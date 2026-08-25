@@ -29,4 +29,3 @@ When the required concept is missing, use domain modeling to define it before sp
 
 Surface conflicts with existing ADRs explicitly.
 Do not silently override or contradict an accepted decision.
-

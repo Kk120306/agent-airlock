@@ -59,4 +59,3 @@ Send a short follow-up prompt to prove that the Agent continues from the promote
 
 If live model latency threatens the three-minute window, prepare the fixture and first successful Run before judging, then execute the rejection and repair journey live.
 Do not replace middleware behavior with recorded or hard-coded success states.
-

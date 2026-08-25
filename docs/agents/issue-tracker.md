@@ -38,4 +38,3 @@ Decision tickets are GitHub sub-issues of that map and use one of `wayfinder:res
 - Refer to issues by their linked titles in user-facing text rather than by bare numbers.
 
 The frontier consists of open, unblocked, unassigned child issues.
-

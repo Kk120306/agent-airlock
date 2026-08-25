@@ -52,4 +52,3 @@ _Avoid_: Tool call, queued action, side effect
 **Promotion Receipt**:
 The durable evidence connecting a Run Transaction, its Outcome Contract version, its Validation results, and the resulting Canonical State version.
 _Avoid_: Log entry, audit row
-

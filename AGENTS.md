@@ -69,4 +69,3 @@ Resolve decision tickets before turning them into implementation tickets.
 - Do not manually edit generated changelogs or generated files.
 - Use Mermaid for architecture diagrams when relationships or state transitions benefit from a visual.
 - Keep the PRD product-facing and keep implementation details in the architecture and plan documents.
-
