@@ -126,6 +126,27 @@ function AirlockEvidence({ run }: { run: AgentRun }) {
         </div>
       </div>
 
+      {transaction.resources.length > 0 && (
+        <section className="resource-ledger" aria-label="Transactional resources">
+          <div className="resource-ledger-heading">
+            <h4>Whole-Agent state</h4>
+            <span>one decision across {transaction.resources.length} resources</span>
+          </div>
+          <div className="resource-ledger-grid">
+            {transaction.resources.map((resource) => (
+              <article key={resource.kind}>
+                <div>
+                  <span>{resource.label}</span>
+                  <strong>{resource.disposition ?? "pending"}</strong>
+                </div>
+                <code>{shortHash(resource.fingerprintAfter)}</code>
+                <p>{resource.summary}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className="airlock-columns">
         <section className="evidence-section">
           <h4>Run timeline</h4>

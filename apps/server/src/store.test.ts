@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 3", async () => {
+  it("migrates starter version 1 data to version 4", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,7 +59,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 3,
+      version: 4,
       agents: [
         {
           canonicalStateId: "",
@@ -68,7 +68,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 3 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 4 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -178,7 +178,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 3,
+      version: 4,
       agents: [
         {
           outcomeContract: {
@@ -193,10 +193,43 @@ describe("JsonStore", () => {
           transaction: {
             outcomeContract: { version: 1, requiredPaths: ["AGENTS.md"] },
             promotionReceipt: null,
+            resources: [],
             validations: [{ required: true }],
           },
         },
       ],
+    });
+  });
+
+  it("migrates Phase 2 data without inventing Whole-Agent evidence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v3-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 3,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-2-run",
+            transaction: {
+              id: "phase-2-run",
+              disposition: "promoted",
+              validations: [{ name: "required-paths", status: "passed" }],
+            },
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 4,
+      runs: [{ transaction: { id: "phase-2-run", resources: [] } }],
     });
   });
 });

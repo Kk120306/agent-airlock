@@ -11,10 +11,15 @@ export type RunTransactionStatus =
   | "cancelled";
 export type RunTransactionDisposition = "promoted" | "quarantined" | "cancelled";
 export type ValidationStatus = "passed" | "failed" | "error";
+export type TransactionResourceKind = "workspace" | "codex-session";
 
 export interface CanonicalStateReference {
   stateId: string;
   workspacePath: string;
+  codexHomePath: string;
+  codexThreadId: string | null;
+  workspaceContentHash: string;
+  sessionContentHash: string;
   contentHash: string;
 }
 
@@ -87,6 +92,15 @@ export interface WorkspaceChangeSummary {
   truncated: boolean;
 }
 
+export interface TransactionResourceEvidence {
+  kind: TransactionResourceKind;
+  label: string;
+  disposition: RunTransactionDisposition | null;
+  fingerprintBefore: string | null;
+  fingerprintAfter: string | null;
+  summary: string;
+}
+
 export interface RunTransaction {
   id: string;
   status: RunTransactionStatus;
@@ -98,6 +112,7 @@ export interface RunTransaction {
   canonicalContentHashAfter: string | null;
   outcomeContractVersion: number;
   outcomeContract: OutcomeContract;
+  resources: TransactionResourceEvidence[];
   changes: WorkspaceChangeSummary | null;
   validations: ValidationEvidence[];
   events: RunTransactionEvent[];
@@ -150,7 +165,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 3;
+  version: 4;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -177,6 +192,7 @@ export interface RunnerResult {
 export interface RunnerRequest {
   agentId: string;
   workspacePath: string;
+  codexHomePath: string;
   prompt: string;
   threadId: string | null;
 }

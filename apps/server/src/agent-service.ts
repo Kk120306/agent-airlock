@@ -4,6 +4,7 @@ import {
   AirlockRunner,
   createPromotionReceipt,
   createRunTransaction,
+  finalizeResources,
 } from "./airlock-runner.js";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
@@ -80,6 +81,10 @@ export class AgentService {
               run.transaction.canonicalStateIdBefore;
             run.transaction.canonicalContentHashAfter =
               run.transaction.canonicalContentHashBefore;
+            run.transaction = finalizeResources(
+              run.transaction,
+              "cancelled",
+            );
             run.transaction.events.push({
               status: "cancelled",
               at: now(),
@@ -96,6 +101,7 @@ export class AgentService {
         if (!canonical) throw new Error("Canonical State reconciliation failed");
         agent.canonicalStateId = canonical.stateId;
         agent.workspacePath = canonical.workspacePath;
+        agent.codexThreadId = canonical.codexThreadId;
         if (agent.status === "busy") {
           agent.status = "ready";
           agent.updatedAt = now();
@@ -172,6 +178,7 @@ export class AgentService {
         agent.instructions = proposed.instructions;
         agent.workspacePath = canonical.workspacePath;
         agent.canonicalStateId = canonical.stateId;
+        agent.codexThreadId = canonical.codexThreadId;
         agent.lastError = null;
         agent.updatedAt = now();
         return structuredClone(agent);
@@ -311,6 +318,9 @@ export class AgentService {
       if (this.configuringAgents.has(agentId)) {
         throw new HttpError(409, "Wait for the Agent configuration update to finish");
       }
+      storedAgent.workspacePath = canonical.workspacePath;
+      storedAgent.canonicalStateId = canonical.stateId;
+      storedAgent.codexThreadId = canonical.codexThreadId;
       run.transaction = createRunTransaction(
         runId,
         canonical,
@@ -367,14 +377,16 @@ export class AgentService {
       if (this.cancellationRequests.has(agentAtStart.id)) {
         throw new RunCancelledError();
       }
+      const canonical = await this.workspaces.readCanonical(agentAtStart.id);
       const result = await this.runner.run(
         {
           runId: run.id,
           agentId: agentAtStart.id,
-          workspacePath: agentAtStart.workspacePath,
+          workspacePath: canonical.workspacePath,
+          codexHomePath: canonical.codexHomePath,
           prompt: run.prompt,
-          threadId: agentAtStart.codexThreadId,
-          canonicalStateId: agentAtStart.canonicalStateId,
+          threadId: canonical.codexThreadId,
+          canonicalStateId: canonical.stateId,
         },
         run.transaction ??
           createRunTransaction(
@@ -411,7 +423,7 @@ export class AgentService {
         if (result.canonicalState) {
           agent.workspacePath = result.canonicalState.workspacePath;
           agent.canonicalStateId = result.canonicalState.stateId;
-          agent.codexThreadId = result.threadId;
+          agent.codexThreadId = result.canonicalState.codexThreadId;
           agent.lastError = null;
         } else {
           agent.lastError = "Run quarantined because a required Validation failed";
@@ -439,6 +451,10 @@ export class AgentService {
               storedRun.transaction.canonicalStateIdBefore;
             storedRun.transaction.canonicalContentHashAfter =
               storedRun.transaction.canonicalContentHashBefore;
+            storedRun.transaction = finalizeResources(
+              storedRun.transaction,
+              "cancelled",
+            );
             storedRun.transaction.events.push({
               status: "cancelled",
               at: completedAt,

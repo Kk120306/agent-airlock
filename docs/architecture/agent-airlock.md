@@ -7,11 +7,11 @@ The control plane continues to own Agent lifecycle and Run orchestration, while 
 
 ## Baseline observation
 
-The existing `AgentService` passes the persistent workspace path and canonical Codex thread directly to `AgentRunner` in `apps/server/src/agent-service.ts:235`.
-The local Runtime then bind-mounts that workspace and the shared Codex home as writable container paths in `apps/server/src/container-codex-runner.ts:38`.
-Container disposal therefore contains the process but does not make its persistent state changes transactional.
+The original `AgentService` passed the persistent workspace path and canonical Codex thread directly to `AgentRunner`.
+The original local Runtime also bind-mounted that workspace and one shared Codex home as writable container paths.
+Phase 1 isolated workspace files, but the shared Codex home remained a hidden mutation path until Phase 3.
 
-## Implemented Phase 2 architecture
+## Implemented Phase 3 architecture
 
 ```mermaid
 flowchart LR
@@ -19,7 +19,7 @@ flowchart LR
     API --> AS["AgentService"]
     AS --> AR["AirlockRunner"]
     AR --> SR["Workspace State Registry"]
-    SR --> CS["Candidate State"]
+    SR --> CS["Candidate workspace plus Codex home"]
     AR --> RR["Existing AgentRunner"]
     RR --> RC["Disposable Runtime container"]
     RC --> CS
@@ -27,7 +27,7 @@ flowchart LR
     VE --> VC["Constrained validation container"]
     VE --> CS
     AR --> PR["Promotion or Quarantine"]
-    PR --> ST["Run evidence and Promotion Receipt"]
+    PR --> ST["Whole-Agent evidence and Promotion Receipt"]
     ST --> UI
 ```
 
@@ -52,26 +52,34 @@ Recovery journals, retention, and additional Transactional Resource adapters rem
 
 ## State layout
 
-ADR 0002 selects immutable state-version directories with an atomically replaced canonical manifest:
+ADR 0002 selects immutable state-version directories with an atomically replaced canonical manifest.
+ADR 0005 makes the workspace and Codex home one versioned Whole-Agent state:
 
 ```text
 workspaces/
 ├── <agent-id>/
 │   ├── canonical.json
-│   └── versions/<state-id>/workspace/
+│   └── versions/<state-id>/
+│       ├── candidate.json (promoted Runs only)
+│       ├── workspace/
+│       └── codex-home/
 ├── .candidates/<run-id>/
 │   ├── candidate.json
-│   └── workspace/
+│   ├── workspace/
+│   └── codex-home/
 └── .quarantine/<run-id>/
     ├── candidate.json
-    └── workspace/
+    ├── workspace/
+    └── codex-home/
 ```
 
-`canonical.json` identifies the accepted resource versions.
+`canonical.json` identifies the accepted workspace path, Codex home path, Codex thread identifier, resource fingerprints, and composite state fingerprint.
 A Candidate State is mutable only while its Run Transaction is active.
 A promoted state version becomes immutable and may be used as the source for a later candidate.
-Phase 1 verifies the manifest content hash whenever Canonical State is resolved.
-Codex session state and additional resource versions join the canonical manifest in later phases.
+Airlock verifies the workspace hash, session hash, and composite hash whenever Canonical State is resolved.
+Candidate preparation copies both resources and refreshes only the generated provider configuration file from a platform-owned template.
+Promotion moves the complete candidate root before one atomic manifest replacement, while Quarantine preserves the same complete root without changing the manifest.
+`npm run test:codex-session-container` reproduces the pinned CLI storage boundary with container networking disabled and a fake credential.
 
 ## Run Transaction lifecycle
 
@@ -105,6 +113,7 @@ Validation proceeds in a deterministic order so evidence remains understandable:
 6. Scan changed content for configured secret patterns.
 7. Execute operator-defined validation commands in a constrained container.
 All required Validations must pass before promotion begins.
+The Candidate Codex home is also rejected before Promotion if it contains any symbolic link or if the returned thread has no matching rollout artifact.
 
 Outcome Contract schema version 1 is a bounded data model rather than a policy language.
 Its default requires `AGENTS.md` and `README.md`, protects `AGENTS.md`, limits a Run to 200 changed files and 2 MiB of candidate payload across added or modified files, scans for Ark key assignments and bearer tokens, and defines no command Validations until the operator adds them.
@@ -132,8 +141,8 @@ interface TransactionalResource {
 }
 ```
 
-Workspace is the only implemented Transactional Resource in Phase 2.
-Codex Session, SQLite, and External Action Intent adapters remain later roadmap work.
+Workspace and Codex Session are implemented Transactional Resources in Phase 3.
+SQLite and External Action Intent adapters remain Phase 4 work.
 
 ## Planned External Action Intent outbox
 
@@ -146,10 +155,11 @@ It will not claim to intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The version 3 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
+The version 4 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
-Phase 2 Promotion moves a candidate to an immutable version and atomically replaces `canonical.json`.
-A durable promotion journal and startup reconciliation remain later work.
+Phase 3 Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
+Startup reconciliation treats that manifest as authoritative and repairs cached workspace, state, and thread references in the JSON store.
+A durable promotion journal and crash-point reconciliation remain later work.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -166,7 +176,7 @@ Interruption during Promotion does not yet have full journal-based reconciliatio
 
 ## Trust boundaries
 
-- The Agent Runtime is untrusted and receives Candidate State only.
+- The Agent Runtime is untrusted and receives only the Candidate workspace and Candidate Codex home as writable state.
 - Validation code from the candidate project is untrusted and runs from a disposable copy inside a constrained container.
 - The Fastify control plane and Airlock state manager form the trusted POC boundary.
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
@@ -181,11 +191,13 @@ Each Run Transaction records:
 - Bounded resource change summaries.
 - Validation names, statuses, durations, and redacted output.
 - Resulting canonical version for promoted Runs.
+- Independent workspace and Agent-memory fingerprints with one shared terminal disposition.
 
 Promotion journal position, external action delivery, and Repair Run ancestry join this model in later phases.
 
 ## Open architectural decisions
 
-The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Codex session isolation, Promotion recovery, outbox delivery, the operator experience, and the judging cutoff.
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Promotion recovery, outbox delivery, the operator experience, and the judging cutoff.
+Codex session isolation is resolved by ADR 0005.
 Outcome Contract semantics and Validation containment are resolved by ADR 0003 and ADR 0004.
 This document must be revised when those tickets close.

@@ -12,6 +12,35 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+export function buildCodexEnvironment(
+  config: AppConfig,
+  codexHomePath: string,
+): NodeJS.ProcessEnv {
+  const inheritedNames = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "NODE_EXTRA_CA_CERTS",
+    "TERM",
+  ] as const;
+  const environment: NodeJS.ProcessEnv = {
+    CODEX_HOME: codexHomePath,
+    ARK_API_KEY: config.arkApiKey,
+    NO_COLOR: "1",
+  };
+  for (const name of inheritedNames) {
+    if (process.env[name] !== undefined) environment[name] = process.env[name];
+  }
+  return environment;
+}
+
 export interface ParsedEvents {
   messages: string[];
   threadId: string | null;
@@ -105,7 +134,7 @@ export class CodexRunner implements AgentRunner {
     try {
       await execFileAsync(this.config.codexBin, ["--version"], {
         timeout: 5_000,
-        env: this.childEnvironment(),
+        env: buildCodexEnvironment(this.config, this.config.codexHome),
       });
       return true;
     } catch {
@@ -132,7 +161,7 @@ export class CodexRunner implements AgentRunner {
     const args = buildCodexArgs(request, this.config.codexSandboxMode);
     const child = spawn(this.config.codexBin, args, {
       cwd: request.workspacePath,
-      env: this.childEnvironment(),
+      env: buildCodexEnvironment(this.config, request.codexHomePath),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const settled = new Promise<void>((resolve) => {
@@ -239,29 +268,4 @@ export class CodexRunner implements AgentRunner {
     }
   }
 
-  private childEnvironment(): NodeJS.ProcessEnv {
-    const inheritedNames = [
-      "PATH",
-      "HOME",
-      "TMPDIR",
-      "LANG",
-      "LC_ALL",
-      "SSL_CERT_FILE",
-      "SSL_CERT_DIR",
-      "HTTP_PROXY",
-      "HTTPS_PROXY",
-      "NO_PROXY",
-      "NODE_EXTRA_CA_CERTS",
-      "TERM",
-    ] as const;
-    const environment: NodeJS.ProcessEnv = {
-      CODEX_HOME: this.config.codexHome,
-      ARK_API_KEY: this.config.arkApiKey,
-      NO_COLOR: "1",
-    };
-    for (const name of inheritedNames) {
-      if (process.env[name] !== undefined) environment[name] = process.env[name];
-    }
-    return environment;
-  }
 }

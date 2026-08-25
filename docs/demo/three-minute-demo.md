@@ -2,7 +2,7 @@
 
 ## Demo promise
 
-Agent Airlock lets an Agent attempt real file changes without allowing a rejected attempt to alter the accepted workspace.
+Agent Airlock lets an Agent attempt real file and reasoning changes without allowing a rejected attempt to alter the accepted workspace or Agent memory.
 The demo uses the starter kit's existing Agent creation, Playground, Codex CLI, and ModelArk execution path.
 
 ## Before judging
@@ -32,7 +32,7 @@ Do not modify or delete any existing file.
 ```
 
 Show the Run moving through preparation, execution, validation, and promotion.
-Open the Airlock evidence and identify the changed file, passing Validations, terminal disposition, receipt hash, and advanced Canonical State fingerprint.
+Open the Airlock evidence and identify the changed file, passing Validations, terminal disposition, receipt hash, advanced Canonical State fingerprint, and promoted Workspace plus Agent memory ledger.
 
 ### 1:15 to 2:15 - Quarantine a destructive future
 
@@ -43,14 +43,15 @@ Delete AGENTS.md and replace it with damage.txt containing the text destructive 
 Perform the file changes now.
 ```
 
-The Agent is allowed to make the requested changes because it can write only to Candidate State.
-Show that Airlock rejects the protected-path and required-path violations, reports `Quarantined`, and labels Canonical State as unchanged.
+The Agent is allowed to make the requested changes and reason about them because it can write only to Candidate State.
+Show that Airlock rejects the protected-path and required-path violations, reports `Quarantined`, and labels both Workspace and Agent memory as unchanged.
 
 ### 2:15 to 2:45 - Prove accepted reality survived
 
 Compare the before and after Canonical State fingerprints in the UI.
 Point to the rejected change summary, then verify that canonical `AGENTS.md` remains present and `damage.txt` was not promoted.
-The rejected Candidate State remains available as bounded evidence without becoming accepted state.
+Send a safe follow-up that inspects the accepted file and show that the Agent resumes the accepted thread without remembering rejected reasoning.
+The quarantined candidate retains both the rejected files and rejected session artifact as evidence without becoming accepted state.
 
 ### 2:45 to 3:00 - Close with the middleware boundary
 
@@ -62,18 +63,19 @@ Show that the ordinary Playground and Agent lifecycle controls remain usable aft
 
 - The Agent is created or selected through the starter-kit frontend.
 - A real ModelArk-backed Codex Run performs a real file action.
-- The Runtime receives Candidate State rather than a writable canonical workspace.
+- The Runtime receives Candidate workspace and Codex-home paths rather than writable canonical resources.
 - A valid candidate advances Canonical State exactly once.
 - A destructive candidate is quarantined with an understandable reason.
 - The canonical fingerprint is identical before and after rejection.
+- Rejected reasoning remains in Quarantine and is absent from the next turn.
 - Validation evidence is redacted and bounded.
 - The existing Agent lifecycle and Playground remain controllable afterward.
 
 ## Honest scope boundary
 
-The current qualifying release makes workspace mutation transactional and makes promotion decisions explainable.
-Transactional Codex session continuity, SQLite resources, deferred external actions, repair runs, and crash-journal reconciliation are later roadmap phases.
-Do not claim those capabilities in the Phase 0-2 demonstration.
+The current qualifying release makes workspace and Codex-session mutation transactional and makes promotion decisions explainable.
+SQLite resources, deferred external actions, repair runs, and crash-journal reconciliation are later roadmap phases.
+Do not claim those later capabilities in the Phase 3 demonstration.
 
 ## Live-demo contingency
 

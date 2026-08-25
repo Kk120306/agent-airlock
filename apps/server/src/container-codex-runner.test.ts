@@ -22,6 +22,7 @@ describe("Container Codex runner", () => {
       {
         agentId: "agent/unsafe",
         workspacePath: "/tmp/agent-workspace",
+        codexHomePath: "/tmp/candidate-codex-home",
         prompt: "write a small program",
         threadId: null,
       },
@@ -33,7 +34,8 @@ describe("Container Codex runner", () => {
     );
     expect(args).toContain("runtime:test");
     expect(args).toContain("type=bind,src=/tmp/agent-workspace,dst=/workspace");
-    expect(args).toContain("type=bind,src=/tmp/codex-home,dst=/codex-home");
+    expect(args).toContain("type=bind,src=/tmp/candidate-codex-home,dst=/codex-home");
+    expect(args).not.toContain("type=bind,src=/tmp/codex-home,dst=/codex-home");
     expect(args).toContain("501:20");
     expect(args).toContain("workspace-write");
     expect(args).toContain("/workspace");
@@ -52,6 +54,7 @@ describe("Container Codex runner", () => {
       {
         agentId: "agent",
         workspacePath: "/tmp/workspace",
+        codexHomePath: "/tmp/candidate-codex-home",
         prompt: "continue",
         threadId: "thread-123",
       },

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
+import { loadConfig } from "./config.js";
+import {
+  buildCodexArgs,
+  buildCodexEnvironment,
+  parseCodexEventLine,
+} from "./codex-runner.js";
 
 describe("Codex runner protocol", () => {
   it("builds a new-session invocation", () => {
@@ -7,6 +12,7 @@ describe("Codex runner protocol", () => {
       {
         agentId: "agent",
         workspacePath: "/tmp/workspace",
+        codexHomePath: "/tmp/candidate-codex-home",
         prompt: "build a calculator",
         threadId: null,
       },
@@ -29,12 +35,27 @@ describe("Codex runner protocol", () => {
       {
         agentId: "agent",
         workspacePath: "/tmp/workspace",
+        codexHomePath: "/tmp/candidate-codex-home",
         prompt: "add tests",
         threadId: "thread-123",
       },
       "workspace-write",
     );
     expect(args.slice(-3)).toEqual(["resume", "thread-123", "add tests"]);
+  });
+
+  it("uses the Candidate State Codex home instead of the global template", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      CODEX_HOME: "/tmp/global-template",
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+
+    const environment = buildCodexEnvironment(config, "/tmp/candidate-session");
+
+    expect(environment.CODEX_HOME).toBe("/tmp/candidate-session");
+    expect(environment.CODEX_HOME).not.toBe(config.codexHome);
   });
 
   it("extracts the session, final message and usage", () => {

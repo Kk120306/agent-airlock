@@ -49,6 +49,11 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await expect(evidence.getByText("Decisive Validation")).toBeVisible();
   await expect(evidence.getByText("protected-paths", { exact: true }).first()).toBeVisible();
   await expect(evidence.getByText("Outcome Contract v1")).toBeVisible();
+  const resources = evidence.getByRole("region", { name: "Transactional resources" });
+  await expect(resources.getByText("one decision across 2 resources")).toBeVisible();
+  await expect(resources.getByText("Workspace", { exact: true })).toBeVisible();
+  await expect(resources.getByText("Agent memory", { exact: true })).toBeVisible();
+  await expect(resources.getByText("quarantined", { exact: true })).toHaveCount(2);
 
   const runsResponse = await request.get(
     "/api/agents/" + (agentBeforeRejection?.id ?? "") + "/runs",
@@ -63,6 +68,13 @@ test("preserves the complete starter Playground journey", async ({ page, request
           canonicalStateIdAfter: string;
           canonicalContentHashBefore: string;
           canonicalContentHashAfter: string;
+          quarantinePath: string;
+          resources: Array<{
+            kind: string;
+            disposition: string;
+            fingerprintBefore: string;
+            fingerprintAfter: string;
+          }>;
           promotionReceipt: { disposition: string };
         } | null;
       }>;
@@ -76,6 +88,33 @@ test("preserves the complete starter Playground journey", async ({ page, request
   });
   expect(quarantinedRun?.transaction?.canonicalContentHashAfter)
     .toBe(quarantinedRun?.transaction?.canonicalContentHashBefore);
+  expect(quarantinedRun?.transaction?.resources).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        kind: "workspace",
+        disposition: "quarantined",
+      }),
+      expect.objectContaining({
+        kind: "codex-session",
+        disposition: "quarantined",
+      }),
+    ]),
+  );
+  for (const resource of quarantinedRun?.transaction?.resources ?? []) {
+    expect(resource.fingerprintAfter).toBe(resource.fingerprintBefore);
+  }
+  await expect(
+    readFile(
+      path.join(
+        quarantinedRun?.transaction?.quarantinePath ?? "",
+        "codex-home",
+        "sessions",
+        "fixture",
+        "rollout-baseline-thread.jsonl",
+      ),
+      "utf8",
+    ),
+  ).resolves.toContain("rejected-memory");
 
   const agentAfterRejectionResponse = await request.get("/api/agents");
   const agentAfterRejection = (
@@ -100,6 +139,7 @@ test("preserves the complete starter Playground journey", async ({ page, request
     .toBeVisible({ timeout: 15_000 });
   await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
   await expect(evidence.getByText("Candidate became Canonical State")).toBeVisible();
+  await expect(resources.getByText("promoted", { exact: true })).toHaveCount(2);
 
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator(".status-stopped")).toBeVisible();

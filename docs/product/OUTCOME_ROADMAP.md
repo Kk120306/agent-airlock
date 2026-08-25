@@ -2,6 +2,8 @@
 
 **Status:** Outcome-gated product strategy
 
+**Delivered:** Phases 0 through 3
+
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
 ## Why this roadmap exists
@@ -150,6 +152,8 @@ Make the evidence feel like a flight recorder for Agent state, with the decisive
 Reviewers can understand the trusted boundary, and operators can act on rejection without reading server internals.
 
 ### Phase 3: Whole-Agent continuity
+
+**Status:** Delivered and regression-locked
 
 **Outcome**
 

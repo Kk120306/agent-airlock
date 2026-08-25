@@ -7,7 +7,7 @@ import {
 import type { Database } from "./types.js";
 
 const emptyDatabase = (): Database => ({
-  version: 3,
+  version: 4,
   agents: [],
   messages: [],
   runs: [],
@@ -22,6 +22,13 @@ interface VersionOneDatabase {
 
 interface VersionTwoDatabase {
   version: 2;
+  agents: Array<Record<string, unknown>>;
+  messages: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+}
+
+interface VersionThreeDatabase {
+  version: 3;
   agents: Array<Record<string, unknown>>;
   messages: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
@@ -42,7 +49,7 @@ function migrateVersionOne(database: VersionOneDatabase): VersionTwoDatabase {
   };
 }
 
-function migrateVersionTwo(database: VersionTwoDatabase): Database {
+function migrateVersionTwo(database: VersionTwoDatabase): VersionThreeDatabase {
   return {
     version: 3,
     agents: database.agents.map((agent) => ({
@@ -51,8 +58,8 @@ function migrateVersionTwo(database: VersionTwoDatabase): Database {
         2,
         typeof agent.updatedAt === "string" ? agent.updatedAt : undefined,
       ),
-    })) as unknown as Database["agents"],
-    messages: database.messages as unknown as Database["messages"],
+    })),
+    messages: database.messages,
     runs: database.runs.map((run) => {
       const transaction =
         run.transaction && typeof run.transaction === "object"
@@ -76,6 +83,28 @@ function migrateVersionTwo(database: VersionTwoDatabase): Database {
             }
           : null,
       };
+    }),
+  };
+}
+
+function migrateVersionThree(database: VersionThreeDatabase): Database {
+  return {
+    version: 4,
+    agents: database.agents as unknown as Database["agents"],
+    messages: database.messages as unknown as Database["messages"],
+    runs: database.runs.map((run) => {
+      const transaction =
+        run.transaction && typeof run.transaction === "object"
+          ? (run.transaction as Record<string, unknown>)
+          : null;
+      if (!transaction) return run;
+      return {
+        ...run,
+        transaction: {
+          ...transaction,
+          resources: [],
+        },
+      };
     }) as unknown as Database["runs"],
   };
 }
@@ -93,7 +122,8 @@ export class JsonStore {
       const parsed = JSON.parse(raw) as
         | Database
         | VersionOneDatabase
-        | VersionTwoDatabase;
+        | VersionTwoDatabase
+        | VersionThreeDatabase;
       if (
         !Array.isArray(parsed.agents) ||
         !Array.isArray(parsed.messages) ||
@@ -102,12 +132,15 @@ export class JsonStore {
         throw new Error("Unsupported database format");
       }
       if (parsed.version === 1) {
-        this.data = migrateVersionTwo(migrateVersionOne(parsed));
+        this.data = migrateVersionThree(migrateVersionTwo(migrateVersionOne(parsed)));
         await this.persist();
       } else if (parsed.version === 2) {
-        this.data = migrateVersionTwo(parsed);
+        this.data = migrateVersionThree(migrateVersionTwo(parsed));
         await this.persist();
       } else if (parsed.version === 3) {
+        this.data = migrateVersionThree(parsed);
+        await this.persist();
+      } else if (parsed.version === 4) {
         this.data = parsed;
       } else {
         throw new Error("Unsupported database format");

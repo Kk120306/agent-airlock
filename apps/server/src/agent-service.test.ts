@@ -8,12 +8,15 @@ import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import type { ValidationCommandExecutor } from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
+import { persistFixtureSession } from "../test/session-fixture.js";
 
 class FakeRunner implements AgentRunner {
   async run(request: RunnerRequest): Promise<RunnerResult> {
+    const threadId = request.threadId ?? "fake-thread";
+    await persistFixtureSession(request, threadId);
     return {
       output: "Completed: " + request.prompt,
-      threadId: request.threadId ?? "fake-thread",
+      threadId,
       usage: { inputTokens: 12, outputTokens: 5 },
     };
   }
@@ -91,7 +94,11 @@ describe("Agent lifecycle", () => {
       finish = resolve;
     });
     const runner: AgentRunner = {
-      run: () => pending,
+      run: async (request) => {
+        const result = await pending;
+        if (result.threadId) await persistFixtureSession(request, result.threadId);
+        return result;
+      },
       cancel: async () => false,
       isAvailable: async () => true,
     };
@@ -120,7 +127,11 @@ describe("Agent lifecycle", () => {
       finish = resolve;
     });
     const service = await makeService({
-      run: () => pending,
+      run: async (request) => {
+        const result = await pending;
+        if (result.threadId) await persistFixtureSession(request, result.threadId);
+        return result;
+      },
       cancel: async () => false,
       isAvailable: async () => true,
     });
@@ -175,7 +186,11 @@ describe("Agent lifecycle", () => {
       finish = resolve;
     });
     const service = await makeService({
-      run: () => pending,
+      run: async (request) => {
+        const result = await pending;
+        if (result.threadId) await persistFixtureSession(request, result.threadId);
+        return result;
+      },
       cancel: async () => false,
       isAvailable: async () => true,
     });
@@ -298,6 +313,7 @@ describe("Agent lifecycle", () => {
       const service = await makeService({
         run: async (request) => {
           await mutate(request);
+          await persistFixtureSession(request, "future-thread");
           return { output: "candidate changed", threadId: "future-thread", usage: null };
         },
         cancel: async () => false,

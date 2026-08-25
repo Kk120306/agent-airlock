@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phase 2 implemented, later phases planned
+**Status:** Phase 3 implemented, Phase 4 in progress
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -18,9 +18,9 @@ The product promise is simple:
 
 ## Current qualifying release
 
-Phases 0 through 2 are implemented.
-The release makes workspace changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded decision evidence in the existing Playground.
-Transactional Codex session state, SQLite adapters, deferred external actions, Repair Runs, and crash-journal reconciliation are product targets for later phases.
+Phases 0 through 3 are implemented.
+The release makes workspace and Codex-session changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
+SQLite adapters, deferred external actions, Repair Runs, and crash-journal reconciliation are product targets for later phases.
 
 ## Problem
 

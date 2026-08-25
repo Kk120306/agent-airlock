@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
+import { persistFixtureSession } from "../test/session-fixture.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -38,9 +39,11 @@ class PersistentFixtureRunner implements AgentRunner {
       );
       if (!source.includes('"hello"')) throw new Error("Workspace did not persist");
     }
+    const threadId = request.threadId ?? "baseline-thread";
+    await persistFixtureSession(request, threadId);
     return {
       output: request.threadId ? "continued baseline" : "created baseline",
-      threadId: request.threadId ?? "baseline-thread",
+      threadId,
       usage: { inputTokens: 4, outputTokens: 2 },
     };
   }
@@ -123,11 +126,18 @@ describe("Phase 0 baseline acceptance", () => {
       })).json<{ agent: { status: string } }>().agent.status,
     ).toBe("ready");
     const workspacePath = firstService.getAgent(agentId).workspacePath;
+    const canonicalBeforeRestart = await new WorkspaceManager(
+      config.workspaceRoot,
+    ).readCanonical(agentId);
     await expect(readFile(path.join(workspacePath, "src", "hello.ts"), "utf8"))
       .resolves.toContain('"hello"');
     await firstApp.close();
 
     const restartedService = await createService();
+    const canonicalAfterRestart = await new WorkspaceManager(
+      config.workspaceRoot,
+    ).readCanonical(agentId);
+    expect(canonicalAfterRestart).toEqual(canonicalBeforeRestart);
     expect(restartedService.getAgent(agentId)).toMatchObject({
       status: "ready",
       codexThreadId: "baseline-thread",

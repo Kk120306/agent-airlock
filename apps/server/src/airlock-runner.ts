@@ -55,6 +55,26 @@ export function createRunTransaction(
     canonicalContentHashAfter: null,
     outcomeContractVersion: outcomeContract.version,
     outcomeContract: structuredClone(outcomeContract),
+    resources: [
+      {
+        kind: "workspace",
+        label: "Workspace",
+        disposition: null,
+        fingerprintBefore: canonicalState.workspaceContentHash,
+        fingerprintAfter: null,
+        summary: "Candidate workspace is isolated from Canonical State",
+      },
+      {
+        kind: "codex-session",
+        label: "Agent memory",
+        disposition: null,
+        fingerprintBefore: canonicalState.sessionContentHash,
+        fingerprintAfter: null,
+        summary: canonicalState.codexThreadId
+          ? "Candidate session resumes the accepted thread"
+          : "Candidate session will start the first accepted thread",
+      },
+    ],
     changes: null,
     validations: [],
     events: [
@@ -106,9 +126,16 @@ export class AirlockRunner {
       candidatePrepared = true;
       const candidateWorkspacePath =
         await this.workspaces.candidateWorkspacePath(request.runId);
+      const candidateCodexHomePath =
+        await this.workspaces.candidateCodexHomePath(request.runId);
       this.assertNotCancelled(request.agentId);
-      if (candidate.canonicalStateIdBefore !== request.canonicalStateId) {
-        throw new Error("Agent metadata does not match the current Canonical State");
+      if (
+        candidate.canonicalStateIdBefore !== request.canonicalStateId ||
+        candidate.canonicalThreadIdBefore !== request.threadId
+      ) {
+        throw new Error(
+          "Agent metadata does not match the current Canonical State pair",
+        );
       }
       transaction.candidateStateId = candidate.candidateStateId;
       transaction = await this.transition(
@@ -121,9 +148,11 @@ export class AirlockRunner {
       const result = await this.inner.run({
         agentId: request.agentId,
         workspacePath: candidateWorkspacePath,
+        codexHomePath: candidateCodexHomePath,
         prompt: request.prompt,
-        threadId: request.threadId,
+        threadId: candidate.canonicalThreadIdBefore,
       });
+      await this.workspaces.recordCandidateThread(request.runId, result.threadId);
       this.assertNotCancelled(request.agentId);
 
       transaction = await this.transition(
@@ -154,6 +183,7 @@ export class AirlockRunner {
         transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
         transaction.canonicalContentHashAfter =
           transaction.canonicalContentHashBefore;
+        transaction = finalizeResources(transaction, "quarantined");
         transaction.promotionReceipt = createPromotionReceipt(transaction);
         transaction = await this.transition(
           transaction,
@@ -179,6 +209,7 @@ export class AirlockRunner {
       transaction.disposition = "promoted";
       transaction.canonicalStateIdAfter = canonicalState.stateId;
       transaction.canonicalContentHashAfter = canonicalState.contentHash;
+      transaction = finalizeResources(transaction, "promoted", canonicalState);
       transaction.promotionReceipt = createPromotionReceipt(transaction);
       transaction = this.recordTransition(
         transaction,
@@ -201,6 +232,10 @@ export class AirlockRunner {
       transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
       transaction.canonicalContentHashAfter =
         transaction.canonicalContentHashBefore;
+      transaction = finalizeResources(
+        transaction,
+        cancelled ? "cancelled" : "quarantined",
+      );
       transaction.promotionReceipt = createPromotionReceipt(transaction);
       transaction = await this.transition(
         transaction,
@@ -243,6 +278,32 @@ export class AirlockRunner {
     next.events.push({ status, at: now(), summary });
     return next;
   }
+}
+
+export function finalizeResources(
+  transaction: RunTransaction,
+  disposition: "promoted" | "quarantined" | "cancelled",
+  canonicalState?: CanonicalStateReference,
+): RunTransaction {
+  const next = structuredClone(transaction);
+  next.resources = next.resources.map((resource) => {
+    const fingerprintAfter =
+      disposition === "promoted" && canonicalState
+        ? resource.kind === "workspace"
+          ? canonicalState.workspaceContentHash
+          : canonicalState.sessionContentHash
+        : resource.fingerprintBefore;
+    return {
+      ...resource,
+      disposition,
+      fingerprintAfter,
+      summary:
+        disposition === "promoted"
+          ? resource.label + " accepted in the new Canonical State"
+          : resource.label + " remained on the prior Canonical State",
+    };
+  });
+  return next;
 }
 
 export function createPromotionReceipt(

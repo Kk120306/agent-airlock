@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -18,10 +18,39 @@ const prompt =
     : (args.at(-1) ?? "");
 const threadId = resumedThreadId ?? "baseline-thread";
 const destructiveRequest = /delete\s+AGENTS\.md/i.test(prompt);
+const codexHome = process.env.CODEX_HOME;
+
+if (!codexHome) {
+  process.stderr.write("CODEX_HOME is required\n");
+  process.exit(2);
+}
+
+const sessionDirectory = path.join(codexHome, "sessions", "fixture");
+const sessionPath = path.join(sessionDirectory, "rollout-" + threadId + ".jsonl");
 
 if (resumedThreadId && resumedThreadId !== "baseline-thread") {
   process.stderr.write("Unexpected thread identifier\n");
   process.exit(2);
+}
+
+await mkdir(sessionDirectory, { recursive: true });
+
+if (resumedThreadId) {
+  let acceptedMemory;
+  try {
+    acceptedMemory = await readFile(sessionPath, "utf8");
+  } catch {
+    process.stderr.write("Accepted session artifact did not persist\n");
+    process.exit(4);
+  }
+  if (!acceptedMemory.includes("accepted-memory")) {
+    process.stderr.write("Accepted reasoning did not persist\n");
+    process.exit(5);
+  }
+  if (acceptedMemory.includes("rejected-memory")) {
+    process.stderr.write("Rejected reasoning leaked into the next turn\n");
+    process.exit(6);
+  }
 }
 
 if (!resumedThreadId) {
@@ -53,10 +82,21 @@ if (!resumedThreadId) {
   }
 }
 
+await appendFile(
+  sessionPath,
+  JSON.stringify({
+    threadId,
+    memory: destructiveRequest ? "rejected-memory" : "accepted-memory",
+    prompt,
+  }) + "\n",
+  "utf8",
+);
+
 const output = destructiveRequest
   ? "Attempted the destructive workspace change for: " + prompt
   : resumedThreadId
-    ? "Continued baseline-thread with the existing hello-world workspace for: " + prompt
+    ? "Continued baseline-thread with the existing hello-world workspace and accepted memory for: " +
+      prompt
     : "Baseline completed with a TypeScript hello-world source file and test for: " + prompt;
 
 for (const event of [

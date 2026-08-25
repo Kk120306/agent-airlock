@@ -37,6 +37,14 @@ export interface RunTransaction {
   canonicalContentHashAfter: string | null;
   outcomeContractVersion: number;
   outcomeContract: OutcomeContract;
+  resources: Array<{
+    kind: "workspace" | "codex-session";
+    label: string;
+    disposition: "promoted" | "quarantined" | "cancelled" | null;
+    fingerprintBefore: string | null;
+    fingerprintAfter: string | null;
+    summary: string;
+  }>;
   changes: {
     files: Array<{
       path: string;

@@ -43,4 +43,4 @@ Rejected, failed, and cancelled Run Transactions can leave the canonical identif
 The Runtime never needs a writable canonical workspace mount.
 Preparation currently copies the workspace, so very large workspaces may have noticeable preparation latency.
 Phase 1 does not yet provide a durable multi-step Promotion journal, so crash reconciliation around manifest replacement remains Phase 6 work.
-Codex session state remains outside this decision until the Phase 3 session-isolation proof is complete.
+ADR 0005 extends the version root and canonical manifest to Codex session state after the Phase 3 storage proof.
