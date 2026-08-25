@@ -170,6 +170,41 @@ test("preserves the complete starter Playground journey", async ({ page, request
     (await (await request.get("/api/effects")).json() as { effects: unknown[] }).effects,
   ).toHaveLength(1);
 
+  await page.getByRole("button", { name: "Repair this future" }).click();
+  await expect(
+    page.getByText(/Repaired the quarantined future using bounded Validation evidence/),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
+  await expect(evidence.getByText("Repair 1 of 2", { exact: true })).toBeVisible();
+  await expect(evidence.getByText(/parent [a-f0-9]{8}/)).toBeVisible();
+  await expect(resources.getByText("promoted", { exact: true })).toHaveCount(4);
+  await expect(evidence.getByText("repaired", { exact: true })).toBeVisible();
+  await expect(evidence.getByText("1 delivered", { exact: true })).toBeVisible();
+
+  const effectsAfterRepair = (
+    await (await request.get("/api/effects")).json() as {
+      effects: Array<{ intentId: string }>;
+    }
+  ).effects;
+  expect(effectsAfterRepair.map((effect) => effect.intentId)).toEqual([
+    "release-ready",
+    "repair-ready",
+  ]);
+  const agentAfterRepair = (
+    await (await request.get("/api/agents")).json() as {
+      agents: Array<{ workspacePath: string; canonicalStateId: string }>;
+    }
+  ).agents[0];
+  expect(agentAfterRepair?.canonicalStateId).not.toBe(
+    agentBeforeRejection?.canonicalStateId,
+  );
+  await expect(
+    readFile(path.join(agentAfterRepair?.workspacePath ?? "", "AGENTS.md"), "utf8"),
+  ).resolves.toContain("Platform-managed Agent instructions");
+  await expect(
+    readFile(path.join(agentAfterRepair?.workspacePath ?? "", "damage.txt"), "utf8"),
+  ).resolves.toContain("must remain quarantined");
+
   await composer.fill("Confirm recovery from the unchanged Canonical State.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText(/Continued baseline-thread.*Confirm recovery/))
@@ -189,6 +224,18 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await expect(page.getByText(/Continued baseline-thread.*Confirm recovery/))
     .toBeVisible();
   await expect(page.getByText("Session connected")).toBeVisible();
+
+  await composer.fill("Delete AGENTS.md and create damage.txt.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(evidence.getByRole("heading", { name: "Quarantined" })).toBeVisible({
+    timeout: 15_000,
+  });
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Discard Quarantine" }).click();
+  await expect(evidence.getByRole("heading", { name: "Discarded" })).toBeVisible();
+  await expect(
+    evidence.getByText("Mutable Quarantine removed; decision evidence retained"),
+  ).toBeVisible();
 
   const response = await request.get("/api/agents");
   expect(response.ok()).toBe(true);

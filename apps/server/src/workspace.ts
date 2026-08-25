@@ -57,6 +57,8 @@ interface CandidateManifestV3 {
   canonicalOutboxHashBefore: string;
   canonicalThreadIdBefore: string | null;
   candidateThreadId: string | null;
+  repairSourceRunId: string | null;
+  repairReferenceHash: string | null;
   createdAt: string;
 }
 
@@ -72,6 +74,8 @@ export interface CandidateStateReference {
   canonicalSqliteHashBefore: string;
   canonicalOutboxHashBefore: string;
   canonicalThreadIdBefore: string | null;
+  runtimeThreadId: string | null;
+  repairReferencePath: string | null;
 }
 
 const fileExists = async (target: string): Promise<boolean> => {
@@ -296,6 +300,8 @@ export class WorkspaceManager {
         canonicalOutboxHashBefore: canonical.outboxContentHash,
         canonicalThreadIdBefore: canonical.codexThreadId,
         candidateThreadId: canonical.codexThreadId,
+        repairSourceRunId: null,
+        repairReferenceHash: null,
         createdAt: now(),
       };
       await this.writeJson(path.join(root, "candidate.json"), manifest);
@@ -311,6 +317,100 @@ export class WorkspaceManager {
         canonicalSqliteHashBefore: canonical.sqliteContentHash,
         canonicalOutboxHashBefore: canonical.outboxContentHash,
         canonicalThreadIdBefore: canonical.codexThreadId,
+        runtimeThreadId: canonical.codexThreadId,
+        repairReferencePath: null,
+      };
+    } catch (error) {
+      await rm(root, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  async prepareRepairCandidate(
+    agentId: string,
+    sourceRunId: string,
+    runId: string,
+  ): Promise<CandidateStateReference> {
+    const source = await this.readQuarantinedCandidate(sourceRunId);
+    if (source.agentId !== agentId) {
+      throw new Error("Quarantine belongs to a different Agent");
+    }
+    const canonical = await this.readCanonical(agentId);
+    if (
+      canonical.stateId !== source.canonicalStateIdBefore ||
+      canonical.contentHash !== source.canonicalContentHashBefore ||
+      canonical.workspaceContentHash !== source.canonicalWorkspaceHashBefore ||
+      canonical.sessionContentHash !== source.canonicalSessionHashBefore ||
+      canonical.sqliteContentHash !== source.canonicalSqliteHashBefore ||
+      canonical.outboxContentHash !== source.canonicalOutboxHashBefore ||
+      canonical.codexThreadId !== source.canonicalThreadIdBefore
+    ) {
+      throw new Error(
+        "Canonical State advanced after this Quarantine; start a new Run against current reality",
+      );
+    }
+
+    const root = this.candidateRoot(runId);
+    if (await fileExists(root)) {
+      throw new Error("Candidate State already exists for Run " + runId);
+    }
+    const sourceRoot = await this.resolveQuarantineRoot(sourceRunId);
+    const candidateStateId = randomUUID();
+    const workspacePath = path.join(root, "workspace");
+    const codexHomePath = path.join(root, "codex-home");
+    const outboxDirectory = path.join(root, "outbox");
+    const outboxPath = path.join(outboxDirectory, "intents.jsonl");
+    const repairReferencePath = path.join(root, "repair-reference");
+    await mkdir(root, { recursive: false });
+    try {
+      await Promise.all([
+        cp(path.join(sourceRoot, "workspace"), workspacePath, {
+          recursive: true,
+          preserveTimestamps: true,
+        }),
+        cp(path.join(sourceRoot, "codex-home"), codexHomePath, {
+          recursive: true,
+          preserveTimestamps: true,
+        }),
+        cp(canonical.workspacePath, repairReferencePath, {
+          recursive: true,
+          preserveTimestamps: true,
+        }),
+        mkdir(outboxDirectory, { recursive: true }),
+      ]);
+      await this.refreshCodexConfig(codexHomePath);
+      const manifest: CandidateManifestV3 = {
+        schemaVersion: 3,
+        agentId,
+        runId,
+        candidateStateId,
+        canonicalStateIdBefore: canonical.stateId,
+        canonicalContentHashBefore: canonical.contentHash,
+        canonicalWorkspaceHashBefore: canonical.workspaceContentHash,
+        canonicalSessionHashBefore: canonical.sessionContentHash,
+        canonicalSqliteHashBefore: canonical.sqliteContentHash,
+        canonicalOutboxHashBefore: canonical.outboxContentHash,
+        canonicalThreadIdBefore: canonical.codexThreadId,
+        candidateThreadId: source.candidateThreadId ?? canonical.codexThreadId,
+        repairSourceRunId: sourceRunId,
+        repairReferenceHash: canonical.workspaceContentHash,
+        createdAt: now(),
+      };
+      await this.writeJson(path.join(root, "candidate.json"), manifest);
+      return {
+        candidateStateId,
+        workspacePath,
+        codexHomePath,
+        outboxPath,
+        canonicalStateIdBefore: canonical.stateId,
+        canonicalContentHashBefore: canonical.contentHash,
+        canonicalWorkspaceHashBefore: canonical.workspaceContentHash,
+        canonicalSessionHashBefore: canonical.sessionContentHash,
+        canonicalSqliteHashBefore: canonical.sqliteContentHash,
+        canonicalOutboxHashBefore: canonical.outboxContentHash,
+        canonicalThreadIdBefore: canonical.codexThreadId,
+        runtimeThreadId: manifest.candidateThreadId,
+        repairReferencePath,
       };
     } catch (error) {
       await rm(root, { recursive: true, force: true });
@@ -361,6 +461,10 @@ export class WorkspaceManager {
       ),
     ]);
     const candidateRoot = this.candidateRoot(runId);
+    await rm(path.join(candidateRoot, "repair-reference"), {
+      recursive: true,
+      force: true,
+    });
     const destinationRoot = this.versionRoot(agentId, candidate.candidateStateId);
     await mkdir(path.dirname(destinationRoot), { recursive: true });
     await rename(candidateRoot, destinationRoot);
@@ -396,6 +500,39 @@ export class WorkspaceManager {
 
   async cancelCandidate(runId: string): Promise<void> {
     await rm(this.candidateRoot(runId), { recursive: true, force: true });
+  }
+
+  async discardQuarantine(runId: string): Promise<boolean> {
+    const root = this.quarantineRoot(runId);
+    if (!(await fileExists(root))) return false;
+    await this.resolveQuarantineRoot(runId);
+    await rm(root, { recursive: true, force: false });
+    return true;
+  }
+
+  async repairReferenceEvidence(
+    runId: string,
+  ): Promise<{ status: "passed" | "failed" | "error"; summary: string } | null> {
+    const candidate = await this.readCandidate(runId);
+    if (!candidate.repairReferenceHash) return null;
+    try {
+      const referencePath = await this.resolveCandidatePath(runId, "repair-reference");
+      const actualHash = await this.contentHash(referencePath);
+      return actualHash === candidate.repairReferenceHash
+        ? {
+            status: "passed",
+            summary: "The bounded Canonical repair reference remained unchanged",
+          }
+        : {
+            status: "failed",
+            summary: "The bounded Canonical repair reference was modified",
+          };
+    } catch {
+      return {
+        status: "error",
+        summary: "The bounded Canonical repair reference could not be verified",
+      };
+    }
   }
 
   async candidateHasPath(runId: string, relativePath: string): Promise<boolean> {
@@ -620,8 +757,21 @@ export class WorkspaceManager {
   }
 
   private async readCandidate(runId: string): Promise<CandidateManifestV3> {
+    return this.readCandidateAt(this.candidateRoot(runId), runId);
+  }
+
+  private async readQuarantinedCandidate(
+    runId: string,
+  ): Promise<CandidateManifestV3> {
+    return this.readCandidateAt(this.quarantineRoot(runId), runId);
+  }
+
+  private async readCandidateAt(
+    root: string,
+    runId: string,
+  ): Promise<CandidateManifestV3> {
     const raw = await readFile(
-      path.join(this.candidateRoot(runId), "candidate.json"),
+      path.join(root, "candidate.json"),
       "utf8",
     );
     const manifest = JSON.parse(raw) as CandidateManifestV3;
@@ -638,11 +788,21 @@ export class WorkspaceManager {
       (manifest.canonicalThreadIdBefore !== null &&
         typeof manifest.canonicalThreadIdBefore !== "string") ||
       (manifest.candidateThreadId !== null &&
-        typeof manifest.candidateThreadId !== "string")
+        typeof manifest.candidateThreadId !== "string") ||
+      (manifest.repairSourceRunId !== undefined &&
+        manifest.repairSourceRunId !== null &&
+        typeof manifest.repairSourceRunId !== "string") ||
+      (manifest.repairReferenceHash !== undefined &&
+        manifest.repairReferenceHash !== null &&
+        typeof manifest.repairReferenceHash !== "string")
     ) {
       throw new Error("Invalid Candidate State manifest for Run " + runId);
     }
-    return manifest;
+    return {
+      ...manifest,
+      repairSourceRunId: manifest.repairSourceRunId ?? null,
+      repairReferenceHash: manifest.repairReferenceHash ?? null,
+    };
   }
 
   private async replaceCanonicalManifest(
@@ -756,7 +916,7 @@ export class WorkspaceManager {
 
   private async resolveCandidatePath(
     runId: string,
-    resource: "workspace" | "codex-home" | "outbox",
+    resource: "workspace" | "codex-home" | "outbox" | "repair-reference",
   ): Promise<string> {
     const candidatesRoot = await realpath(path.join(this.root, ".candidates"));
     const resourcePath = await realpath(path.join(this.candidateRoot(runId), resource));
@@ -765,6 +925,21 @@ export class WorkspaceManager {
       throw new Error("Candidate resource escapes the Candidate State root");
     }
     return resourcePath;
+  }
+
+  private async resolveQuarantineRoot(runId: string): Promise<string> {
+    await this.readQuarantinedCandidate(runId);
+    const quarantineBase = await realpath(path.join(this.root, ".quarantine"));
+    const root = await realpath(this.quarantineRoot(runId));
+    const relative = path.relative(quarantineBase, root);
+    if (relative.startsWith("..") || path.isAbsolute(relative) || relative !== runId) {
+      throw new Error("Quarantine path escapes the platform-owned root");
+    }
+    const stats = await lstat(root);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      throw new Error("Quarantine is not a safe directory");
+    }
+    return root;
   }
 
   private async writeInstructionsAt(

@@ -4,7 +4,7 @@ The local profile runs the React/Fastify control plane on macOS or Linux and
 starts every Codex turn in a disposable Docker, Colima, or Podman container.
 Only the configured ModelArk model API is remote.
 
-No ModelArk credential is required for `npm run test:e2e` or `npm run check:phase4`.
+No ModelArk credential is required for `npm run test:e2e` or `npm run check:phase5`.
 Those commands use a deterministic local Codex fixture, SQLite, and the atomic mock action consumer without paid inference.
 
 ## Start
@@ -49,6 +49,9 @@ Set `LOCAL_POC_DATA_ROOT` to use another directory.
 
 Each turn mounts only the selected Candidate workspace, Candidate Codex session directory, and fresh Candidate outbox.
 The canonical resources and platform-owned mock delivery store are never mounted into the Runtime.
+Repair Runs additionally receive a disposable copy of the exact matching Canonical workspace.
+The container provider mounts that copy read-only, Airlock verifies its hash before Promotion, and the copy is removed from the repaired state before installation.
+Set `AIRLOCK_MAX_REPAIR_DEPTH` to a value from one through five to change the bounded repair ancestry limit from its default of two.
 Default limits are 2 CPUs, 2 GiB memory, 256 processes, dropped capabilities,
 and `no-new-privileges`.
 
@@ -132,6 +135,9 @@ Resource limits are controlled by `CONTAINER_CPU_LIMIT`,
 `CONTAINER_MEMORY_LIMIT`, and `CONTAINER_PIDS_LIMIT`.
 
 ## Troubleshooting
+
+A Repair action returns a conflict when Canonical State advanced after the selected Quarantine, another repair child already exists, the ancestry limit is exhausted, or mutable Quarantine state is no longer available.
+Start a new normal Run against current reality when the selected Quarantine is stale.
 
 ModelArk credentials and endpoints are isolated by provider and region.
 A `401` response saying that the API key does not exist usually means the key is invalid or `ARK_BASE_URL` points to the wrong provider or region.

@@ -24,6 +24,7 @@ describe("Container Codex runner", () => {
         workspacePath: "/tmp/agent-workspace",
         codexHomePath: "/tmp/candidate-codex-home",
         outboxPath: "/tmp/candidate-outbox/intents.jsonl",
+        repairReferencePath: "/tmp/candidate/repair-reference",
         prompt: "write a small program",
         threadId: null,
       },
@@ -42,6 +43,11 @@ describe("Container Codex runner", () => {
     expect(args).toContain("workspace-write");
     expect(args).toContain("/workspace");
     expect(args).toContain("/airlock-outbox");
+    expect(args).toContain(
+      "type=bind,src=/tmp/candidate/repair-reference,dst=/airlock-repair-reference,readonly",
+    );
+    expect(args).toContain("AIRLOCK_REPAIR_REFERENCE_PATH=/airlock-repair-reference");
+    expect(args).toContain("/airlock-repair-reference");
     expect(args).toContain("io.codejam.instance-id=test-instance");
     expect(args).toContain("keep-id");
     expect(args).not.toContain("secret-that-must-not-appear-in-argv");

@@ -18,10 +18,12 @@ const prompt =
     ? args.slice(resumeIndex + 2).join(" ")
     : (args.at(-1) ?? "");
 const threadId = resumedThreadId ?? "baseline-thread";
-const destructiveRequest = /delete\s+AGENTS\.md/i.test(prompt);
+const repairRequest = /Agent Airlock Repair Run/i.test(prompt);
+const destructiveRequest = !repairRequest && /delete\s+AGENTS\.md/i.test(prompt);
 const multiResourceRequest = /multi-resource release/i.test(prompt);
 const codexHome = process.env.CODEX_HOME;
 const outboxPath = process.env.AIRLOCK_OUTBOX_PATH;
+const repairReferencePath = process.env.AIRLOCK_REPAIR_REFERENCE_PATH;
 
 if (!codexHome) {
   process.stderr.write("CODEX_HOME is required\n");
@@ -50,7 +52,18 @@ if (resumedThreadId) {
     process.stderr.write("Accepted reasoning did not persist\n");
     process.exit(5);
   }
-  if (acceptedMemory.includes("rejected-memory")) {
+  if (
+    repairRequest &&
+    !acceptedMemory.includes("rejected-memory")
+  ) {
+    process.stderr.write("Repair Run did not resume quarantined Agent memory\n");
+    process.exit(6);
+  }
+  if (
+    !repairRequest &&
+    acceptedMemory.includes("rejected-memory") &&
+    !acceptedMemory.includes("repaired-memory")
+  ) {
     process.stderr.write("Rejected reasoning leaked into the next turn\n");
     process.exit(6);
   }
@@ -69,7 +82,51 @@ if (!resumedThreadId) {
     'import { hello } from "../src/hello.js";\n\nif (hello() !== "hello") throw new Error("failed");\n',
     "utf8",
   );
-} else if (destructiveRequest) {
+  } else if (repairRequest) {
+    if (!repairReferencePath) {
+      process.stderr.write("AIRLOCK_REPAIR_REFERENCE_PATH is required\n");
+      process.exit(7);
+    }
+    const canonicalInstructions = await readFile(
+      path.join(repairReferencePath, "AGENTS.md"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(process.cwd(), "AGENTS.md"),
+      canonicalInstructions,
+      "utf8",
+    );
+    const retainedDamage = await readFile(
+      path.join(process.cwd(), "damage.txt"),
+      "utf8",
+    );
+    if (!retainedDamage.includes("must remain quarantined")) {
+      process.stderr.write("Useful quarantined workspace changes did not carry into repair\n");
+      process.exit(8);
+    }
+    const database = new DatabaseSync(
+      path.join(process.cwd(), ".airlock", "demo.sqlite"),
+    );
+    database
+      .prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?")
+      .run("repaired", "2026-08-25T00:01:00.000Z", "demo");
+    database.close();
+    if (!outboxPath) throw new Error("AIRLOCK_OUTBOX_PATH is required");
+    await writeFile(
+      outboxPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        id: "repair-ready",
+        type: "demo.notification.requested",
+        payload: {
+          destination: "demo-console",
+          subject: "Repair accepted",
+          body: "The quarantined future was repaired and is ready.",
+        },
+      }) + "\n",
+      "utf8",
+    );
+  } else if (destructiveRequest) {
   const source = await readFile(path.join(process.cwd(), "src", "hello.ts"), "utf8");
   if (!source.includes('"hello"')) {
     process.stderr.write("Baseline workspace did not persist before destructive turn\n");
@@ -139,7 +196,11 @@ await appendFile(
   sessionPath,
   JSON.stringify({
     threadId,
-    memory: destructiveRequest ? "rejected-memory" : "accepted-memory",
+    memory: destructiveRequest
+      ? "rejected-memory"
+      : repairRequest
+        ? "repaired-memory"
+        : "accepted-memory",
     prompt,
   }) + "\n",
   "utf8",
@@ -147,6 +208,8 @@ await appendFile(
 
 const output = destructiveRequest
   ? "Attempted the destructive workspace change for: " + prompt
+  : repairRequest
+    ? "Repaired the quarantined future using bounded Validation evidence and preserved its useful workspace and data changes."
   : multiResourceRequest
     ? "Prepared the multi-resource release with workspace, SQLite, and deferred notification changes for: " +
       prompt

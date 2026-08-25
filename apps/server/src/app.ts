@@ -22,6 +22,9 @@ const updateAgentBody = createAgentBody.partial().refine(
 const messageBody = z.object({
   content: z.string().trim().min(1).max(50_000),
 });
+const repairBody = z.object({
+  objective: z.string().trim().min(1).max(2_000).optional(),
+});
 const contractName = z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.-]+$/);
 const outcomeContractBody = z.object({
   requiredPaths: z.array(z.string().trim().min(1).max(240)).max(100),
@@ -163,6 +166,17 @@ export async function createApp(
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id) };
+  });
+
+  app.post("/api/runs/:id/repair", async (request, reply) => {
+    const { id } = runIdParams.parse(request.params);
+    const body = repairBody.parse(request.body ?? {});
+    return reply.code(202).send(await service.repairRun(id, body.objective));
+  });
+
+  app.post("/api/runs/:id/discard", async (request) => {
+    const { id } = runIdParams.parse(request.params);
+    return { run: await service.discardRun(id) };
   });
 
   if (config.nodeEnv === "production") {

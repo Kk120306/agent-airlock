@@ -45,6 +45,7 @@ export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
   private readonly configuringAgents = new Set<string>();
+  private readonly quarantineOperations = new Set<string>();
   private readonly runner: AirlockRunner;
   private readonly actionDispatcher: MockExternalActionDispatcher;
 
@@ -344,6 +345,7 @@ export class AgentService {
         runId,
         canonical,
         storedAgent.outcomeContract,
+        this.config.maxRepairDepth,
       );
       database.runs.push(run);
       database.messages.push(message);
@@ -353,16 +355,213 @@ export class AgentService {
       storedAgent.updatedAt = timestamp;
       return snapshot;
     });
-    const execution = this.executeRun(agentAtStart, run);
-    this.activeExecutions.set(agentId, execution);
-    void execution
-      .finally(() => {
-        if (this.activeExecutions.get(agentId) === execution) {
-          this.activeExecutions.delete(agentId);
-        }
-      })
-      .catch(() => undefined);
+    this.startExecution(agentAtStart, run);
     return { run, message };
+  }
+
+  async repairRun(
+    sourceRunId: string,
+    objective?: string,
+  ): Promise<{ run: AgentRun; message: Message }> {
+    if (!isArkConfigured(this.config)) {
+      throw new HttpError(
+        503,
+        "Ark is not configured. Set ARK_API_KEY and ARK_MODEL, then restart.",
+      );
+    }
+    if (this.quarantineOperations.has(sourceRunId)) {
+      throw new HttpError(409, "This Quarantine already has an active operation");
+    }
+    this.quarantineOperations.add(sourceRunId);
+    try {
+      const source = this.getRun(sourceRunId);
+      const sourceTransaction = source.transaction;
+      if (
+        !sourceTransaction ||
+        sourceTransaction.disposition !== "quarantined" ||
+        !sourceTransaction.quarantineAvailable
+      ) {
+        throw new HttpError(409, "Only an available Quarantine can start a Repair Run");
+      }
+      if (sourceTransaction.lineage.depth >= sourceTransaction.lineage.maxDepth) {
+        throw new HttpError(
+          409,
+          "This repair lineage reached its configured maximum depth",
+        );
+      }
+      const canonical = await this.workspaces.readCanonical(source.agentId);
+      if (
+        canonical.stateId !== sourceTransaction.canonicalStateIdBefore ||
+        canonical.contentHash !== sourceTransaction.canonicalContentHashBefore
+      ) {
+        throw new HttpError(
+          409,
+          "Canonical State advanced after this Quarantine; start a new Run against current reality",
+        );
+      }
+
+      const timestamp = now();
+      const runId = randomUUID();
+      const prompt = buildRepairPrompt(source, objective);
+      const run: AgentRun = {
+        id: runId,
+        agentId: source.agentId,
+        status: "queued",
+        prompt,
+        output: null,
+        error: null,
+        usage: null,
+        transaction: createRunTransaction(
+          runId,
+          canonical,
+          sourceTransaction.outcomeContract,
+          sourceTransaction.lineage.maxDepth,
+          {
+            rootRunId: sourceTransaction.lineage.rootRunId,
+            parentRunId: source.id,
+            depth: sourceTransaction.lineage.depth + 1,
+            maxDepth: sourceTransaction.lineage.maxDepth,
+          },
+        ),
+        startedAt: null,
+        completedAt: null,
+        createdAt: timestamp,
+      };
+      const message: Message = {
+        id: randomUUID(),
+        agentId: source.agentId,
+        runId,
+        role: "user",
+        content:
+          "Repair quarantined Run " +
+          source.id.slice(0, 8) +
+          " using its recorded failed Validation evidence.",
+        createdAt: timestamp,
+      };
+      const agentAtStart = await this.store.mutate((database) => {
+        const storedSource = database.runs.find((item) => item.id === sourceRunId);
+        const agent = database.agents.find((item) => item.id === source.agentId);
+        if (!storedSource?.transaction || !agent) {
+          throw new HttpError(404, "Quarantine or Agent not found");
+        }
+        if (
+          storedSource.transaction.disposition !== "quarantined" ||
+          !storedSource.transaction.quarantineAvailable
+        ) {
+          throw new HttpError(409, "Only an available Quarantine can start a Repair Run");
+        }
+        if (agent.status === "stopped") {
+          throw new HttpError(409, "Start the Agent before repairing this Quarantine");
+        }
+        if (agent.status === "busy") {
+          throw new HttpError(409, "This Agent is already running");
+        }
+        if (this.configuringAgents.has(agent.id)) {
+          throw new HttpError(409, "Wait for the Agent configuration update to finish");
+        }
+        if (
+          database.runs.some(
+            (candidate) =>
+              candidate.transaction?.lineage.parentRunId === sourceRunId &&
+              candidate.status !== "cancelled",
+          )
+        ) {
+          throw new HttpError(
+            409,
+            "A Repair Run already exists for this Quarantine; continue from that lineage",
+          );
+        }
+        agent.workspacePath = canonical.workspacePath;
+        agent.canonicalStateId = canonical.stateId;
+        agent.codexThreadId = canonical.codexThreadId;
+        agent.status = "busy";
+        agent.lastError = null;
+        agent.updatedAt = timestamp;
+        database.runs.push(run);
+        database.messages.push(message);
+        return structuredClone(agent);
+      });
+      this.startExecution(agentAtStart, run);
+      return { run, message };
+    } finally {
+      this.quarantineOperations.delete(sourceRunId);
+    }
+  }
+
+  async discardRun(runId: string): Promise<AgentRun> {
+    const initial = this.getRun(runId);
+    if (initial.transaction?.disposition === "discarded") return initial;
+    if (this.quarantineOperations.has(runId)) {
+      throw new HttpError(409, "This Quarantine already has an active operation");
+    }
+    this.quarantineOperations.add(runId);
+    try {
+      const snapshot = this.store.snapshot();
+      const run = snapshot.runs.find((item) => item.id === runId);
+      const transaction = run?.transaction;
+      const agent = run
+        ? snapshot.agents.find((item) => item.id === run.agentId)
+        : undefined;
+      if (!run || !transaction || !agent) {
+        throw new HttpError(404, "Quarantine or Agent not found");
+      }
+      if (transaction.disposition === "discarded") return run;
+      if (transaction.disposition !== "quarantined" || !transaction.quarantineAvailable) {
+        throw new HttpError(409, "Only an available Quarantine can be discarded");
+      }
+      if (agent.status === "busy") {
+        throw new HttpError(409, "Wait for the active Agent Run to finish");
+      }
+      if (
+        snapshot.runs.some(
+          (candidate) =>
+            candidate.transaction?.lineage.parentRunId === runId &&
+            (candidate.status === "queued" || candidate.status === "running"),
+        )
+      ) {
+        throw new HttpError(409, "Wait for the active Repair Run to finish");
+      }
+
+      await this.workspaces.discardQuarantine(runId);
+      const discardedAt = now();
+      return await this.store.mutate((database) => {
+        const storedRun = database.runs.find((item) => item.id === runId);
+        if (!storedRun?.transaction) {
+          throw new HttpError(404, "Quarantine not found");
+        }
+        if (storedRun.transaction.disposition === "discarded") {
+          return structuredClone(storedRun);
+        }
+        storedRun.transaction.disposition = "discarded";
+        storedRun.transaction.status = "discarded";
+        storedRun.transaction.quarantinePath = null;
+        storedRun.transaction.quarantineAvailable = false;
+        storedRun.transaction.discardedAt = discardedAt;
+        storedRun.transaction = finalizeResources(
+          storedRun.transaction,
+          "discarded",
+        );
+        storedRun.transaction.events.push({
+          status: "discarded",
+          at: discardedAt,
+          summary: "Mutable Quarantine was discarded; bounded decision evidence remains",
+        });
+        storedRun.transaction.promotionReceipt = createPromotionReceipt(
+          storedRun.transaction,
+        );
+        const storedAgent = database.agents.find(
+          (item) => item.id === storedRun.agentId,
+        );
+        if (storedAgent && storedAgent.status !== "stopped") {
+          storedAgent.status = "ready";
+          storedAgent.lastError = null;
+          storedAgent.updatedAt = discardedAt;
+        }
+        return structuredClone(storedRun);
+      });
+    } finally {
+      this.quarantineOperations.delete(runId);
+    }
   }
 
   async systemInfo(): Promise<Record<string, unknown>> {
@@ -406,12 +605,14 @@ export class AgentService {
           prompt: run.prompt,
           threadId: canonical.codexThreadId,
           canonicalStateId: canonical.stateId,
+          repairSourceRunId: run.transaction?.lineage.parentRunId ?? null,
         },
         run.transaction ??
           createRunTransaction(
             run.id,
             await this.workspaces.readCanonical(agentAtStart.id),
             agentAtStart.outcomeContract,
+            this.config.maxRepairDepth,
           ),
         async (transaction) => {
           await this.store.mutate((database) => {
@@ -512,6 +713,18 @@ export class AgentService {
     });
   }
 
+  private startExecution(agent: Agent, run: AgentRun): void {
+    const execution = this.executeRun(agent, run);
+    this.activeExecutions.set(agent.id, execution);
+    void execution
+      .finally(() => {
+        if (this.activeExecutions.get(agent.id) === execution) {
+          this.activeExecutions.delete(agent.id);
+        }
+      })
+      .catch(() => undefined);
+  }
+
   private async cancelExecution(agentId: string): Promise<void> {
     this.cancellationRequests.add(agentId);
     try {
@@ -524,4 +737,40 @@ export class AgentService {
       this.cancellationRequests.delete(agentId);
     }
   }
+}
+
+function buildRepairPrompt(source: AgentRun, objective?: string): string {
+  const failedEvidence =
+    source.transaction?.validations
+      .filter((validation) => validation.required && validation.status !== "passed")
+      .map((validation) => {
+        const output = validation.output ? "\nEvidence: " + validation.output : "";
+        return "- " + validation.name + ": " + validation.summary + output;
+      })
+      .join("\n") || "- The prior Run did not retain a decisive Validation detail.";
+  const boundedObjective =
+    objective?.trim() ||
+    "Correct only the recorded required Validation failures while preserving useful quarantined work.";
+  const prompt = [
+    "Agent Airlock Repair Run for quarantined transaction " + source.id + ".",
+    "",
+    "Original objective:",
+    source.prompt,
+    "",
+    "Bounded remediation objective:",
+    boundedObjective,
+    "",
+    "Failed required Validation evidence:",
+    failedEvidence,
+    "",
+    "A bounded snapshot of the unchanged Canonical workspace is available at AIRLOCK_REPAIR_REFERENCE_PATH.",
+    "Use it only to restore required or protected content cited by the failed evidence.",
+    "Preserve useful Candidate State changes, keep the repair narrow, and rerun relevant checks.",
+    "If an external action is still intended, submit it deliberately through the fresh AIRLOCK_OUTBOX_PATH.",
+  ].join("\n");
+  const bytes = Buffer.from(prompt, "utf8");
+  return bytes.byteLength <= 12_000
+    ? prompt
+    : bytes.subarray(0, 12_000).toString("utf8") +
+        "\n[Repair evidence truncated by Agent Airlock]";
 }

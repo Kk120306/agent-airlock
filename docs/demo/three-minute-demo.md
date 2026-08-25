@@ -3,11 +3,12 @@
 ## Demo promise
 
 Agent Airlock lets an Agent attempt file, reasoning, SQLite, and external-action changes without allowing a rejected attempt to alter accepted reality.
-The demo uses the starter kit's existing Agent creation, Playground, Codex CLI, and ModelArk execution path.
+The product uses the starter kit's existing Agent creation, Playground, Codex CLI, and ModelArk execution path.
+The current no-cost proof drives the same production React, Fastify, Airlock, workspace, SQLite, and outbox boundaries with a deterministic local Codex protocol fixture.
 
 ## Before judging
 
-1. While organizer credentials are pending, run `npm run test:e2e` for the no-cost deterministic production-browser proof.
+1. While organizer credentials are pending, run `npm run test:e2e` for the no-cost deterministic production-browser proof, including Repair and Discard.
 2. For the final live conformance run only, configure organizer-provided `ARK_API_KEY` and `ARK_MODEL` locally without displaying either value.
 3. Run `npm run poc` and open <http://localhost:3000>.
 4. Confirm that the Outcome Contract requires `AGENTS.md` and `README.md` and protects `AGENTS.md`.
@@ -17,13 +18,13 @@ Do not place credentials in the repository, terminal capture, browser, screensho
 
 ## Timeline
 
-### 0:00 to 0:30 - Create the Agent
+### 0:00 to 0:20 - Establish accepted reality
 
-Create an Agent named `Airlock Demo` in the existing starter-kit UI.
+Create or select an Agent named `Airlock Demo` in the existing starter-kit UI.
 Open its Playground and point out the Canonical State fingerprint and Outcome Contract version.
 Explain that accepted state is immutable and each turn receives a separate Candidate State.
 
-### 0:30 to 1:20 - Promote a multi-resource future
+### 0:20 to 1:00 - Promote a multi-resource future
 
 Send this real task through the Playground:
 
@@ -37,7 +38,7 @@ Do not modify or delete any existing file.
 Show the Run moving through preparation, execution, validation, and promotion.
 Open the Airlock evidence and identify the changed file, passing Validations, data snapshot, delivered intent, receipt hash, advanced Canonical fingerprint, and four-resource promoted ledger.
 
-### 1:20 to 2:15 - Quarantine a destructive multi-resource future
+### 1:00 to 1:40 - Quarantine a destructive multi-resource future
 
 Send this controlled destructive task:
 
@@ -51,14 +52,17 @@ Perform all changes now.
 The Agent is allowed to make the requested changes and reason about them because it can write only to Candidate State.
 Show that Airlock rejects the protected-path and required-path violations, reports `Quarantined`, labels all four resources as quarantined, and marks the action intent rejected.
 
-### 2:15 to 2:45 - Prove accepted reality survived
+### 1:40 to 2:35 - Repair the rejected future
 
 Compare the before and after Canonical State fingerprints in the UI.
-Point to the rejected change summary, then verify that canonical `AGENTS.md` remains present, `damage.txt` was not promoted, the inventory value remains `release-ready`, and the mock delivery count remains one.
-Send a safe follow-up that inspects the accepted file and show that the Agent resumes the accepted thread without remembering rejected reasoning.
-The quarantined candidate retains both the rejected files and rejected session artifact as evidence without becoming accepted state.
+Point to the rejected change summary and verify that accepted `AGENTS.md`, SQLite value, and delivery count remain unchanged.
+Select `Repair this future` on the Quarantine card.
+Explain that Airlock forks the quarantined workspace and rejected memory into a new Candidate, supplies a verified disposable Canonical workspace reference, creates a fresh outbox, and keeps accepted reality untouched.
+Show the repaired child preserve useful `damage.txt`, restore the exact protected `AGENTS.md`, change SQLite to `repaired`, intentionally submit a new `repair-ready` intent, pass the original contract, and promote.
+Point to the root, parent, depth, and maximum depth in the recovery lineage.
+The original Quarantine remains inspectable until the operator selects `Discard Quarantine`.
 
-### 2:45 to 3:00 - Close with the middleware boundary
+### 2:35 to 3:00 - Close with the middleware boundary
 
 Open the one-page architecture diagram.
 Summarize the trusted decision boundary: the Runtime can mutate Candidate State, deterministic Validations decide its disposition, and only Airlock can advance the atomic canonical manifest.
@@ -73,6 +77,9 @@ Show that the ordinary Playground and Agent lifecycle controls remain usable aft
 - A destructive candidate is quarantined with an understandable reason.
 - The canonical fingerprint is identical before and after rejection.
 - Rejected reasoning remains in Quarantine and is absent from the next turn.
+- A Repair Run resumes the rejected future without changing Canonical State before its own successful Promotion.
+- The repaired receipt records bounded ancestry, and its fresh outbox prevents rejected intents from replaying automatically.
+- Discard removes mutable Quarantine state without erasing bounded decision evidence.
 - A promoted SQLite mutation becomes canonical while a rejected mutation does not.
 - A promoted intent creates one mock delivery under duplicate dispatch attempts while a rejected intent creates zero.
 - Validation evidence is redacted and bounded.
@@ -83,7 +90,8 @@ Show that the ordinary Playground and Agent lifecycle controls remain usable aft
 The current release makes workspace, Codex-session, SQLite, and supported notification-intent changes share one promotion decision.
 Exactly-once delivery is claimed only inside the atomic mock consumer.
 Unrestricted Runtime networking can bypass the outbox.
-Repair Runs and crash-journal reconciliation remain later roadmap phases.
+Repair Runs, bounded ancestry, canonical freshness checks, and idempotent discard are implemented in Phase 5.
+Crash-journal reconciliation remains Phase 6 scope.
 
 ## Live-demo contingency
 

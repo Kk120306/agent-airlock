@@ -46,7 +46,17 @@ function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
 }
 
-function AirlockEvidence({ run }: { run: AgentRun }) {
+function AirlockEvidence({
+  run,
+  actionBusy,
+  onRepair,
+  onDiscard,
+}: {
+  run: AgentRun;
+  actionBusy: boolean;
+  onRepair: () => void;
+  onDiscard: () => void;
+}) {
   const transaction = run.transaction;
   if (!transaction) return null;
   const disposition = transaction.disposition ?? transaction.status;
@@ -58,6 +68,8 @@ function AirlockEvidence({ run }: { run: AgentRun }) {
       ? "Promoted"
       : disposition === "quarantined"
         ? "Quarantined"
+        : disposition === "discarded"
+          ? "Discarded"
         : disposition === "cancelled"
           ? "Cancelled"
           : "Airlock evaluating";
@@ -66,6 +78,8 @@ function AirlockEvidence({ run }: { run: AgentRun }) {
       ? "Candidate became Canonical State"
       : disposition === "quarantined"
         ? "Canonical State unchanged"
+        : disposition === "discarded"
+          ? "Mutable Quarantine removed; decision evidence retained"
         : disposition === "cancelled"
           ? "Candidate discarded before Promotion"
           : "Canonical State remains protected during this Run";
@@ -88,9 +102,61 @@ function AirlockEvidence({ run }: { run: AgentRun }) {
           <p>{outcome}</p>
         </div>
         <span className="airlock-shield" aria-hidden="true">
-          {disposition === "promoted" ? "✓" : disposition === "quarantined" ? "!" : "◇"}
+          {disposition === "promoted"
+            ? "✓"
+            : disposition === "quarantined"
+              ? "!"
+              : disposition === "discarded"
+                ? "×"
+                : "◇"}
         </span>
       </header>
+
+      <section className="repair-lineage" aria-label="Repair lineage">
+        <div>
+          <span className="eyebrow">Recovery lineage</span>
+          <strong>
+            {transaction.lineage.depth === 0
+              ? "Original Run"
+              : "Repair " +
+                transaction.lineage.depth +
+                " of " +
+                transaction.lineage.maxDepth}
+          </strong>
+          <p>
+            Root {transaction.lineage.rootRunId.slice(0, 8)}
+            {transaction.lineage.parentRunId
+              ? " · parent " + transaction.lineage.parentRunId.slice(0, 8)
+              : " · no parent"}
+          </p>
+        </div>
+        {disposition === "quarantined" && transaction.quarantineAvailable && (
+          <div className="quarantine-actions">
+            <button
+              className="button button-primary"
+              onClick={onRepair}
+              disabled={
+                actionBusy || transaction.lineage.depth >= transaction.lineage.maxDepth
+              }
+            >
+              {actionBusy ? <Spinner /> : "Repair this future"}
+            </button>
+            <button
+              className="button button-ghost"
+              onClick={onDiscard}
+              disabled={actionBusy}
+            >
+              Discard Quarantine
+            </button>
+          </div>
+        )}
+        {disposition === "quarantined" &&
+          transaction.lineage.depth >= transaction.lineage.maxDepth && (
+            <p className="repair-limit" role="status">
+              Repair depth exhausted. Inspect or discard this Quarantine.
+            </p>
+          )}
+      </section>
 
       {decisiveValidation && (
         <div className="decisive-validation" role="alert">
@@ -294,6 +360,7 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [airlockActionBusy, setAirlockActionBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
@@ -491,6 +558,52 @@ export default function App() {
       setError(reason instanceof Error ? reason.message : String(reason));
       setActiveRun(null);
       await refreshAgents();
+    }
+  };
+
+  const repairActiveRun = async () => {
+    if (!selected || !activeRun) return;
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      const result = await api.repairRun(activeRun.id);
+      if (selectedIdRef.current === selected.id) {
+        setMessages((current) => [...current, result.message]);
+        setActiveRun(result.run);
+      }
+      setAgents((current) =>
+        current.map((agent) =>
+          agent.id === selected.id ? { ...agent, status: "busy" } : agent,
+        ),
+      );
+      await pollRun(result.run.id, selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      await refreshAgents();
+    } finally {
+      setAirlockActionBusy(false);
+    }
+  };
+
+  const discardActiveRun = async () => {
+    if (!activeRun) return;
+    if (
+      !window.confirm(
+        "Discard this mutable Quarantine? Its bounded decision evidence will remain.",
+      )
+    ) {
+      return;
+    }
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      const result = await api.discardRun(activeRun.id);
+      setActiveRun(result.run);
+      await refreshAgents();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAirlockActionBusy(false);
     }
   };
 
@@ -840,7 +953,14 @@ export default function App() {
                     <span>{activeRun.error}</span>
                   </article>
                 )}
-                {activeRun && <AirlockEvidence run={activeRun} />}
+                {activeRun && (
+                  <AirlockEvidence
+                    run={activeRun}
+                    actionBusy={airlockActionBusy}
+                    onRepair={() => void repairActiveRun()}
+                    onDiscard={() => void discardActiveRun()}
+                  />
+                )}
                 <div ref={messageEnd} />
               </div>
 

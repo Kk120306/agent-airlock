@@ -48,6 +48,35 @@ describe("Codex runner protocol", () => {
     expect(args.slice(-3)).toEqual(["resume", "thread-123", "add tests"]);
   });
 
+  it("exposes a bounded repair reference only for Repair Runs", () => {
+    const request = {
+      agentId: "agent",
+      workspacePath: "/tmp/workspace",
+      codexHomePath: "/tmp/candidate-codex-home",
+      outboxPath: "/tmp/candidate-outbox/intents.jsonl",
+      repairReferencePath: "/tmp/candidate/repair-reference",
+      prompt: "repair",
+      threadId: "thread-123",
+    };
+    const args = buildCodexArgs(request, "workspace-write");
+    const config = loadConfig({
+      NODE_ENV: "test",
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+    const environment = buildCodexEnvironment(
+      config,
+      request.codexHomePath,
+      request.outboxPath,
+      request.repairReferencePath,
+    );
+
+    expect(args).toContain("/tmp/candidate/repair-reference");
+    expect(environment.AIRLOCK_REPAIR_REFERENCE_PATH).toBe(
+      "/tmp/candidate/repair-reference",
+    );
+  });
+
   it("uses the Candidate State Codex home instead of the global template", () => {
     const config = loadConfig({
       NODE_ENV: "test",

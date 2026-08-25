@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 5", async () => {
+  it("migrates starter version 1 data to version 6", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,7 +59,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 5,
+      version: 6,
       agents: [
         {
           canonicalStateId: "",
@@ -68,7 +68,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 5 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 6 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -178,7 +178,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 5,
+      version: 6,
       agents: [
         {
           outcomeContract: {
@@ -196,6 +196,13 @@ describe("JsonStore", () => {
             resources: [],
             sqlite: null,
             externalActions: { intents: [], deliveredCount: 0 },
+            quarantineAvailable: false,
+            lineage: {
+              rootRunId: "run-2",
+              parentRunId: null,
+              depth: 0,
+              maxDepth: 2,
+            },
             validations: [{ required: true }],
           },
         },
@@ -230,8 +237,16 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 5,
-      runs: [{ transaction: { id: "phase-2-run", resources: [] } }],
+      version: 6,
+      runs: [
+        {
+          transaction: {
+            id: "phase-2-run",
+            resources: [],
+            lineage: { rootRunId: "phase-2-run", parentRunId: null, depth: 0 },
+          },
+        },
+      ],
     });
   });
 
@@ -261,12 +276,67 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 5,
+      version: 6,
       runs: [
         {
           transaction: {
             sqlite: null,
             externalActions: { intents: [], deliveredCount: 0 },
+            lineage: { rootRunId: "phase-3-run", parentRunId: null, depth: 0 },
+          },
+        },
+      ],
+    });
+  });
+
+  it("adds original repair lineage to Phase 4 receipts", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v5-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 5,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-4-run",
+            transaction: {
+              id: "phase-4-run",
+              disposition: "quarantined",
+              quarantinePath: "/tmp/quarantine/phase-4-run",
+              promotionReceipt: {
+                runTransactionId: "phase-4-run",
+                disposition: "quarantined",
+                validationEvidenceHash: "sha256:evidence",
+              },
+            },
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 6,
+      runs: [
+        {
+          transaction: {
+            quarantineAvailable: true,
+            discardedAt: null,
+            lineage: {
+              rootRunId: "phase-4-run",
+              parentRunId: null,
+              depth: 0,
+              maxDepth: 2,
+            },
+            promotionReceipt: {
+              validationEvidenceHash: "sha256:evidence",
+              lineage: { rootRunId: "phase-4-run", parentRunId: null, depth: 0 },
+            },
           },
         },
       ],

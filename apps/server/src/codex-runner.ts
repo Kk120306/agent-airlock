@@ -17,6 +17,7 @@ export function buildCodexEnvironment(
   config: AppConfig,
   codexHomePath: string,
   outboxPath?: string,
+  repairReferencePath?: string | null,
 ): NodeJS.ProcessEnv {
   const inheritedNames = [
     "PATH",
@@ -37,6 +38,9 @@ export function buildCodexEnvironment(
     ARK_API_KEY: config.arkApiKey,
     NO_COLOR: "1",
     ...(outboxPath ? { AIRLOCK_OUTBOX_PATH: outboxPath } : {}),
+    ...(repairReferencePath
+      ? { AIRLOCK_REPAIR_REFERENCE_PATH: repairReferencePath }
+      : {}),
   };
   for (const name of inheritedNames) {
     if (process.env[name] !== undefined) environment[name] = process.env[name];
@@ -56,6 +60,7 @@ export function buildCodexArgs(
   sandboxMode: AppConfig["codexSandboxMode"],
   workspacePath = request.workspacePath,
   outboxDirectory = path.dirname(request.outboxPath),
+  repairReferencePath = request.repairReferencePath,
 ): string[] {
   const args = [
     "exec",
@@ -67,6 +72,7 @@ export function buildCodexArgs(
     workspacePath,
     "--add-dir",
     outboxDirectory,
+    ...(repairReferencePath ? ["--add-dir", repairReferencePath] : []),
   ];
   if (request.threadId) {
     args.push("resume", request.threadId, request.prompt);
@@ -171,6 +177,7 @@ export class CodexRunner implements AgentRunner {
         this.config,
         request.codexHomePath,
         request.outboxPath,
+        request.repairReferencePath,
       ),
       stdio: ["ignore", "pipe", "pipe"],
     });

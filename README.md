@@ -5,7 +5,7 @@ CRUD, a browser Playground, persistent workspaces, and Codex CLI backed by the
 ModelArk Responses API.
 
 This repository is the foundation for **Agent Airlock**, transactional execution middleware that runs every Agent task against isolated Candidate State and promotes only outcomes that satisfy a versioned Outcome Contract.
-Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), and [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md) before extending Airlock.
+Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), and [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
 Run it locally with Docker, Colima, or rootless Podman, or deploy it to
@@ -36,6 +36,8 @@ Volcengine ECS.
 - Immutable Whole-Agent Candidate and Canonical versions with Promotion or Quarantine
 - Versioned Outcome Contracts with bounded, redacted Validation evidence
 - Compact Airlock timeline, four-resource disposition, change summary, canonical fingerprint, and Promotion Receipt
+- Bounded Repair Runs that preserve useful quarantined work, resume rejected Agent memory, and use a fresh outbox
+- Canonical freshness checks, receipt lineage, and idempotent Quarantine discard with retained evidence
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -219,6 +221,7 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `RUNTIME_PROVIDER` | `local-process` | `container` for disposable local Runtime containers. |
 | `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |
 | `CODEX_TIMEOUT_MS` | `600000` | Maximum duration of one turn. |
+| `AIRLOCK_MAX_REPAIR_DEPTH` | `2` | Maximum bounded Repair Runs in one Quarantine lineage. |
 | `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.
@@ -236,6 +239,8 @@ flowchart LR
     Runtime -->|ECS profile| Codex["Codex CLI in application container"]
     Airlock --> Validate["Bounded Validations"]
     Validate --> Decision{"Promote or Quarantine"}
+    Decision -->|Rejected| Repair["Bounded Repair or Discard"]
+    Repair -->|Fresh candidate and outbox| Airlock
     Container --> Ark["ModelArk Responses API"]
     Codex --> Ark
 ```
@@ -262,6 +267,7 @@ Use `npm run check:phase0` to run the starter checks and this complete baseline 
 Use `npm run check:phase2` to run the full qualifying proof, browser journey, and dependency audit.
 Use `npm run check:phase3` to add the pinned Codex session-isolation and real validation-container proofs.
 Use `npm run check:phase4` for the complete no-cost four-resource proof.
+Use `npm run check:phase5` for the complete no-cost Quarantine, Repair, lineage, and discard proof.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.

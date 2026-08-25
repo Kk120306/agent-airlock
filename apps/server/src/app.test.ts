@@ -88,4 +88,42 @@ describe("HTTP boundary", () => {
     expect(rejected.statusCode).toBe(400);
     await app.close();
   });
+
+  it("exposes path-free Repair Run and discard operations", async () => {
+    const calls: Array<{ operation: string; id: string; objective?: string }> = [];
+    const recoveryService = {
+      repairRun: async (id: string, objective?: string) => {
+        calls.push({ operation: "repair", id, ...(objective ? { objective } : {}) });
+        return { run: { id: "repair-run" }, message: { id: "message" } };
+      },
+      discardRun: async (id: string) => {
+        calls.push({ operation: "discard", id });
+        return { id, transaction: { disposition: "discarded" } };
+      },
+    } as unknown as AgentService;
+    const app = await createApp(loadConfig({ NODE_ENV: "test" }), recoveryService);
+    const runId = "11111111-1111-4111-8111-111111111111";
+
+    const repaired = await app.inject({
+      method: "POST",
+      url: "/api/runs/" + runId + "/repair",
+      payload: { objective: "Restore only the failed protected path" },
+    });
+    const discarded = await app.inject({
+      method: "POST",
+      url: "/api/runs/" + runId + "/discard",
+    });
+
+    expect(repaired.statusCode).toBe(202);
+    expect(discarded.statusCode).toBe(200);
+    expect(calls).toEqual([
+      {
+        operation: "repair",
+        id: runId,
+        objective: "Restore only the failed protected path",
+      },
+      { operation: "discard", id: runId },
+    ]);
+    await app.close();
+  });
 });

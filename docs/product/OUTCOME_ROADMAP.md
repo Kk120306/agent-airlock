@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 4
+**Delivered:** Phases 0 through 5
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -214,6 +214,8 @@ Use one task that edits code, migrates data, and prepares a notification, then p
 The architecture becomes credible as general Agent middleware and not a thin wrapper around Git.
 
 ### Phase 5: Recoverable intelligence
+
+**Status:** Delivered and regression-locked
 
 **Outcome**
 

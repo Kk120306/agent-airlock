@@ -11,7 +11,7 @@ The original `AgentService` passed the persistent workspace path and canonical C
 The original local Runtime also bind-mounted that workspace and one shared Codex home as writable container paths.
 Phase 1 isolated workspace files, but the shared Codex home remained a hidden mutation path until Phase 3.
 
-## Implemented Phase 4 architecture
+## Implemented Phase 5 architecture
 
 ```mermaid
 flowchart LR
@@ -20,6 +20,10 @@ flowchart LR
     AS --> AR["AirlockRunner"]
     AR --> SR["Workspace State Registry"]
     SR --> CS["Candidate workspace, Codex home, SQLite, and outbox"]
+    SR --> Q["Quarantined Whole-Agent future"]
+    SR --> CR["Disposable canonical repair reference"]
+    Q -->|Repair fork| CS
+    CR -->|Verified reference| CS
     AR --> RR["Existing AgentRunner"]
     RR --> RC["Disposable Runtime container"]
     RC --> CS
@@ -28,7 +32,7 @@ flowchart LR
     ED --> MS["Atomic mock-delivery store"]
     VE --> VC["Constrained validation container"]
     VE --> CS
-    AR --> PR["Promotion or Quarantine"]
+    AR --> PR["Promotion, Quarantine, or Discard"]
     PR --> ST["Whole-Agent evidence and Promotion Receipt"]
     ST --> UI
 ```
@@ -51,6 +55,7 @@ interface AirlockRunner {
 
 Preparation, workspace coordination, validators, and receipts remain inside the module.
 Recovery journals, retention, and additional Transactional Resource adapters remain later-phase extension seams.
+Repair preparation, ancestry, freshness checks, and discard remain inside the same Airlock boundary.
 
 ## State layout
 
@@ -72,7 +77,8 @@ workspaces/
 │   ├── workspace/
 │   │   └── .airlock/demo.sqlite
 │   ├── codex-home/
-│   └── outbox/
+│   ├── outbox/
+│   └── repair-reference/ (Repair Runs only, removed before Promotion)
 └── .quarantine/<run-id>/
     ├── candidate.json
     ├── workspace/
@@ -86,6 +92,10 @@ A promoted state version becomes immutable and may be used as the source for a l
 Airlock verifies the workspace hash, session hash, and composite hash whenever Canonical State is resolved.
 Candidate preparation copies both resources and refreshes only the generated provider configuration file from a platform-owned template.
 Promotion moves the complete candidate root before one atomic manifest replacement, while Quarantine preserves the same complete root without changing the manifest.
+Repair copies a selected Quarantine into a new Candidate State, resumes its rejected Codex thread, creates a fresh empty outbox, and adds a disposable copy of the exact matching Canonical workspace as a repair reference.
+The container Runtime mounts that reference read-only, and every provider must pass a required reference-integrity Validation before Promotion.
+Airlock removes the reference before installing the repaired immutable version.
+Discard removes only the internally resolved mutable Quarantine root and retains bounded evidence in the control-plane store.
 `npm run test:codex-session-container` reproduces the pinned CLI storage boundary with container networking disabled and a fake credential.
 
 ## Run Transaction lifecycle
@@ -101,12 +111,16 @@ stateDiagram-v2
     Validating --> Promoting: all required Validations pass
     Validating --> Quarantined: any required Validation fails
     Promoting --> Promoted: Canonical State advances
+    Quarantined --> Preparing: bounded Repair Run
+    Quarantined --> Discarded: operator discards mutable state
     Promoted --> [*]
-    Quarantined --> [*]
+    Discarded --> [*]
     Cancelled --> [*]
 ```
 
-Crash-journal reconciliation, explicit discard, and Repair Runs remain later roadmap phases.
+Repair may start only when the selected Quarantine is available, its recorded Canonical State still exactly matches current reality, its parent has no existing repair child, and the configured ancestry bound is not exhausted.
+Each Repair Run uses the original snapshotted Outcome Contract and follows the ordinary execution, Validation, Promotion, and Quarantine path.
+Crash-journal reconciliation remains Phase 6 scope.
 
 ## Outcome Contract evaluation
 
@@ -165,10 +179,11 @@ The POC does not intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The version 5 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
+The version 6 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
 Phase 3 Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
 Startup reconciliation treats that manifest as authoritative and repairs cached workspace, state, and thread references in the JSON store.
+Phase 5 persists repair ancestry, mutable Quarantine availability, discard timestamps, and the same lineage in each Promotion Receipt.
 A durable promotion journal and crash-point reconciliation remain later work.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
@@ -180,6 +195,9 @@ Schema evolution must increment the database version and include a tested migrat
 | Candidate preparation fails | Do not invoke the AgentRunner and leave Canonical State unchanged. |
 | AgentRunner fails or times out | Quarantine bounded evidence and leave Canonical State unchanged. |
 | Validation fails | Quarantine Candidate State and identify the failing Validation. |
+| Repair source is stale, missing, exhausted, or already has a child | Reject the operation before scheduling and leave both realities unchanged. |
+| Repair reference changes | Fail its required Validation and quarantine the Repair Run. |
+| Operator discards Quarantine | Remove only mutable Quarantine state and retain bounded evidence with `discarded` disposition. |
 | Evidence persistence fails before promotion | Fail closed without promotion. |
 
 Interruption during Promotion does not yet have full journal-based reconciliation and is a documented Phase 2 limitation.
@@ -187,6 +205,7 @@ Interruption during Promotion does not yet have full journal-based reconciliatio
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.
+- A Repair Runtime may read a disposable canonical workspace copy, but it never receives a writable path to the real Canonical State.
 - Validation code from the candidate project is untrusted and runs from a disposable copy inside a constrained container.
 - The Fastify control plane and Airlock state manager form the trusted POC boundary.
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
@@ -205,13 +224,15 @@ Each Run Transaction records:
 - Independent workspace and Agent-memory fingerprints with one shared terminal disposition.
 - SQLite before, candidate, and final semantic snapshots.
 - Typed intent identities, idempotency keys, statuses, and bounded post-Promotion delivery receipts.
+- Root Run identifier, parent Run identifier, repair depth, configured depth bound, and mutable Quarantine availability.
 
-Promotion journal position and Repair Run ancestry join this model in later phases.
+Promotion journal position joins this model in Phase 6.
 
 ## Open architectural decisions
 
-The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Promotion recovery, the operator experience, and the judging cutoff.
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Promotion recovery and the judging cutoff.
 Codex session isolation is resolved by ADR 0005.
 External action ordering and idempotency are resolved by ADR 0006.
+Repair ancestry, canonical freshness, fresh outbox, canonical reference, and discard semantics are resolved by ADR 0007.
 Outcome Contract semantics and Validation containment are resolved by ADR 0003 and ADR 0004.
 This document must be revised when those tickets close.

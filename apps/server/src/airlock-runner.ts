@@ -14,6 +14,7 @@ import type {
   CanonicalStateReference,
   OutcomeContract,
   PromotionReceipt,
+  RunLineage,
   RunTransaction,
   RunTransactionStatus,
   RunnerRequest,
@@ -26,6 +27,7 @@ const now = () => new Date().toISOString();
 export interface AirlockRunRequest extends Omit<RunnerRequest, "outboxPath"> {
   runId: string;
   canonicalStateId: string;
+  repairSourceRunId?: string | null;
 }
 
 export interface AirlockRunResult extends RunnerResult {
@@ -51,6 +53,8 @@ export function createRunTransaction(
   runId: string,
   canonicalState: CanonicalStateReference,
   outcomeContract: OutcomeContract,
+  maxRepairDepth = 2,
+  lineage?: RunLineage,
 ): RunTransaction {
   return {
     id: runId,
@@ -116,6 +120,14 @@ export function createRunTransaction(
       },
     ],
     quarantinePath: null,
+    quarantineAvailable: false,
+    discardedAt: null,
+    lineage: lineage ?? {
+      rootRunId: runId,
+      parentRunId: null,
+      depth: 0,
+      maxDepth: maxRepairDepth,
+    },
     promotionReceipt: null,
   };
 }
@@ -154,10 +166,13 @@ export class AirlockRunner {
     let parsedIntents: ParsedExternalActionIntent[] = [];
     this.activeAgentIds.add(request.agentId);
     try {
-      const candidate = await this.workspaces.prepareCandidate(
-        request.agentId,
-        request.runId,
-      );
+      const candidate = request.repairSourceRunId
+        ? await this.workspaces.prepareRepairCandidate(
+            request.agentId,
+            request.repairSourceRunId,
+            request.runId,
+          )
+        : await this.workspaces.prepareCandidate(request.agentId, request.runId);
       candidatePrepared = true;
       const candidateWorkspacePath =
         await this.workspaces.candidateWorkspacePath(request.runId);
@@ -199,8 +214,9 @@ export class AirlockRunner {
         workspacePath: candidateWorkspacePath,
         codexHomePath: candidateCodexHomePath,
         outboxPath: candidateOutboxPath,
+        repairReferencePath: candidate.repairReferencePath,
         prompt: request.prompt,
-        threadId: candidate.canonicalThreadIdBefore,
+        threadId: candidate.runtimeThreadId,
       });
       await this.workspaces.recordCandidateThread(request.runId, result.threadId);
       this.assertNotCancelled(request.agentId);
@@ -225,12 +241,26 @@ export class AirlockRunner {
         ),
         this.actionOutbox.validate(candidateOutboxPath, request.runId),
       ]);
+      const repairReferenceValidation =
+        await this.workspaces.repairReferenceEvidence(request.runId);
       parsedIntents = actionValidation.intents;
       transaction.changes = validationResult.changes;
       transaction.validations = [
         ...validationResult.validations,
         sqliteValidation.evidence,
         actionValidation.evidence,
+        ...(repairReferenceValidation
+          ? [
+              {
+                name: "repair-reference",
+                status: repairReferenceValidation.status,
+                required: true,
+                summary: repairReferenceValidation.summary,
+                durationMs: 0,
+                output: null,
+              } as const,
+            ]
+          : []),
       ];
       transaction.sqlite = {
         databasePath: SQLITE_RELATIVE_PATH,
@@ -252,6 +282,7 @@ export class AirlockRunner {
         transaction.quarantinePath = await this.workspaces.quarantineCandidate(
           request.runId,
         );
+        transaction.quarantineAvailable = true;
         candidatePrepared = false;
         transaction.disposition = "quarantined";
         transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
@@ -289,6 +320,7 @@ export class AirlockRunner {
       );
       candidatePrepared = false;
       transaction.disposition = "promoted";
+      transaction.quarantineAvailable = false;
       transaction.canonicalStateIdAfter = canonicalState.stateId;
       transaction.canonicalContentHashAfter = canonicalState.contentHash;
       if (transaction.sqlite) transaction.sqlite.after = sqliteValidation.snapshot;
@@ -348,6 +380,7 @@ export class AirlockRunner {
           transaction.quarantinePath = await this.workspaces.quarantineCandidate(
             request.runId,
           );
+          transaction.quarantineAvailable = true;
         }
       }
       transaction.disposition = cancelled ? "cancelled" : "quarantined";
@@ -404,7 +437,7 @@ export class AirlockRunner {
 
 export function finalizeResources(
   transaction: RunTransaction,
-  disposition: "promoted" | "quarantined" | "cancelled",
+  disposition: "promoted" | "quarantined" | "discarded" | "cancelled",
   canonicalState?: CanonicalStateReference,
   fingerprints: Partial<
     Record<RunTransaction["resources"][number]["kind"], string | null>
@@ -431,6 +464,8 @@ export function finalizeResources(
       summary:
         disposition === "promoted"
           ? resource.label + " accepted in the new Canonical State"
+          : disposition === "discarded"
+            ? resource.label + " Quarantine was discarded; Canonical State stayed unchanged"
           : resource.label + " remained on the prior Canonical State",
     };
   });
@@ -476,6 +511,7 @@ export function createPromotionReceipt(
     canonicalContentHashBefore: transaction.canonicalContentHashBefore,
     canonicalContentHashAfter: transaction.canonicalContentHashAfter,
     validationEvidenceHash,
+    lineage: structuredClone(transaction.lineage),
     createdAt: now(),
   };
 }

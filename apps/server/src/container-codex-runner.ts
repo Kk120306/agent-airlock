@@ -79,12 +79,23 @@ export function buildContainerRunArgs(
     "NO_COLOR=1",
     "--env",
     "AIRLOCK_OUTBOX_PATH=/airlock-outbox/intents.jsonl",
+    ...(request.repairReferencePath
+      ? ["--env", "AIRLOCK_REPAIR_REFERENCE_PATH=/airlock-repair-reference"]
+      : []),
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
     "type=bind,src=" + request.codexHomePath + ",dst=/codex-home",
     "--mount",
     "type=bind,src=" + path.dirname(request.outboxPath) + ",dst=/airlock-outbox",
+    ...(request.repairReferencePath
+      ? [
+          "--mount",
+          "type=bind,src=" +
+            request.repairReferencePath +
+            ",dst=/airlock-repair-reference,readonly",
+        ]
+      : []),
     "--workdir",
     "/workspace",
     config.containerRuntimeImage,
@@ -94,6 +105,7 @@ export function buildContainerRunArgs(
       config.codexSandboxMode,
       "/workspace",
       "/airlock-outbox",
+      request.repairReferencePath ? "/airlock-repair-reference" : undefined,
     ),
   ];
 }

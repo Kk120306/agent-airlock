@@ -7,7 +7,15 @@ export type RunTransactionStatus =
   | "promoting"
   | "promoted"
   | "quarantined"
+  | "discarded"
   | "cancelled";
+
+export interface RunLineage {
+  rootRunId: string;
+  parentRunId: string | null;
+  depth: number;
+  maxDepth: number;
+}
 
 export interface OutcomeContract {
   schemaVersion: 1;
@@ -29,7 +37,7 @@ export interface OutcomeContract {
 export interface RunTransaction {
   id: string;
   status: RunTransactionStatus;
-  disposition: "promoted" | "quarantined" | "cancelled" | null;
+  disposition: "promoted" | "quarantined" | "discarded" | "cancelled" | null;
   candidateStateId: string | null;
   canonicalStateIdBefore: string;
   canonicalStateIdAfter: string | null;
@@ -40,7 +48,7 @@ export interface RunTransaction {
   resources: Array<{
     kind: "workspace" | "codex-session" | "sqlite" | "external-actions";
     label: string;
-    disposition: "promoted" | "quarantined" | "cancelled" | null;
+    disposition: "promoted" | "quarantined" | "discarded" | "cancelled" | null;
     fingerprintBefore: string | null;
     fingerprintAfter: string | null;
     summary: string;
@@ -90,15 +98,19 @@ export interface RunTransaction {
     summary: string;
   }>;
   quarantinePath: string | null;
+  quarantineAvailable: boolean;
+  discardedAt: string | null;
+  lineage: RunLineage;
   promotionReceipt: {
     runTransactionId: string;
-    disposition: "promoted" | "quarantined" | "cancelled";
+    disposition: "promoted" | "quarantined" | "discarded" | "cancelled";
     outcomeContractVersion: number;
     canonicalStateIdBefore: string;
     canonicalStateIdAfter: string;
     canonicalContentHashBefore: string;
     canonicalContentHashAfter: string;
     validationEvidenceHash: string;
+    lineage: RunLineage;
     createdAt: string;
   } | null;
 }

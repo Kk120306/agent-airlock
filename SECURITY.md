@@ -17,6 +17,7 @@ credentials, personal data, or exploit details in an issue.
 - Ordinary local containers, not hardened multi-tenant sandboxes
 - Broad outbound network access
 - Supported action intents can be bypassed through direct outbound Runtime traffic
+- The local-process Repair Runtime receives a disposable Canonical workspace copy that is integrity-checked but not protected by an operating-system read-only mount
 - Prompt-triggered command and file execution
 - Ark key available to the server and active Runtime container
 - Ark key stored in Terraform POC state
@@ -29,6 +30,8 @@ credentials, personal data, or exploit details in an issue.
 - Add HTTPS before sending the shared token over an untrusted network.
 - Never mount production data or provide Volcengine account AK/SK to Agents.
 - Treat `.airlock/demo.sqlite` and the notification outbox as bounded demonstration resources only.
+- Treat quarantined work and Repair Run prompts as untrusted Agent-controlled content.
+- Use the container Runtime when an operating-system read-only mount for the disposable repair reference is required.
 - Do not interpret mock-consumer idempotency as an exactly-once guarantee for third-party providers.
 - Stop the POC, destroy test resources, and revoke keys after the event.
 

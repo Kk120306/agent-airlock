@@ -8,8 +8,13 @@ export type RunTransactionStatus =
   | "promoting"
   | "promoted"
   | "quarantined"
+  | "discarded"
   | "cancelled";
-export type RunTransactionDisposition = "promoted" | "quarantined" | "cancelled";
+export type RunTransactionDisposition =
+  | "promoted"
+  | "quarantined"
+  | "discarded"
+  | "cancelled";
 export type ValidationStatus = "passed" | "failed" | "error";
 export type TransactionResourceKind =
   | "workspace"
@@ -74,6 +79,13 @@ export interface ValidationEvidence {
   output: string | null;
 }
 
+export interface RunLineage {
+  rootRunId: string;
+  parentRunId: string | null;
+  depth: number;
+  maxDepth: number;
+}
+
 export interface PromotionReceipt {
   runTransactionId: string;
   disposition: RunTransactionDisposition;
@@ -83,6 +95,7 @@ export interface PromotionReceipt {
   canonicalContentHashBefore: string;
   canonicalContentHashAfter: string;
   validationEvidenceHash: string;
+  lineage: RunLineage;
   createdAt: string;
 }
 
@@ -167,6 +180,9 @@ export interface RunTransaction {
   validations: ValidationEvidence[];
   events: RunTransactionEvent[];
   quarantinePath: string | null;
+  quarantineAvailable: boolean;
+  discardedAt: string | null;
+  lineage: RunLineage;
   promotionReceipt: PromotionReceipt | null;
 }
 
@@ -215,7 +231,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 5;
+  version: 6;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -244,6 +260,7 @@ export interface RunnerRequest {
   workspacePath: string;
   codexHomePath: string;
   outboxPath: string;
+  repairReferencePath?: string | null;
   prompt: string;
   threadId: string | null;
 }

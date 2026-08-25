@@ -95,4 +95,13 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  repairRun: (id: string, objective?: string) =>
+    request<{ run: AgentRun; message: Message }>("/api/runs/" + id + "/repair", {
+      method: "POST",
+      body: JSON.stringify(objective ? { objective } : {}),
+    }),
+  discardRun: (id: string) =>
+    request<{ run: AgentRun }>("/api/runs/" + id + "/discard", {
+      method: "POST",
+    }),
 };
