@@ -237,9 +237,14 @@ boundaries.
 
 ```bash
 npm run check
+npm run test:e2e
 terraform fmt -check -recursive deploy/volcengine
 docker compose config
 ```
+
+`npm run test:e2e` runs the production React and Fastify path in installed Google Chrome against a deterministic Codex protocol fixture.
+Use `npm run check:phase0` to run the starter checks and this complete baseline journey together.
+The credentialed ModelArk acceptance journey remains the browser SOP documented above.
 
 ## Documentation
 
