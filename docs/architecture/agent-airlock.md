@@ -51,7 +51,7 @@ Preparation, resource coordination, validators, receipts, recovery journals, and
 
 ## State layout
 
-The exact physical mechanism remains a Wayfinder decision, but the logical model is stable:
+ADR 0002 selects immutable state-version directories with an atomically replaced canonical manifest:
 
 ```text
 airlock-state/
@@ -61,8 +61,8 @@ airlock-state/
 │       ├── workspace/
 │       ├── codex-home/
 │       └── resources/
-├── candidates/<run-id>/
-├── quarantine/<run-id>/
+├── .candidates/<run-id>/
+├── .quarantine/<run-id>/
 ├── receipts/<run-id>.json
 └── promotion-journal/
 ```
@@ -70,6 +70,7 @@ airlock-state/
 `canonical.json` identifies the accepted resource versions.
 A Candidate State is mutable only while its Run Transaction is active.
 A promoted state version becomes immutable and may be used as the source for a later candidate.
+Phase 1 verifies the manifest content hash whenever Canonical State is resolved.
 
 ## Run Transaction lifecycle
 
@@ -138,7 +139,7 @@ It does not claim to intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The existing JSON store remains the control-plane metadata source for Agents, messages, Runs, and operator-visible evidence.
+The version 2 JSON store remains the control-plane metadata source for Agents, messages, Runs, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
 Promotion uses a durable journal so startup reconciliation can distinguish completed, incomplete, and impossible transitions.
 
@@ -178,5 +179,5 @@ Each Run Transaction records:
 
 ## Open architectural decisions
 
-The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about physical versioning, Codex session isolation, contract semantics, validator containment, outbox delivery, and the operator experience.
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Codex session isolation, contract semantics, validator containment, Promotion recovery, outbox delivery, and the operator experience.
 This document must be revised when those tickets close.

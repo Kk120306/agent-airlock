@@ -180,7 +180,6 @@ These capabilities shape stable extension points but are not hackathon dependenc
 
 ## Open Wayfinder decisions
 
-- [Choose the Canonical State and Promotion model](https://github.com/Kk120306/agent-airlock/issues/2).
 - [Prove safe Codex session isolation](https://github.com/Kk120306/agent-airlock/issues/3).
 - [Freeze Outcome Contract semantics and defaults](https://github.com/Kk120306/agent-airlock/issues/4).
 - [Choose Validation containment and evidence limits](https://github.com/Kk120306/agent-airlock/issues/5).

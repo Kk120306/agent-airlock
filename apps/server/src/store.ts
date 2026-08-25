@@ -3,11 +3,33 @@ import path from "node:path";
 import type { Database } from "./types.js";
 
 const emptyDatabase = (): Database => ({
-  version: 1,
+  version: 2,
   agents: [],
   messages: [],
   runs: [],
 });
+
+interface VersionOneDatabase {
+  version: 1;
+  agents: Array<Record<string, unknown>>;
+  messages: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+}
+
+function migrateVersionOne(database: VersionOneDatabase): Database {
+  return {
+    version: 2,
+    agents: database.agents.map((agent) => ({
+      ...agent,
+      canonicalStateId: "",
+    })) as unknown as Database["agents"],
+    messages: database.messages as unknown as Database["messages"],
+    runs: database.runs.map((run) => ({
+      ...run,
+      transaction: null,
+    })) as unknown as Database["runs"],
+  };
+}
 
 export class JsonStore {
   private data: Database = emptyDatabase();
@@ -19,11 +41,18 @@ export class JsonStore {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as Database;
-      if (parsed.version !== 1 || !Array.isArray(parsed.agents)) {
+      const parsed = JSON.parse(raw) as Database | VersionOneDatabase;
+      if (!Array.isArray(parsed.agents) || !Array.isArray(parsed.messages) || !Array.isArray(parsed.runs)) {
         throw new Error("Unsupported database format");
       }
-      this.data = parsed;
+      if (parsed.version === 1) {
+        this.data = migrateVersionOne(parsed);
+        await this.persist();
+      } else if (parsed.version === 2) {
+        this.data = parsed;
+      } else {
+        throw new Error("Unsupported database format");
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;

@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import {
+  AirlockRunError,
+  AirlockRunner,
+  createRunTransaction,
+} from "./airlock-runner.js";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
@@ -7,6 +12,7 @@ import type {
   Agent,
   AgentRun,
   AgentRunner,
+  CanonicalStateReference,
   CreateAgentInput,
   Message,
   UpdateAgentInput,
@@ -18,26 +24,57 @@ const now = () => new Date().toISOString();
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
+  private readonly configuringAgents = new Set<string>();
+  private readonly runner: AirlockRunner;
 
   constructor(
     private readonly config: AppConfig,
     private readonly store: JsonStore,
     private readonly workspaces: WorkspaceManager,
-    private readonly runner: AgentRunner,
-  ) {}
+    runner: AgentRunner,
+  ) {
+    this.runner = new AirlockRunner(runner, workspaces);
+  }
 
   async initialize(): Promise<void> {
     await this.store.initialize();
     await this.workspaces.initialize();
+    const snapshot = this.store.snapshot();
+    const canonicalStates = new Map<string, CanonicalStateReference>();
+    for (const agent of snapshot.agents) {
+      canonicalStates.set(agent.id, await this.workspaces.ensureCanonical(agent));
+    }
+    await Promise.all(
+      snapshot.runs
+        .filter((run) => run.status === "queued" || run.status === "running")
+        .map((run) => this.workspaces.cancelCandidate(run.id)),
+    );
     await this.store.mutate((database) => {
       for (const run of database.runs) {
         if (run.status === "queued" || run.status === "running") {
           run.status = "cancelled";
           run.error = "Server restarted while this run was active";
           run.completedAt = now();
+          if (run.transaction) {
+            run.transaction.status = "cancelled";
+            run.transaction.disposition = "cancelled";
+            run.transaction.canonicalStateIdAfter =
+              run.transaction.canonicalStateIdBefore;
+            run.transaction.canonicalContentHashAfter =
+              run.transaction.canonicalContentHashBefore;
+            run.transaction.events.push({
+              status: "cancelled",
+              at: now(),
+              summary: "Server restarted while the Run Transaction was active",
+            });
+          }
         }
       }
       for (const agent of database.agents) {
+        const canonical = canonicalStates.get(agent.id);
+        if (!canonical) throw new Error("Canonical State reconciliation failed");
+        agent.canonicalStateId = canonical.stateId;
+        agent.workspacePath = canonical.workspacePath;
         if (agent.status === "busy") {
           agent.status = "ready";
           agent.updatedAt = now();
@@ -69,13 +106,16 @@ export class AgentService {
       description: input.description?.trim() ?? "",
       instructions: input.instructions?.trim() ?? "",
       status: "ready",
-      workspacePath: this.workspaces.workspacePath(id),
+      workspacePath: "",
+      canonicalStateId: "",
       codexThreadId: null,
       lastError: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    await this.workspaces.create(agent);
+    const canonical = await this.workspaces.create(agent);
+    agent.workspacePath = canonical.workspacePath;
+    agent.canonicalStateId = canonical.stateId;
     await this.store.mutate((database) => database.agents.push(agent));
     return agent;
   }
@@ -85,27 +125,45 @@ export class AgentService {
     if (current.status === "busy") {
       throw new HttpError(409, "Stop the active run before editing this Agent");
     }
-    const updated = await this.store.mutate((database) => {
-      const agent = database.agents.find((item) => item.id === id);
-      if (!agent) {
-        throw new HttpError(404, "Agent not found");
+    if (this.configuringAgents.has(id)) {
+      throw new HttpError(409, "This Agent is already being updated");
+    }
+    this.configuringAgents.add(id);
+    try {
+      const proposed = structuredClone(current);
+      if (input.name !== undefined) proposed.name = input.name.trim();
+      if (input.description !== undefined) {
+        proposed.description = input.description.trim();
       }
-      if (agent.status === "busy") {
-        throw new HttpError(409, "Stop the active run before editing this Agent");
+      if (input.instructions !== undefined) {
+        proposed.instructions = input.instructions.trim();
       }
-      if (input.name !== undefined) agent.name = input.name.trim();
-      if (input.description !== undefined) agent.description = input.description.trim();
-      if (input.instructions !== undefined) agent.instructions = input.instructions.trim();
-      agent.lastError = null;
-      agent.updatedAt = now();
-      return structuredClone(agent);
-    });
-    await this.workspaces.writeInstructions(updated);
-    return updated;
+      const canonical = await this.workspaces.updateInstructions(proposed);
+      return await this.store.mutate((database) => {
+        const agent = database.agents.find((item) => item.id === id);
+        if (!agent) throw new HttpError(404, "Agent not found");
+        if (agent.status === "busy") {
+          throw new HttpError(409, "Stop the active run before editing this Agent");
+        }
+        agent.name = proposed.name;
+        agent.description = proposed.description;
+        agent.instructions = proposed.instructions;
+        agent.workspacePath = canonical.workspacePath;
+        agent.canonicalStateId = canonical.stateId;
+        agent.lastError = null;
+        agent.updatedAt = now();
+        return structuredClone(agent);
+      });
+    } finally {
+      this.configuringAgents.delete(id);
+    }
   }
 
   async deleteAgent(id: string): Promise<{ archivedWorkspace: string }> {
     const agent = this.getAgent(id);
+    if (this.configuringAgents.has(id)) {
+      throw new HttpError(409, "Wait for the Agent configuration update to finish");
+    }
     await this.cancelExecution(id);
     const archivedWorkspace = await this.workspaces.archive(agent);
     await this.store.mutate((database) => {
@@ -160,6 +218,8 @@ export class AgentService {
         "Ark is not configured. Set ARK_API_KEY and ARK_MODEL, then restart.",
       );
     }
+    this.getAgent(agentId);
+    const canonical = await this.workspaces.readCanonical(agentId);
     const timestamp = now();
     const runId = randomUUID();
     const run: AgentRun = {
@@ -170,6 +230,7 @@ export class AgentService {
       output: null,
       error: null,
       usage: null,
+      transaction: createRunTransaction(runId, canonical),
       startedAt: null,
       completedAt: null,
       createdAt: timestamp,
@@ -192,6 +253,9 @@ export class AgentService {
       }
       if (storedAgent.status === "busy") {
         throw new HttpError(409, "This Agent is already running");
+      }
+      if (this.configuringAgents.has(agentId)) {
+        throw new HttpError(409, "Wait for the Agent configuration update to finish");
       }
       database.runs.push(run);
       database.messages.push(message);
@@ -244,12 +308,27 @@ export class AgentService {
       if (this.cancellationRequests.has(agentAtStart.id)) {
         throw new RunCancelledError();
       }
-      const result = await this.runner.run({
-        agentId: agentAtStart.id,
-        workspacePath: agentAtStart.workspacePath,
-        prompt: run.prompt,
-        threadId: agentAtStart.codexThreadId,
-      });
+      const result = await this.runner.run(
+        {
+          runId: run.id,
+          agentId: agentAtStart.id,
+          workspacePath: agentAtStart.workspacePath,
+          prompt: run.prompt,
+          threadId: agentAtStart.codexThreadId,
+          canonicalStateId: agentAtStart.canonicalStateId,
+        },
+        run.transaction ??
+          createRunTransaction(
+            run.id,
+            await this.workspaces.readCanonical(agentAtStart.id),
+          ),
+        async (transaction) => {
+          await this.store.mutate((database) => {
+            const storedRun = database.runs.find((item) => item.id === run.id);
+            if (storedRun) storedRun.transaction = transaction;
+          });
+        },
+      );
       const completedAt = now();
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
@@ -258,6 +337,7 @@ export class AgentService {
         storedRun.status = "completed";
         storedRun.output = result.output;
         storedRun.usage = result.usage;
+        storedRun.transaction = result.transaction;
         storedRun.completedAt = completedAt;
         database.messages.push({
           id: randomUUID(),
@@ -268,13 +348,21 @@ export class AgentService {
           createdAt: completedAt,
         });
         agent.status = "ready";
-        agent.codexThreadId = result.threadId;
-        agent.lastError = null;
+        if (result.canonicalState) {
+          agent.workspacePath = result.canonicalState.workspacePath;
+          agent.canonicalStateId = result.canonicalState.stateId;
+          agent.codexThreadId = result.threadId;
+          agent.lastError = null;
+        } else {
+          agent.lastError = "Run quarantined because a required Validation failed";
+        }
         agent.updatedAt = completedAt;
       });
     } catch (error) {
       const completedAt = now();
-      const cancelled = error instanceof RunCancelledError;
+      const cancelled =
+        error instanceof RunCancelledError ||
+        (error instanceof AirlockRunError && error.cancelled);
       const message = error instanceof Error ? error.message : String(error);
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
@@ -282,6 +370,21 @@ export class AgentService {
         if (storedRun) {
           storedRun.status = cancelled ? "cancelled" : "failed";
           storedRun.error = message;
+          if (error instanceof AirlockRunError) {
+            storedRun.transaction = error.transaction;
+          } else if (cancelled && storedRun.transaction) {
+            storedRun.transaction.status = "cancelled";
+            storedRun.transaction.disposition = "cancelled";
+            storedRun.transaction.canonicalStateIdAfter =
+              storedRun.transaction.canonicalStateIdBefore;
+            storedRun.transaction.canonicalContentHashAfter =
+              storedRun.transaction.canonicalContentHashBefore;
+            storedRun.transaction.events.push({
+              status: "cancelled",
+              at: completedAt,
+              summary: "Run Transaction was cancelled before execution",
+            });
+          }
           storedRun.completedAt = completedAt;
         }
         if (agent) {

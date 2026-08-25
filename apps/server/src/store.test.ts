@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,6 +15,57 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
+  it("migrates starter version 1 data to version 2", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        agents: [
+          {
+            id: "agent-1",
+            name: "Legacy",
+            description: "",
+            instructions: "",
+            status: "ready",
+            workspacePath: "/tmp/legacy",
+            codexThreadId: null,
+            lastError: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        messages: [],
+        runs: [
+          {
+            id: "run-1",
+            agentId: "agent-1",
+            status: "completed",
+            prompt: "hello",
+            output: "done",
+            error: null,
+            usage: null,
+            startedAt: "2026-01-01T00:00:01.000Z",
+            completedAt: "2026-01-01T00:00:02.000Z",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }) + "\n",
+    );
+    const store = new JsonStore(filePath);
+
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 2,
+      agents: [{ canonicalStateId: "" }],
+      runs: [{ transaction: null }],
+    });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 2 });
+  });
+
   it("does not publish a mutation in memory when persistence fails", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-test-"));
     temporaryDirectories.push(root);
