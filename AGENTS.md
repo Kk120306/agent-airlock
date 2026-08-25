@@ -11,6 +11,7 @@ Read these files before planning or changing Agent Airlock behavior:
 
 - `CONTEXT.md` for canonical domain language.
 - `docs/product/PRD.md` for product requirements and scope.
+- `docs/product/OUTCOME_ROADMAP.md` for outcome phases, exit gates, and scope cut lines.
 - `docs/architecture/agent-airlock.md` for the intended execution seam and trust model.
 - Relevant records under `docs/adr/` before revisiting an architectural decision.
 - `docs/agents/issue-tracker.md` before creating or editing project issues.

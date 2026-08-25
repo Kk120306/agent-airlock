@@ -8,6 +8,24 @@ The POC must demonstrate transactional workspace and Codex session behavior, a S
 
 This plan remains provisional until the open Wayfinder decision tickets close.
 
+## Outcome sequence
+
+Implementation follows the [outcome roadmap](../../docs/product/OUTCOME_ROADMAP.md).
+A later phase does not enter the judging path until the previous phase's automated, user-visible, and reproducibility gates pass.
+
+| Outcome phase | Implementation steps | Required result |
+| --- | --- | --- |
+| 0. Baseline locked | Baseline acceptance before Step 1 | The starter browser, Runtime, persistence, and follow-up journey is repeatable. |
+| 1. Harmless failure | Steps 2 through 4 | Rejection leaves the canonical content hash unchanged. |
+| 2. Explainable decision | Steps 5 and 8 | The operator can understand the contract, evidence, and disposition. |
+| 3. Whole-Agent continuity | Steps 3, 4, and 6 | Workspace and Codex session advance or remain unchanged together. |
+| 4. Transactional effects | Step 7 | Files, SQLite, and deferred actions share one coherent decision. |
+| 5. Recoverable intelligence | Steps 6 and 8 | A quarantined future can be repaired without premature canonical mutation. |
+| 6. Adversarial resilience | Steps 5, 6, and 9 | Crash, bypass, cleanup, and replay tests fail closed. |
+| 7. Judge-ready release | Step 9 | The complete product is reproducible and demonstrable within three minutes. |
+
+Phases 8 through 11 are post-hackathon outcomes and must not expand the implementation scope until Phase 7 is green.
+
 ## Acceptance criteria
 
 1. The baseline create, invoke, follow-up, stop, restart, and persistence journey continues to work through the browser.
@@ -163,5 +181,6 @@ Run fault-injection integration tests without Ark credentials by using fake Agen
 
 - Stop before implementation if session isolation cannot preserve both accepted conversation continuity and rejected-Run separation.
 - Stop promotion work if the chosen state model cannot recover deterministically from every simulated crash point.
-- Do not add remote providers until local workspace, session, SQLite, and outbox behavior meet the P0 acceptance criteria.
+- Do not add remote providers until local workspace, session, SQLite, and outbox behavior meet the Phase 4 exit gate.
 - Do not weaken a failed required Validation into a warning to make the demo pass.
+- Do not begin a later outcome phase while an earlier phase has failing acceptance evidence.

@@ -1,0 +1,496 @@
+# Agent Airlock outcome roadmap
+
+**Status:** Outcome-gated product strategy
+
+**North-star promise:** Agents may explore many futures, but only validated futures become reality.
+
+## Why this roadmap exists
+
+Agent Airlock should not win by accumulating the largest feature list.
+It should win by making one difficult promise visibly true, proving that promise under failure, and then extending the same model further than reviewers expect.
+
+A phase is complete only when it creates an observable user outcome, produces repeatable evidence, and locks that outcome against regression.
+Completing code without completing the evidence is not phase completion.
+
+Every later phase must preserve every earlier guarantee.
+If an ambitious phase destabilizes the accepted path, it has not earned its place in the submission.
+
+## Product thesis
+
+The CodeJam starter kit already gives an Agent a persistent workspace and session, but the disposable Runtime container does not make those persistent resources transactional.
+Agent Airlock adds a trusted decision boundary around the Agent Run.
+
+The winning story is:
+
+1. The Agent works freely in an isolated future.
+2. Airlock evaluates the result, not merely the Agent's stated intent.
+3. A valid future is promoted as one coherent state change.
+4. An invalid future remains inspectable without changing accepted reality.
+5. The same contract applies to files, Agent continuity, data, and deferred external effects.
+
+## Advancement rules
+
+1. **Outcome before breadth.**
+   Each phase must improve what the operator can safely accomplish, not only what the architecture contains.
+2. **Evidence before claims.**
+   Each guarantee needs an automated test and a visible demonstration.
+3. **Failure is part of the product.**
+   Every success path must have a paired rejection, interruption, or recovery path.
+4. **The starter kit remains the product surface.**
+   The Playground, Agent lifecycle, Runtime, persistent workspace, and Codex continuity must continue to work.
+5. **No hidden heroics.**
+   A fresh reviewer must be able to reproduce the result without undocumented setup or manual state repair.
+6. **The next phase must be earned.**
+   Work on a later phase may be explored, but it cannot enter the demo branch until the current phase's exit gate passes.
+
+## Outcome ladder
+
+| Phase | Product outcome | Competitive level | Irreversible proof |
+| --- | --- | --- | --- |
+| 0. Baseline locked | The unmodified starter journey is understood and repeatable. | Eligibility | Browser acceptance flow and `npm run check` pass. |
+| 1. Harmless failure | A rejected Agent Run cannot change Canonical State. | Qualifying | Destructive candidate is quarantined and canonical hash is unchanged. |
+| 2. Explainable decision | The operator can understand exactly why a future was accepted or rejected. | Strong submission | Outcome Contract, change summary, timeline, and bounded evidence agree. |
+| 3. Whole-Agent continuity | Workspace and Codex session advance or remain unchanged together. | Podium | Rejected work does not pollute the next turn, while promoted work continues correctly. |
+| 4. Transactional effects | The model works across files, SQLite, and a deferred external action. | Podium plus | Rejection changes none of them and promotion delivers the action exactly once. |
+| 5. Recoverable intelligence | Airlock can repair a quarantined future without contaminating Canonical State. | Winning target | A Repair Run turns real failure evidence into a validated promoted result. |
+| 6. Adversarial resilience | Crashes and obvious bypass attempts fail closed. | Winning target | Fault injection, path escape, symlink, timeout, and duplicate-delivery tests pass. |
+| 7. Judge-ready release | A reviewer understands and believes the whole product in three minutes. | Submission release | Fresh-clone setup, live demo, architecture, and full checks pass without hidden steps. |
+| 8. Transactional Resource SDK | Other developers can put new resources behind Airlock. | Post-hackathon platform | A provider adapter passes a shared conformance suite. |
+| 9. Competing futures | Several Agents or models can attempt the same task and only the best valid future is promoted. | Category-defining product | Deterministic evaluation ranks isolated candidates without cross-contamination. |
+| 10. Adaptive assurance | Airlock learns which protections should be strengthened from observed failures. | Intelligent control plane | Suggested contract changes are explainable, versioned, reviewed, and never silently weakened. |
+| 11. Portable trust | Promotion evidence can be verified across runtimes and organizations. | Ecosystem standard | A provider-neutral signed Promotion Receipt verifies independently of the original Airlock instance. |
+
+## Hackathon phases
+
+### Phase 0: Baseline locked
+
+**Outcome**
+
+A developer can clone the repository, run the supported local container path, create an Agent, complete a coding task, continue the same session, restart the Agent, and find the workspace intact.
+
+**Build only what is needed**
+
+- Preserve the exact starter-kit frontend, Agent lifecycle, Fastify control plane, Codex Runtime, and local container path.
+- Record a deterministic baseline fixture and expected state fingerprint.
+- Identify the `AgentRunner`, workspace resolution, Run persistence, and polling seams that Airlock will extend.
+
+**Exit gate**
+
+- The documented browser acceptance journey passes.
+- The follow-up turn proves that session continuity works.
+- Stop and restart proves workspace persistence.
+- `npm run check` passes.
+- No secret appears in repository state or captured evidence.
+
+**Beyond-expectations finish**
+
+Capture the baseline as a repeatable regression test so every later phase proves that the starter kit still works.
+
+**What this unlocks**
+
+The team can change the execution boundary without guessing what the baseline promised.
+
+### Phase 1: Harmless failure
+
+**Outcome**
+
+An Agent can attempt dangerous or incomplete work, but a failed attempt cannot alter the accepted workspace.
+
+**Build only what is needed**
+
+- Represent the accepted workspace as versioned Canonical State.
+- Prepare isolated Candidate State for every Run Transaction.
+- Pass only Candidate State paths to the Runtime.
+- Evaluate one required-path Validation.
+- Promote a passing candidate and quarantine a failing candidate.
+
+**Exit gate**
+
+- A successful task promotes exactly one new canonical version.
+- A controlled task deletes a required file and is quarantined.
+- The canonical content hash before and after rejection is identical.
+- A failed, cancelled, or timed-out Run cannot reach `promoted`.
+- Automated tests exercise the real runner seam rather than a static UI result.
+
+**Beyond-expectations finish**
+
+Show accepted reality and rejected future side by side in the Playground so the safety property is immediately visible.
+
+**What this unlocks**
+
+Airlock becomes real middleware instead of an observability layer wrapped around irreversible execution.
+
+### Phase 2: Explainable decision
+
+**Outcome**
+
+The operator can determine what changed, what was evaluated, and why Airlock promoted or quarantined the Run.
+
+**Build only what is needed**
+
+- Add versioned Outcome Contracts with protected paths, required paths, change limits, secret scanning, and required commands.
+- Persist each Validation name, status, duration, and bounded redacted evidence.
+- Add a compact preparation, execution, validation, and disposition timeline.
+- Add a semantic change summary and Promotion Receipt.
+
+**Exit gate**
+
+- The operator can locate the decisive failed Validation in less than ten seconds.
+- The UI, persisted evidence, and final disposition cannot disagree.
+- Validation output is time-bounded, size-bounded, and redacted before persistence.
+- Contract updates are versioned and affect future Run Transactions only.
+- Success and rejection are both covered through the HTTP and browser paths.
+
+**Beyond-expectations finish**
+
+Make the evidence feel like a flight recorder for Agent state, with the decisive moment highlighted instead of buried in logs.
+
+**What this unlocks**
+
+Reviewers can understand the trusted boundary, and operators can act on rejection without reading server internals.
+
+### Phase 3: Whole-Agent continuity
+
+**Outcome**
+
+The Agent's working memory and workspace behave as one accepted future from the operator's perspective.
+
+**Build only what is needed**
+
+- Isolate the Codex session used by each Run Transaction with Candidate State.
+- Advance workspace and session references together during promotion.
+- Preserve the canonical session reference during rejection, cancellation, and timeout.
+- Start the next Run from the current canonical workspace and session pair.
+
+**Exit gate**
+
+- A promoted Run is correctly understood by the next Playground turn.
+- A rejected Run is not remembered as accepted work by the next Playground turn.
+- Restart reconciliation preserves the last confirmed workspace and session pair.
+- Tests prove that the Runtime receives no writable canonical workspace or canonical session path.
+
+**Beyond-expectations finish**
+
+Demonstrate a rejected future containing both file changes and Agent reasoning, then show the next turn continuing from the untouched accepted reality.
+This is the moment that separates Airlock from ordinary file snapshots.
+
+**What this unlocks**
+
+Agent state becomes a coherent transaction rather than a folder rollback with contradictory memory.
+
+### Phase 4: Transactional effects
+
+**Outcome**
+
+Airlock proves that its contract is a middleware abstraction for Agent effects, not merely a source-control feature.
+
+**Build only what is needed**
+
+- Add one SQLite Transactional Resource inside Candidate State.
+- Add typed External Action Intents through a platform-controlled outbox.
+- Assign stable idempotency keys and deliver intents only after promotion.
+- Show file, database, and action changes in one Run Transaction summary.
+
+**Exit gate**
+
+- A rejected database mutation leaves canonical query results unchanged.
+- A rejected or discarded intent causes zero mock external effects.
+- A promoted intent causes exactly one effect under duplicate dispatch attempts.
+- The demo discloses that unrestricted network access can bypass the outbox.
+- The three resources share one understandable final disposition.
+
+**Beyond-expectations finish**
+
+Use one task that edits code, migrates data, and prepares a notification, then prove that all three effects cross the Airlock together or none do.
+
+**What this unlocks**
+
+The architecture becomes credible as general Agent middleware and not a thin wrapper around Git.
+
+### Phase 5: Recoverable intelligence
+
+**Outcome**
+
+A failed future becomes useful material for a safe repair instead of dead work or corrupted accepted state.
+
+**Build only what is needed**
+
+- Preserve quarantined Candidate State, Validation evidence, and Agent response.
+- Start a Repair Run from a selected Quarantine.
+- Give the repair attempt the failed Validation evidence and a bounded remediation objective.
+- Preserve repair ancestry in the resulting Promotion Receipt.
+- Allow discard without erasing the bounded decision evidence.
+
+**Exit gate**
+
+- A real destructive candidate is quarantined.
+- A Repair Run corrects the failure and passes the original Outcome Contract.
+- Canonical State remains unchanged until repair promotion.
+- A failed repair remains quarantined and cannot loop without a configured bound.
+- The complete lineage is understandable in the Playground.
+
+**Beyond-expectations finish**
+
+Turn Airlock from a passive gate into a safe recovery system that converts precise failure evidence into the next constrained attempt.
+
+**What this unlocks**
+
+Safety no longer means throwing useful work away, which gives the product a compelling productivity story as well as a security story.
+
+### Phase 6: Adversarial resilience
+
+**Outcome**
+
+Airlock keeps its promise when execution is malicious, duplicated, interrupted, or partially completed.
+
+**Build only what is needed**
+
+- Add an idempotent promotion journal and startup reconciliation.
+- Bound validation duration, output, resources, and credentials.
+- Defend Candidate State against path traversal and symlink escape.
+- Add configurable Candidate State and Quarantine retention.
+- Inject failures before, during, and after the promotion decision.
+
+**Exit gate**
+
+- Every simulated crash point converges to one documented recoverable state.
+- Replaying promotion, discard, or external dispatch is safe.
+- Path traversal and symlink fixtures cannot reach canonical or unrelated host paths.
+- Cleanup never removes current Canonical State or active Candidate State.
+- The canonical fingerprint remains unchanged throughout the rejection and abuse matrix.
+- `npm audit` reports zero known vulnerabilities and `npm run check` passes repeatedly.
+
+**Beyond-expectations finish**
+
+Present the abuse matrix as product evidence and trigger one failure live, making robustness visible rather than merely asserted.
+
+**What this unlocks**
+
+The submission can make a credible reliability claim instead of relying on the happy path.
+
+### Phase 7: Judge-ready release
+
+**Outcome**
+
+A reviewer can understand, run, test, and remember Agent Airlock with almost no cognitive overhead.
+
+**Build only what is needed**
+
+- Create one deterministic hero scenario covering promotion, rejection, unchanged reality, and repair.
+- Provide one-command local startup and seeded demo fixtures.
+- Finish a one-page architecture diagram with the trust boundary and recovery point.
+- Polish only the UI states that reveal middleware behavior.
+- Document setup, rationale, tests, limitations, and recovery.
+
+**Exit gate**
+
+- A fresh clone reaches the hero scenario without undocumented steps.
+- The complete live demonstration finishes within three minutes.
+- A reviewer can state the problem, trusted boundary, failure guarantee, and differentiator after one viewing.
+- The architecture diagram and running system tell the same story.
+- The repository contains no secret, stale screenshot, broken link, lint failure, flaky test, or hidden manual repair.
+
+**Beyond-expectations finish**
+
+End the demo by showing that the Agent did something genuinely destructive, Airlock preserved reality, and the same rejected work was safely repaired and promoted.
+The final impression should be a working product with a falsifiable guarantee, not a collection of infrastructure components.
+
+**What this unlocks**
+
+Agent Airlock becomes a coherent hackathon submission that directly addresses all four judging categories.
+
+## Post-hackathon phases
+
+### Phase 8: Transactional Resource SDK
+
+**Outcome**
+
+Developers can bring a new resource under Airlock without changing the core Run Transaction engine.
+
+**Build**
+
+- Define lifecycle hooks for prepare, diff, validate, promote, quarantine, discard, and reconcile.
+- Publish adapter capability declarations and failure semantics.
+- Build a provider conformance suite from the workspace, SQLite, and outbox behavior.
+- Add one remote-resource adapter, such as PostgreSQL branching or object storage versioning.
+
+**Exit gate**
+
+- A third-party adapter passes the same isolation, idempotency, evidence, and crash-recovery tests as built-in resources.
+- Unsupported atomicity guarantees are explicitly represented rather than hidden.
+
+**Beyond-expectations finish**
+
+Make the conformance suite executable so provider claims can be verified, not merely documented.
+
+### Phase 9: Competing futures
+
+**Outcome**
+
+Airlock can ask several Agents, models, or strategies to solve the same objective, evaluate their isolated results, and promote only the best valid future.
+
+**Build**
+
+- Fork several Candidate States from one canonical version.
+- Apply the same Outcome Contract to every candidate.
+- Rank passing candidates with deterministic quality, cost, latency, and operator-defined criteria.
+- Show the evidence for both rejection and selection.
+- Promote one winner and discard or retain the remaining candidates according to policy.
+
+**Exit gate**
+
+- No candidate can observe or alter a sibling candidate.
+- The selected winner is reproducible from recorded criteria and evidence.
+- A lower-quality candidate cannot win by bypassing a required Validation.
+- Promotion still advances Canonical State exactly once.
+
+**Beyond-expectations finish**
+
+Turn transactional safety into an optimization primitive: safe parallel exploration of possible Agent futures.
+This is Agent Airlock's category-defining expansion because ordinary sandboxes isolate one attempt, while Airlock can compare and choose among many accepted possibilities.
+
+### Phase 10: Adaptive assurance
+
+**Outcome**
+
+Airlock uses patterns in rejected Runs and production incidents to recommend stronger Outcome Contracts without silently taking authority from operators.
+
+**Build**
+
+- Detect recurring failure, protected-path, secret, and resource-limit patterns.
+- Propose new or tightened Validations with evidence and expected impact.
+- Simulate a proposed contract against historical Promotion Receipts before adoption.
+- Require review for contract changes and preserve version history.
+
+**Exit gate**
+
+- Every suggestion cites the Runs and evidence that motivated it.
+- Historical simulation identifies which prior Runs would change disposition.
+- The system cannot automatically weaken a required Validation.
+- Operators can reject or roll back a policy version without changing prior evidence.
+
+**Beyond-expectations finish**
+
+Make safety improve from experience while keeping the acceptance boundary explicit, reviewable, and reversible.
+
+### Phase 11: Portable trust
+
+**Outcome**
+
+A Promotion Receipt can be independently verified after it crosses a machine, team, Runtime, or organization boundary.
+
+**Build**
+
+- Define a provider-neutral receipt schema for contract version, resource versions, Validation evidence hashes, disposition, and ancestry.
+- Sign receipts using ordinary public-key infrastructure.
+- Add optional immutable anchoring when multiple organizations genuinely need a shared timestamp or ownership-neutral audit trail.
+- Keep private inputs and sensitive evidence off public ledgers.
+
+**Exit gate**
+
+- An independent verifier can confirm receipt integrity without access to the original Airlock database.
+- Redacted or private evidence remains private while its integrity remains verifiable.
+- The design works without blockchain and uses blockchain only where shared governance creates a real trust gap.
+
+**Beyond-expectations finish**
+
+Establish Outcome Contracts and Promotion Receipts as a portable trust protocol for Agent execution rather than a feature owned by one application.
+
+## Hackathon cut lines
+
+### Qualifying proof
+
+Phases 0 through 2 are the non-negotiable floor.
+They prove real middleware behavior, integration, failure containment, and visible evidence.
+
+### Podium target
+
+Phases 3 and 4 create the strongest technical differentiation.
+They prove that Agent memory and multiple side effects participate in one coherent acceptance decision.
+
+### Winning target
+
+Phases 5 through 7 turn the architecture into a memorable product.
+They add safe repair, adversarial confidence, and a flawless three-minute story.
+
+### Future vision
+
+Phases 8 through 11 belong in the product narrative and architecture extension points, not in the hackathon implementation unless every prior exit gate is already green.
+
+## Three-day execution allocation
+
+### Day 1: Make failure harmless
+
+- Complete Phase 0 before changing the execution path.
+- Build the thinnest end-to-end slice of Phase 1 through the real `AgentRunner` seam.
+- Finish the day only when one passing candidate promotes and one destructive candidate leaves the canonical fingerprint unchanged.
+
+The Day 1 demo should already communicate the core invention even if every later phase is removed.
+
+### Day 2: Make the decision understandable and Agent-aware
+
+- Complete the Phase 2 contract, evidence, API, and minimum Playground presentation.
+- Complete Phase 3 session isolation and prove the next-turn behavior after both promotion and rejection.
+- Begin Phase 4 only after the browser path and automated regression path are green.
+
+The Day 2 demo should show a complete browser-to-Runtime success and rejection story with no static middleware result.
+
+### Day 3: Prove breadth, recovery, and polish
+
+- Complete the deterministic SQLite and mock outbox fixture for Phase 4.
+- Add the single Repair Run journey from Phase 5.
+- Select the highest-risk abuse and crash cases from Phase 6 instead of attempting an unlimited hardening sweep.
+- Freeze behavior for the final four hours and spend that time completing Phase 7 rehearsal, documentation, cleanup, and reproducibility.
+
+If Phase 4 is not stable by the Day 3 midpoint, freeze new capabilities and submit the strongest fully proven Phase 3 product.
+A smaller falsifiable guarantee scores better than a larger unreliable claim.
+
+## Judging strategy
+
+| Judging category | Weight | Evidence designed into the roadmap |
+| --- | ---: | --- |
+| End-to-end middleware behavior | 40% | Browser-to-Runtime Candidate State, real Validation, promotion, quarantine, repair, SQLite, and outbox effects. |
+| Technical design and integration | 25% | A narrow `AgentRunner` seam, versioned contracts, Transactional Resource boundaries, and recoverable promotion. |
+| Verification and robustness | 20% | Paired positive and negative tests, canonical fingerprints, fault injection, redaction, cleanup, and bypass disclosure. |
+| Demo and reproducibility | 15% | One-command startup, deterministic fixtures, one-page architecture, three-minute hero scenario, and explicit limitations. |
+
+The roadmap intentionally spends most implementation effort on the 40% behavior category while using the same artifacts to earn the design and robustness points.
+The final polish phase protects the remaining 15% instead of treating presentation as last-minute decoration.
+
+## The three-minute hero scenario
+
+1. Select an existing Agent with a visible Outcome Contract.
+2. Ask it to update application code, migrate SQLite data, and prepare a mock deployment notification.
+3. Trigger a controlled mistake that deletes a required file.
+4. Show the candidate diff, failed Validation, quarantined database change, deferred notification, and unchanged canonical fingerprint.
+5. Start a Repair Run using the captured failure evidence.
+6. Show every required Validation pass and promote the repaired workspace, session, database, and notification intent.
+7. Send a follow-up message that proves the Agent continues from the promoted state.
+
+This one scenario demonstrates useful behavior, a trusted boundary, an Agent-specific failure, recovery, multiple resources, evidence, and continuity without changing the starter kit's core experience.
+
+## Product scorecard
+
+Review the scorecard at every phase boundary.
+A phase does not advance while any critical row is red.
+
+| Dimension | Green condition |
+| --- | --- |
+| User outcome | The operator can accomplish the phase promise through the normal Playground journey. |
+| Safety invariant | Rejection, cancellation, timeout, and interruption preserve the last confirmed Canonical State. |
+| Evidence | The final disposition can be explained from persisted bounded evidence. |
+| Automation | The phase's success and failure claims have deterministic automated coverage. |
+| Baseline | Agent CRUD, lifecycle, Playground, model execution, persistence, and follow-up still work. |
+| Reproducibility | A teammate can reproduce the phase from documented setup. |
+| Demo clarity | The new value can be shown in one concise visual beat. |
+| Scope control | No unproven later-phase dependency is required for the current promise. |
+
+## Product decisions this roadmap makes
+
+- Airlock wins through transactional Agent state, not through blockchain, generic authorization, or a broad observability dashboard.
+- The POC uses local containers because the track rewards the smallest infrastructure that proves the middleware.
+- UI work exists to reveal real backend behavior and evidence, not to replace it.
+- SQLite and the mock outbox are proof of abstraction, not separate product directions.
+- Repair is the hackathon's highest-value stretch because it turns containment into productive recovery.
+- Competing futures are the strongest post-hackathon expansion because they convert the same isolation boundary into a quality optimizer.
+- Portable receipts may later use cryptographic or blockchain anchoring, but only after the transactional guarantee is real and only when independent parties need shared verification.

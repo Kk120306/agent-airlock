@@ -10,6 +10,7 @@
 
 Agent Airlock gives every Agent Run a safe place to attempt work without immediately changing accepted platform state.
 The Run executes against isolated Candidate State, produces an explainable change set, and becomes Canonical State only after its Outcome Contract passes.
+Delivery follows the measurable exit gates in the [outcome roadmap](OUTCOME_ROADMAP.md).
 
 The product promise is simple:
 
@@ -149,32 +150,25 @@ Operators currently cannot answer these questions before accepting a Run:
 
 ## Release scope
 
-### P0: Judging path
+### Qualifying proof
 
-- Transactional workspace execution.
-- Codex session isolation.
-- Versioned Outcome Contract with required validators.
-- Promotion, Quarantine, Discard, and Repair Run lifecycle.
-- Playground evidence timeline and semantic change summary.
-- SQLite Transactional Resource fixture.
-- Mock External Action Intent outbox.
-- Automated positive, rejection, recovery, restart, and bypass tests.
+Phases 0 through 2 of the [outcome roadmap](OUTCOME_ROADMAP.md) are the minimum submission.
+They preserve the starter baseline, isolate Agent execution, prove that rejection leaves Canonical State unchanged, and make the promotion decision explainable.
 
-### P1: Hardening
+### Podium target
 
-- Retention and cleanup controls.
-- Richer secret detection.
-- Exportable Promotion Receipts.
-- Operator-selected repair guidance.
-- Stronger network-egress enforcement.
+Phases 3 and 4 are the primary technical differentiators.
+They make Codex continuity transactional with the workspace and prove the same acceptance boundary across SQLite and a deferred External Action Intent.
 
-### P2: Extension ecosystem
+### Winning target
 
-- PostgreSQL branching adapter.
-- Remote object-store adapter.
-- Payment and communication outbox adapters.
-- Provider-neutral Transactional Resource SDK.
-- Cryptographic or blockchain anchoring of Promotion Receipts.
+Phases 5 through 7 add recoverable Repair Runs, adversarial resilience, and a deterministic three-minute release experience.
+Later-phase work must not enter the judging path until all earlier exit gates pass.
+
+### Post-hackathon expansion
+
+Phases 8 through 11 define a Transactional Resource SDK, competing Agent futures, adaptive assurance, and portable Promotion Receipts.
+These capabilities shape stable extension points but are not hackathon dependencies.
 
 ## Known limitations
 
