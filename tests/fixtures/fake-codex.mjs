@@ -2,6 +2,7 @@
 
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const args = process.argv.slice(2);
 
@@ -18,7 +19,9 @@ const prompt =
     : (args.at(-1) ?? "");
 const threadId = resumedThreadId ?? "baseline-thread";
 const destructiveRequest = /delete\s+AGENTS\.md/i.test(prompt);
+const multiResourceRequest = /multi-resource release/i.test(prompt);
 const codexHome = process.env.CODEX_HOME;
+const outboxPath = process.env.AIRLOCK_OUTBOX_PATH;
 
 if (!codexHome) {
   process.stderr.write("CODEX_HOME is required\n");
@@ -74,6 +77,56 @@ if (!resumedThreadId) {
   }
   await rm(path.join(process.cwd(), "AGENTS.md"));
   await writeFile(path.join(process.cwd(), "damage.txt"), "must remain quarantined\n");
+  const database = new DatabaseSync(
+    path.join(process.cwd(), ".airlock", "demo.sqlite"),
+  );
+  database
+    .prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?")
+    .run("rejected", "2026-08-25T00:00:00.000Z", "demo");
+  database.close();
+  if (!outboxPath) throw new Error("AIRLOCK_OUTBOX_PATH is required");
+  await writeFile(
+    outboxPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "unsafe-notice",
+      type: "demo.notification.requested",
+      payload: {
+        destination: "demo-console",
+        subject: "Unsafe change",
+        body: "This effect must remain rejected.",
+      },
+    }) + "\n",
+    "utf8",
+  );
+} else if (multiResourceRequest) {
+  const database = new DatabaseSync(
+    path.join(process.cwd(), ".airlock", "demo.sqlite"),
+  );
+  database
+    .prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?")
+    .run("shipped", "2026-08-25T00:00:00.000Z", "demo");
+  database.close();
+  await writeFile(
+    path.join(process.cwd(), "release.txt"),
+    "workspace, data, and effect prepared\n",
+    "utf8",
+  );
+  if (!outboxPath) throw new Error("AIRLOCK_OUTBOX_PATH is required");
+  await writeFile(
+    outboxPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "release-ready",
+      type: "demo.notification.requested",
+      payload: {
+        destination: "demo-console",
+        subject: "Release ready",
+        body: "The accepted multi-resource release is ready.",
+      },
+    }) + "\n",
+    "utf8",
+  );
 } else {
   const source = await readFile(path.join(process.cwd(), "src", "hello.ts"), "utf8");
   if (!source.includes('"hello"')) {
@@ -94,6 +147,9 @@ await appendFile(
 
 const output = destructiveRequest
   ? "Attempted the destructive workspace change for: " + prompt
+  : multiResourceRequest
+    ? "Prepared the multi-resource release with workspace, SQLite, and deferred notification changes for: " +
+      prompt
   : resumedThreadId
     ? "Continued baseline-thread with the existing hello-world workspace and accepted memory for: " +
       prompt

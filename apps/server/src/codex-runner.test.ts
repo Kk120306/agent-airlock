@@ -13,6 +13,7 @@ describe("Codex runner protocol", () => {
         agentId: "agent",
         workspacePath: "/tmp/workspace",
         codexHomePath: "/tmp/candidate-codex-home",
+        outboxPath: "/tmp/candidate-outbox/intents.jsonl",
         prompt: "build a calculator",
         threadId: null,
       },
@@ -26,6 +27,8 @@ describe("Codex runner protocol", () => {
       "--skip-git-repo-check",
       "-C",
       "/tmp/workspace",
+      "--add-dir",
+      "/tmp/candidate-outbox",
       "build a calculator",
     ]);
   });
@@ -36,6 +39,7 @@ describe("Codex runner protocol", () => {
         agentId: "agent",
         workspacePath: "/tmp/workspace",
         codexHomePath: "/tmp/candidate-codex-home",
+        outboxPath: "/tmp/candidate-outbox/intents.jsonl",
         prompt: "add tests",
         threadId: "thread-123",
       },
@@ -52,10 +56,17 @@ describe("Codex runner protocol", () => {
       ARK_MODEL: "ep-test",
     });
 
-    const environment = buildCodexEnvironment(config, "/tmp/candidate-session");
+    const environment = buildCodexEnvironment(
+      config,
+      "/tmp/candidate-session",
+      "/tmp/candidate-outbox/intents.jsonl",
+    );
 
     expect(environment.CODEX_HOME).toBe("/tmp/candidate-session");
     expect(environment.CODEX_HOME).not.toBe(config.codexHome);
+    expect(environment.AIRLOCK_OUTBOX_PATH).toBe(
+      "/tmp/candidate-outbox/intents.jsonl",
+    );
   });
 
   it("extracts the session, final message and usage", () => {

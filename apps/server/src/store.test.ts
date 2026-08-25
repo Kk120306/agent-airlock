@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 4", async () => {
+  it("migrates starter version 1 data to version 5", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,7 +59,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 4,
+      version: 5,
       agents: [
         {
           canonicalStateId: "",
@@ -68,7 +68,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 4 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 5 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -178,7 +178,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 4,
+      version: 5,
       agents: [
         {
           outcomeContract: {
@@ -194,6 +194,8 @@ describe("JsonStore", () => {
             outcomeContract: { version: 1, requiredPaths: ["AGENTS.md"] },
             promotionReceipt: null,
             resources: [],
+            sqlite: null,
+            externalActions: { intents: [], deliveredCount: 0 },
             validations: [{ required: true }],
           },
         },
@@ -228,8 +230,46 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 4,
+      version: 5,
       runs: [{ transaction: { id: "phase-2-run", resources: [] } }],
+    });
+  });
+
+  it("migrates Phase 3 data without inventing data or effect evidence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v4-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 4,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-3-run",
+            transaction: {
+              id: "phase-3-run",
+              resources: [{ kind: "workspace", label: "Workspace" }],
+            },
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 5,
+      runs: [
+        {
+          transaction: {
+            sqlite: null,
+            externalActions: { intents: [], deliveredCount: 0 },
+          },
+        },
+      ],
     });
   });
 });

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { RunCancelledError } from "./errors.js";
@@ -15,6 +16,7 @@ const execFileAsync = promisify(execFile);
 export function buildCodexEnvironment(
   config: AppConfig,
   codexHomePath: string,
+  outboxPath?: string,
 ): NodeJS.ProcessEnv {
   const inheritedNames = [
     "PATH",
@@ -34,6 +36,7 @@ export function buildCodexEnvironment(
     CODEX_HOME: codexHomePath,
     ARK_API_KEY: config.arkApiKey,
     NO_COLOR: "1",
+    ...(outboxPath ? { AIRLOCK_OUTBOX_PATH: outboxPath } : {}),
   };
   for (const name of inheritedNames) {
     if (process.env[name] !== undefined) environment[name] = process.env[name];
@@ -52,6 +55,7 @@ export function buildCodexArgs(
   request: RunnerRequest,
   sandboxMode: AppConfig["codexSandboxMode"],
   workspacePath = request.workspacePath,
+  outboxDirectory = path.dirname(request.outboxPath),
 ): string[] {
   const args = [
     "exec",
@@ -61,6 +65,8 @@ export function buildCodexArgs(
     "--skip-git-repo-check",
     "-C",
     workspacePath,
+    "--add-dir",
+    outboxDirectory,
   ];
   if (request.threadId) {
     args.push("resume", request.threadId, request.prompt);
@@ -161,7 +167,11 @@ export class CodexRunner implements AgentRunner {
     const args = buildCodexArgs(request, this.config.codexSandboxMode);
     const child = spawn(this.config.codexBin, args, {
       cwd: request.workspacePath,
-      env: buildCodexEnvironment(this.config, request.codexHomePath),
+      env: buildCodexEnvironment(
+        this.config,
+        request.codexHomePath,
+        request.outboxPath,
+      ),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const settled = new Promise<void>((resolve) => {

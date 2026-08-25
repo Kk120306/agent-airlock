@@ -2,7 +2,7 @@
 
 ## Falsifiable guarantee
 
-An Agent Run may freely mutate its isolated workspace and reasoning, but it cannot change accepted workspace or memory unless every required Validation in the snapshotted Outcome Contract passes.
+An Agent Run may freely mutate its isolated workspace, reasoning, SQLite data, and supported action outbox, but none can change accepted reality unless every required Validation passes.
 
 ```mermaid
 flowchart LR
@@ -29,7 +29,7 @@ flowchart LR
 
     subgraph Untrusted["Untrusted execution"]
         Runtime["Starter-kit Codex Runtime"]
-        Candidate["Run-owned workspace plus Codex home"]
+        Candidate["Run-owned workspace, Codex home, SQLite, and action outbox"]
         Check["Disposable validation copy in constrained container"]
         Ark["ModelArk Responses API"]
         Runtime <--> Candidate
@@ -42,12 +42,19 @@ flowchart LR
     Check --> Validate
 
     subgraph Accepted["Accepted Whole-Agent state"]
-        Versions["Immutable workspace and session versions"]
-        Canonical["Canonical workspace plus Codex thread"]
+        Versions["Immutable workspace, session, data, and outbox evidence"]
+        Canonical["Canonical workspace, thread, and SQLite snapshot"]
         Versions --> Canonical
     end
 
+    subgraph Effects["Post-Promotion effects"]
+        Dispatcher["Idempotent dispatcher"]
+        Mock["Atomic mock-delivery store"]
+        Dispatcher --> Mock
+    end
+
     Manifest -->|Advance exactly once| Versions
+    Manifest -->|Only after advance| Dispatcher
     Canonical -->|Copy at Run start| Candidate
     Receipt --> UI
 ```
@@ -55,22 +62,24 @@ flowchart LR
 ## One Run, one decision
 
 1. Airlock resolves and verifies the current immutable Canonical State.
-2. Airlock copies its workspace and Codex home into Run-owned Candidate State and gives only those paths to the existing Runtime.
-3. The Agent uses Codex and ModelArk normally and may change files, tools, and reasoning inside Candidate State.
-4. Airlock calculates a bounded change set and evaluates path safety, protected and required paths, change limits, secret patterns, and configured commands.
+2. Airlock copies its workspace, Codex home, and SQLite database into Run-owned Candidate State and creates a fresh dedicated outbox.
+3. The Agent uses Codex and ModelArk normally and may change files, data, reasoning, and supported action intents inside Candidate State.
+4. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
 5. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
-6. A pass moves the complete workspace and session candidate into a new immutable version and atomically advances `canonical.json`.
-7. A failure, Runtime error, or cancellation quarantines or removes both resources while the canonical identifier, thread, and fingerprints remain unchanged.
-8. The Playground receives a terminal receipt whose disposition, evidence hash, timeline, change summary, and decisive failure agree with persisted state.
+6. A pass moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
+7. Only after that advance may the idempotent mock consumer claim a validated notification intent.
+8. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
+9. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
 
 ## Trust and recovery boundary
 
 The Fastify control plane, Airlock state manager, and canonical manifest are trusted in this proof of concept.
 The Agent Runtime, generated project content, and project validation commands are untrusted.
 The atomic canonical manifest is the Phase 2 recovery point and the only source of accepted state.
-Canonical workspace and Codex-session versions are never mounted writable into the Runtime or validation container.
+Canonical workspace, Codex-session, and SQLite versions are never mounted writable into the Runtime or validation container.
+The platform-owned delivery store is never mounted into either execution boundary.
 
-## Implemented and tested in Phases 0-3
+## Implemented and tested in Phases 0-4
 
 - Starter-kit Agent CRUD, lifecycle controls, Playground chat, persistence, Codex runner seam, and container path remain intact.
 - Promotion, destructive Quarantine, Runtime failure, and cancellation preserve the documented canonical-state invariant.
@@ -78,10 +87,13 @@ Canonical workspace and Codex-session versions are never mounted writable into t
 - Validation evidence is size bounded, duration bounded, and redacted before persistence.
 - A production-browser journey proves safe Promotion followed by destructive Quarantine and unchanged accepted reality.
 - The same journey stores rejected reasoning in Quarantine and proves that the next turn resumes only accepted reasoning.
-- A Whole-Agent resource ledger shows the shared workspace and Agent-memory disposition.
+- A Whole-Agent resource ledger shows one disposition across workspace, Agent memory, SQLite, and supported external actions.
+- A promoted multi-resource fixture changes code and data and produces one mock notification under duplicate dispatch attempts.
+- A rejected multi-resource fixture preserves its changed database and intent in Quarantine while canonical data and delivery count remain unchanged.
 - An opt-in real-container suite proves validation containment without an Ark key or writable canonical mount.
 
 ## Deliberate non-claims
 
-This phase does not yet transact SQLite, dispatch external actions, repair quarantined candidates, or reconcile promotion through a crash journal.
-Those are explicit later phases rather than hidden assumptions in the qualifying guarantee.
+The exactly-once guarantee ends at the atomic mock consumer and does not claim a distributed transaction with arbitrary providers.
+Unrestricted Runtime network egress can bypass the supported outbox.
+Repair Runs and promotion crash-journal reconciliation remain explicit later phases.

@@ -11,15 +11,22 @@ export type RunTransactionStatus =
   | "cancelled";
 export type RunTransactionDisposition = "promoted" | "quarantined" | "cancelled";
 export type ValidationStatus = "passed" | "failed" | "error";
-export type TransactionResourceKind = "workspace" | "codex-session";
+export type TransactionResourceKind =
+  | "workspace"
+  | "codex-session"
+  | "sqlite"
+  | "external-actions";
 
 export interface CanonicalStateReference {
   stateId: string;
   workspacePath: string;
   codexHomePath: string;
+  outboxPath: string;
   codexThreadId: string | null;
   workspaceContentHash: string;
   sessionContentHash: string;
+  sqliteContentHash: string;
+  outboxContentHash: string;
   contentHash: string;
 }
 
@@ -101,6 +108,47 @@ export interface TransactionResourceEvidence {
   summary: string;
 }
 
+export interface SqliteSnapshot {
+  contentHash: string;
+  rowCount: number;
+  rows: Array<{
+    id: string;
+    value: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface SqliteResourceEvidence {
+  databasePath: ".airlock/demo.sqlite";
+  integrity: "passed" | "failed" | "error";
+  before: SqliteSnapshot | null;
+  candidate: SqliteSnapshot | null;
+  after: SqliteSnapshot | null;
+}
+
+export type ExternalActionIntentStatus =
+  | "deferred"
+  | "delivered"
+  | "rejected"
+  | "delivery-error";
+
+export interface ExternalActionIntentEvidence {
+  id: string;
+  type: "demo.notification.requested";
+  destination: string;
+  subject: string;
+  idempotencyKey: string;
+  status: ExternalActionIntentStatus;
+  deliveredAt: string | null;
+}
+
+export interface ExternalActionEvidence {
+  outboxPath: string;
+  intents: ExternalActionIntentEvidence[];
+  deliveredCount: number;
+  bypassDisclosure: string;
+}
+
 export interface RunTransaction {
   id: string;
   status: RunTransactionStatus;
@@ -113,6 +161,8 @@ export interface RunTransaction {
   outcomeContractVersion: number;
   outcomeContract: OutcomeContract;
   resources: TransactionResourceEvidence[];
+  sqlite: SqliteResourceEvidence | null;
+  externalActions: ExternalActionEvidence;
   changes: WorkspaceChangeSummary | null;
   validations: ValidationEvidence[];
   events: RunTransactionEvent[];
@@ -165,7 +215,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 4;
+  version: 5;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -193,6 +243,7 @@ export interface RunnerRequest {
   agentId: string;
   workspacePath: string;
   codexHomePath: string;
+  outboxPath: string;
   prompt: string;
   threadId: string | null;
 }

@@ -9,6 +9,7 @@ flowchart LR
     Service --> Store["JSON store"]
     Service --> Airlock["AirlockRunner"]
     Airlock --> Workspace["Candidate and Canonical State"]
+    Airlock --> Effects["Post-Promotion mock effect store"]
     Airlock --> Runner{"AgentRunner"}
     Airlock --> Validate["Outcome Validator"]
     Validate --> ValidationContainer["Constrained validation container"]
@@ -56,8 +57,9 @@ Interrupted Runs become `cancelled` after a restart.
 ```text
 data/launchpad.json                         Agent, message, Run, contract, and evidence metadata
 workspaces/AgentID/canonical.json           Accepted state pointer and content hash
-workspaces/AgentID/versions/StateID/         Immutable accepted workspace versions
-workspaces/.candidates/RunID/                Mutable state for one active Run
+data/mock-deliveries.json                    Idempotent mock external effects
+workspaces/AgentID/versions/StateID/         Immutable workspace, Codex home, data, and outbox evidence
+workspaces/.candidates/RunID/                Mutable workspace, Codex home, and dedicated outbox for one Run
 workspaces/.quarantine/RunID/                Rejected Candidate State
 workspaces/.deleted/                         Archived deleted Agents
 codex-home/                                  Codex configuration and sessions
@@ -73,14 +75,24 @@ one process only.
   container for every local turn.
 
 Both providers use argv-only process execution, bound output and time, resume the stored Codex thread, and escalate termination after a grace period.
-Airlock passes only a Candidate State workspace path to either provider.
+Airlock passes only a Candidate State workspace, Codex home, and dedicated outbox path to either provider.
+The platform-owned delivery store is never mounted into the Runtime.
 
 ### Outcome Validator
 
 Runs deterministic path, symlink, protected-path, required-path, change-limit, and secret-pattern checks against Candidate State.
+It also validates the SQLite database with integrity, schema, size, row-count, field-size, and semantic secret checks.
+Typed action intents receive strict schema, size, count, duplicate-ID, and supported-type checks before Promotion.
 Operator-defined commands run in fresh containers with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
 Each command receives a disposable copy of Candidate State as its only project mount, so build artifacts can never enter Promotion.
 Every terminal Run stores bounded evidence and a Promotion Receipt.
+
+### Post-Promotion effects
+
+The candidate-owned outbox accepts only `demo.notification.requested` intents in Phase 4.
+Airlock derives a stable idempotency key, promotes the complete candidate, verifies that the canonical manifest advanced, and then calls the atomic mock consumer.
+Rejected candidates produce no mock delivery.
+The exactly-once claim applies only to the mock consumer, and unrestricted Runtime networking remains a disclosed bypass outside the supported outbox path.
 
 ## Deployment profiles
 

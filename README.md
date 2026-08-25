@@ -32,9 +32,10 @@ Volcengine ECS.
 - Agent create, edit, start, stop, delete, and multi-turn chat
 - Fastify control plane with asynchronous Run state
 - Transactional Agent workspaces and Codex sessions
+- Validated SQLite snapshots and typed deferred notification intents
 - Immutable Whole-Agent Candidate and Canonical versions with Promotion or Quarantine
 - Versioned Outcome Contracts with bounded, redacted Validation evidence
-- Compact Airlock timeline, two-resource disposition, change summary, canonical fingerprint, and Promotion Receipt
+- Compact Airlock timeline, four-resource disposition, change summary, canonical fingerprint, and Promotion Receipt
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -46,6 +47,10 @@ Volcengine ECS.
 - A ModelArk API key and endpoint or model that supports the Responses API
 
 Codex CLI is included in the Runtime image and is not required on the host.
+
+The automated proof does not require ModelArk credentials or paid inference.
+Run `npm run test:e2e` to exercise the production browser, deterministic Codex fixture, SQLite transaction, and mock external effect locally.
+Organizer-provided credentials are needed only for the final live ModelArk conformance journey.
 
 ## Local browser SOP
 
@@ -224,7 +229,8 @@ See [.env.example](.env.example) for all Runtime and resource-limit options.
 flowchart LR
     UI["React Web UI"] --> API["Fastify control plane"]
     API --> Airlock["Agent Airlock"]
-    Airlock --> Store["Candidate and Canonical workspace plus session"]
+    Airlock --> Store["Candidate and Canonical workspace, session, and SQLite"]
+    Airlock --> Effects["Deferred post-Promotion mock effects"]
     Airlock --> Runtime{"Runtime provider"}
     Runtime -->|Local POC| Container["Disposable Docker / Colima / Podman container"]
     Runtime -->|ECS profile| Codex["Codex CLI in application container"]
@@ -255,6 +261,7 @@ docker compose config
 Use `npm run check:phase0` to run the starter checks and this complete baseline journey together.
 Use `npm run check:phase2` to run the full qualifying proof, browser journey, and dependency audit.
 Use `npm run check:phase3` to add the pinned Codex session-isolation and real validation-container proofs.
+Use `npm run check:phase4` for the complete no-cost four-resource proof.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.

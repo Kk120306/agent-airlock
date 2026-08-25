@@ -4,10 +4,11 @@ import {
   createDefaultOutcomeContract,
   createLegacyPhaseOneContract,
 } from "./outcome-contract.js";
+import { EXTERNAL_ACTION_BYPASS_DISCLOSURE } from "./external-actions.js";
 import type { Database } from "./types.js";
 
 const emptyDatabase = (): Database => ({
-  version: 4,
+  version: 5,
   agents: [],
   messages: [],
   runs: [],
@@ -29,6 +30,13 @@ interface VersionTwoDatabase {
 
 interface VersionThreeDatabase {
   version: 3;
+  agents: Array<Record<string, unknown>>;
+  messages: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+}
+
+interface VersionFourDatabase {
+  version: 4;
   agents: Array<Record<string, unknown>>;
   messages: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
@@ -87,9 +95,31 @@ function migrateVersionTwo(database: VersionTwoDatabase): VersionThreeDatabase {
   };
 }
 
-function migrateVersionThree(database: VersionThreeDatabase): Database {
+function migrateVersionThree(database: VersionThreeDatabase): VersionFourDatabase {
   return {
     version: 4,
+    agents: database.agents,
+    messages: database.messages,
+    runs: database.runs.map((run) => {
+      const transaction =
+        run.transaction && typeof run.transaction === "object"
+          ? (run.transaction as Record<string, unknown>)
+          : null;
+      if (!transaction) return run;
+      return {
+        ...run,
+        transaction: {
+          ...transaction,
+          resources: [],
+        },
+      };
+    }),
+  };
+}
+
+function migrateVersionFour(database: VersionFourDatabase): Database {
+  return {
+    version: 5,
     agents: database.agents as unknown as Database["agents"],
     messages: database.messages as unknown as Database["messages"],
     runs: database.runs.map((run) => {
@@ -102,7 +132,13 @@ function migrateVersionThree(database: VersionThreeDatabase): Database {
         ...run,
         transaction: {
           ...transaction,
-          resources: [],
+          sqlite: null,
+          externalActions: {
+            outboxPath: "Candidate State/outbox/intents.jsonl",
+            intents: [],
+            deliveredCount: 0,
+            bypassDisclosure: EXTERNAL_ACTION_BYPASS_DISCLOSURE,
+          },
         },
       };
     }) as unknown as Database["runs"],
@@ -123,7 +159,8 @@ export class JsonStore {
         | Database
         | VersionOneDatabase
         | VersionTwoDatabase
-        | VersionThreeDatabase;
+        | VersionThreeDatabase
+        | VersionFourDatabase;
       if (
         !Array.isArray(parsed.agents) ||
         !Array.isArray(parsed.messages) ||
@@ -132,15 +169,20 @@ export class JsonStore {
         throw new Error("Unsupported database format");
       }
       if (parsed.version === 1) {
-        this.data = migrateVersionThree(migrateVersionTwo(migrateVersionOne(parsed)));
+        this.data = migrateVersionFour(
+          migrateVersionThree(migrateVersionTwo(migrateVersionOne(parsed))),
+        );
         await this.persist();
       } else if (parsed.version === 2) {
-        this.data = migrateVersionThree(migrateVersionTwo(parsed));
+        this.data = migrateVersionFour(migrateVersionThree(migrateVersionTwo(parsed)));
         await this.persist();
       } else if (parsed.version === 3) {
-        this.data = migrateVersionThree(parsed);
+        this.data = migrateVersionFour(migrateVersionThree(parsed));
         await this.persist();
       } else if (parsed.version === 4) {
+        this.data = migrateVersionFour(parsed);
+        await this.persist();
+      } else if (parsed.version === 5) {
         this.data = parsed;
       } else {
         throw new Error("Unsupported database format");

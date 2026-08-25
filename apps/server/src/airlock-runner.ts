@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
+import {
+  EXTERNAL_ACTION_BYPASS_DISCLOSURE,
+  ExternalActionOutbox,
+  intentEvidence,
+  MockExternalActionDispatcher,
+  type ParsedExternalActionIntent,
+} from "./external-actions.js";
 import { RunCancelledError } from "./errors.js";
 import { OutcomeValidator } from "./outcome-validator.js";
+import { SQLITE_RELATIVE_PATH, SqliteResource } from "./sqlite-resource.js";
 import type {
   AgentRunner,
   CanonicalStateReference,
@@ -15,7 +23,7 @@ import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
 
-export interface AirlockRunRequest extends RunnerRequest {
+export interface AirlockRunRequest extends Omit<RunnerRequest, "outboxPath"> {
   runId: string;
   canonicalStateId: string;
 }
@@ -74,7 +82,30 @@ export function createRunTransaction(
           ? "Candidate session resumes the accepted thread"
           : "Candidate session will start the first accepted thread",
       },
+      {
+        kind: "sqlite",
+        label: "SQLite data",
+        disposition: null,
+        fingerprintBefore: canonicalState.sqliteContentHash,
+        fingerprintAfter: null,
+        summary: "Candidate data is isolated from the Canonical database",
+      },
+      {
+        kind: "external-actions",
+        label: "External actions",
+        disposition: null,
+        fingerprintBefore: externalActionFingerprint([]),
+        fingerprintAfter: null,
+        summary: "Typed intents remain deferred until Promotion",
+      },
     ],
+    sqlite: null,
+    externalActions: {
+      outboxPath: "Candidate State/outbox/intents.jsonl",
+      intents: [],
+      deliveredCount: 0,
+      bypassDisclosure: EXTERNAL_ACTION_BYPASS_DISCLOSURE,
+    },
     changes: null,
     validations: [],
     events: [
@@ -97,6 +128,9 @@ export class AirlockRunner {
     private readonly inner: AgentRunner,
     private readonly workspaces: WorkspaceManager,
     private readonly validator: OutcomeValidator,
+    private readonly sqlite: SqliteResource,
+    private readonly actionOutbox: ExternalActionOutbox,
+    private readonly actionDispatcher: MockExternalActionDispatcher,
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -117,6 +151,7 @@ export class AirlockRunner {
   ): Promise<AirlockRunResult> {
     let transaction = structuredClone(initialTransaction);
     let candidatePrepared = false;
+    let parsedIntents: ParsedExternalActionIntent[] = [];
     this.activeAgentIds.add(request.agentId);
     try {
       const candidate = await this.workspaces.prepareCandidate(
@@ -128,6 +163,20 @@ export class AirlockRunner {
         await this.workspaces.candidateWorkspacePath(request.runId);
       const candidateCodexHomePath =
         await this.workspaces.candidateCodexHomePath(request.runId);
+      const candidateOutboxPath =
+        await this.workspaces.candidateOutboxPath(request.runId);
+      const canonicalBefore = await this.workspaces.readCanonical(request.agentId);
+      const sqliteBefore = await this.sqlite.inspect(canonicalBefore.workspacePath);
+      if (sqliteBefore.contentHash !== canonicalBefore.sqliteContentHash) {
+        throw new Error("Canonical SQLite snapshot does not match its manifest");
+      }
+      transaction.sqlite = {
+        databasePath: SQLITE_RELATIVE_PATH,
+        integrity: "passed",
+        before: sqliteBefore,
+        candidate: null,
+        after: null,
+      };
       this.assertNotCancelled(request.agentId);
       if (
         candidate.canonicalStateIdBefore !== request.canonicalStateId ||
@@ -149,6 +198,7 @@ export class AirlockRunner {
         agentId: request.agentId,
         workspacePath: candidateWorkspacePath,
         codexHomePath: candidateCodexHomePath,
+        outboxPath: candidateOutboxPath,
         prompt: request.prompt,
         threadId: candidate.canonicalThreadIdBefore,
       });
@@ -168,8 +218,32 @@ export class AirlockRunner {
         transaction.outcomeContract,
         request.runId,
       );
+      const [sqliteValidation, actionValidation] = await Promise.all([
+        this.sqlite.validate(
+          candidateWorkspacePath,
+          transaction.outcomeContract.secretPatterns,
+        ),
+        this.actionOutbox.validate(candidateOutboxPath, request.runId),
+      ]);
+      parsedIntents = actionValidation.intents;
       transaction.changes = validationResult.changes;
-      transaction.validations = validationResult.validations;
+      transaction.validations = [
+        ...validationResult.validations,
+        sqliteValidation.evidence,
+        actionValidation.evidence,
+      ];
+      transaction.sqlite = {
+        databasePath: SQLITE_RELATIVE_PATH,
+        integrity:
+          sqliteValidation.evidence.status === "passed" ? "passed" : "failed",
+        before: sqliteBefore,
+        candidate: sqliteValidation.snapshot,
+        after: null,
+      };
+      transaction.externalActions.intents = intentEvidence(
+        parsedIntents,
+        "deferred",
+      );
       const failedRequiredValidation = transaction.validations.find(
         (validation) => validation.required && validation.status !== "passed",
       );
@@ -183,7 +257,15 @@ export class AirlockRunner {
         transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
         transaction.canonicalContentHashAfter =
           transaction.canonicalContentHashBefore;
-        transaction = finalizeResources(transaction, "quarantined");
+        transaction.externalActions.intents = intentEvidence(
+          parsedIntents,
+          "rejected",
+        );
+        if (transaction.sqlite) transaction.sqlite.after = sqliteBefore;
+        transaction = finalizeResources(transaction, "quarantined", undefined, {
+          sqlite: sqliteBefore.contentHash,
+          "external-actions": externalActionFingerprint([]),
+        });
         transaction.promotionReceipt = createPromotionReceipt(transaction);
         transaction = await this.transition(
           transaction,
@@ -209,12 +291,52 @@ export class AirlockRunner {
       transaction.disposition = "promoted";
       transaction.canonicalStateIdAfter = canonicalState.stateId;
       transaction.canonicalContentHashAfter = canonicalState.contentHash;
-      transaction = finalizeResources(transaction, "promoted", canonicalState);
+      if (transaction.sqlite) transaction.sqlite.after = sqliteValidation.snapshot;
+      let actionFingerprint = externalActionFingerprint([]);
+      try {
+        const current = await this.workspaces.readCanonical(request.agentId);
+        if (current.stateId !== canonicalState.stateId) {
+          throw new Error("Canonical State did not advance to the promoted state");
+        }
+        const receipts = await this.actionDispatcher.dispatch(
+          request.runId,
+          parsedIntents,
+        );
+        transaction.externalActions.intents = intentEvidence(
+          parsedIntents,
+          "deferred",
+          receipts,
+        );
+        transaction.externalActions.deliveredCount = receipts.length;
+        actionFingerprint = externalActionFingerprint(receipts);
+      } catch {
+        transaction.externalActions.intents = intentEvidence(
+          parsedIntents,
+          "delivery-error",
+        );
+      }
+      transaction = finalizeResources(transaction, "promoted", canonicalState, {
+        sqlite: sqliteValidation.snapshot?.contentHash ?? null,
+        "external-actions": actionFingerprint,
+      });
+      const deliveryFailed = transaction.externalActions.intents.some(
+        (intent) => intent.status === "delivery-error",
+      );
+      transaction.resources = transaction.resources.map((resource) =>
+        resource.kind === "external-actions" && deliveryFailed
+          ? {
+              ...resource,
+              summary: "Canonical intent awaits delivery recovery",
+            }
+          : resource,
+      );
       transaction.promotionReceipt = createPromotionReceipt(transaction);
       transaction = this.recordTransition(
         transaction,
         "promoted",
-        "Candidate State is now Canonical State",
+        deliveryFailed
+          ? "Candidate State is Canonical; external delivery needs recovery"
+          : "Candidate State is now Canonical State",
       );
       return { ...result, transaction, canonicalState };
     } catch (error) {
@@ -284,15 +406,24 @@ export function finalizeResources(
   transaction: RunTransaction,
   disposition: "promoted" | "quarantined" | "cancelled",
   canonicalState?: CanonicalStateReference,
+  fingerprints: Partial<
+    Record<RunTransaction["resources"][number]["kind"], string | null>
+  > = {},
 ): RunTransaction {
   const next = structuredClone(transaction);
   next.resources = next.resources.map((resource) => {
+    const canonicalFingerprint =
+      resource.kind === "workspace"
+        ? canonicalState?.workspaceContentHash
+        : resource.kind === "codex-session"
+          ? canonicalState?.sessionContentHash
+          : undefined;
     const fingerprintAfter =
-      disposition === "promoted" && canonicalState
-        ? resource.kind === "workspace"
-          ? canonicalState.workspaceContentHash
-          : canonicalState.sessionContentHash
-        : resource.fingerprintBefore;
+      resource.kind in fingerprints
+        ? fingerprints[resource.kind] ?? null
+        : disposition === "promoted" && canonicalFingerprint
+          ? canonicalFingerprint
+          : resource.fingerprintBefore;
     return {
       ...resource,
       disposition,
@@ -304,6 +435,21 @@ export function finalizeResources(
     };
   });
   return next;
+}
+
+function externalActionFingerprint(
+  receipts: Array<{ idempotencyKey: string; deliveredAt: string }>,
+): string {
+  const normalized = receipts
+    .map((receipt) => ({
+      idempotencyKey: receipt.idempotencyKey,
+      deliveredAt: receipt.deliveredAt,
+    }))
+    .sort((left, right) => left.idempotencyKey.localeCompare(right.idempotencyKey));
+  return (
+    "sha256:" +
+    createHash("sha256").update(JSON.stringify(normalized)).digest("hex")
+  );
 }
 
 export function createPromotionReceipt(

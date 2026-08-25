@@ -121,6 +121,8 @@ Do not claim real ModelArk continuity until the organizer credential journey run
 
 ## Phase 4: Transactional effects
 
+**Status:** Implemented, regression-locked, and audited without paid inference.
+
 ### Outcome
 
 One Agent task can edit files, update one SQLite database, and prepare one typed external action, and Promotion accepts all three or rejection accepts none.
@@ -133,7 +135,7 @@ The POC will implement three resource adapters behind one Run Transaction summar
 | --- | --- | --- | --- |
 | Workspace | Candidate `workspace/` tree | Existing Outcome Contract | Version root is promoted or quarantined. |
 | SQLite | `workspace/.airlock/demo.sqlite` | Size limit, SQLite integrity, schema allowlist, and deterministic query snapshot | The database crosses with the workspace version or remains canonical. |
-| External action | `workspace/.airlock/outbox.jsonl` containing typed intents | JSON schema, count and byte limits, supported action type, stable intent ID, and payload limits | Canonical intents dispatch only after Promotion, while rejected intents produce no delivery. |
+| External action | Candidate-owned `outbox/intents.jsonl` on a dedicated Runtime mount | JSON schema, count and byte limits, supported action type, stable intent ID, and payload limits | Promoted intents dispatch only after Promotion, while rejected intents produce no delivery. |
 
 The initial supported action type will be `demo.notification.requested` with a short destination, subject, and body.
 It represents a real irreversible boundary without contacting a third-party service.
@@ -157,7 +159,7 @@ Verification:
 
 ### Chunk 4.2: Add typed deferred External Action Intents
 
-1. Define a versioned JSONL submission contract at `.airlock/outbox.jsonl` and document it in the generated `AGENTS.md`.
+1. Define a versioned JSONL submission contract at the candidate-owned path named by `AIRLOCK_OUTBOX_PATH` and document it in the generated `AGENTS.md`.
 2. Parse and validate intents only in the control plane after Runtime execution.
 3. Derive an idempotency key from the promoted Run Transaction identifier, intent identifier, action type, and normalized payload hash.
 4. Persist mock deliveries in a platform-owned atomic store under `APP_DATA_DIR`, outside every Runtime mount.
@@ -220,3 +222,13 @@ Do not begin Repair Run or crash-journal scope until the Phase 4 three-resource 
 
 Repair Runs, crash-journal reconciliation, stronger network egress controls, retention automation, provider conformance, and blockchain receipt anchoring remain later roadmap phases.
 They must not weaken or blur the Phase 3 and Phase 4 acceptance claims.
+
+## Phase 4 completion evidence
+
+- The final server suite passes 67 tests with one opt-in container case skipped in the default run.
+- The production Chrome journey passes the accepted and rejected four-resource story.
+- The pinned Codex session-isolation probe and the three-case real validation-container suite pass with networking disabled where specified.
+- Type checks, production builds, script syntax checks, dependency audit, Docker Compose rendering, Terraform formatting, Markdown links, credential-pattern review, and Git whitespace checks pass.
+- Desktop and mobile screenshots were inspected after the final four-resource UI build.
+- No paid ModelArk request was made.
+- The organizer-credential ModelArk browser conformance journey remains pending and is explicitly not represented as completed.

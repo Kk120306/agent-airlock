@@ -38,13 +38,34 @@ export interface RunTransaction {
   outcomeContractVersion: number;
   outcomeContract: OutcomeContract;
   resources: Array<{
-    kind: "workspace" | "codex-session";
+    kind: "workspace" | "codex-session" | "sqlite" | "external-actions";
     label: string;
     disposition: "promoted" | "quarantined" | "cancelled" | null;
     fingerprintBefore: string | null;
     fingerprintAfter: string | null;
     summary: string;
   }>;
+  sqlite: {
+    databasePath: ".airlock/demo.sqlite";
+    integrity: "passed" | "failed" | "error";
+    before: SqliteSnapshot | null;
+    candidate: SqliteSnapshot | null;
+    after: SqliteSnapshot | null;
+  } | null;
+  externalActions: {
+    outboxPath: string;
+    intents: Array<{
+      id: string;
+      type: "demo.notification.requested";
+      destination: string;
+      subject: string;
+      idempotencyKey: string;
+      status: "deferred" | "delivered" | "rejected" | "delivery-error";
+      deliveredAt: string | null;
+    }>;
+    deliveredCount: number;
+    bypassDisclosure: string;
+  };
   changes: {
     files: Array<{
       path: string;
@@ -80,6 +101,12 @@ export interface RunTransaction {
     validationEvidenceHash: string;
     createdAt: string;
   } | null;
+}
+
+interface SqliteSnapshot {
+  contentHash: string;
+  rowCount: number;
+  rows: Array<{ id: string; value: string; updatedAt: string }>;
 }
 
 export interface Agent {

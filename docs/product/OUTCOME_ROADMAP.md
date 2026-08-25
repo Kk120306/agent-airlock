@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 3
+**Delivered:** Phases 0 through 4
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -183,6 +183,8 @@ This is the moment that separates Airlock from ordinary file snapshots.
 Agent state becomes a coherent transaction rather than a folder rollback with contradictory memory.
 
 ### Phase 4: Transactional effects
+
+**Status:** Delivered and regression-locked
 
 **Outcome**
 

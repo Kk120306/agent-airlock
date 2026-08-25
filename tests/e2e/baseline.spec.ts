@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 test("preserves the complete starter Playground journey", async ({ page, request }) => {
   await page.goto("/");
@@ -26,6 +27,28 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await expect(page.getByText(/Continued baseline-thread with the existing hello-world/))
     .toBeVisible({ timeout: 15_000 });
 
+  const effectsBefore = await request.get("/api/effects");
+  expect(
+    (await effectsBefore.json() as { effects: unknown[] }).effects,
+  ).toHaveLength(0);
+  await composer.fill("Update inventory and prepare notification for the multi-resource release.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(/Prepared the multi-resource release with workspace/))
+    .toBeVisible({ timeout: 15_000 });
+  const evidence = page.getByRole("article", { name: "Agent Airlock evidence" });
+  const resources = evidence.getByRole("region", { name: "Transactional resources" });
+  await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
+  await expect(resources.getByText("one decision across 4 resources")).toBeVisible();
+  await expect(resources.getByText("SQLite data", { exact: true })).toBeVisible();
+  await expect(resources.getByText("External actions", { exact: true })).toBeVisible();
+  await expect(evidence.getByText("1 delivered", { exact: true })).toBeVisible();
+  await expect(evidence.getByText("shipped", { exact: true })).toBeVisible();
+  const effectsAfterPromotion = await request.get("/api/effects");
+  expect(
+    (await effectsAfterPromotion.json() as { effects: Array<{ intentId: string }> })
+      .effects,
+  ).toEqual([expect.objectContaining({ intentId: "release-ready" })]);
+
   const agentBeforeRejectionResponse = await request.get("/api/agents");
   expect(agentBeforeRejectionResponse.ok()).toBe(true);
   const agentBeforeRejection = (
@@ -43,17 +66,20 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText(/Attempted the destructive workspace change/))
     .toBeVisible({ timeout: 15_000 });
-  const evidence = page.getByRole("article", { name: "Agent Airlock evidence" });
   await expect(evidence.getByRole("heading", { name: "Quarantined" })).toBeVisible();
   await expect(evidence.getByText("Canonical State unchanged")).toBeVisible();
   await expect(evidence.getByText("Decisive Validation")).toBeVisible();
   await expect(evidence.getByText("protected-paths", { exact: true }).first()).toBeVisible();
   await expect(evidence.getByText("Outcome Contract v1")).toBeVisible();
-  const resources = evidence.getByRole("region", { name: "Transactional resources" });
-  await expect(resources.getByText("one decision across 2 resources")).toBeVisible();
+  await expect(resources.getByText("one decision across 4 resources")).toBeVisible();
   await expect(resources.getByText("Workspace", { exact: true })).toBeVisible();
   await expect(resources.getByText("Agent memory", { exact: true })).toBeVisible();
-  await expect(resources.getByText("quarantined", { exact: true })).toHaveCount(2);
+  await expect(resources.getByText("SQLite data", { exact: true })).toBeVisible();
+  await expect(resources.getByText("External actions", { exact: true })).toBeVisible();
+  await expect(resources.getByText("quarantined", { exact: true })).toHaveCount(4);
+  await expect(
+    evidence.locator(".effect-status").getByText("rejected", { exact: true }),
+  ).toBeVisible();
 
   const runsResponse = await request.get(
     "/api/agents/" + (agentBeforeRejection?.id ?? "") + "/runs",
@@ -132,6 +158,17 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await expect(
     access(path.join(agentAfterRejection?.workspacePath ?? "", "damage.txt")),
   ).rejects.toThrow();
+  const canonicalDatabase = new DatabaseSync(
+    path.join(agentAfterRejection?.workspacePath ?? "", ".airlock", "demo.sqlite"),
+    { readOnly: true },
+  );
+  expect(
+    canonicalDatabase.prepare("SELECT value FROM inventory WHERE id = ?").get("demo"),
+  ).toMatchObject({ value: "shipped" });
+  canonicalDatabase.close();
+  expect(
+    (await (await request.get("/api/effects")).json() as { effects: unknown[] }).effects,
+  ).toHaveLength(1);
 
   await composer.fill("Confirm recovery from the unchanged Canonical State.");
   await page.getByRole("button", { name: "Send message" }).click();
@@ -139,7 +176,7 @@ test("preserves the complete starter Playground journey", async ({ page, request
     .toBeVisible({ timeout: 15_000 });
   await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
   await expect(evidence.getByText("Candidate became Canonical State")).toBeVisible();
-  await expect(resources.getByText("promoted", { exact: true })).toHaveCount(2);
+  await expect(resources.getByText("promoted", { exact: true })).toHaveCount(4);
 
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator(".status-stopped")).toBeVisible();

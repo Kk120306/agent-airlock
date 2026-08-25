@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phase 3 implemented, Phase 4 in progress
+**Status:** Phases 0 through 4 implemented and regression-locked
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -18,9 +18,10 @@ The product promise is simple:
 
 ## Current qualifying release
 
-Phases 0 through 3 are implemented.
-The release makes workspace and Codex-session changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
-SQLite adapters, deferred external actions, Repair Runs, and crash-journal reconciliation are product targets for later phases.
+Phases 0 through 4 are implemented.
+The release makes workspace, Codex-session, and SQLite changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
+Typed notification intents use a candidate-owned outbox and an idempotent mock consumer that can claim an effect only after the canonical manifest advances.
+Repair Runs and crash-journal reconciliation remain later-phase product targets.
 
 ## Problem
 
@@ -146,17 +147,17 @@ This journey describes the complete product direction, including later roadmap p
 - Symlink handling must prevent Candidate State from reaching canonical or unrelated host paths.
 - External actions outside the controlled outbox are a documented residual risk for the POC.
 
-## Phase 2 qualifying success metrics
+## Implemented success metrics
 
 - A successful Run promotes a valid workspace and the next Playground message continues from that promoted state.
 - A destructive Run that deletes required files is quarantined and leaves the Canonical State content hash unchanged.
 - The complete success and rejection story fits in a three-minute live demonstration.
 - `npm run check` passes.
+- A rejected SQLite mutation leaves canonical query results unchanged.
+- A deferred mock external action executes once after promotion and zero times after rejection.
 
 ## Later-phase success metrics
 
-- A rejected SQLite mutation leaves canonical query results unchanged.
-- A deferred mock external action executes once after promotion and zero times after rejection.
 - A quarantined Run can be repaired and subsequently promoted without modifying the original Canonical State before promotion.
 - The complete success, rejection, and recovery story fits in a later three-minute demonstration.
 
@@ -188,14 +189,15 @@ These capabilities shape stable extension points but are not hackathon dependenc
 - Full atomicity across local state and arbitrary external providers is not claimed.
 - The outbox only controls actions routed through the platform interface.
 - Copy-based Candidate State preparation may be slower for very large workspaces.
-- Codex session storage behavior must be validated against the pinned CLI version before its isolation design is finalized.
+- Exactly-once delivery is claimed only for the atomic local mock consumer, not arbitrary third-party providers.
 
-## Open Wayfinder decisions
+## Wayfinder decisions
 
-- [Prove safe Codex session isolation](https://github.com/Kk120306/agent-airlock/issues/3).
 - [Define Promotion journal and crash recovery semantics](https://github.com/Kk120306/agent-airlock/issues/6).
-- [Define External Action Intent delivery guarantees](https://github.com/Kk120306/agent-airlock/issues/7).
 - [Design Quarantine and Repair Run experience](https://github.com/Kk120306/agent-airlock/issues/8).
 - [Set the P0 scope cutoff and judging acceptance bar](https://github.com/Kk120306/agent-airlock/issues/9).
+
+Codex session isolation is resolved in [ADR 0005](../adr/0005-version-codex-home-with-candidate-state.md).
+External Action Intent delivery is resolved in [ADR 0006](../adr/0006-defer-external-actions-until-promotion.md).
 
 The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) is the canonical index for these decisions.

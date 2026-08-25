@@ -14,6 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { SqliteResource } from "./sqlite-resource.js";
 import type { Agent, CanonicalStateReference } from "./types.js";
 
 interface CanonicalManifestV1 {
@@ -26,15 +27,25 @@ interface CanonicalManifestV1 {
   sourceRunId: string | null;
 }
 
-interface CanonicalManifestV2 extends CanonicalStateReference {
+type CanonicalManifestV2 = Omit<
+  CanonicalStateReference,
+  "outboxPath" | "sqliteContentHash" | "outboxContentHash"
+> & {
   schemaVersion: 2;
+  agentId: string;
+  createdAt: string;
+  sourceRunId: string | null;
+};
+
+interface CanonicalManifestV3 extends CanonicalStateReference {
+  schemaVersion: 3;
   agentId: string;
   createdAt: string;
   sourceRunId: string | null;
 }
 
-interface CandidateManifestV2 {
-  schemaVersion: 2;
+interface CandidateManifestV3 {
+  schemaVersion: 3;
   agentId: string;
   runId: string;
   candidateStateId: string;
@@ -42,6 +53,8 @@ interface CandidateManifestV2 {
   canonicalContentHashBefore: string;
   canonicalWorkspaceHashBefore: string;
   canonicalSessionHashBefore: string;
+  canonicalSqliteHashBefore: string;
+  canonicalOutboxHashBefore: string;
   canonicalThreadIdBefore: string | null;
   candidateThreadId: string | null;
   createdAt: string;
@@ -51,10 +64,13 @@ export interface CandidateStateReference {
   candidateStateId: string;
   workspacePath: string;
   codexHomePath: string;
+  outboxPath: string;
   canonicalStateIdBefore: string;
   canonicalContentHashBefore: string;
   canonicalWorkspaceHashBefore: string;
   canonicalSessionHashBefore: string;
+  canonicalSqliteHashBefore: string;
+  canonicalOutboxHashBefore: string;
   canonicalThreadIdBefore: string | null;
 }
 
@@ -73,6 +89,7 @@ export class WorkspaceManager {
   constructor(
     private readonly root: string,
     private readonly codexTemplateHome?: string,
+    private readonly sqlite = new SqliteResource(),
   ) {}
 
   async initialize(): Promise<void> {
@@ -89,11 +106,14 @@ export class WorkspaceManager {
     const stateId = randomUUID();
     const workspacePath = this.versionWorkspacePath(agent.id, stateId);
     const codexHomePath = this.versionCodexHomePath(agent.id, stateId);
+    const outboxPath = this.versionOutboxPath(agent.id, stateId);
     await Promise.all([
       mkdir(workspacePath, { recursive: true }),
       mkdir(codexHomePath, { recursive: true }),
+      mkdir(outboxPath, { recursive: true }),
     ]);
     await this.writeInstructionsAt(workspacePath, agent);
+    await this.sqlite.seed(workspacePath);
     await writeFile(
       path.join(workspacePath, ".gitignore"),
       [".codex/", "node_modules/", "dist/", ".env", "*.log", ""].join("\n"),
@@ -125,9 +145,15 @@ export class WorkspaceManager {
     const manifestPath = this.canonicalManifestPath(agent.id);
     if (await fileExists(manifestPath)) {
       const raw = await readFile(manifestPath, "utf8");
-      const manifest = JSON.parse(raw) as CanonicalManifestV1 | CanonicalManifestV2;
+      const manifest = JSON.parse(raw) as
+        | CanonicalManifestV1
+        | CanonicalManifestV2
+        | CanonicalManifestV3;
       if (manifest.schemaVersion === 1) {
         return this.migrateCanonicalManifest(agent, manifest);
+      }
+      if (manifest.schemaVersion === 2) {
+        return this.migratePhaseFourManifest(agent, manifest);
       }
       return this.readCanonical(agent.id);
     }
@@ -158,7 +184,11 @@ export class WorkspaceManager {
     const codexHomePath = this.versionCodexHomePath(agent.id, stateId);
     await mkdir(path.dirname(workspacePath), { recursive: true });
     await rename(migrationPath, workspacePath);
-    await mkdir(codexHomePath, { recursive: true });
+    await this.sqlite.seed(workspacePath);
+    await Promise.all([
+      mkdir(codexHomePath, { recursive: true }),
+      mkdir(this.versionOutboxPath(agent.id, stateId), { recursive: true }),
+    ]);
     await this.seedCodexHome(codexHomePath);
     const preservedThread = await this.copyLegacySession(
       agent.codexThreadId,
@@ -176,29 +206,38 @@ export class WorkspaceManager {
 
   async readCanonical(agentId: string): Promise<CanonicalStateReference> {
     const raw = await readFile(this.canonicalManifestPath(agentId), "utf8");
-    const manifest = JSON.parse(raw) as CanonicalManifestV2;
+    const manifest = JSON.parse(raw) as CanonicalManifestV3;
     if (
-      manifest.schemaVersion !== 2 ||
+      manifest.schemaVersion !== 3 ||
       manifest.agentId !== agentId ||
       typeof manifest.stateId !== "string" ||
       typeof manifest.workspacePath !== "string" ||
       typeof manifest.codexHomePath !== "string" ||
+      typeof manifest.outboxPath !== "string" ||
       (manifest.codexThreadId !== null && typeof manifest.codexThreadId !== "string") ||
       typeof manifest.workspaceContentHash !== "string" ||
       typeof manifest.sessionContentHash !== "string" ||
+      typeof manifest.sqliteContentHash !== "string" ||
+      typeof manifest.outboxContentHash !== "string" ||
       typeof manifest.contentHash !== "string"
     ) {
       throw new Error("Invalid canonical manifest for Agent " + agentId);
     }
     const expectedWorkspace = this.versionWorkspacePath(agentId, manifest.stateId);
     const expectedCodexHome = this.versionCodexHomePath(agentId, manifest.stateId);
+    const expectedOutbox = this.versionOutboxPath(agentId, manifest.stateId);
     if (
       path.resolve(manifest.workspacePath) !== path.resolve(expectedWorkspace) ||
-      path.resolve(manifest.codexHomePath) !== path.resolve(expectedCodexHome)
+      path.resolve(manifest.codexHomePath) !== path.resolve(expectedCodexHome) ||
+      path.resolve(manifest.outboxPath) !== path.resolve(expectedOutbox)
     ) {
       throw new Error("Canonical manifest contains an unexpected resource path");
     }
-    await Promise.all([access(expectedWorkspace), access(expectedCodexHome)]);
+    await Promise.all([
+      access(expectedWorkspace),
+      access(expectedCodexHome),
+      access(expectedOutbox),
+    ]);
     const actual = await this.buildStateReference(
       agentId,
       manifest.stateId,
@@ -207,6 +246,8 @@ export class WorkspaceManager {
     if (
       actual.workspaceContentHash !== manifest.workspaceContentHash ||
       actual.sessionContentHash !== manifest.sessionContentHash ||
+      actual.sqliteContentHash !== manifest.sqliteContentHash ||
+      actual.outboxContentHash !== manifest.outboxContentHash ||
       actual.contentHash !== manifest.contentHash
     ) {
       throw new Error("Canonical State content does not match its immutable manifest");
@@ -226,6 +267,8 @@ export class WorkspaceManager {
     const candidateStateId = randomUUID();
     const workspacePath = path.join(root, "workspace");
     const codexHomePath = path.join(root, "codex-home");
+    const outboxDirectory = path.join(root, "outbox");
+    const outboxPath = path.join(outboxDirectory, "intents.jsonl");
     await mkdir(root, { recursive: false });
     try {
       await Promise.all([
@@ -237,10 +280,11 @@ export class WorkspaceManager {
           recursive: true,
           preserveTimestamps: true,
         }),
+        mkdir(outboxDirectory, { recursive: true }),
       ]);
       await this.refreshCodexConfig(codexHomePath);
-      const manifest: CandidateManifestV2 = {
-        schemaVersion: 2,
+      const manifest: CandidateManifestV3 = {
+        schemaVersion: 3,
         agentId,
         runId,
         candidateStateId,
@@ -248,6 +292,8 @@ export class WorkspaceManager {
         canonicalContentHashBefore: canonical.contentHash,
         canonicalWorkspaceHashBefore: canonical.workspaceContentHash,
         canonicalSessionHashBefore: canonical.sessionContentHash,
+        canonicalSqliteHashBefore: canonical.sqliteContentHash,
+        canonicalOutboxHashBefore: canonical.outboxContentHash,
         canonicalThreadIdBefore: canonical.codexThreadId,
         candidateThreadId: canonical.codexThreadId,
         createdAt: now(),
@@ -257,10 +303,13 @@ export class WorkspaceManager {
         candidateStateId,
         workspacePath,
         codexHomePath,
+        outboxPath,
         canonicalStateIdBefore: canonical.stateId,
         canonicalContentHashBefore: canonical.contentHash,
         canonicalWorkspaceHashBefore: canonical.workspaceContentHash,
         canonicalSessionHashBefore: canonical.sessionContentHash,
+        canonicalSqliteHashBefore: canonical.sqliteContentHash,
+        canonicalOutboxHashBefore: canonical.outboxContentHash,
         canonicalThreadIdBefore: canonical.codexThreadId,
       };
     } catch (error) {
@@ -294,12 +343,23 @@ export class WorkspaceManager {
       current.contentHash !== candidate.canonicalContentHashBefore ||
       current.workspaceContentHash !== candidate.canonicalWorkspaceHashBefore ||
       current.sessionContentHash !== candidate.canonicalSessionHashBefore ||
+      current.sqliteContentHash !== candidate.canonicalSqliteHashBefore ||
+      current.outboxContentHash !== candidate.canonicalOutboxHashBefore ||
       current.codexThreadId !== candidate.canonicalThreadIdBefore
     ) {
       throw new Error("Canonical State changed while the Run Transaction was active");
     }
 
-    await this.assertSessionTreeSafe(this.candidateCodexPath(runId));
+    await Promise.all([
+      this.assertResourceTreeSafe(
+        this.candidateCodexPath(runId),
+        "Candidate Codex session",
+      ),
+      this.assertResourceTreeSafe(
+        path.join(this.candidateRoot(runId), "outbox"),
+        "Candidate outbox",
+      ),
+    ]);
     const candidateRoot = this.candidateRoot(runId);
     const destinationRoot = this.versionRoot(agentId, candidate.candidateStateId);
     await mkdir(path.dirname(destinationRoot), { recursive: true });
@@ -310,8 +370,8 @@ export class WorkspaceManager {
         candidate.candidateStateId,
         candidate.candidateThreadId,
       );
-      const manifest: CanonicalManifestV2 = {
-        schemaVersion: 2,
+      const manifest: CanonicalManifestV3 = {
+        schemaVersion: 3,
         agentId,
         ...canonical,
         createdAt: now(),
@@ -360,6 +420,12 @@ export class WorkspaceManager {
   async candidateCodexHomePath(runId: string): Promise<string> {
     await this.readCandidate(runId);
     return this.resolveCandidatePath(runId, "codex-home");
+  }
+
+  async candidateOutboxPath(runId: string): Promise<string> {
+    await this.readCandidate(runId);
+    const outboxDirectory = await this.resolveCandidatePath(runId, "outbox");
+    return path.join(outboxDirectory, "intents.jsonl");
   }
 
   async updateInstructions(agent: Agent): Promise<CanonicalStateReference> {
@@ -423,7 +489,13 @@ export class WorkspaceManager {
       throw new Error("Invalid schema 1 canonical manifest for Agent " + agent.id);
     }
     const codexHomePath = this.versionCodexHomePath(agent.id, manifest.stateId);
-    await mkdir(codexHomePath, { recursive: true });
+    await Promise.all([
+      mkdir(codexHomePath, { recursive: true }),
+      mkdir(this.versionOutboxPath(agent.id, manifest.stateId), {
+        recursive: true,
+      }),
+    ]);
+    await this.sqlite.seed(manifest.workspacePath);
     await this.seedCodexHome(codexHomePath);
     const preservedThread = await this.copyLegacySession(
       agent.codexThreadId,
@@ -435,7 +507,38 @@ export class WorkspaceManager {
       preservedThread ? agent.codexThreadId : null,
     );
     await this.replaceCanonicalManifest(agent.id, {
-      schemaVersion: 2,
+      schemaVersion: 3,
+      agentId: agent.id,
+      ...canonical,
+      createdAt: manifest.createdAt,
+      sourceRunId: manifest.sourceRunId,
+    });
+    return canonical;
+  }
+
+  private async migratePhaseFourManifest(
+    agent: Agent,
+    manifest: CanonicalManifestV2,
+  ): Promise<CanonicalStateReference> {
+    if (
+      manifest.agentId !== agent.id ||
+      typeof manifest.stateId !== "string" ||
+      path.resolve(manifest.workspacePath) !==
+        path.resolve(this.versionWorkspacePath(agent.id, manifest.stateId))
+    ) {
+      throw new Error("Invalid schema 2 canonical manifest for Agent " + agent.id);
+    }
+    await this.sqlite.seed(manifest.workspacePath);
+    await mkdir(this.versionOutboxPath(agent.id, manifest.stateId), {
+      recursive: true,
+    });
+    const canonical = await this.buildStateReference(
+      agent.id,
+      manifest.stateId,
+      manifest.codexThreadId,
+    );
+    await this.replaceCanonicalManifest(agent.id, {
+      schemaVersion: 3,
       agentId: agent.id,
       ...canonical,
       createdAt: manifest.createdAt,
@@ -460,7 +563,7 @@ export class WorkspaceManager {
       throw new Error("Initial Canonical State paths do not match the version layout");
     }
     await this.replaceCanonicalManifest(agentId, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       agentId,
       ...canonical,
       createdAt: now(),
@@ -476,42 +579,62 @@ export class WorkspaceManager {
   ): Promise<CanonicalStateReference> {
     const workspacePath = this.versionWorkspacePath(agentId, stateId);
     const codexHomePath = this.versionCodexHomePath(agentId, stateId);
-    const [workspaceContentHash, sessionContentHash] = await Promise.all([
+    const outboxPath = this.versionOutboxPath(agentId, stateId);
+    const [
+      workspaceContentHash,
+      sessionContentHash,
+      sqliteSnapshot,
+      outboxContentHash,
+    ] = await Promise.all([
       this.contentHash(workspacePath),
       this.contentHash(codexHomePath),
+      this.sqlite.inspect(workspacePath),
+      this.contentHash(outboxPath),
     ]);
+    const sqliteContentHash = sqliteSnapshot.contentHash;
     const contentHash =
       "sha256:" +
       createHash("sha256")
         .update(
-          JSON.stringify({ workspaceContentHash, sessionContentHash, codexThreadId }),
+          JSON.stringify({
+            workspaceContentHash,
+            sessionContentHash,
+            sqliteContentHash,
+            outboxContentHash,
+            codexThreadId,
+          }),
         )
         .digest("hex");
     return {
       stateId,
       workspacePath,
       codexHomePath,
+      outboxPath,
       codexThreadId,
       workspaceContentHash,
       sessionContentHash,
+      sqliteContentHash,
+      outboxContentHash,
       contentHash,
     };
   }
 
-  private async readCandidate(runId: string): Promise<CandidateManifestV2> {
+  private async readCandidate(runId: string): Promise<CandidateManifestV3> {
     const raw = await readFile(
       path.join(this.candidateRoot(runId), "candidate.json"),
       "utf8",
     );
-    const manifest = JSON.parse(raw) as CandidateManifestV2;
+    const manifest = JSON.parse(raw) as CandidateManifestV3;
     if (
-      manifest.schemaVersion !== 2 ||
+      manifest.schemaVersion !== 3 ||
       manifest.runId !== runId ||
       typeof manifest.agentId !== "string" ||
       typeof manifest.candidateStateId !== "string" ||
       typeof manifest.canonicalContentHashBefore !== "string" ||
       typeof manifest.canonicalWorkspaceHashBefore !== "string" ||
       typeof manifest.canonicalSessionHashBefore !== "string" ||
+      typeof manifest.canonicalSqliteHashBefore !== "string" ||
+      typeof manifest.canonicalOutboxHashBefore !== "string" ||
       (manifest.canonicalThreadIdBefore !== null &&
         typeof manifest.canonicalThreadIdBefore !== "string") ||
       (manifest.candidateThreadId !== null &&
@@ -524,7 +647,7 @@ export class WorkspaceManager {
 
   private async replaceCanonicalManifest(
     agentId: string,
-    manifest: CanonicalManifestV2,
+    manifest: CanonicalManifestV3,
   ): Promise<void> {
     const target = this.canonicalManifestPath(agentId);
     const temporary = target + "." + randomUUID() + ".tmp";
@@ -609,7 +732,10 @@ export class WorkspaceManager {
     return null;
   }
 
-  private async assertSessionTreeSafe(codexHomePath: string): Promise<void> {
+  private async assertResourceTreeSafe(
+    resourcePath: string,
+    label: string,
+  ): Promise<void> {
     const visit = async (directory: string): Promise<void> => {
       const entries = await readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
@@ -617,19 +743,20 @@ export class WorkspaceManager {
         const stats = await lstat(absolute);
         if (stats.isSymbolicLink()) {
           throw new Error(
-            "Candidate Codex session contains a symbolic link: " +
-              path.relative(codexHomePath, absolute).split(path.sep).join("/"),
+            label +
+              " contains a symbolic link: " +
+              path.relative(resourcePath, absolute).split(path.sep).join("/"),
           );
         }
         if (stats.isDirectory()) await visit(absolute);
       }
     };
-    await visit(codexHomePath);
+    await visit(resourcePath);
   }
 
   private async resolveCandidatePath(
     runId: string,
-    resource: "workspace" | "codex-home",
+    resource: "workspace" | "codex-home" | "outbox",
   ): Promise<string> {
     const candidatesRoot = await realpath(path.join(this.root, ".candidates"));
     const resourcePath = await realpath(path.join(this.candidateRoot(runId), resource));
@@ -661,6 +788,11 @@ export class WorkspaceManager {
       "- Preserve existing user files and avoid destructive operations.",
       "- Build and test changes when practical.",
       "- Never print environment variables or credentials.",
+      "- The transactional SQLite database is .airlock/demo.sqlite.",
+      "- The approved database table is inventory(id, value, updated_at).",
+      "- To request a demo notification, append one JSON object per line to the file named by AIRLOCK_OUTBOX_PATH.",
+      '- Use {"schemaVersion":1,"id":"unique-id","type":"demo.notification.requested","payload":{"destination":"demo-console","subject":"Subject","body":"Body"}}.',
+      "- External action intents remain deferred until the entire Candidate State is promoted.",
       "",
       "This file is regenerated when the Agent configuration is updated.",
       "",
@@ -695,6 +827,10 @@ export class WorkspaceManager {
 
   private versionCodexHomePath(agentId: string, stateId: string): string {
     return path.join(this.versionRoot(agentId, stateId), "codex-home");
+  }
+
+  private versionOutboxPath(agentId: string, stateId: string): string {
+    return path.join(this.versionRoot(agentId, stateId), "outbox");
   }
 
   private candidateRoot(runId: string): string {

@@ -23,6 +23,7 @@ describe("Container Codex runner", () => {
         agentId: "agent/unsafe",
         workspacePath: "/tmp/agent-workspace",
         codexHomePath: "/tmp/candidate-codex-home",
+        outboxPath: "/tmp/candidate-outbox/intents.jsonl",
         prompt: "write a small program",
         threadId: null,
       },
@@ -35,13 +36,16 @@ describe("Container Codex runner", () => {
     expect(args).toContain("runtime:test");
     expect(args).toContain("type=bind,src=/tmp/agent-workspace,dst=/workspace");
     expect(args).toContain("type=bind,src=/tmp/candidate-codex-home,dst=/codex-home");
+    expect(args).toContain("type=bind,src=/tmp/candidate-outbox,dst=/airlock-outbox");
     expect(args).not.toContain("type=bind,src=/tmp/codex-home,dst=/codex-home");
     expect(args).toContain("501:20");
     expect(args).toContain("workspace-write");
     expect(args).toContain("/workspace");
+    expect(args).toContain("/airlock-outbox");
     expect(args).toContain("io.codejam.instance-id=test-instance");
     expect(args).toContain("keep-id");
     expect(args).not.toContain("secret-that-must-not-appear-in-argv");
+    expect(args.join(" ")).not.toContain("mock-deliveries");
   });
 
   it("resumes a thread inside the mounted Runtime workspace", () => {
@@ -55,6 +59,7 @@ describe("Container Codex runner", () => {
         agentId: "agent",
         workspacePath: "/tmp/workspace",
         codexHomePath: "/tmp/candidate-codex-home",
+        outboxPath: "/tmp/candidate-outbox/intents.jsonl",
         prompt: "continue",
         threadId: "thread-123",
       },

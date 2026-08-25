@@ -279,6 +279,14 @@ describe("Agent lifecycle", () => {
       maxAddedBytes: 2_097_152,
     },
     {
+      label: "outbox symlink",
+      validation: "external-action-intents",
+      mutate: (request: RunnerRequest) =>
+        symlink("/etc/passwd", request.outboxPath),
+      maxChangedFiles: 200,
+      maxAddedBytes: 2_097_152,
+    },
+    {
       label: "change limit",
       validation: "change-limits",
       mutate: async (request: RunnerRequest) => {

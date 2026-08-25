@@ -4,6 +4,9 @@ The local profile runs the React/Fastify control plane on macOS or Linux and
 starts every Codex turn in a disposable Docker, Colima, or Podman container.
 Only the configured ModelArk model API is remote.
 
+No ModelArk credential is required for `npm run test:e2e` or `npm run check:phase4`.
+Those commands use a deterministic local Codex fixture, SQLite, and the atomic mock action consumer without paid inference.
+
 ## Start
 
 Requirements:
@@ -44,7 +47,8 @@ Persistent state defaults to:
 
 Set `LOCAL_POC_DATA_ROOT` to use another directory.
 
-Each turn mounts only the selected Agent workspace and Codex session directory.
+Each turn mounts only the selected Candidate workspace, Candidate Codex session directory, and fresh Candidate outbox.
+The canonical resources and platform-owned mock delivery store are never mounted into the Runtime.
 Default limits are 2 CPUs, 2 GiB memory, 256 processes, dropped capabilities,
 and `no-new-privileges`.
 

@@ -11,6 +11,7 @@ import {
   rm,
 } from "node:fs/promises";
 import path from "node:path";
+import { SQLITE_RELATIVE_PATH } from "./sqlite-resource.js";
 import type {
   OutcomeContract,
   ValidationEvidence,
@@ -264,6 +265,7 @@ export class OutcomeValidator {
       .filter((change) => change.kind !== "deleted")
       .map((change) => change.path);
     for (const relativePath of changedFilePaths) {
+      if (relativePath === SQLITE_RELATIVE_PATH) continue;
       const entry = candidateInventory.get(relativePath);
       if (!entry || entry.kind !== "file") continue;
       if (entry.size > MAX_SECRET_SCAN_FILE_BYTES) {

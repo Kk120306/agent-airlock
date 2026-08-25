@@ -147,6 +147,68 @@ function AirlockEvidence({ run }: { run: AgentRun }) {
         </section>
       )}
 
+      {(transaction.sqlite || transaction.externalActions.intents.length > 0) && (
+        <section className="multi-resource-disposition" aria-label="Data and effects evidence">
+          <article>
+            <span className="eyebrow">SQLite snapshot</span>
+            <div className="disposition-title">
+              <strong>
+                {transaction.sqlite?.after
+                  ? transaction.sqlite.after.rowCount +
+                    " row" +
+                    (transaction.sqlite.after.rowCount === 1 ? "" : "s")
+                  : "pending"}
+              </strong>
+              <code>{shortHash(transaction.sqlite?.after?.contentHash ?? null)}</code>
+            </div>
+            <p>
+              {transaction.sqlite?.candidate && transaction.sqlite.before
+                ? transaction.sqlite.candidate.contentHash ===
+                  transaction.sqlite.before.contentHash
+                  ? "Candidate data matched the prior Canonical snapshot."
+                  : transaction.disposition === "promoted"
+                    ? "Candidate data was accepted with the whole Agent."
+                    : "Candidate data changed, but Canonical data remained unchanged."
+                : "Waiting for bounded query evidence."}
+            </p>
+            {transaction.sqlite?.candidate?.rows.slice(0, 3).map((row) => (
+              <div className="sqlite-row" key={row.id}>
+                <code>{row.id}</code>
+                <span>{row.value}</span>
+              </div>
+            ))}
+          </article>
+          <article>
+            <span className="eyebrow">Deferred effects</span>
+            <div className="disposition-title">
+              <strong>{transaction.externalActions.deliveredCount} delivered</strong>
+              <span>{transaction.externalActions.intents.length} requested</span>
+            </div>
+            <p>
+              Effects are claimed only after the Canonical manifest advances.
+            </p>
+            {transaction.externalActions.intents.length === 0 ? (
+              <div className="effect-row"><span>No intent requested</span></div>
+            ) : (
+              transaction.externalActions.intents.map((intent) => (
+                <div className="effect-row" key={intent.idempotencyKey}>
+                  <div>
+                    <code>{intent.id}</code>
+                    <span>{intent.destination}</span>
+                  </div>
+                  <strong className={"effect-status effect-" + intent.status}>
+                    {intent.status}
+                  </strong>
+                </div>
+              ))
+            )}
+          </article>
+          <p className="boundary-disclosure">
+            {transaction.externalActions.bypassDisclosure}
+          </p>
+        </section>
+      )}
+
       <div className="airlock-columns">
         <section className="evidence-section">
           <h4>Run timeline</h4>

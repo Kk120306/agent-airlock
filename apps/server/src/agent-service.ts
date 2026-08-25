@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import {
   AirlockRunError,
   AirlockRunner,
@@ -10,11 +11,17 @@ import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
 import {
+  ExternalActionOutbox,
+  MockExternalActionDispatcher,
+  type MockDeliveryReceipt,
+} from "./external-actions.js";
+import {
   createDefaultOutcomeContract,
   createNextOutcomeContract,
 } from "./outcome-contract.js";
 import { OutcomeValidator } from "./outcome-validator.js";
 import { JsonStore } from "./store.js";
+import { SqliteResource } from "./sqlite-resource.js";
 import type {
   Agent,
   AgentRun,
@@ -39,6 +46,7 @@ export class AgentService {
   private readonly cancellationRequests = new Set<string>();
   private readonly configuringAgents = new Set<string>();
   private readonly runner: AirlockRunner;
+  private readonly actionDispatcher: MockExternalActionDispatcher;
 
   constructor(
     private readonly config: AppConfig,
@@ -48,16 +56,23 @@ export class AgentService {
     validationCommandExecutor: ValidationCommandExecutor =
       new ContainerValidationCommandExecutor(config),
   ) {
+    this.actionDispatcher = new MockExternalActionDispatcher(
+      path.join(config.dataDirectory, "mock-deliveries.json"),
+    );
     this.runner = new AirlockRunner(
       runner,
       workspaces,
       new OutcomeValidator(validationCommandExecutor),
+      new SqliteResource(),
+      new ExternalActionOutbox(),
+      this.actionDispatcher,
     );
   }
 
   async initialize(): Promise<void> {
     await this.store.initialize();
     await this.workspaces.initialize();
+    await this.actionDispatcher.initialize();
     const snapshot = this.store.snapshot();
     const canonicalStates = new Map<string, CanonicalStateReference>();
     for (const agent of snapshot.agents) {
@@ -267,6 +282,10 @@ export class AgentService {
       .snapshot()
       .runs.filter((run) => run.agentId === agentId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async listExternalEffects(): Promise<MockDeliveryReceipt[]> {
+    return this.actionDispatcher.list();
   }
 
   async sendMessage(

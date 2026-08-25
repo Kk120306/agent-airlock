@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
@@ -76,15 +77,24 @@ export function buildContainerRunArgs(
     "HOME=/tmp",
     "--env",
     "NO_COLOR=1",
+    "--env",
+    "AIRLOCK_OUTBOX_PATH=/airlock-outbox/intents.jsonl",
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
     "type=bind,src=" + request.codexHomePath + ",dst=/codex-home",
+    "--mount",
+    "type=bind,src=" + path.dirname(request.outboxPath) + ",dst=/airlock-outbox",
     "--workdir",
     "/workspace",
     config.containerRuntimeImage,
     "codex",
-    ...buildCodexArgs(request, config.codexSandboxMode, "/workspace"),
+    ...buildCodexArgs(
+      request,
+      config.codexSandboxMode,
+      "/workspace",
+      "/airlock-outbox",
+    ),
   ];
 }
 
