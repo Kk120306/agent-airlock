@@ -1,13 +1,19 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import {
   EXTERNAL_ACTION_BYPASS_DISCLOSURE,
   ExternalActionOutbox,
   intentEvidence,
   MockExternalActionDispatcher,
+  type MockDeliveryReceipt,
   type ParsedExternalActionIntent,
 } from "./external-actions.js";
 import { RunCancelledError } from "./errors.js";
 import { OutcomeValidator } from "./outcome-validator.js";
+import {
+  PromotionJournal,
+  type PromotionJournalRecord,
+} from "./promotion-journal.js";
 import { SQLITE_RELATIVE_PATH, SqliteResource } from "./sqlite-resource.js";
 import type {
   AgentRunner,
@@ -36,6 +42,36 @@ export interface AirlockRunResult extends RunnerResult {
 }
 
 export type TransactionProgress = (transaction: RunTransaction) => Promise<void>;
+
+export type PromotionFaultPoint =
+  | "after-validated"
+  | "after-version-install"
+  | "after-version-installed"
+  | "after-canonical-advance"
+  | "after-canonical-advanced"
+  | "after-effect-dispatch"
+  | "after-effects-delivered"
+  | "after-completed";
+
+export type PromotionFaultInjector = (
+  point: PromotionFaultPoint,
+  runId: string,
+) => void | Promise<void>;
+
+export interface ReconciledPromotion {
+  runId: string;
+  agentId: string;
+  result: RunnerResult;
+  transaction: RunTransaction;
+  canonicalState: CanonicalStateReference;
+}
+
+export interface PromotionRecoveryFailure {
+  runId: string | null;
+  agentId: string | null;
+  message: string;
+  transaction: RunTransaction | null;
+}
 
 export class AirlockRunError extends Error {
   constructor(
@@ -128,6 +164,11 @@ export function createRunTransaction(
       depth: 0,
       maxDepth: maxRepairDepth,
     },
+    recovery: {
+      journalPhase: null,
+      recoveredAfterRestart: false,
+      recoveryError: null,
+    },
     promotionReceipt: null,
   };
 }
@@ -143,6 +184,8 @@ export class AirlockRunner {
     private readonly sqlite: SqliteResource,
     private readonly actionOutbox: ExternalActionOutbox,
     private readonly actionDispatcher: MockExternalActionDispatcher,
+    private readonly promotionJournal: PromotionJournal,
+    private readonly injectPromotionFault?: PromotionFaultInjector,
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -314,64 +357,90 @@ export class AirlockRunner {
         "All required Validations passed",
         onProgress,
       );
-      const canonicalState = await this.workspaces.promoteCandidate(
+      const plan = await this.workspaces.planPromotion(
         request.agentId,
         request.runId,
       );
-      candidatePrepared = false;
-      transaction.disposition = "promoted";
-      transaction.quarantineAvailable = false;
-      transaction.canonicalStateIdAfter = canonicalState.stateId;
-      transaction.canonicalContentHashAfter = canonicalState.contentHash;
-      if (transaction.sqlite) transaction.sqlite.after = sqliteValidation.snapshot;
-      let actionFingerprint = externalActionFingerprint([]);
-      try {
-        const current = await this.workspaces.readCanonical(request.agentId);
-        if (current.stateId !== canonicalState.stateId) {
-          throw new Error("Canonical State did not advance to the promoted state");
-        }
-        const receipts = await this.actionDispatcher.dispatch(
-          request.runId,
-          parsedIntents,
-        );
-        transaction.externalActions.intents = intentEvidence(
-          parsedIntents,
-          "deferred",
-          receipts,
-        );
-        transaction.externalActions.deliveredCount = receipts.length;
-        actionFingerprint = externalActionFingerprint(receipts);
-      } catch {
-        transaction.externalActions.intents = intentEvidence(
-          parsedIntents,
-          "delivery-error",
-        );
-      }
-      transaction = finalizeResources(transaction, "promoted", canonicalState, {
-        sqlite: sqliteValidation.snapshot?.contentHash ?? null,
-        "external-actions": actionFingerprint,
+      let journal = await this.promotionJournal.begin({
+        plan,
+        transaction,
+        result,
       });
-      const deliveryFailed = transaction.externalActions.intents.some(
-        (intent) => intent.status === "delivery-error",
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-validated", request.runId);
+
+      const installed = await this.workspaces.installPromotion(plan);
+      candidatePrepared = false;
+      await this.injectPromotionFault?.("after-version-install", request.runId);
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "version-installed",
+        { transaction, targetCanonical: installed },
       );
-      transaction.resources = transaction.resources.map((resource) =>
-        resource.kind === "external-actions" && deliveryFailed
-          ? {
-              ...resource,
-              summary: "Canonical intent awaits delivery recovery",
-            }
-          : resource,
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-version-installed", request.runId);
+
+      const canonicalState = await this.workspaces.advancePromotion(plan, installed);
+      transaction = this.recordCanonicalAdvance(transaction, canonicalState);
+      await this.injectPromotionFault?.("after-canonical-advance", request.runId);
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "canonical-advanced",
+        { transaction, targetCanonical: canonicalState },
       );
-      transaction.promotionReceipt = createPromotionReceipt(transaction);
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-canonical-advanced", request.runId);
+
+      const receipts = await this.actionDispatcher.dispatch(
+        request.runId,
+        parsedIntents,
+      );
+      await this.injectPromotionFault?.("after-effect-dispatch", request.runId);
+      transaction = this.finalizePromotedEffects(
+        transaction,
+        canonicalState,
+        parsedIntents,
+        receipts,
+      );
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "effects-delivered",
+        { transaction, targetCanonical: canonicalState },
+      );
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-effects-delivered", request.runId);
+
       transaction = this.recordTransition(
         transaction,
         "promoted",
-        deliveryFailed
-          ? "Candidate State is Canonical; external delivery needs recovery"
-          : "Candidate State is now Canonical State",
+        "Candidate State is now Canonical State",
       );
+      journal = await this.promotionJournal.advance(request.runId, "completed", {
+        transaction,
+        targetCanonical: canonicalState,
+      });
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-completed", request.runId);
       return { ...result, transaction, canonicalState };
     } catch (error) {
+      const journal = await this.promotionJournal
+        .read(request.runId)
+        .catch(() => null);
+      if (journal) {
+        throw new AirlockRunError(
+          "Promotion was interrupted at " +
+            journal.phase +
+            " and requires durable reconciliation",
+          journal.transaction,
+          false,
+          error,
+        );
+      }
       const cancelled = error instanceof RunCancelledError;
       if (candidatePrepared) {
         if (cancelled) {
@@ -406,6 +475,228 @@ export class AirlockRunner {
       this.activeAgentIds.delete(request.agentId);
       this.cancellationRequests.delete(request.agentId);
     }
+  }
+
+  async reconcilePromotions(
+    recoverCompletedRunIds: Set<string>,
+  ): Promise<{
+    recovered: ReconciledPromotion[];
+    failures: PromotionRecoveryFailure[];
+    protectedRunIds: Set<string>;
+  }> {
+    const scan = await this.promotionJournal.scan();
+    const recovered: ReconciledPromotion[] = [];
+    const failures: PromotionRecoveryFailure[] = scan.errors.map((error) => ({
+      runId: error.runId,
+      agentId: null,
+      message: error.message,
+      transaction: null,
+    }));
+    const protectedRunIds = new Set<string>();
+    for (const record of scan.records) {
+      if (record.phase === "completed" && !recoverCompletedRunIds.has(record.runId)) {
+        continue;
+      }
+      protectedRunIds.add(record.runId);
+      try {
+        recovered.push(await this.reconcilePromotion(record));
+        protectedRunIds.delete(record.runId);
+      } catch (error) {
+        const message =
+          "Promotion recovery failed: " +
+          (error instanceof Error ? error.message : String(error));
+        const failedRecord = await this.promotionJournal
+          .recordRecoveryError(record.runId, record.transaction, message)
+          .catch(() => record);
+        failures.push({
+          runId: record.runId,
+          agentId: record.agentId,
+          message,
+          transaction: failedRecord.transaction,
+        });
+      }
+    }
+    return { recovered, failures, protectedRunIds };
+  }
+
+  private async reconcilePromotion(
+    initial: PromotionJournalRecord,
+  ): Promise<ReconciledPromotion> {
+    let record = structuredClone(initial);
+    let transaction = structuredClone(record.transaction);
+    transaction.recovery = {
+      ...transaction.recovery,
+      recoveredAfterRestart: true,
+      recoveryError: null,
+    };
+
+    if (record.phase === "validated") {
+      const installed = await this.workspaces.installPromotion(record.plan);
+      record = await this.promotionJournal.advance(
+        record.runId,
+        "version-installed",
+        { transaction, targetCanonical: installed },
+      );
+      transaction = record.transaction;
+    }
+
+    if (record.phase === "version-installed") {
+      if (!record.targetCanonical) {
+        throw new Error("Installed journal phase has no target fingerprints");
+      }
+      const installed = await this.workspaces.verifyInstalledPromotion(
+        record.plan,
+        record.targetCanonical,
+      );
+      const canonical = await this.workspaces.advancePromotion(
+        record.plan,
+        installed,
+      );
+      transaction = this.recordCanonicalAdvance(transaction, canonical);
+      record = await this.promotionJournal.advance(
+        record.runId,
+        "canonical-advanced",
+        { transaction, targetCanonical: canonical },
+      );
+      transaction = record.transaction;
+    }
+
+    if (record.phase === "canonical-advanced") {
+      const canonical = await this.verifyJournalCanonical(record);
+      const actionValidation = await this.actionOutbox.validate(
+        path.join(canonical.outboxPath, "intents.jsonl"),
+        record.runId,
+      );
+      if (actionValidation.evidence.status !== "passed") {
+        throw new Error(actionValidation.evidence.summary);
+      }
+      const receipts = await this.actionDispatcher.dispatch(
+        record.runId,
+        actionValidation.intents,
+      );
+      transaction = this.finalizePromotedEffects(
+        transaction,
+        canonical,
+        actionValidation.intents,
+        receipts,
+      );
+      record = await this.promotionJournal.advance(
+        record.runId,
+        "effects-delivered",
+        { transaction, targetCanonical: canonical },
+      );
+      transaction = record.transaction;
+    }
+
+    if (record.phase === "effects-delivered") {
+      const canonical = await this.verifyJournalCanonical(record);
+      await this.verifyDeliveredEffects(record, canonical);
+      transaction = this.recordTransition(
+        transaction,
+        "promoted",
+        "Promotion journal reconciled after server restart",
+      );
+      record = await this.promotionJournal.advance(record.runId, "completed", {
+        transaction,
+        targetCanonical: record.targetCanonical,
+      });
+      transaction = record.transaction;
+    } else if (record.phase === "completed") {
+      const canonical = await this.verifyJournalCanonical(record);
+      await this.verifyDeliveredEffects(record, canonical);
+      transaction.recovery.recoveredAfterRestart = true;
+      record = await this.promotionJournal.updateTransaction(
+        record.runId,
+        transaction,
+      );
+      transaction = record.transaction;
+    }
+
+    if (!record.targetCanonical) {
+      throw new Error("Completed Promotion journal has no target fingerprints");
+    }
+    const canonicalState = await this.verifyJournalCanonical(record);
+    return {
+      runId: record.runId,
+      agentId: record.agentId,
+      result: record.recoveryResult,
+      transaction,
+      canonicalState,
+    };
+  }
+
+  private async verifyJournalCanonical(
+    record: PromotionJournalRecord,
+  ): Promise<CanonicalStateReference> {
+    if (!record.targetCanonical) {
+      throw new Error("Promotion journal has no target fingerprints");
+    }
+    const installed = await this.workspaces.verifyInstalledPromotion(
+      record.plan,
+      record.targetCanonical,
+    );
+    return this.workspaces.advancePromotion(record.plan, installed);
+  }
+
+  private async verifyDeliveredEffects(
+    record: PromotionJournalRecord,
+    canonical: CanonicalStateReference,
+  ): Promise<void> {
+    const actionValidation = await this.actionOutbox.validate(
+      path.join(canonical.outboxPath, "intents.jsonl"),
+      record.runId,
+    );
+    if (actionValidation.evidence.status !== "passed") {
+      throw new Error(actionValidation.evidence.summary);
+    }
+    const receipts = await this.actionDispatcher.dispatch(
+      record.runId,
+      actionValidation.intents,
+    );
+    const expectedKeys = record.transaction.externalActions.intents
+      .map((intent) => intent.idempotencyKey)
+      .sort();
+    const actualKeys = receipts.map((receipt) => receipt.idempotencyKey).sort();
+    if (
+      expectedKeys.length !== actualKeys.length ||
+      expectedKeys.some((key, index) => key !== actualKeys[index])
+    ) {
+      throw new Error("Delivered effects contradict the Promotion journal");
+    }
+  }
+
+  private recordCanonicalAdvance(
+    transaction: RunTransaction,
+    canonicalState: CanonicalStateReference,
+  ): RunTransaction {
+    const next = structuredClone(transaction);
+    next.disposition = "promoted";
+    next.quarantineAvailable = false;
+    next.canonicalStateIdAfter = canonicalState.stateId;
+    next.canonicalContentHashAfter = canonicalState.contentHash;
+    if (next.sqlite) next.sqlite.after = next.sqlite.candidate;
+    return next;
+  }
+
+  private finalizePromotedEffects(
+    transaction: RunTransaction,
+    canonicalState: CanonicalStateReference,
+    parsedIntents: ParsedExternalActionIntent[],
+    receipts: MockDeliveryReceipt[],
+  ): RunTransaction {
+    let next = structuredClone(transaction);
+    next.externalActions.intents = intentEvidence(
+      parsedIntents,
+      "deferred",
+      receipts,
+    );
+    next.externalActions.deliveredCount = receipts.length;
+    next = finalizeResources(next, "promoted", canonicalState, {
+      sqlite: next.sqlite?.after?.contentHash ?? null,
+      "external-actions": externalActionFingerprint(receipts),
+    });
+    next.promotionReceipt = createPromotionReceipt(next);
+    return next;
   }
 
   private assertNotCancelled(agentId: string): void {

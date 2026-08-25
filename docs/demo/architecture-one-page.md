@@ -14,6 +14,7 @@ flowchart LR
         Contract["Versioned Outcome Contract snapshot"]
         Validate["Deterministic Validators"]
         Decision{"All required Validations pass?"}
+        Journal["Durable Promotion journal"]
         Manifest["Atomic canonical.json recovery point"]
         Lineage["Bounded Repair lineage and freshness gate"]
         Receipt["Bounded and redacted Promotion Receipt"]
@@ -21,7 +22,8 @@ flowchart LR
         Contract --> Airlock
         Airlock --> Validate
         Validate --> Decision
-        Decision -->|Yes| Manifest
+        Decision -->|Yes| Journal
+        Journal -->|Install verified version| Manifest
         Decision -->|No| Receipt
         Lineage --> Airlock
         Manifest --> Receipt
@@ -64,6 +66,7 @@ flowchart LR
 
     Manifest -->|Advance exactly once| Versions
     Manifest -->|Only after advance| Dispatcher
+    Dispatcher -->|Receipt acknowledgement| Journal
     Canonical -->|Copy at Run start| Candidate
     Receipt --> UI
     Decision -->|No accepted mutation| Quarantine
@@ -77,21 +80,22 @@ flowchart LR
 3. The Agent uses Codex and ModelArk normally and may change files, data, reasoning, and supported action intents inside Candidate State.
 4. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
 5. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
-6. A pass moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
-7. Only after that advance may the idempotent mock consumer claim a validated notification intent.
+6. A pass first records an approved decision, then moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
+7. Only after that advance may the idempotent mock consumer claim a validated notification intent, and every boundary advances the monotonic journal.
 8. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
 9. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
 10. The operator may discard mutable Quarantine state or fork one bounded Repair Run that resumes rejected memory, preserves useful work, uses a fresh outbox, and must pass the original contract before Promotion.
+11. After interruption, startup verifies the journal, installed version, canonical manifest, and mock receipts before reconstructing operator-facing metadata.
 
 ## Trust and recovery boundary
 
 The Fastify control plane, Airlock state manager, and canonical manifest are trusted in this proof of concept.
 The Agent Runtime, generated project content, and project validation commands are untrusted.
-The atomic canonical manifest is the Phase 2 recovery point and the only source of accepted state.
+The atomic canonical manifest is the only source of accepted state, while the journal is the durable approved decision that recovery completes forward.
 Canonical workspace, Codex-session, and SQLite versions are never mounted writable into the Runtime or validation container.
 The platform-owned delivery store is never mounted into either execution boundary.
 
-## Implemented and tested in Phases 0-5
+## Implemented and tested in Phases 0-6
 
 - Starter-kit Agent CRUD, lifecycle controls, Playground chat, persistence, Codex runner seam, and container path remain intact.
 - Promotion, destructive Quarantine, Runtime failure, and cancellation preserve the documented canonical-state invariant.
@@ -105,10 +109,12 @@ The platform-owned delivery store is never mounted into either execution boundar
 - A repaired child starts from the exact Quarantine, restores protected canonical content from a verified disposable reference, retains useful rejected work, intentionally resubmits its action, and promotes with ancestry in its receipt.
 - Stale, missing, duplicate-child, and exhausted-depth repairs fail before execution, while discard is idempotent and retains decision evidence.
 - An opt-in real-container suite proves validation containment without an Ark key or writable canonical mount.
+- Eight deterministic interruption seams converge across two restarts to one canonical version, one assistant message, and at most one supported mock effect.
+- A physical fingerprint contradiction fails closed with visible recovery evidence, while root-confined retention preserves bounded evidence and unrelated host data.
 
 ## Deliberate non-claims
 
 The exactly-once guarantee ends at the atomic mock consumer and does not claim a distributed transaction with arbitrary providers.
 Unrestricted Runtime network egress can bypass the supported outbox.
-Promotion crash-journal reconciliation remains an explicit Phase 6 target.
+The journal is designed for one local control-plane process and does not claim power-loss durability or distributed coordination.
 A local-process Repair Run receives a disposable canonical copy whose integrity is promotion-gated, while the container provider additionally mounts that copy read-only.

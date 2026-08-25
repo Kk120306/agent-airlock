@@ -38,6 +38,8 @@ Volcengine ECS.
 - Compact Airlock timeline, four-resource disposition, change summary, canonical fingerprint, and Promotion Receipt
 - Bounded Repair Runs that preserve useful quarantined work, resume rejected Agent memory, and use a fresh outbox
 - Canonical freshness checks, receipt lineage, and idempotent Quarantine discard with retained evidence
+- Durable five-phase Promotion journal with forward startup reconciliation and visible fail-closed errors
+- Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -222,6 +224,8 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |
 | `CODEX_TIMEOUT_MS` | `600000` | Maximum duration of one turn. |
 | `AIRLOCK_MAX_REPAIR_DEPTH` | `2` | Maximum bounded Repair Runs in one Quarantine lineage. |
+| `AIRLOCK_CANDIDATE_RETENTION_HOURS` | `24` | Mutable Candidate retention window in positive hours. |
+| `AIRLOCK_QUARANTINE_RETENTION_HOURS` | `168` | Mutable Quarantine retention window in positive hours while bounded evidence remains. |
 | `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.
@@ -232,6 +236,7 @@ See [.env.example](.env.example) for all Runtime and resource-limit options.
 flowchart LR
     UI["React Web UI"] --> API["Fastify control plane"]
     API --> Airlock["Agent Airlock"]
+    Airlock --> Journal["Durable Promotion journal"]
     Airlock --> Store["Candidate and Canonical workspace, session, and SQLite"]
     Airlock --> Effects["Deferred post-Promotion mock effects"]
     Airlock --> Runtime{"Runtime provider"}
@@ -240,6 +245,8 @@ flowchart LR
     Airlock --> Validate["Bounded Validations"]
     Validate --> Decision{"Promote or Quarantine"}
     Decision -->|Rejected| Repair["Bounded Repair or Discard"]
+    Journal -->|Verified startup replay| Store
+    Journal -->|After canonical advance| Effects
     Repair -->|Fresh candidate and outbox| Airlock
     Container --> Ark["ModelArk Responses API"]
     Codex --> Ark
@@ -268,6 +275,7 @@ Use `npm run check:phase2` to run the full qualifying proof, browser journey, an
 Use `npm run check:phase3` to add the pinned Codex session-isolation and real validation-container proofs.
 Use `npm run check:phase4` for the complete no-cost four-resource proof.
 Use `npm run check:phase5` for the complete no-cost Quarantine, Repair, lineage, and discard proof.
+Use `npm run check:phase6` to add all eight Promotion interruption seams, repeated restart convergence, retention, and path-abuse proof.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.
@@ -282,6 +290,7 @@ The credentialed ModelArk acceptance journey remains the browser SOP documented 
 - [Product requirements](docs/product/PRD.md)
 - [Outcome roadmap](docs/product/OUTCOME_ROADMAP.md)
 - [Local POC](docs/LOCAL_POC.md)
+- [Recovery guide](docs/RECOVERY.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)
 - [Security policy](SECURITY.md)

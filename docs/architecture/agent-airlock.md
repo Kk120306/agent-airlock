@@ -11,13 +11,14 @@ The original `AgentService` passed the persistent workspace path and canonical C
 The original local Runtime also bind-mounted that workspace and one shared Codex home as writable container paths.
 Phase 1 isolated workspace files, but the shared Codex home remained a hidden mutation path until Phase 3.
 
-## Implemented Phase 5 architecture
+## Implemented Phase 6 architecture
 
 ```mermaid
 flowchart LR
     UI["Existing React Playground"] --> API["Existing Fastify API"]
     API --> AS["AgentService"]
     AS --> AR["AirlockRunner"]
+    AR --> PJ["Platform-owned Promotion journal"]
     AR --> SR["Workspace State Registry"]
     SR --> CS["Candidate workspace, Codex home, SQLite, and outbox"]
     SR --> Q["Quarantined Whole-Agent future"]
@@ -35,6 +36,8 @@ flowchart LR
     AR --> PR["Promotion, Quarantine, or Discard"]
     PR --> ST["Whole-Agent evidence and Promotion Receipt"]
     ST --> UI
+    PJ -->|Startup reconciliation| SR
+    PJ -->|Verified replay| ED
 ```
 
 ## Primary seam
@@ -54,8 +57,9 @@ interface AirlockRunner {
 ```
 
 Preparation, workspace coordination, validators, and receipts remain inside the module.
-Recovery journals, retention, and additional Transactional Resource adapters remain later-phase extension seams.
+Additional Transactional Resource adapters remain a later-phase extension seam.
 Repair preparation, ancestry, freshness checks, and discard remain inside the same Airlock boundary.
+Promotion journaling, forward recovery, and bounded retention are implemented inside that boundary.
 
 ## State layout
 
@@ -92,11 +96,24 @@ A promoted state version becomes immutable and may be used as the source for a l
 Airlock verifies the workspace hash, session hash, and composite hash whenever Canonical State is resolved.
 Candidate preparation copies both resources and refreshes only the generated provider configuration file from a platform-owned template.
 Promotion moves the complete candidate root before one atomic manifest replacement, while Quarantine preserves the same complete root without changing the manifest.
+An approved Agent Run records a Promotion journal outside every Runtime mount before the candidate root moves.
 Repair copies a selected Quarantine into a new Candidate State, resumes its rejected Codex thread, creates a fresh empty outbox, and adds a disposable copy of the exact matching Canonical workspace as a repair reference.
 The container Runtime mounts that reference read-only, and every provider must pass a required reference-integrity Validation before Promotion.
 Airlock removes the reference before installing the repaired immutable version.
 Discard removes only the internally resolved mutable Quarantine root and retains bounded evidence in the control-plane store.
 `npm run test:codex-session-container` reproduces the pinned CLI storage boundary with container networking disabled and a fake credential.
+
+The platform data layout adds one journal record per approved Run:
+
+```text
+APP_DATA_DIR/
+├── launchpad.json
+├── mock-deliveries.json
+└── promotion-journal/<run-id>.json
+```
+
+Each record advances atomically through `validated`, `version-installed`, `canonical-advanced`, `effects-delivered`, and `completed`.
+The record contains bounded redacted transaction evidence and a neutral recovery result, not a duplicate of arbitrary Runtime output.
 
 ## Run Transaction lifecycle
 
@@ -110,7 +127,12 @@ stateDiagram-v2
     Executing --> Cancelled: operator stops Run
     Validating --> Promoting: all required Validations pass
     Validating --> Quarantined: any required Validation fails
-    Promoting --> Promoted: Canonical State advances
+    Promoting --> Journaled: approved decision is durable
+    Journaled --> Installed: immutable version exists
+    Installed --> Accepted: Canonical State advances
+    Accepted --> Delivered: supported effects are claimed
+    Delivered --> Promoted: final evidence is durable
+    Promoting --> RecoveryError: physical evidence contradicts journal
     Quarantined --> Preparing: bounded Repair Run
     Quarantined --> Discarded: operator discards mutable state
     Promoted --> [*]
@@ -120,7 +142,8 @@ stateDiagram-v2
 
 Repair may start only when the selected Quarantine is available, its recorded Canonical State still exactly matches current reality, its parent has no existing repair child, and the configured ancestry bound is not exhausted.
 Each Repair Run uses the original snapshotted Outcome Contract and follows the ordinary execution, Validation, Promotion, and Quarantine path.
-Crash-journal reconciliation remains Phase 6 scope.
+Server startup reconciles journaled Promotions before generic active-Run handling.
+An interrupted pre-decision Candidate is retained in Quarantine when its manifest is valid and is cancelled only when no Candidate exists.
 
 ## Outcome Contract evaluation
 
@@ -179,12 +202,13 @@ The POC does not intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The version 6 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
+The version 7 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
-Phase 3 Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
-Startup reconciliation treats that manifest as authoritative and repairs cached workspace, state, and thread references in the JSON store.
+Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
+Startup reconciliation treats the journal as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the atomic mock-delivery store as effect truth.
+It verifies physical fingerprints before repairing cached workspace, state, thread, Run, message, receipt, and effect metadata in the JSON store.
 Phase 5 persists repair ancestry, mutable Quarantine availability, discard timestamps, and the same lineage in each Promotion Receipt.
-A durable promotion journal and crash-point reconciliation remain later work.
+Phase 6 persists Promotion journal position, recovered-after-restart evidence, and bounded recovery errors.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -199,8 +223,11 @@ Schema evolution must increment the database version and include a tested migrat
 | Repair reference changes | Fail its required Validation and quarantine the Repair Run. |
 | Operator discards Quarantine | Remove only mutable Quarantine state and retain bounded evidence with `discarded` disposition. |
 | Evidence persistence fails before promotion | Fail closed without promotion. |
+| Process stops after an approved journal | Reconcile the same decision forward to one target version and at most one supported mock effect. |
+| Journal and physical state contradict | Preserve current Canonical State, dispatch no new effect, and surface `recovery-error`. |
+| Candidate or Quarantine retention expires | Remove only unprotected mutable state and retain bounded control-plane evidence. |
 
-Interruption during Promotion does not yet have full journal-based reconciliation and is a documented Phase 2 limitation.
+The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 
 ## Trust boundaries
 
@@ -211,6 +238,7 @@ Interruption during Promotion does not yet have full journal-based reconciliatio
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
 - The implemented outbox protects only external actions routed through its interface.
 - The platform-owned mock delivery store is never mounted into the Runtime.
+- The platform-owned Promotion journal is never mounted into the Runtime.
 
 ## Evidence model
 
@@ -225,14 +253,14 @@ Each Run Transaction records:
 - SQLite before, candidate, and final semantic snapshots.
 - Typed intent identities, idempotency keys, statuses, and bounded post-Promotion delivery receipts.
 - Root Run identifier, parent Run identifier, repair depth, configured depth bound, and mutable Quarantine availability.
-
-Promotion journal position joins this model in Phase 6.
+- Monotonic Promotion journal phase, recovered-after-restart status, and bounded fail-closed recovery error.
 
 ## Open architectural decisions
 
-The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Promotion recovery and the judging cutoff.
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns the unresolved judging cutoff decision.
 Codex session isolation is resolved by ADR 0005.
 External action ordering and idempotency are resolved by ADR 0006.
 Repair ancestry, canonical freshness, fresh outbox, canonical reference, and discard semantics are resolved by ADR 0007.
+Promotion journal ordering, forward recovery, contradiction handling, and bounded retention are resolved by ADR 0008.
 Outcome Contract semantics and Validation containment are resolved by ADR 0003 and ADR 0004.
 This document must be revised when those tickets close.

@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 5 implemented and regression-locked
+**Status:** Phases 0 through 6 implemented and regression-locked
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -18,11 +18,12 @@ The product promise is simple:
 
 ## Current release
 
-Phases 0 through 5 are implemented.
+Phases 0 through 6 are implemented.
 The release makes workspace, Codex-session, and SQLite changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
 Typed notification intents use a candidate-owned outbox and an idempotent mock consumer that can claim an effect only after the canonical manifest advances.
 An operator can now repair or discard a Quarantine, while bounded ancestry, canonical freshness checks, a fresh outbox, and the original Outcome Contract keep recovery fail-closed.
-Crash-journal reconciliation remains the next product target.
+A platform-owned Promotion journal now reconciles every approved decision forward after process interruption, verifies physical fingerprints before repairing metadata, and fails closed on contradiction.
+Positive Candidate and Quarantine retention windows remove only expired mutable state while preserving bounded decision evidence.
 
 ## Problem
 
@@ -159,10 +160,12 @@ This journey describes the complete product direction, including later roadmap p
 - A quarantined destructive Run can be repaired and promoted without changing Canonical State before the repaired promotion.
 - The repaired Run preserves useful rejected work, restores protected canonical content, uses a fresh outbox, and records bounded lineage.
 - Discard removes mutable Quarantine state idempotently while retaining bounded decision evidence.
+- Interruption at each Promotion seam converges after restart to one canonical version, one assistant message, and at most one supported mock effect.
+- A contradictory journal, installed version, or canonical manifest produces an explicit `recovery-error` without rewriting Canonical State.
+- Candidate and Quarantine cleanup is root-confined, symlink-safe, active-Run-aware, and evidence preserving.
 
 ## Later-phase success metrics
 
-- Interrupted promotion converges after restart to one canonical version and at most one supported mock effect.
 - The complete success, rejection, and recovery story fits in a deterministic three-minute demonstration.
 
 ## Release scope
@@ -197,11 +200,11 @@ These capabilities shape stable extension points but are not hackathon dependenc
 
 ## Wayfinder decisions
 
-- [Define Promotion journal and crash recovery semantics](https://github.com/Kk120306/agent-airlock/issues/6).
 - [Set the P0 scope cutoff and judging acceptance bar](https://github.com/Kk120306/agent-airlock/issues/9).
 
 Codex session isolation is resolved in [ADR 0005](../adr/0005-version-codex-home-with-candidate-state.md).
 External Action Intent delivery is resolved in [ADR 0006](../adr/0006-defer-external-actions-until-promotion.md).
 Quarantine repair, lineage, freshness, and discard semantics are resolved in [ADR 0007](../adr/0007-repair-quarantined-futures.md).
+Promotion journal, forward recovery, contradiction handling, and retention semantics are resolved in [ADR 0008](../adr/0008-reconcile-approved-promotions-forward.md).
 
 The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) is the canonical index for these decisions.

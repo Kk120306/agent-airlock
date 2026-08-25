@@ -23,6 +23,7 @@
     "check:phase3": "npm run check:phase2 && npm run test:codex-session-container && npm run test:validation-container",
     "check:phase4": "npm run check:phase3",
     "check:phase5": "npm run check:phase4",
+    "check:phase6": "npm run check:phase5",
     "test:codex-session-container": "bash scripts/probe-codex-session.sh",
     "test:validation-container": "AIRLOCK_TEST_CONTAINER=1 npm test -w @launchpad/server -- --run src/validation-command-runner.test.ts",
     "poc": "node --env-file-if-exists=.env scripts/run-local-poc.mjs",

@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 5
+**Delivered:** Phases 0 through 6
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -246,6 +246,8 @@ Turn Airlock from a passive gate into a safe recovery system that converts preci
 Safety no longer means throwing useful work away, which gives the product a compelling productivity story as well as a security story.
 
 ### Phase 6: Adversarial resilience
+
+**Status:** Delivered and regression-locked
 
 **Outcome**
 

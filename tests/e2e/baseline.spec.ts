@@ -38,6 +38,7 @@ test("preserves the complete starter Playground journey", async ({ page, request
   const evidence = page.getByRole("article", { name: "Agent Airlock evidence" });
   const resources = evidence.getByRole("region", { name: "Transactional resources" });
   await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
+  await expect(evidence.getByText("Journal completed", { exact: true })).toBeVisible();
   await expect(resources.getByText("one decision across 4 resources")).toBeVisible();
   await expect(resources.getByText("SQLite data", { exact: true })).toBeVisible();
   await expect(resources.getByText("External actions", { exact: true })).toBeVisible();
@@ -176,6 +177,7 @@ test("preserves the complete starter Playground journey", async ({ page, request
   ).toBeVisible({ timeout: 15_000 });
   await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
   await expect(evidence.getByText("Repair 1 of 2", { exact: true })).toBeVisible();
+  await expect(evidence.getByText("Journal completed", { exact: true })).toBeVisible();
   await expect(evidence.getByText(/parent [a-f0-9]{8}/)).toBeVisible();
   await expect(resources.getByText("promoted", { exact: true })).toHaveCount(4);
   await expect(evidence.getByText("repaired", { exact: true })).toBeVisible();

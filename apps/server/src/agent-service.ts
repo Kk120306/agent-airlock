@@ -6,6 +6,7 @@ import {
   createPromotionReceipt,
   createRunTransaction,
   finalizeResources,
+  type PromotionFaultInjector,
 } from "./airlock-runner.js";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
@@ -20,6 +21,7 @@ import {
   createNextOutcomeContract,
 } from "./outcome-contract.js";
 import { OutcomeValidator } from "./outcome-validator.js";
+import { PromotionJournal } from "./promotion-journal.js";
 import { JsonStore } from "./store.js";
 import { SqliteResource } from "./sqlite-resource.js";
 import type {
@@ -31,6 +33,7 @@ import type {
   Message,
   OutcomeContract,
   OutcomeContractInput,
+  RunTransaction,
   UpdateAgentInput,
 } from "./types.js";
 import {
@@ -48,6 +51,7 @@ export class AgentService {
   private readonly quarantineOperations = new Set<string>();
   private readonly runner: AirlockRunner;
   private readonly actionDispatcher: MockExternalActionDispatcher;
+  private readonly promotionJournal: PromotionJournal;
 
   constructor(
     private readonly config: AppConfig,
@@ -56,9 +60,13 @@ export class AgentService {
     runner: AgentRunner,
     validationCommandExecutor: ValidationCommandExecutor =
       new ContainerValidationCommandExecutor(config),
+    promotionFaultInjector?: PromotionFaultInjector,
   ) {
     this.actionDispatcher = new MockExternalActionDispatcher(
       path.join(config.dataDirectory, "mock-deliveries.json"),
+    );
+    this.promotionJournal = new PromotionJournal(
+      path.join(config.dataDirectory, "promotion-journal"),
     );
     this.runner = new AirlockRunner(
       runner,
@@ -67,6 +75,8 @@ export class AgentService {
       new SqliteResource(),
       new ExternalActionOutbox(),
       this.actionDispatcher,
+      this.promotionJournal,
+      promotionFaultInjector,
     );
   }
 
@@ -74,22 +84,161 @@ export class AgentService {
     await this.store.initialize();
     await this.workspaces.initialize();
     await this.actionDispatcher.initialize();
+    await this.promotionJournal.initialize();
     const snapshot = this.store.snapshot();
-    const canonicalStates = new Map<string, CanonicalStateReference>();
-    for (const agent of snapshot.agents) {
-      canonicalStates.set(agent.id, await this.workspaces.ensureCanonical(agent));
-    }
-    await Promise.all(
+    const recoverCompletedRunIds = new Set(
       snapshot.runs
-        .filter((run) => run.status === "queued" || run.status === "running")
-        .map((run) => this.workspaces.cancelCandidate(run.id)),
+        .filter((run) => run.status !== "completed")
+        .map((run) => run.id),
     );
+    const recovery = await this.runner.reconcilePromotions(
+      recoverCompletedRunIds,
+    );
+    const recoveredRunIds = new Set(recovery.recovered.map((item) => item.runId));
+    const recoveryFailures = new Map(
+      recovery.failures
+        .filter((failure) => failure.runId)
+        .map((failure) => [failure.runId as string, failure]),
+    );
+    const interrupted = new Map<
+      string,
+      Awaited<ReturnType<WorkspaceManager["quarantineInterruptedCandidate"]>>
+    >();
+    const activeRunIds = snapshot.runs
+      .filter((run) => run.status === "queued" || run.status === "running")
+      .map((run) => run.id);
+    for (const runId of activeRunIds) {
+      if (recoveredRunIds.has(runId) || recovery.protectedRunIds.has(runId)) {
+        continue;
+      }
+      interrupted.set(
+        runId,
+        await this.workspaces.quarantineInterruptedCandidate(runId),
+      );
+    }
+
+    const canonicalStates = new Map<string, CanonicalStateReference>();
+    const canonicalErrors = new Map<string, string>();
+    for (const agent of snapshot.agents) {
+      try {
+        canonicalStates.set(agent.id, await this.workspaces.ensureCanonical(agent));
+      } catch (error) {
+        canonicalErrors.set(
+          agent.id,
+          "Canonical State reconciliation failed: " +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+
+    const protectedRunIds = new Set([
+      ...recovery.protectedRunIds,
+      ...activeRunIds,
+    ]);
+    const startupTime = Date.now();
+    const cleanup = await this.workspaces.cleanupExpiredState({
+      candidateOlderThan: new Date(
+        startupTime - this.config.candidateRetentionMs,
+      ).toISOString(),
+      quarantineOlderThan: new Date(
+        startupTime - this.config.quarantineRetentionMs,
+      ).toISOString(),
+      protectedRunIds,
+    });
+
     await this.store.mutate((database) => {
+      for (const recovered of recovery.recovered) {
+        const run = database.runs.find((item) => item.id === recovered.runId);
+        const agent = database.agents.find((item) => item.id === recovered.agentId);
+        if (!run || !agent || run.status === "completed") continue;
+        const completedAt = now();
+        run.status = "completed";
+        run.output = recovered.result.output;
+        run.error = null;
+        run.usage = recovered.result.usage;
+        run.transaction = recovered.transaction;
+        run.completedAt = completedAt;
+        if (
+          !database.messages.some(
+            (message) => message.runId === run.id && message.role === "assistant",
+          )
+        ) {
+          database.messages.push({
+            id: randomUUID(),
+            agentId: agent.id,
+            runId: run.id,
+            role: "assistant",
+            content: recovered.result.output,
+            createdAt: completedAt,
+          });
+        }
+        agent.workspacePath = recovered.canonicalState.workspacePath;
+        agent.canonicalStateId = recovered.canonicalState.stateId;
+        agent.codexThreadId = recovered.canonicalState.codexThreadId;
+        agent.status = "ready";
+        agent.lastError = null;
+        agent.updatedAt = completedAt;
+      }
+
+      for (const [runId, failure] of recoveryFailures) {
+        const run = database.runs.find((item) => item.id === runId);
+        if (!run) continue;
+        run.status = "failed";
+        run.error = failure.message;
+        run.completedAt = now();
+        if (failure.transaction) {
+          run.transaction = failure.transaction;
+        } else if (run.transaction) {
+          run.transaction.status = "recovery-error";
+          run.transaction.recovery = {
+            ...run.transaction.recovery,
+            recoveredAfterRestart: true,
+            recoveryError: failure.message.slice(0, 500),
+          };
+        }
+      }
+
       for (const run of database.runs) {
-        if (run.status === "queued" || run.status === "running") {
+        if (
+          (run.status !== "queued" && run.status !== "running") ||
+          recoveredRunIds.has(run.id) ||
+          recoveryFailures.has(run.id)
+        ) {
+          continue;
+        }
+        const retained = interrupted.get(run.id);
+        const completedAt = now();
+        run.completedAt = completedAt;
+        if (retained?.quarantinePath && run.transaction) {
+          run.status = "failed";
+          run.error = "Server restarted; the interrupted Candidate was retained in Quarantine";
+          run.transaction.status = "quarantined";
+          run.transaction.disposition = "quarantined";
+          run.transaction.quarantinePath = retained.quarantinePath;
+          run.transaction.quarantineAvailable = true;
+          run.transaction.canonicalStateIdAfter =
+            run.transaction.canonicalStateIdBefore;
+          run.transaction.canonicalContentHashAfter =
+            run.transaction.canonicalContentHashBefore;
+          run.transaction = finalizeResources(run.transaction, "quarantined");
+          run.transaction.events.push({
+            status: "quarantined",
+            at: completedAt,
+            summary: "Server restart retained the interrupted Candidate in Quarantine",
+          });
+          run.transaction.promotionReceipt = createPromotionReceipt(run.transaction);
+        } else if (retained?.error && run.transaction) {
+          run.status = "failed";
+          run.error = "Interrupted Candidate recovery failed: " + retained.error;
+          run.transaction.status = "recovery-error";
+          run.transaction.recovery = {
+            ...run.transaction.recovery,
+            recoveredAfterRestart: true,
+            recoveryError: retained.error.slice(0, 500),
+          };
+        } else {
           run.status = "cancelled";
-          run.error = "Server restarted while this run was active";
-          run.completedAt = now();
+          run.error = "Server restarted before Candidate State was available";
           if (run.transaction) {
             run.transaction.status = "cancelled";
             run.transaction.disposition = "cancelled";
@@ -97,28 +246,50 @@ export class AgentService {
               run.transaction.canonicalStateIdBefore;
             run.transaction.canonicalContentHashAfter =
               run.transaction.canonicalContentHashBefore;
-            run.transaction = finalizeResources(
-              run.transaction,
-              "cancelled",
-            );
+            run.transaction = finalizeResources(run.transaction, "cancelled");
             run.transaction.events.push({
               status: "cancelled",
-              at: now(),
-              summary: "Server restarted while the Run Transaction was active",
+              at: completedAt,
+              summary: "Server restarted before Candidate State was available",
             });
-            run.transaction.promotionReceipt = createPromotionReceipt(
-              run.transaction,
-            );
+            run.transaction.promotionReceipt = createPromotionReceipt(run.transaction);
           }
         }
       }
+
+      for (const runId of cleanup.quarantineRunIds) {
+        const run = database.runs.find((item) => item.id === runId);
+        if (!run?.transaction || run.transaction.disposition !== "quarantined") {
+          continue;
+        }
+        const discardedAt = now();
+        run.transaction = markTransactionDiscarded(run.transaction, discardedAt, true);
+      }
+
       for (const agent of database.agents) {
         const canonical = canonicalStates.get(agent.id);
-        if (!canonical) throw new Error("Canonical State reconciliation failed");
-        agent.canonicalStateId = canonical.stateId;
-        agent.workspacePath = canonical.workspacePath;
-        agent.codexThreadId = canonical.codexThreadId;
-        if (agent.status === "busy") {
+        const recoveryFailure = recovery.failures.find(
+          (failure) => failure.agentId === agent.id,
+        );
+        const corruptJournalFailure = database.runs
+          .filter((run) => run.agentId === agent.id)
+          .map((run) => recoveryFailures.get(run.id))
+          .find((failure) => failure !== undefined);
+        const canonicalError = canonicalErrors.get(agent.id);
+        if (canonical) {
+          agent.canonicalStateId = canonical.stateId;
+          agent.workspacePath = canonical.workspacePath;
+          agent.codexThreadId = canonical.codexThreadId;
+        }
+        if (recoveryFailure || corruptJournalFailure || canonicalError) {
+          agent.status = "error";
+          agent.lastError =
+            recoveryFailure?.message ??
+            corruptJournalFailure?.message ??
+            canonicalError ??
+            null;
+          agent.updatedAt = now();
+        } else if (agent.status === "busy") {
           agent.status = "ready";
           agent.updatedAt = now();
         }
@@ -532,22 +703,10 @@ export class AgentService {
         if (storedRun.transaction.disposition === "discarded") {
           return structuredClone(storedRun);
         }
-        storedRun.transaction.disposition = "discarded";
-        storedRun.transaction.status = "discarded";
-        storedRun.transaction.quarantinePath = null;
-        storedRun.transaction.quarantineAvailable = false;
-        storedRun.transaction.discardedAt = discardedAt;
-        storedRun.transaction = finalizeResources(
+        storedRun.transaction = markTransactionDiscarded(
           storedRun.transaction,
-          "discarded",
-        );
-        storedRun.transaction.events.push({
-          status: "discarded",
-          at: discardedAt,
-          summary: "Mutable Quarantine was discarded; bounded decision evidence remains",
-        });
-        storedRun.transaction.promotionReceipt = createPromotionReceipt(
-          storedRun.transaction,
+          discardedAt,
+          false,
         );
         const storedAgent = database.agents.find(
           (item) => item.id === storedRun.agentId,
@@ -773,4 +932,27 @@ function buildRepairPrompt(source: AgentRun, objective?: string): string {
     ? prompt
     : bytes.subarray(0, 12_000).toString("utf8") +
         "\n[Repair evidence truncated by Agent Airlock]";
+}
+
+function markTransactionDiscarded(
+  transaction: RunTransaction,
+  discardedAt: string,
+  expired: boolean,
+): RunTransaction {
+  let next = structuredClone(transaction);
+  next.disposition = "discarded";
+  next.status = "discarded";
+  next.quarantinePath = null;
+  next.quarantineAvailable = false;
+  next.discardedAt = discardedAt;
+  next = finalizeResources(next, "discarded");
+  next.events.push({
+    status: "discarded",
+    at: discardedAt,
+    summary: expired
+      ? "Quarantine retention expired; bounded decision evidence remains"
+      : "Mutable Quarantine was discarded; bounded decision evidence remains",
+  });
+  next.promotionReceipt = createPromotionReceipt(next);
+  return next;
 }

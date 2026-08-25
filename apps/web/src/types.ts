@@ -8,6 +8,7 @@ export type RunTransactionStatus =
   | "promoted"
   | "quarantined"
   | "discarded"
+  | "recovery-error"
   | "cancelled";
 
 export interface RunLineage {
@@ -15,6 +16,19 @@ export interface RunLineage {
   parentRunId: string | null;
   depth: number;
   maxDepth: number;
+}
+
+export type PromotionJournalPhase =
+  | "validated"
+  | "version-installed"
+  | "canonical-advanced"
+  | "effects-delivered"
+  | "completed";
+
+export interface PromotionRecoveryEvidence {
+  journalPhase: PromotionJournalPhase | null;
+  recoveredAfterRestart: boolean;
+  recoveryError: string | null;
 }
 
 export interface OutcomeContract {
@@ -101,6 +115,7 @@ export interface RunTransaction {
   quarantineAvailable: boolean;
   discardedAt: string | null;
   lineage: RunLineage;
+  recovery: PromotionRecoveryEvidence;
   promotionReceipt: {
     runTransactionId: string;
     disposition: "promoted" | "quarantined" | "discarded" | "cancelled";

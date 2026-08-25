@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 6", async () => {
+  it("migrates starter version 1 data to version 7", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,7 +59,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 6,
+      version: 7,
       agents: [
         {
           canonicalStateId: "",
@@ -68,7 +68,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 6 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 7 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -178,7 +178,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 6,
+      version: 7,
       agents: [
         {
           outcomeContract: {
@@ -237,7 +237,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 6,
+      version: 7,
       runs: [
         {
           transaction: {
@@ -276,7 +276,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 6,
+      version: 7,
       runs: [
         {
           transaction: {
@@ -321,7 +321,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 6,
+      version: 7,
       runs: [
         {
           transaction: {
@@ -336,6 +336,54 @@ describe("JsonStore", () => {
             promotionReceipt: {
               validationEvidenceHash: "sha256:evidence",
               lineage: { rootRunId: "phase-4-run", parentRunId: null, depth: 0 },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it("adds empty Promotion recovery evidence to Phase 5 transactions", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v6-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 6,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-5-run",
+            transaction: {
+              id: "phase-5-run",
+              disposition: "promoted",
+              lineage: {
+                rootRunId: "phase-5-run",
+                parentRunId: null,
+                depth: 0,
+                maxDepth: 2,
+              },
+            },
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 7,
+      runs: [
+        {
+          transaction: {
+            id: "phase-5-run",
+            recovery: {
+              journalPhase: null,
+              recoveredAfterRestart: false,
+              recoveryError: null,
             },
           },
         },

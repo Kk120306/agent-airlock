@@ -78,6 +78,31 @@ export interface CandidateStateReference {
   repairReferencePath: string | null;
 }
 
+export interface PromotionPlan {
+  runId: string;
+  agentId: string;
+  targetStateId: string;
+  targetThreadId: string | null;
+  sourceStateId: string;
+  sourceContentHash: string;
+  sourceWorkspaceHash: string;
+  sourceSessionHash: string;
+  sourceSqliteHash: string;
+  sourceOutboxHash: string;
+  sourceThreadId: string | null;
+}
+
+export interface InterruptedCandidateResult {
+  quarantinePath: string | null;
+  error: string | null;
+}
+
+export interface StateCleanupResult {
+  candidateRunIds: string[];
+  quarantineRunIds: string[];
+  errors: string[];
+}
+
 const fileExists = async (target: string): Promise<boolean> => {
   try {
     await access(target);
@@ -88,6 +113,7 @@ const fileExists = async (target: string): Promise<boolean> => {
 };
 
 const now = () => new Date().toISOString();
+const safeIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export class WorkspaceManager {
   constructor(
@@ -331,7 +357,8 @@ export class WorkspaceManager {
     sourceRunId: string,
     runId: string,
   ): Promise<CandidateStateReference> {
-    const source = await this.readQuarantinedCandidate(sourceRunId);
+    const sourceRoot = await this.resolveQuarantineRoot(sourceRunId);
+    const source = await this.readCandidateAt(sourceRoot, sourceRunId);
     if (source.agentId !== agentId) {
       throw new Error("Quarantine belongs to a different Agent");
     }
@@ -354,7 +381,6 @@ export class WorkspaceManager {
     if (await fileExists(root)) {
       throw new Error("Candidate State already exists for Run " + runId);
     }
-    const sourceRoot = await this.resolveQuarantineRoot(sourceRunId);
     const candidateStateId = randomUUID();
     const workspacePath = path.join(root, "workspace");
     const codexHomePath = path.join(root, "codex-home");
@@ -433,6 +459,12 @@ export class WorkspaceManager {
     agentId: string,
     runId: string,
   ): Promise<CanonicalStateReference> {
+    const plan = await this.planPromotion(agentId, runId);
+    const installed = await this.installPromotion(plan);
+    return this.advancePromotion(plan, installed);
+  }
+
+  async planPromotion(agentId: string, runId: string): Promise<PromotionPlan> {
     const candidate = await this.readCandidate(runId);
     if (candidate.agentId !== agentId) {
       throw new Error("Candidate State belongs to a different Agent");
@@ -460,46 +492,151 @@ export class WorkspaceManager {
         "Candidate outbox",
       ),
     ]);
-    const candidateRoot = this.candidateRoot(runId);
-    await rm(path.join(candidateRoot, "repair-reference"), {
-      recursive: true,
-      force: true,
-    });
-    const destinationRoot = this.versionRoot(agentId, candidate.candidateStateId);
-    await mkdir(path.dirname(destinationRoot), { recursive: true });
-    await rename(candidateRoot, destinationRoot);
-    try {
-      const canonical = await this.buildStateReference(
-        agentId,
-        candidate.candidateStateId,
-        candidate.candidateThreadId,
-      );
-      const manifest: CanonicalManifestV3 = {
-        schemaVersion: 3,
-        agentId,
-        ...canonical,
-        createdAt: now(),
-        sourceRunId: runId,
-      };
-      await this.replaceCanonicalManifest(agentId, manifest);
-      return canonical;
-    } catch (error) {
-      await rename(destinationRoot, candidateRoot).catch(() => undefined);
-      throw error;
+    return {
+      runId,
+      agentId,
+      targetStateId: candidate.candidateStateId,
+      targetThreadId: candidate.candidateThreadId,
+      sourceStateId: current.stateId,
+      sourceContentHash: current.contentHash,
+      sourceWorkspaceHash: current.workspaceContentHash,
+      sourceSessionHash: current.sessionContentHash,
+      sourceSqliteHash: current.sqliteContentHash,
+      sourceOutboxHash: current.outboxContentHash,
+      sourceThreadId: current.codexThreadId,
+    };
+  }
+
+  async installPromotion(plan: PromotionPlan): Promise<CanonicalStateReference> {
+    this.assertPromotionPlanIdentifiers(plan);
+    const candidateRoot = this.candidateRoot(plan.runId);
+    const destinationRoot = this.versionRoot(plan.agentId, plan.targetStateId);
+    const candidateExists = await fileExists(candidateRoot);
+    const versionExists = await fileExists(destinationRoot);
+    if (candidateExists && versionExists) {
+      throw new Error("Promotion has both Candidate and installed version state");
     }
+    if (!candidateExists && !versionExists) {
+      throw new Error("Promotion has neither Candidate nor installed version state");
+    }
+
+    if (candidateExists) {
+      const candidate = await this.readCandidate(plan.runId);
+      this.assertCandidateMatchesPlan(candidate, plan);
+      await Promise.all([
+        this.assertResourceTreeSafe(
+          this.candidateCodexPath(plan.runId),
+          "Candidate Codex session",
+        ),
+        this.assertResourceTreeSafe(
+          path.join(candidateRoot, "outbox"),
+          "Candidate outbox",
+        ),
+      ]);
+      await rm(path.join(candidateRoot, "repair-reference"), {
+        recursive: true,
+        force: true,
+      });
+    }
+    await mkdir(path.dirname(destinationRoot), { recursive: true });
+    if (candidateExists) await rename(candidateRoot, destinationRoot);
+
+    const stats = await lstat(destinationRoot);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      throw new Error("Installed Promotion state is not a safe directory");
+    }
+    const installedManifest = await this.readCandidateAt(destinationRoot, plan.runId);
+    this.assertCandidateMatchesPlan(installedManifest, plan);
+    const installed = await this.buildStateReference(
+      plan.agentId,
+      plan.targetStateId,
+      plan.targetThreadId,
+    );
+    if (installed.stateId !== plan.targetStateId) {
+      throw new Error("Installed Promotion state identifier does not match its plan");
+    }
+    return installed;
+  }
+
+  async verifyInstalledPromotion(
+    plan: PromotionPlan,
+    expected: CanonicalStateReference,
+  ): Promise<CanonicalStateReference> {
+    const installed = await this.installPromotion(plan);
+    this.assertCanonicalReferencesEqual(installed, expected);
+    return installed;
+  }
+
+  async advancePromotion(
+    plan: PromotionPlan,
+    installed: CanonicalStateReference,
+  ): Promise<CanonicalStateReference> {
+    this.assertPromotionPlanIdentifiers(plan);
+    if (installed.stateId !== plan.targetStateId) {
+      throw new Error("Installed Promotion state does not match the target plan");
+    }
+    const verifiedInstalled = await this.buildStateReference(
+      plan.agentId,
+      plan.targetStateId,
+      plan.targetThreadId,
+    );
+    this.assertCanonicalReferencesEqual(verifiedInstalled, installed);
+    const current = await this.readCanonical(plan.agentId);
+    if (current.stateId === plan.targetStateId) {
+      this.assertCanonicalReferencesEqual(current, installed);
+      const raw = JSON.parse(
+        await readFile(this.canonicalManifestPath(plan.agentId), "utf8"),
+      ) as CanonicalManifestV3;
+      if (raw.sourceRunId !== plan.runId) {
+        throw new Error("Canonical target belongs to a different Run Transaction");
+      }
+      return current;
+    }
+    this.assertSourceMatchesPlan(current, plan);
+    await this.replaceCanonicalManifest(plan.agentId, {
+      schemaVersion: 3,
+      agentId: plan.agentId,
+      ...installed,
+      createdAt: now(),
+      sourceRunId: plan.runId,
+    });
+    return this.readCanonical(plan.agentId);
   }
 
   async quarantineCandidate(runId: string): Promise<string> {
     const source = this.candidateRoot(runId);
     await this.readCandidate(runId);
     const destination = this.quarantineRoot(runId);
-    await rm(destination, { recursive: true, force: true });
+    if (await fileExists(destination)) {
+      throw new Error("Quarantine already exists for Run " + runId);
+    }
     await rename(source, destination);
     return destination;
   }
 
   async cancelCandidate(runId: string): Promise<void> {
-    await rm(this.candidateRoot(runId), { recursive: true, force: true });
+    if (!(await fileExists(this.candidateRoot(runId)))) return;
+    const root = await this.resolveCandidateRoot(runId);
+    await rm(root, { recursive: true, force: false });
+  }
+
+  async quarantineInterruptedCandidate(
+    runId: string,
+  ): Promise<InterruptedCandidateResult> {
+    if (!(await fileExists(this.candidateRoot(runId)))) {
+      return { quarantinePath: null, error: null };
+    }
+    try {
+      return {
+        quarantinePath: await this.quarantineCandidate(runId),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        quarantinePath: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async discardQuarantine(runId: string): Promise<boolean> {
@@ -533,6 +670,74 @@ export class WorkspaceManager {
         summary: "The bounded Canonical repair reference could not be verified",
       };
     }
+  }
+
+  async cleanupExpiredState(options: {
+    candidateOlderThan: string;
+    quarantineOlderThan: string;
+    protectedRunIds: Set<string>;
+  }): Promise<StateCleanupResult> {
+    const result: StateCleanupResult = {
+      candidateRunIds: [],
+      quarantineRunIds: [],
+      errors: [],
+    };
+    const candidateCutoff = Date.parse(options.candidateOlderThan);
+    const quarantineCutoff = Date.parse(options.quarantineOlderThan);
+    if (!Number.isFinite(candidateCutoff) || !Number.isFinite(quarantineCutoff)) {
+      throw new Error("State retention cutoffs must be valid ISO timestamps");
+    }
+    const scan = async (
+      kind: "candidate" | "quarantine",
+      cutoff: number,
+      removed: string[],
+    ) => {
+      const base = path.join(
+        this.root,
+        kind === "candidate" ? ".candidates" : ".quarantine",
+      );
+      const entries = await readdir(base, { withFileTypes: true });
+      for (const entry of entries) {
+        const runId = entry.name;
+        if (options.protectedRunIds.has(runId)) continue;
+        if (!safeIdentifierPattern.test(runId)) {
+          result.errors.push("Ignored unsafe retention entry " + runId);
+          continue;
+        }
+        try {
+          const root = path.join(base, runId);
+          const stats = await lstat(root);
+          if (!entry.isDirectory() || !stats.isDirectory() || stats.isSymbolicLink()) {
+            throw new Error("entry is not a safe directory");
+          }
+          const manifest = await this.readCandidateAt(root, runId);
+          const createdAt = Date.parse(manifest.createdAt);
+          if (!Number.isFinite(createdAt)) {
+            throw new Error("candidate manifest has an invalid creation time");
+          }
+          if (createdAt >= cutoff) continue;
+          if (kind === "candidate") {
+            await this.resolveCandidateRoot(runId);
+          } else {
+            await this.resolveQuarantineRoot(runId);
+          }
+          await rm(root, { recursive: true, force: false });
+          removed.push(runId);
+        } catch (error) {
+          result.errors.push(
+            "Could not clean " +
+              kind +
+              " " +
+              runId +
+              ": " +
+              (error instanceof Error ? error.message : String(error)),
+          );
+        }
+      }
+    };
+    await scan("candidate", candidateCutoff, result.candidateRunIds);
+    await scan("quarantine", quarantineCutoff, result.quarantineRunIds);
+    return result;
   }
 
   async candidateHasPath(runId: string, relativePath: string): Promise<boolean> {
@@ -760,12 +965,6 @@ export class WorkspaceManager {
     return this.readCandidateAt(this.candidateRoot(runId), runId);
   }
 
-  private async readQuarantinedCandidate(
-    runId: string,
-  ): Promise<CandidateManifestV3> {
-    return this.readCandidateAt(this.quarantineRoot(runId), runId);
-  }
-
   private async readCandidateAt(
     root: string,
     runId: string,
@@ -780,6 +979,7 @@ export class WorkspaceManager {
       manifest.runId !== runId ||
       typeof manifest.agentId !== "string" ||
       typeof manifest.candidateStateId !== "string" ||
+      typeof manifest.canonicalStateIdBefore !== "string" ||
       typeof manifest.canonicalContentHashBefore !== "string" ||
       typeof manifest.canonicalWorkspaceHashBefore !== "string" ||
       typeof manifest.canonicalSessionHashBefore !== "string" ||
@@ -794,7 +994,8 @@ export class WorkspaceManager {
         typeof manifest.repairSourceRunId !== "string") ||
       (manifest.repairReferenceHash !== undefined &&
         manifest.repairReferenceHash !== null &&
-        typeof manifest.repairReferenceHash !== "string")
+        typeof manifest.repairReferenceHash !== "string") ||
+      typeof manifest.createdAt !== "string"
     ) {
       throw new Error("Invalid Candidate State manifest for Run " + runId);
     }
@@ -918,28 +1119,120 @@ export class WorkspaceManager {
     runId: string,
     resource: "workspace" | "codex-home" | "outbox" | "repair-reference",
   ): Promise<string> {
-    const candidatesRoot = await realpath(path.join(this.root, ".candidates"));
+    const candidateRoot = await this.resolveCandidateRoot(runId);
     const resourcePath = await realpath(path.join(this.candidateRoot(runId), resource));
-    const relative = path.relative(candidatesRoot, resourcePath);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    const relative = path.relative(candidateRoot, resourcePath);
+    if (
+      relative.startsWith("..") ||
+      path.isAbsolute(relative) ||
+      relative !== resource
+    ) {
       throw new Error("Candidate resource escapes the Candidate State root");
     }
     return resourcePath;
   }
 
+  private async resolveCandidateRoot(runId: string): Promise<string> {
+    const unresolved = this.candidateRoot(runId);
+    const unresolvedStats = await lstat(unresolved);
+    if (!unresolvedStats.isDirectory() || unresolvedStats.isSymbolicLink()) {
+      throw new Error("Candidate is not a safe directory");
+    }
+    const candidateBase = await realpath(path.join(this.root, ".candidates"));
+    const root = await realpath(unresolved);
+    const relative = path.relative(candidateBase, root);
+    if (relative.startsWith("..") || path.isAbsolute(relative) || relative !== runId) {
+      throw new Error("Candidate path escapes the platform-owned root");
+    }
+    await this.readCandidateAt(root, runId);
+    return root;
+  }
+
   private async resolveQuarantineRoot(runId: string): Promise<string> {
-    await this.readQuarantinedCandidate(runId);
+    const unresolved = this.quarantineRoot(runId);
+    const unresolvedStats = await lstat(unresolved);
+    if (!unresolvedStats.isDirectory() || unresolvedStats.isSymbolicLink()) {
+      throw new Error("Quarantine is not a safe directory");
+    }
     const quarantineBase = await realpath(path.join(this.root, ".quarantine"));
-    const root = await realpath(this.quarantineRoot(runId));
+    const root = await realpath(unresolved);
     const relative = path.relative(quarantineBase, root);
     if (relative.startsWith("..") || path.isAbsolute(relative) || relative !== runId) {
       throw new Error("Quarantine path escapes the platform-owned root");
     }
-    const stats = await lstat(root);
-    if (!stats.isDirectory() || stats.isSymbolicLink()) {
-      throw new Error("Quarantine is not a safe directory");
-    }
+    await this.readCandidateAt(root, runId);
     return root;
+  }
+
+  private assertPromotionPlanIdentifiers(plan: PromotionPlan): void {
+    this.assertIdentifier(plan.runId, "Run");
+    this.assertIdentifier(plan.agentId, "Agent");
+    this.assertIdentifier(plan.targetStateId, "target state");
+    this.assertIdentifier(plan.sourceStateId, "source state");
+    if (plan.targetStateId === plan.sourceStateId) {
+      throw new Error("Promotion target must differ from its source state");
+    }
+  }
+
+  private assertCandidateMatchesPlan(
+    candidate: CandidateManifestV3,
+    plan: PromotionPlan,
+  ): void {
+    if (
+      candidate.runId !== plan.runId ||
+      candidate.agentId !== plan.agentId ||
+      candidate.candidateStateId !== plan.targetStateId ||
+      candidate.candidateThreadId !== plan.targetThreadId ||
+      candidate.canonicalStateIdBefore !== plan.sourceStateId ||
+      candidate.canonicalContentHashBefore !== plan.sourceContentHash ||
+      candidate.canonicalWorkspaceHashBefore !== plan.sourceWorkspaceHash ||
+      candidate.canonicalSessionHashBefore !== plan.sourceSessionHash ||
+      candidate.canonicalSqliteHashBefore !== plan.sourceSqliteHash ||
+      candidate.canonicalOutboxHashBefore !== plan.sourceOutboxHash ||
+      candidate.canonicalThreadIdBefore !== plan.sourceThreadId
+    ) {
+      throw new Error("Candidate State does not match its durable Promotion plan");
+    }
+  }
+
+  private assertSourceMatchesPlan(
+    current: CanonicalStateReference,
+    plan: PromotionPlan,
+  ): void {
+    if (
+      current.stateId !== plan.sourceStateId ||
+      current.contentHash !== plan.sourceContentHash ||
+      current.workspaceContentHash !== plan.sourceWorkspaceHash ||
+      current.sessionContentHash !== plan.sourceSessionHash ||
+      current.sqliteContentHash !== plan.sourceSqliteHash ||
+      current.outboxContentHash !== plan.sourceOutboxHash ||
+      current.codexThreadId !== plan.sourceThreadId
+    ) {
+      throw new Error("Canonical State contradicts the durable Promotion source");
+    }
+  }
+
+  private assertCanonicalReferencesEqual(
+    actual: CanonicalStateReference,
+    expected: CanonicalStateReference,
+  ): void {
+    if (
+      actual.stateId !== expected.stateId ||
+      actual.contentHash !== expected.contentHash ||
+      actual.workspaceContentHash !== expected.workspaceContentHash ||
+      actual.sessionContentHash !== expected.sessionContentHash ||
+      actual.sqliteContentHash !== expected.sqliteContentHash ||
+      actual.outboxContentHash !== expected.outboxContentHash ||
+      actual.codexThreadId !== expected.codexThreadId
+    ) {
+      throw new Error("Installed Promotion state contradicts its durable fingerprint");
+    }
+  }
+
+  private assertIdentifier(value: string, label: string): void {
+    if (!safeIdentifierPattern.test(value)) {
+      throw new Error(label + " identifier is not safe");
+    }
   }
 
   private async writeInstructionsAt(
@@ -985,6 +1278,7 @@ export class WorkspaceManager {
   }
 
   private agentRoot(agentId: string): string {
+    this.assertIdentifier(agentId, "Agent");
     return path.join(this.root, agentId);
   }
 
@@ -993,6 +1287,7 @@ export class WorkspaceManager {
   }
 
   private versionRoot(agentId: string, stateId: string): string {
+    this.assertIdentifier(stateId, "state");
     return path.join(this.agentRoot(agentId), "versions", stateId);
   }
 
@@ -1009,6 +1304,7 @@ export class WorkspaceManager {
   }
 
   private candidateRoot(runId: string): string {
+    this.assertIdentifier(runId, "Run");
     return path.join(this.root, ".candidates", runId);
   }
 
@@ -1017,6 +1313,7 @@ export class WorkspaceManager {
   }
 
   private quarantineRoot(runId: string): string {
+    this.assertIdentifier(runId, "Run");
     return path.join(this.root, ".quarantine", runId);
   }
 }

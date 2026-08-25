@@ -60,11 +60,15 @@ function AirlockEvidence({
   const transaction = run.transaction;
   if (!transaction) return null;
   const disposition = transaction.disposition ?? transaction.status;
+  const recoveryFailed = transaction.status === "recovery-error";
+  const visualDisposition = recoveryFailed ? "recovery-error" : disposition;
   const decisiveValidation = transaction.validations.find(
     (validation) => validation.required && validation.status !== "passed",
   );
   const title =
-    disposition === "promoted"
+    recoveryFailed
+      ? "Recovery needs attention"
+      : disposition === "promoted"
       ? "Promoted"
       : disposition === "quarantined"
         ? "Quarantined"
@@ -74,7 +78,9 @@ function AirlockEvidence({
           ? "Cancelled"
           : "Airlock evaluating";
   const outcome =
-    disposition === "promoted"
+    recoveryFailed
+      ? "Airlock found contradictory recovery evidence and failed closed"
+      : disposition === "promoted"
       ? "Candidate became Canonical State"
       : disposition === "quarantined"
         ? "Canonical State unchanged"
@@ -86,9 +92,9 @@ function AirlockEvidence({
 
   return (
     <article
-      className={"airlock-card airlock-" + disposition}
+      className={"airlock-card airlock-" + visualDisposition}
       aria-label="Agent Airlock evidence"
-      data-disposition={disposition}
+      data-disposition={visualDisposition}
     >
       <header className="airlock-heading">
         <div>
@@ -102,7 +108,9 @@ function AirlockEvidence({
           <p>{outcome}</p>
         </div>
         <span className="airlock-shield" aria-hidden="true">
-          {disposition === "promoted"
+          {recoveryFailed
+            ? "!"
+            : disposition === "promoted"
             ? "✓"
             : disposition === "quarantined"
               ? "!"
@@ -112,7 +120,7 @@ function AirlockEvidence({
         </span>
       </header>
 
-      <section className="repair-lineage" aria-label="Repair lineage">
+      <section className="repair-lineage" aria-label="Recovery evidence">
         <div>
           <span className="eyebrow">Recovery lineage</span>
           <strong>
@@ -155,6 +163,29 @@ function AirlockEvidence({
             <p className="repair-limit" role="status">
               Repair depth exhausted. Inspect or discard this Quarantine.
             </p>
+          )}
+        {transaction.recovery.journalPhase &&
+          disposition !== "quarantined" && (
+            <div
+              className={
+                "journal-proof" +
+                (transaction.recovery.recoveryError ? " journal-proof-error" : "")
+              }
+              role={transaction.recovery.recoveryError ? "alert" : "status"}
+            >
+              <span className="eyebrow">Durable Promotion</span>
+              <strong>
+                {transaction.recovery.recoveryError
+                  ? "Recovery failed closed"
+                  : transaction.recovery.recoveredAfterRestart
+                    ? "Recovered after restart"
+                    : "Journal " + transaction.recovery.journalPhase}
+              </strong>
+              <p>
+                {transaction.recovery.recoveryError ??
+                  "Phase " + transaction.recovery.journalPhase.replaceAll("-", " ")}
+              </p>
+            </div>
           )}
       </section>
 

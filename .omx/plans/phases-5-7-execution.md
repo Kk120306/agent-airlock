@@ -1,12 +1,14 @@
 # Phases 5 through 7 execution plan
 
-**Status:** Phase 5 implementation and no-cost exit gate complete; Phases 6 and 7 pending
+**Status:** Phases 5 and 6 implementation and no-cost exit gates complete; Phase 7 pending
 
 **Scope:** Recoverable intelligence, adversarial resilience, and judge-ready release
 
 **Cost boundary:** All automated and browser work uses deterministic local fixtures until organizer-provided ModelArk credentials arrive.
 
 **Phase 5 evidence:** `npm run check:phase5` passed with 73 server tests, one production Chrome journey, zero dependency vulnerabilities, the pinned Codex session-isolation probe, and three constrained validation-container tests.
+
+**Phase 6 evidence:** `npm run check:phase6` passed with 88 server tests, the eight-point crash matrix and repeated restart convergence, a 10.1-second production Chrome journey, zero dependency vulnerabilities, the pinned Codex session-isolation probe, and three constrained validation-container tests.
 
 ## Requirements summary
 

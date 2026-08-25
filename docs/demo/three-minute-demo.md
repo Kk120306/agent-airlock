@@ -36,7 +36,7 @@ Do not modify or delete any existing file.
 ```
 
 Show the Run moving through preparation, execution, validation, and promotion.
-Open the Airlock evidence and identify the changed file, passing Validations, data snapshot, delivered intent, receipt hash, advanced Canonical fingerprint, and four-resource promoted ledger.
+Open the Airlock evidence and identify the changed file, passing Validations, data snapshot, delivered intent, completed journal, receipt hash, advanced Canonical fingerprint, and four-resource promoted ledger.
 
 ### 1:00 to 1:40 - Quarantine a destructive multi-resource future
 
@@ -80,6 +80,8 @@ Show that the ordinary Playground and Agent lifecycle controls remain usable aft
 - A Repair Run resumes the rejected future without changing Canonical State before its own successful Promotion.
 - The repaired receipt records bounded ancestry, and its fresh outbox prevents rejected intents from replaying automatically.
 - Discard removes mutable Quarantine state without erasing bounded decision evidence.
+- Every approved Promotion records a monotonic journal outside the Runtime, and restart reconciliation is idempotent.
+- Contradictory physical state produces a visible fail-closed recovery error instead of a guessed Promotion.
 - A promoted SQLite mutation becomes canonical while a rejected mutation does not.
 - A promoted intent creates one mock delivery under duplicate dispatch attempts while a rejected intent creates zero.
 - Validation evidence is redacted and bounded.
@@ -91,7 +93,7 @@ The current release makes workspace, Codex-session, SQLite, and supported notifi
 Exactly-once delivery is claimed only inside the atomic mock consumer.
 Unrestricted Runtime networking can bypass the outbox.
 Repair Runs, bounded ancestry, canonical freshness checks, and idempotent discard are implemented in Phase 5.
-Crash-journal reconciliation remains Phase 6 scope.
+Forward Promotion-journal reconciliation, explicit recovery errors, and root-confined retention are implemented in Phase 6.
 
 ## Live-demo contingency
 

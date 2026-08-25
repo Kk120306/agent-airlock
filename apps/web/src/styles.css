@@ -935,6 +935,7 @@ textarea:focus {
 
 .airlock-quarantined,
 .airlock-discarded,
+.airlock-recovery-error,
 .airlock-cancelled {
   border-color: #e7c7ad;
 }
@@ -960,6 +961,7 @@ textarea:focus {
 
 .airlock-quarantined .airlock-heading,
 .airlock-discarded .airlock-heading,
+.airlock-recovery-error .airlock-heading,
 .airlock-cancelled .airlock-heading {
   background:
     radial-gradient(circle at 90% 0, rgba(197, 83, 83, 0.12), transparent 43%),
@@ -1008,6 +1010,7 @@ textarea:focus {
 
 .airlock-quarantined .airlock-shield,
 .airlock-discarded .airlock-shield,
+.airlock-recovery-error .airlock-shield,
 .airlock-cancelled .airlock-shield {
   color: #aa5445;
   border-color: #eccaba;
@@ -1056,6 +1059,17 @@ textarea:focus {
   max-width: 230px;
   color: #98544b !important;
   text-align: right;
+}
+
+.journal-proof {
+  min-width: 190px;
+  padding-left: 14px;
+  border-left: 1px solid #ddd7ef;
+  text-align: right;
+}
+
+.journal-proof-error {
+  color: #98544b;
 }
 
 .decisive-validation {
@@ -1826,6 +1840,15 @@ textarea:focus {
 
   .quarantine-actions .button {
     width: 100%;
+  }
+
+  .journal-proof {
+    width: 100%;
+    min-width: 0;
+    padding: 10px 0 0;
+    border-top: 1px solid #ddd7ef;
+    border-left: 0;
+    text-align: left;
   }
 
   .repair-limit {

@@ -4,7 +4,7 @@ The local profile runs the React/Fastify control plane on macOS or Linux and
 starts every Codex turn in a disposable Docker, Colima, or Podman container.
 Only the configured ModelArk model API is remote.
 
-No ModelArk credential is required for `npm run test:e2e` or `npm run check:phase5`.
+No ModelArk credential is required for `npm run test:e2e` or `npm run check:phase6`.
 Those commands use a deterministic local Codex fixture, SQLite, and the atomic mock action consumer without paid inference.
 
 ## Start
@@ -52,6 +52,11 @@ The canonical resources and platform-owned mock delivery store are never mounted
 Repair Runs additionally receive a disposable copy of the exact matching Canonical workspace.
 The container provider mounts that copy read-only, Airlock verifies its hash before Promotion, and the copy is removed from the repaired state before installation.
 Set `AIRLOCK_MAX_REPAIR_DEPTH` to a value from one through five to change the bounded repair ancestry limit from its default of two.
+Set `AIRLOCK_CANDIDATE_RETENTION_HOURS` to change the 24-hour mutable Candidate retention window.
+Set `AIRLOCK_QUARANTINE_RETENTION_HOURS` to change the 168-hour mutable Quarantine retention window.
+Both retention settings are positive hour values, and active or unresolved Promotion Runs are protected from cleanup.
+The platform-owned Promotion journal lives under `APP_DATA_DIR/promotion-journal`, outside every Runtime mount, and is reconciled before active-Run cleanup on restart.
+See the [recovery guide](RECOVERY.md) for phases, fault outcomes, and fail-closed operator guidance.
 Default limits are 2 CPUs, 2 GiB memory, 256 processes, dropped capabilities,
 and `no-new-privileges`.
 

@@ -9,6 +9,7 @@ export type RunTransactionStatus =
   | "promoted"
   | "quarantined"
   | "discarded"
+  | "recovery-error"
   | "cancelled";
 export type RunTransactionDisposition =
   | "promoted"
@@ -84,6 +85,19 @@ export interface RunLineage {
   parentRunId: string | null;
   depth: number;
   maxDepth: number;
+}
+
+export type PromotionJournalPhase =
+  | "validated"
+  | "version-installed"
+  | "canonical-advanced"
+  | "effects-delivered"
+  | "completed";
+
+export interface PromotionRecoveryEvidence {
+  journalPhase: PromotionJournalPhase | null;
+  recoveredAfterRestart: boolean;
+  recoveryError: string | null;
 }
 
 export interface PromotionReceipt {
@@ -183,6 +197,7 @@ export interface RunTransaction {
   quarantineAvailable: boolean;
   discardedAt: string | null;
   lineage: RunLineage;
+  recovery: PromotionRecoveryEvidence;
   promotionReceipt: PromotionReceipt | null;
 }
 
@@ -231,7 +246,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 6;
+  version: 7;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];

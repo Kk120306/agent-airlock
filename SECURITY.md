@@ -21,6 +21,7 @@ credentials, personal data, or exploit details in an issue.
 - Prompt-triggered command and file execution
 - Ark key available to the server and active Runtime container
 - Ark key stored in Terraform POC state
+- Local host access can tamper with the Promotion journal, immutable versions, canonical manifest, or mock-delivery store
 
 ## Safe use
 
@@ -31,6 +32,8 @@ credentials, personal data, or exploit details in an issue.
 - Never mount production data or provide Volcengine account AK/SK to Agents.
 - Treat `.airlock/demo.sqlite` and the notification outbox as bounded demonstration resources only.
 - Treat quarantined work and Repair Run prompts as untrusted Agent-controlled content.
+- Keep `APP_DATA_DIR` and `AGENT_WORKSPACE_ROOT` writable only by the trusted local control-plane account.
+- Treat `recovery-error` as a physical-state contradiction and preserve the data directory before diagnosis.
 - Use the container Runtime when an operating-system read-only mount for the disposable repair reference is required.
 - Do not interpret mock-consumer idempotency as an exactly-once guarantee for third-party providers.
 - Stop the POC, destroy test resources, and revoke keys after the event.
