@@ -11,7 +11,7 @@ The existing `AgentService` passes the persistent workspace path and canonical C
 The local Runtime then bind-mounts that workspace and the shared Codex home as writable container paths in `apps/server/src/container-codex-runner.ts:38`.
 Container disposal therefore contains the process but does not make its persistent state changes transactional.
 
-## Target architecture
+## Implemented Phase 2 architecture
 
 ```mermaid
 flowchart LR
@@ -86,15 +86,12 @@ stateDiagram-v2
     Validating --> Promoting: all required Validations pass
     Validating --> Quarantined: any required Validation fails
     Promoting --> Promoted: Canonical State advances
-    Promoting --> Reconciling: process interruption or uncertain result
-    Reconciling --> Promoted: canonical pointer confirms promotion
-    Reconciling --> Quarantined: canonical pointer confirms no promotion
-    Quarantined --> Preparing: Repair Run
-    Quarantined --> Discarded: operator discards candidate
     Promoted --> [*]
-    Discarded --> [*]
+    Quarantined --> [*]
     Cancelled --> [*]
 ```
+
+Crash-journal reconciliation, explicit discard, and Repair Runs remain later roadmap phases.
 
 ## Outcome Contract evaluation
 
@@ -107,8 +104,6 @@ Validation proceeds in a deterministic order so evidence remains understandable:
 5. Enforce change-count and added-byte limits.
 6. Scan changed content for configured secret patterns.
 7. Execute operator-defined validation commands in a constrained container.
-8. Validate queued External Action Intents against their schemas and limits.
-
 All required Validations must pass before promotion begins.
 
 Outcome Contract schema version 1 is a bounded data model rather than a policy language.
@@ -122,9 +117,10 @@ Changed files larger than 1 MiB fail the secret scan.
 Command output is terminated above 65,536 bytes, redacted, and persisted up to 16,384 bytes.
 Command duration is bounded by the contract between 1 second and 300 seconds.
 
-## Transactional Resources
+## Transactional Resource direction
 
-The internal Transactional Resource seam lets Airlock apply one lifecycle to different mutable resources:
+The current release implements the workspace lifecycle directly.
+The planned Transactional Resource seam will apply the same lifecycle to other mutable resources:
 
 ```ts
 interface TransactionalResource {
@@ -136,24 +132,24 @@ interface TransactionalResource {
 }
 ```
 
-The POC requires Workspace, Codex Session, SQLite, and External Action Intent implementations.
-Only the first two define the platform's Canonical State continuity.
-SQLite and the outbox prove that the model is extensible beyond file diffs.
+Workspace is the only implemented Transactional Resource in Phase 2.
+Codex Session, SQLite, and External Action Intent adapters remain later roadmap work.
 
-## External Action Intent outbox
+## Planned External Action Intent outbox
 
-The Agent must submit irreversible operations as typed intents through a platform-controlled interface.
-An intent is stored with Candidate State and is validated before promotion.
-After promotion, a dispatcher executes the intent with a stable idempotency key and records delivery evidence.
+The planned design requires the Agent to submit irreversible operations as typed intents through a platform-controlled interface.
+An intent will be stored with Candidate State and validated before promotion.
+After promotion, a dispatcher will execute the intent with a stable idempotency key and record delivery evidence.
 
-The POC provides at-least-once dispatch with idempotent mock consumers.
-It does not claim to intercept arbitrary network traffic from the Agent Runtime.
+The planned POC will provide at-least-once dispatch with idempotent mock consumers.
+It will not claim to intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
 The version 3 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
-Promotion uses a durable journal so startup reconciliation can distinguish completed, incomplete, and impossible transitions.
+Phase 2 Promotion moves a candidate to an immutable version and atomically replaces `canonical.json`.
+A durable promotion journal and startup reconciliation remain later work.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -164,10 +160,9 @@ Schema evolution must increment the database version and include a tested migrat
 | Candidate preparation fails | Do not invoke the AgentRunner and leave Canonical State unchanged. |
 | AgentRunner fails or times out | Quarantine bounded evidence and leave Canonical State unchanged. |
 | Validation fails | Quarantine Candidate State and identify the failing Validation. |
-| Promotion is interrupted | Reconcile from the journal and canonical pointer before accepting another Run. |
 | Evidence persistence fails before promotion | Fail closed without promotion. |
-| Evidence persistence fails after the canonical pointer changes | Reconstruct evidence from the promotion journal during reconciliation. |
-| Outbox delivery fails | Preserve the promoted intent and retry with the same idempotency key. |
+
+Interruption during Promotion does not yet have full journal-based reconciliation and is a documented Phase 2 limitation.
 
 ## Trust boundaries
 
@@ -175,7 +170,7 @@ Schema evolution must increment the database version and include a tested migrat
 - Validation code from the candidate project is untrusted and runs from a disposable copy inside a constrained container.
 - The Fastify control plane and Airlock state manager form the trusted POC boundary.
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
-- The outbox protects only external actions routed through its interface.
+- The planned outbox will protect only external actions routed through its interface.
 
 ## Evidence model
 
@@ -185,9 +180,9 @@ Each Run Transaction records:
 - Lifecycle timestamps and terminal disposition.
 - Bounded resource change summaries.
 - Validation names, statuses, durations, and redacted output.
-- Promotion journal position and resulting canonical version.
-- External Action Intent identifiers and delivery state.
-- Repair Run ancestry.
+- Resulting canonical version for promoted Runs.
+
+Promotion journal position, external action delivery, and Repair Run ancestry join this model in later phases.
 
 ## Open architectural decisions
 

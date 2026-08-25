@@ -154,6 +154,12 @@ The opt-in validation-container suite passes three tests against the built `volc
 The Phase 2 check includes type checks, all ordinary server tests, production builds, the browser journey, and an audit reporting zero known vulnerabilities.
 The external credentialed ModelArk browser journey remains pending until `ARK_API_KEY` and `ARK_MODEL` are available locally.
 
+The final qualifying audit was repeated on 2026-08-25 after the judging documentation was aligned to implemented Phase 2 behavior.
+`npm run check:phase2` passed with 46 server tests, one intentionally skipped opt-in test, one production-browser journey, successful builds, and zero reported dependency vulnerabilities.
+`npm run test:validation-container` passed all three real-container isolation tests.
+All relative Markdown links resolve across the tracked documentation, `.env` is ignored, and a history scan found no private-key, GitHub-token, AWS-access-key, or JWT signatures.
+The repository now includes a one-page trust-boundary architecture and a three-minute live script that does not claim later SQLite, outbox, Repair Run, transactional-session, or crash-journal features.
+
 ## Stop conditions
 
 - Stop Phase 1 if the Runtime can still receive any writable canonical workspace path.

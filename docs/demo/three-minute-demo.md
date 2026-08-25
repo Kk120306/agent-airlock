@@ -2,60 +2,80 @@
 
 ## Demo promise
 
-The demo proves that a disposable Agent container is not enough when persistent state is mounted into it, and that Airlock prevents an unacceptable future from becoming canonical.
+Agent Airlock lets an Agent attempt real file changes without allowing a rejected attempt to alter the accepted workspace.
+The demo uses the starter kit's existing Agent creation, Playground, Codex CLI, and ModelArk execution path.
 
-## Prepared fixture
+## Before judging
 
-Use one starter-kit Agent with a TypeScript application containing:
+1. Configure `ARK_API_KEY` and `ARK_MODEL` locally without displaying either value.
+2. Run `npm run poc` and open <http://localhost:3000>.
+3. Confirm that the Outcome Contract requires `AGENTS.md` and `README.md` and protects `AGENTS.md`.
+4. Keep this script and the [one-page architecture](architecture-one-page.md) open in separate tabs.
 
-- A passing unit test suite.
-- A required `src/index.ts` file.
-- A protected `package.json` file.
-- A SQLite database containing one canonical inventory record.
-- A mock notification outbox consumer.
-
-Configure an Outcome Contract that requires the tests to pass, preserves the required and protected paths, limits changed files, scans changed content for secrets, and validates typed notification intents.
+Do not place credentials in the repository, terminal capture, browser, screenshots, or Promotion Receipt evidence.
 
 ## Timeline
 
-### 0:00 to 0:25 - Establish the risk
+### 0:00 to 0:30 - Create the Agent
 
-Show the existing Playground and explain that the Runtime container is disposable while its mounted workspace is persistent.
-Show the current Canonical State identifier and green Outcome Contract.
+Create an Agent named `Airlock Demo` in the existing starter-kit UI.
+Open its Playground and point out the Canonical State fingerprint and Outcome Contract version.
+Explain that accepted state is immutable and each turn receives a separate Candidate State.
 
-### 0:25 to 1:05 - Promote a valid future
+### 0:30 to 1:15 - Promote a valid future
 
-Ask the Agent to add a health-check command, update the tests, update the SQLite fixture, and prepare a notification.
-Show the Run Transaction moving through preparation, execution, validation, and promotion.
-Show the file summary, database change, passing validations, one delivered notification, and the new Canonical State identifier.
+Send this real task through the Playground:
 
-### 1:05 to 1:55 - Quarantine a destructive future
+```text
+Create AIRLOCK_DEMO.md containing a short explanation of why isolated candidate state protects an AI coding workspace.
+Do not modify or delete any existing file.
+```
 
-Ask the Agent to simplify the project by deleting the tests and replacing the application with a static file.
-Show that the Agent performs the work inside Candidate State.
-Show the Outcome Contract rejecting the missing required path and failed test command.
-Show that the Run is quarantined, the canonical content hash is unchanged, the canonical SQLite query is unchanged, and no notification was delivered.
+Show the Run moving through preparation, execution, validation, and promotion.
+Open the Airlock evidence and identify the changed file, passing Validations, terminal disposition, receipt hash, and advanced Canonical State fingerprint.
 
-### 1:55 to 2:35 - Repair without contamination
+### 1:15 to 2:15 - Quarantine a destructive future
 
-Start a Repair Run from the Quarantine.
-Airlock supplies the failed Validation evidence and asks the Agent to restore the required behavior.
-Show the repaired Candidate State passing and becoming canonical.
+Send this controlled destructive task:
 
-### 2:35 to 3:00 - Close with control and evidence
+```text
+Delete AGENTS.md and replace it with damage.txt containing the text destructive candidate.
+Perform the file changes now.
+```
 
-Open the Promotion Receipt and point to the Run ancestry, validations, bounded changes, and resulting state version.
-Send a short follow-up prompt to prove that the Agent continues from the promoted Codex session and workspace.
+The Agent is allowed to make the requested changes because it can write only to Candidate State.
+Show that Airlock rejects the protected-path and required-path violations, reports `Quarantined`, and labels Canonical State as unchanged.
+
+### 2:15 to 2:45 - Prove accepted reality survived
+
+Compare the before and after Canonical State fingerprints in the UI.
+Point to the rejected change summary, then verify that canonical `AGENTS.md` remains present and `damage.txt` was not promoted.
+The rejected Candidate State remains available as bounded evidence without becoming accepted state.
+
+### 2:45 to 3:00 - Close with the middleware boundary
+
+Open the one-page architecture diagram.
+Summarize the trusted decision boundary: the Runtime can mutate Candidate State, deterministic Validations decide its disposition, and only Airlock can advance the atomic canonical manifest.
+Show that the ordinary Playground and Agent lifecycle controls remain usable after rejection.
 
 ## Required proof points
 
-- A real Codex Run modifies Candidate State.
-- A successful Run promotes files, session state, SQLite state, and one mock external intent.
-- A failed Run leaves all canonical resources unchanged.
-- A Repair Run continues from Quarantine rather than from corrupted Canonical State.
-- The ordinary Agent lifecycle and Playground remain usable afterward.
+- The Agent is created or selected through the starter-kit frontend.
+- A real ModelArk-backed Codex Run performs a real file action.
+- The Runtime receives Candidate State rather than a writable canonical workspace.
+- A valid candidate advances Canonical State exactly once.
+- A destructive candidate is quarantined with an understandable reason.
+- The canonical fingerprint is identical before and after rejection.
+- Validation evidence is redacted and bounded.
+- The existing Agent lifecycle and Playground remain controllable afterward.
 
-## Controlled fallback
+## Honest scope boundary
 
-If live model latency threatens the three-minute window, prepare the fixture and first successful Run before judging, then execute the rejection and repair journey live.
-Do not replace middleware behavior with recorded or hard-coded success states.
+The current qualifying release makes workspace mutation transactional and makes promotion decisions explainable.
+Transactional Codex session continuity, SQLite resources, deferred external actions, repair runs, and crash-journal reconciliation are later roadmap phases.
+Do not claim those capabilities in the Phase 0-2 demonstration.
+
+## Live-demo contingency
+
+If the live model stalls, cancel the Run from the existing control and repeat with the shorter prompt `Create AIRLOCK_DEMO.md containing candidate state works.`
+The deterministic Playwright fixture is valid automated regression evidence, but it is not a substitute for the credentialed ModelArk step in the live judging path.

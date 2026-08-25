@@ -5,7 +5,7 @@ CRUD, a browser Playground, persistent workspaces, and Codex CLI backed by the
 Volcengine Ark Responses API.
 
 This repository is the foundation for **Agent Airlock**, transactional execution middleware that runs every Agent task against isolated Candidate State and promotes only outcomes that satisfy a versioned Outcome Contract.
-Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), and [implementation plan](.omx/plans/agent-airlock.md) before starting Airlock work.
+Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), and [Phase 0-2 implementation plan](.omx/plans/phases-0-2-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
 Run it locally with Docker, Colima, or rootless Podman, or deploy it to
@@ -259,6 +259,11 @@ The credentialed ModelArk acceptance journey remains the browser SOP documented 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Agent Airlock architecture](docs/architecture/agent-airlock.md)
+- [One-page judging architecture](docs/demo/architecture-one-page.md)
+- [Three-minute live demo](docs/demo/three-minute-demo.md)
+- [Product requirements](docs/product/PRD.md)
+- [Outcome roadmap](docs/product/OUTCOME_ROADMAP.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)

@@ -16,6 +16,12 @@ The product promise is simple:
 
 > Agents may explore many futures, but only validated futures become reality.
 
+## Current qualifying release
+
+Phases 0 through 2 are implemented.
+The release makes workspace changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded decision evidence in the existing Playground.
+Transactional Codex session state, SQLite adapters, deferred external actions, Repair Runs, and crash-journal reconciliation are product targets for later phases.
+
 ## Problem
 
 The starter kit creates a disposable Runtime container for each local turn but bind-mounts the persistent Agent workspace and shared Codex state into that container.
@@ -50,7 +56,9 @@ Operators currently cannot answer these questions before accepting a Run:
 - BytePlus ECS deployment as a judging requirement.
 - Blockchain integration.
 
-## Core user journey
+## Target product journey
+
+This journey describes the complete product direction, including later roadmap phases.
 
 1. The operator creates or selects an Agent through the starter UI.
 2. The operator reviews or accepts the Agent's Outcome Contract.
@@ -62,7 +70,7 @@ Operators currently cannot answer these questions before accepting a Run:
 8. Airlock quarantines the Candidate State when any required Validation fails.
 9. The operator can inspect evidence, discard the Quarantine, or start a Repair Run from it.
 
-## Functional requirements
+## Product target requirements
 
 ### Run Transaction lifecycle
 
@@ -138,15 +146,19 @@ Operators currently cannot answer these questions before accepting a Run:
 - Symlink handling must prevent Candidate State from reaching canonical or unrelated host paths.
 - External actions outside the controlled outbox are a documented residual risk for the POC.
 
-## Success metrics
+## Phase 2 qualifying success metrics
 
 - A successful Run promotes a valid workspace and the next Playground message continues from that promoted state.
 - A destructive Run that deletes required files is quarantined and leaves the Canonical State content hash unchanged.
+- The complete success and rejection story fits in a three-minute live demonstration.
+- `npm run check` passes.
+
+## Later-phase success metrics
+
 - A rejected SQLite mutation leaves canonical query results unchanged.
 - A deferred mock external action executes once after promotion and zero times after rejection.
 - A quarantined Run can be repaired and subsequently promoted without modifying the original Canonical State before promotion.
-- The complete success, rejection, and recovery story fits in a three-minute live demonstration.
-- `npm run check` passes.
+- The complete success, rejection, and recovery story fits in a later three-minute demonstration.
 
 ## Release scope
 
