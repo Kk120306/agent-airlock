@@ -1,10 +1,43 @@
 # Local POC
 
+## Free deterministic demo
+
+Use this path for development, judging rehearsal, and automated evidence while organizer credentials are pending.
+It builds the production application, binds Fastify to `127.0.0.1:3199`, seeds one `Airlock Demo` Agent, and runs a deterministic local Codex protocol fixture.
+It does not require Docker, a ModelArk key, or paid inference.
+
+```bash
+npm install
+npm run demo -- --reset
+```
+
+Open <http://127.0.0.1:3199> and follow the four numbered controls in the `Judge path` strip.
+The terminal and Web UI both disclose fixture mode.
+The launcher's `ARK_BASE_URL` is an unreachable loopback address, so the fixture path cannot silently make a remote model request.
+Server startup rejects partial or remote `AIRLOCK_DEMO_MODE` configurations instead of displaying an inaccurate no-cost disclosure.
+
+Run `npm run demo` without `--reset` to prove that the seeded Agent, conversation, Canonical State, and evidence survive restart.
+Set `AIRLOCK_DEMO_PORT` to choose another loopback port.
+Set `AIRLOCK_DEMO_DATA_ROOT` to choose another isolated persistent root.
+The launcher marks managed demo roots and refuses to reset a nonempty unmarked directory, so a custom root cannot erase unrelated host data accidentally.
+
+Run the exact automated hero journey with:
+
+```bash
+npm run test:demo
+npm run test:demo:e2e
+```
+
+`test:demo` verifies port conflicts, clean reset, process shutdown, seeding, and restart persistence.
+`test:demo:e2e` verifies Promotion, destructive Quarantine, unchanged Canonical State, Repair lineage, two accepted mock effects, session continuity, reload persistence, and a 390-pixel layout.
+
+## Credentialed ModelArk POC
+
 The local profile runs the React/Fastify control plane on macOS or Linux and
 starts every Codex turn in a disposable Docker, Colima, or Podman container.
 Only the configured ModelArk model API is remote.
 
-No ModelArk credential is required for `npm run test:e2e` or `npm run check:phase6`.
+No ModelArk credential is required for `npm run demo`, `npm run test:e2e`, or any `npm run check:phase7` verification path.
 Those commands use a deterministic local Codex fixture, SQLite, and the atomic mock action consumer without paid inference.
 
 ## Start

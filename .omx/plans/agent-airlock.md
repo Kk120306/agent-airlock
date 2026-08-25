@@ -6,7 +6,7 @@ Agent Airlock must extend the CodeJam starter kit without replacing its React UI
 Every Agent Run must execute against Candidate State, and only a candidate satisfying its versioned Outcome Contract may become Canonical State.
 The POC must demonstrate transactional workspace and Codex session behavior, a SQLite Transactional Resource, a deferred mock External Action Intent, quarantine, repair, recovery, and evidence.
 
-This plan remains provisional until the open Wayfinder decision tickets close.
+This plan is frozen for judging by [ADR 0009](../../docs/adr/0009-freeze-the-judge-release-boundary.md).
 
 ## Outcome sequence
 
@@ -24,7 +24,7 @@ A later phase does not enter the judging path until the previous phase's automat
 | 6. Adversarial resilience | Steps 5, 6, and 9 | Crash, bypass, cleanup, and replay tests fail closed. |
 | 7. Judge-ready release | Step 9 | The complete product is reproducible and demonstrable within three minutes. |
 
-Phases 8 through 11 are post-hackathon outcomes and must not expand the implementation scope until Phase 7 is green.
+Phases 8 through 11 are post-hackathon outcomes and must not expand the implementation scope before submission.
 
 ## Acceptance criteria
 
@@ -41,7 +41,7 @@ Phases 8 through 11 are post-hackathon outcomes and must not expand the implemen
 11. Validation output and evidence are bounded and redact configured sensitive patterns.
 12. Path traversal and symlink attempts cannot escape Candidate State.
 13. The complete normal, rejection, and recovery scenario fits within three minutes.
-14. `npm run check` passes.
+14. `npm run check:phase7` passes from the working repository and a clean temporary clone.
 
 ## Implementation steps
 

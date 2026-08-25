@@ -33,15 +33,18 @@ flowchart LR
 
     subgraph Untrusted["Untrusted execution"]
         Runtime["Starter-kit Codex Runtime"]
+        Fixture["Deterministic local Codex protocol fixture"]
         Candidate["Run-owned workspace, Codex home, SQLite, and action outbox"]
         Check["Disposable validation copy in constrained container"]
         Ark["ModelArk Responses API"]
         Runtime <--> Candidate
         Runtime <--> Ark
+        Fixture <--> Candidate
         Candidate --> Check
     end
 
-    Airlock -->|Candidate path only| Runtime
+    Airlock -->|Credentialed POC| Runtime
+    Airlock -->|Free judge demo| Fixture
     Candidate --> Validate
     Check --> Validate
 
@@ -77,15 +80,16 @@ flowchart LR
 
 1. Airlock resolves and verifies the current immutable Canonical State.
 2. Airlock copies its workspace, Codex home, and SQLite database into Run-owned Candidate State and creates a fresh dedicated outbox.
-3. The Agent uses Codex and ModelArk normally and may change files, data, reasoning, and supported action intents inside Candidate State.
-4. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
-5. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
-6. A pass first records an approved decision, then moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
-7. Only after that advance may the idempotent mock consumer claim a validated notification intent, and every boundary advances the monotonic journal.
-8. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
-9. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
-10. The operator may discard mutable Quarantine state or fork one bounded Repair Run that resumes rejected memory, preserves useful work, uses a fresh outbox, and must pass the original contract before Promotion.
-11. After interruption, startup verifies the journal, installed version, canonical manifest, and mock receipts before reconstructing operator-facing metadata.
+3. The credentialed POC uses Codex and ModelArk, while the free judge demo substitutes a deterministic local protocol fixture at the same `AgentRunner` seam.
+4. Either provider may change files, data, reasoning, and supported action intents only inside Candidate State.
+5. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
+6. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
+7. A pass first records an approved decision, then moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
+8. Only after that advance may the idempotent mock consumer claim a validated notification intent, and every boundary advances the monotonic journal.
+9. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
+10. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
+11. The operator may discard mutable Quarantine state or fork one bounded Repair Run that resumes rejected memory, preserves useful work, uses a fresh outbox, and must pass the original contract before Promotion.
+12. After interruption, startup verifies the journal, installed version, canonical manifest, and mock receipts before reconstructing operator-facing metadata.
 
 ## Trust and recovery boundary
 
@@ -95,7 +99,7 @@ The atomic canonical manifest is the only source of accepted state, while the jo
 Canonical workspace, Codex-session, and SQLite versions are never mounted writable into the Runtime or validation container.
 The platform-owned delivery store is never mounted into either execution boundary.
 
-## Implemented and tested in Phases 0-6
+## Implemented and tested in Phases 0-7
 
 - Starter-kit Agent CRUD, lifecycle controls, Playground chat, persistence, Codex runner seam, and container path remain intact.
 - Promotion, destructive Quarantine, Runtime failure, and cancellation preserve the documented canonical-state invariant.
@@ -111,6 +115,8 @@ The platform-owned delivery store is never mounted into either execution boundar
 - An opt-in real-container suite proves validation containment without an Ark key or writable canonical mount.
 - Eight deterministic interruption seams converge across two restarts to one canonical version, one assistant message, and at most one supported mock effect.
 - A physical fingerprint contradiction fails closed with visible recovery evidence, while root-confined retention preserves bounded evidence and unrelated host data.
+- One loopback-only command seeds the four-step production demo, discloses the deterministic fixture, and preserves Agent state across restart without a ModelArk credential or paid inference.
+- A dedicated production Chrome journey proves the complete hero path and asserts that the 390-pixel viewport has no document-level overflow.
 
 ## Deliberate non-claims
 

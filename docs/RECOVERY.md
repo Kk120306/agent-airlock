@@ -80,3 +80,13 @@ npm run check:phase6
 The server acceptance suite injects interruption at all eight implemented seams and performs two consecutive restarts.
 It also verifies contradictory installed state, pre-decision Quarantine retention, expiration with evidence preservation, unsafe identifiers, and cleanup symlink confinement.
 No ModelArk credential or paid inference request is used.
+
+Run the judge-ready restart and recovery story with:
+
+```bash
+npm run demo -- --reset
+```
+
+Complete the four guided steps, stop the process with `Ctrl+C`, and restart with `npm run demo` without `--reset`.
+The same Agent identifier, messages, immutable versions, canonical manifest, Promotion evidence, and mock effect receipts must reappear.
+Use `npm run test:demo` for the automated launcher restart assertion and `npm run check:phase7` for the complete recovery and release gate.

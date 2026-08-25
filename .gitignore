@@ -5,6 +5,7 @@ dist/
 !.env.example
 .data/
 .e2e-baseline/
+.e2e-demo/
 .local/
 data/
 workspaces/

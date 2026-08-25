@@ -26,6 +26,10 @@ const envSchema = z.object({
     .positive()
     .max(8_760)
     .default(168),
+  AIRLOCK_DEMO_MODE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   RUNTIME_PROVIDER: z.enum(["local-process", "container"]).default("local-process"),
   CONTAINER_ENGINE: z.string().min(1).default("docker"),
   CONTAINER_RUNTIME_IMAGE: z.string().min(1).default("volc-agent-runtime:local"),
@@ -64,6 +68,21 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
   const env = envSchema.parse(environment);
   const authToken = env.APP_AUTH_TOKEN?.trim() ?? "";
   const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
+  if (env.AIRLOCK_DEMO_MODE) {
+    const arkHostname = new URL(env.ARK_BASE_URL).hostname;
+    const demoProfileValid =
+      loopbackHosts.has(env.HOST) &&
+      loopbackHosts.has(arkHostname) &&
+      env.RUNTIME_PROVIDER === "local-process" &&
+      path.basename(env.CODEX_BIN) === "fake-codex.mjs" &&
+      env.ARK_API_KEY?.trim() === "deterministic-local-fixture" &&
+      env.ARK_MODEL?.trim() === "local-airlock-demo";
+    if (!demoProfileValid) {
+      throw new Error(
+        "AIRLOCK_DEMO_MODE requires the loopback-only deterministic fixture profile from npm run demo",
+      );
+    }
+  }
   if (env.NODE_ENV === "production" && !loopbackHosts.has(env.HOST)) {
     if (authToken.length < 24 || authToken.startsWith("replace-")) {
       throw new Error(
@@ -90,6 +109,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     candidateRetentionMs: env.AIRLOCK_CANDIDATE_RETENTION_HOURS * 60 * 60 * 1_000,
     quarantineRetentionMs:
       env.AIRLOCK_QUARANTINE_RETENTION_HOURS * 60 * 60 * 1_000,
+    demoMode: env.AIRLOCK_DEMO_MODE,
     runtimeProvider: env.RUNTIME_PROVIDER,
     containerEngine: env.CONTAINER_ENGINE,
     containerRuntimeImage: env.CONTAINER_RUNTIME_IMAGE,

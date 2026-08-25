@@ -177,6 +177,8 @@ export interface AgentRun {
 }
 
 export interface SystemInfo {
+  demoMode: boolean;
+  inferenceMode: "deterministic-local-fixture" | "modelark";
   arkConfigured: boolean;
   arkBaseUrl: string;
   arkModel: string | null;

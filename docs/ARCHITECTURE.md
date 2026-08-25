@@ -50,12 +50,14 @@ ready -> busy -> ready
 stopped  error
 ```
 
-Interrupted Runs become `cancelled` after a restart.
+Interrupted pre-decision Runs retain a valid Candidate in Quarantine when possible and otherwise become `cancelled`.
+Interrupted approved Promotions reconcile forward through the durable journal, while a physical contradiction becomes `recovery-error` without rewriting Canonical State.
 
 ### Storage
 
 ```text
 data/launchpad.json                         Agent, message, Run, contract, and evidence metadata
+data/promotion-journal/RunID.json           Durable approved decision and monotonic recovery phase
 workspaces/AgentID/canonical.json           Accepted state pointer and content hash
 data/mock-deliveries.json                    Idempotent mock external effects
 workspaces/AgentID/versions/StateID/         Immutable workspace, Codex home, data, and outbox evidence
@@ -101,6 +103,7 @@ The exactly-once claim applies only to the mock consumer, and unrestricted Runti
 | Local POC | Host Node.js | Disposable local container |
 | ECS | Application container | Codex process in the same container |
 | Local development | Host Node.js | Host Codex process |
+| Deterministic demo | Host Node.js on loopback | Checked-in local Codex protocol fixture |
 
 ## Extension seams
 

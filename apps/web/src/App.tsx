@@ -8,6 +8,43 @@ const starterPrompts = [
   "Build a responsive single-page todo app with tests.",
 ];
 
+const demoHeroPrompts = {
+  promote: "Prepare the multi-resource release.",
+  challenge: "Delete AGENTS.md and create damage.txt.",
+  continue: "Confirm recovery from the repaired Canonical State.",
+} as const;
+
+const demoHeroSteps = [
+  {
+    id: "promote",
+    number: "01",
+    label: "Promote release",
+    detail: "Commit code, data, memory, and one effect",
+    prompt: demoHeroPrompts.promote,
+  },
+  {
+    id: "challenge",
+    number: "02",
+    label: "Challenge safety",
+    detail: "Quarantine a destructive future",
+    prompt: demoHeroPrompts.challenge,
+  },
+  {
+    id: "repair",
+    number: "03",
+    label: "Repair future",
+    detail: "Reuse bounded evidence and lineage",
+    prompt: null,
+  },
+  {
+    id: "continue",
+    number: "04",
+    label: "Prove continuity",
+    detail: "Continue from repaired Canonical State",
+    prompt: demoHeroPrompts.continue,
+  },
+] as const;
+
 const emptyForm = {
   name: "",
   description: "",
@@ -407,6 +444,37 @@ export default function App() {
     [agents, selectedId],
   );
 
+  const demoStepCompletion = useMemo(() => {
+    const assistantOutputs = messages
+      .filter((message) => message.role === "assistant")
+      .map((message) => message.content.toLowerCase());
+    return {
+      promote: assistantOutputs.some((output) =>
+        output.includes("prepared the multi-resource release"),
+      ),
+      challenge: assistantOutputs.some((output) =>
+        output.includes("attempted the destructive workspace change"),
+      ),
+      repair: assistantOutputs.some((output) =>
+        output.includes("repaired the quarantined future"),
+      ),
+      continue: assistantOutputs.some(
+        (output) =>
+          output.includes("continued baseline-thread") &&
+          output.includes("confirm recovery"),
+      ),
+    };
+  }, [messages]);
+
+  const runInProgress =
+    activeRun != null && ["queued", "running"].includes(activeRun.status);
+  const demoActionBusy =
+    busy || airlockActionBusy || selected?.status === "busy" || runInProgress;
+  const canRepairActiveFuture =
+    activeRun?.status === "completed" &&
+    activeRun.transaction?.disposition === "quarantined" &&
+    activeRun.transaction.quarantineAvailable;
+
   const refreshAgents = useCallback(async () => {
     const { agents: next } = await api.listAgents();
     setAgents(next);
@@ -477,7 +545,9 @@ export default function App() {
   }, [selected]);
 
   useEffect(() => {
-    messageEnd.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length > 0 || activeRun) {
+      messageEnd.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, activeRun]);
 
   const createAgent = async (event: React.FormEvent) => {
@@ -707,9 +777,11 @@ export default function App() {
           <div>
             <strong>Agent Launchpad</strong>
             <span>
-              {system?.runtimeProvider === "container"
-                ? "Local container · Codex CLI"
-                : "ECS / Docker · Codex CLI"}
+              {system?.demoMode
+                ? "Free local proof · no network model"
+                : system?.runtimeProvider === "container"
+                  ? "Local container · Codex CLI"
+                  : "ECS / Docker · Codex CLI"}
             </span>
           </div>
         </div>
@@ -755,13 +827,25 @@ export default function App() {
           <span className="eyebrow">Runtime</span>
           <strong>{system?.runtime ?? "Checking…"}</strong>
           <span>
-            {system?.arkModel ?? "Ark model not configured"}
-            {system?.containerEngine ? " · " + system.containerEngine : ""}
+            {system?.demoMode
+              ? "No paid inference"
+              : (system?.arkModel ?? "Ark model not configured") +
+                (system?.containerEngine ? " · " + system.containerEngine : "")}
           </span>
         </div>
       </aside>
 
       <main className="main">
+        {system?.demoMode ? (
+          <div className="demo-mode-banner" role="status">
+            <span>FREE LOCAL DEMO</span>
+            <div>
+              <strong>Deterministic protocol fixture</strong>
+              <p>No ModelArk request or paid inference is active.</p>
+            </div>
+          </div>
+        ) : null}
+
         {!system?.arkConfigured || !system?.codexAvailable ? (
           <div className="config-banner">
             <span>!</span>
@@ -919,20 +1003,71 @@ export default function App() {
             )}
 
             <section className="playground">
-              <div className="playground-topbar">
-                <div>
-                  <span className="eyebrow">Playground</span>
-                  <h2>Build something with your Agent</h2>
-                </div>
-                <div className="playground-state">
-                  <span className="contract-badge">
-                    Outcome Contract v{selected.outcomeContract.version}
-                  </span>
-                  <div className="session-info">
-                    <span className="pulse" />
-                    {selected.codexThreadId ? "Session connected" : "New session"}
+              <div className="playground-header">
+                <div className="playground-topbar">
+                  <div>
+                    <span className="eyebrow">Playground</span>
+                    <h2>
+                      {system?.demoMode
+                        ? "Prove one Agent future is safe"
+                        : "Build something with your Agent"}
+                    </h2>
+                  </div>
+                  <div className="playground-state">
+                    <span className="contract-badge">
+                      Outcome Contract v{selected.outcomeContract.version}
+                    </span>
+                    <div className="session-info">
+                      <span className="pulse" />
+                      {selected.codexThreadId ? "Session connected" : "New session"}
+                    </div>
                   </div>
                 </div>
+
+                {system?.demoMode ? (
+                  <section className="demo-guide" aria-label="Four-step demo proof">
+                    <div className="demo-guide-heading">
+                      <span className="eyebrow">Judge path</span>
+                      <p>Stage each prompt, then send it. Repair runs directly from Quarantine.</p>
+                    </div>
+                    <div className="demo-step-list">
+                      {demoHeroSteps.map((step, index) => {
+                        const completed = demoStepCompletion[step.id];
+                        const prerequisiteMet =
+                          index === 0 || demoStepCompletion[demoHeroSteps[index - 1].id];
+                        const disabled =
+                          demoActionBusy ||
+                          completed ||
+                          !prerequisiteMet ||
+                          (step.id === "repair" && !canRepairActiveFuture);
+                        return (
+                          <button
+                            type="button"
+                            className={completed ? "demo-step completed" : "demo-step"}
+                            key={step.id}
+                            disabled={disabled}
+                            aria-label={"Demo step " + (index + 1) + ": " + step.label}
+                            onClick={() => {
+                              if (step.id === "repair") {
+                                void repairActiveRun();
+                              } else if (step.prompt) {
+                                setPrompt(step.prompt);
+                              }
+                            }}
+                          >
+                            <span className="demo-step-number">
+                              {completed ? "✓" : step.number}
+                            </span>
+                            <span>
+                              <strong>{step.label}</strong>
+                              <small>{step.detail}</small>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
               </div>
 
               <div className="messages">
@@ -941,18 +1076,25 @@ export default function App() {
                     <div className="welcome-orbit">
                       <div>⌁</div>
                     </div>
-                    <h3>What should {selected.name} build?</h3>
+                    <h3>
+                      {system?.demoMode
+                        ? "Start with the safe multi-resource release"
+                        : `What should ${selected.name} build?`}
+                    </h3>
                     <p>
-                      The Agent can inspect files, write code, run commands, and continue the
-                      same Codex session across messages.
+                      {system?.demoMode
+                        ? "This local fixture demonstrates transactional Promotion, Quarantine, Repair, and session continuity without calling a network model."
+                        : "The Agent can inspect files, write code, run commands, and continue the same Codex session across messages."}
                     </p>
                     <div className="prompt-grid">
-                      {starterPrompts.map((item) => (
-                        <button key={item} onClick={() => setPrompt(item)}>
-                          <span>↗</span>
-                          {item}
-                        </button>
-                      ))}
+                      {(system?.demoMode ? Object.values(demoHeroPrompts) : starterPrompts).map(
+                        (item) => (
+                          <button key={item} onClick={() => setPrompt(item)}>
+                            <span>↗</span>
+                            {item}
+                          </button>
+                        ),
+                      )}
                     </div>
                   </div>
                 ) : (

@@ -18,6 +18,7 @@ Object.assign(process.env, {
   ARK_API_KEY: "baseline-fixture-key",
   ARK_MODEL: "ep-baseline-fixture",
   RUNTIME_PROVIDER: "local-process",
+  AIRLOCK_DEMO_MODE: "false",
 });
 
 await import("../../apps/server/dist/index.js");

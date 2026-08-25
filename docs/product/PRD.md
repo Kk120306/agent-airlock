@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 6 implemented and regression-locked
+**Status:** Phases 0 through 7 implemented and regression-locked
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -18,12 +18,14 @@ The product promise is simple:
 
 ## Current release
 
-Phases 0 through 6 are implemented.
+Phases 0 through 7 are implemented.
 The release makes workspace, Codex-session, and SQLite changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
 Typed notification intents use a candidate-owned outbox and an idempotent mock consumer that can claim an effect only after the canonical manifest advances.
 An operator can now repair or discard a Quarantine, while bounded ancestry, canonical freshness checks, a fresh outbox, and the original Outcome Contract keep recovery fail-closed.
 A platform-owned Promotion journal now reconciles every approved decision forward after process interruption, verifies physical fingerprints before repairing metadata, and fails closed on contradiction.
 Positive Candidate and Quarantine retention windows remove only expired mutable state while preserving bounded decision evidence.
+The judge-ready release adds a loopback-only deterministic launcher, one seeded hero Agent, a four-step guided Playground story, restart-safe fixture state, a dedicated production Chrome acceptance path, and an automated release audit.
+The deterministic fixture replaces only paid model inference and is disclosed in the terminal, system API, sidebar, and main UI.
 
 ## Problem
 
@@ -129,6 +131,17 @@ This journey describes the complete product direction, including later roadmap p
 - The operator must be able to discard Quarantine or request a Repair Run.
 - The interface must not display credentials, environment values, or unredacted sensitive content.
 
+### Judge-ready release experience
+
+- `npm run demo -- --reset` must build and start the production application on loopback with no required credential or container engine.
+- The launcher must seed exactly one named Agent and print the URL, persistent state root, four-step path, restart behavior, reset behavior, and no-paid-inference disclosure.
+- The Web UI must disclose deterministic fixture mode without obscuring normal Agent lifecycle or Playground controls.
+- The guided story must stage Promotion, destructive Quarantine, Repair, and continuity actions without hard-coding middleware outcomes in the frontend.
+- Demo progress must be derived from persisted assistant messages and actual Run results.
+- Restart without reset must preserve the Agent identifier, conversation, Canonical State, and evidence.
+- The credentialed `npm run poc` path must remain separate and unchanged.
+- A reviewer must be able to distinguish reproducible middleware proof from pending live ModelArk conformance.
+
 ## Reliability requirements
 
 - Promotion processing must be idempotent.
@@ -166,7 +179,7 @@ This journey describes the complete product direction, including later roadmap p
 
 ## Later-phase success metrics
 
-- The complete success, rejection, and recovery story fits in a deterministic three-minute demonstration.
+- The complete success, rejection, repair, and continuity story finishes in 6.3 seconds under deterministic production-browser automation and fits in a rehearsed three-minute live demonstration.
 
 ## Release scope
 
@@ -183,7 +196,8 @@ They make Codex continuity transactional with the workspace and prove the same a
 ### Winning target
 
 Phases 5 through 7 add recoverable Repair Runs, adversarial resilience, and a deterministic three-minute release experience.
-Later-phase work must not enter the judging path until all earlier exit gates pass.
+All three phases are delivered and regression-locked.
+Later-phase work cannot enter the judging path before submission.
 
 ### Post-hackathon expansion
 
@@ -200,11 +214,12 @@ These capabilities shape stable extension points but are not hackathon dependenc
 
 ## Wayfinder decisions
 
-- [Set the P0 scope cutoff and judging acceptance bar](https://github.com/Kk120306/agent-airlock/issues/9).
+- The P0 cutoff and judging acceptance bar are resolved in [ADR 0009](../adr/0009-freeze-the-judge-release-boundary.md) and tracked through [Wayfinder issue 9](https://github.com/Kk120306/agent-airlock/issues/9).
 
 Codex session isolation is resolved in [ADR 0005](../adr/0005-version-codex-home-with-candidate-state.md).
 External Action Intent delivery is resolved in [ADR 0006](../adr/0006-defer-external-actions-until-promotion.md).
 Quarantine repair, lineage, freshness, and discard semantics are resolved in [ADR 0007](../adr/0007-repair-quarantined-futures.md).
 Promotion journal, forward recovery, contradiction handling, and retention semantics are resolved in [ADR 0008](../adr/0008-reconcile-approved-promotions-forward.md).
+The deterministic judge path, fixture disclosure, and post-hackathon cutoff are resolved in [ADR 0009](../adr/0009-freeze-the-judge-release-boundary.md).
 
 The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) is the canonical index for these decisions.

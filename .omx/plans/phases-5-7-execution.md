@@ -1,6 +1,6 @@
 # Phases 5 through 7 execution plan
 
-**Status:** Phases 5 and 6 implementation and no-cost exit gates complete; Phase 7 pending
+**Status:** Phases 5 through 7 implementation and no-cost exit gates complete; live ModelArk conformance pending organizer credentials
 
 **Scope:** Recoverable intelligence, adversarial resilience, and judge-ready release
 
@@ -9,6 +9,10 @@
 **Phase 5 evidence:** `npm run check:phase5` passed with 73 server tests, one production Chrome journey, zero dependency vulnerabilities, the pinned Codex session-isolation probe, and three constrained validation-container tests.
 
 **Phase 6 evidence:** `npm run check:phase6` passed with 88 server tests, the eight-point crash matrix and repeated restart convergence, a 10.1-second production Chrome journey, zero dependency vulnerabilities, the pinned Codex session-isolation probe, and three constrained validation-container tests.
+
+**Phase 7 evidence:** `npm run check:phase7` passed repeatedly with 95 server tests and one skip, a 10.3-second baseline production Chrome journey, a 6.2-second four-step demo journey, zero dependency vulnerabilities, the pinned Codex session-isolation probe, three constrained validation-container tests, Compose rendering, Terraform formatting through the pinned local image, and a 127-file source and Git-history release audit.
+
+**Fresh-clone evidence:** A clean temporary clone completed `npm install`, started the seeded production demo with no credential, returned the deterministic fixture system profile and one `Airlock Demo` Agent, and passed the full `npm run check:phase7` gate after the infrastructure renderer was made independent of an untracked `.env` file.
 
 ## Requirements summary
 

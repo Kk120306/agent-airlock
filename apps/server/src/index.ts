@@ -14,6 +14,14 @@ const workspaces = new WorkspaceManager(config.workspaceRoot, config.codexHome);
 const runner = createRunner(config);
 const service = new AgentService(config, store, workspaces, runner);
 await service.initialize();
+if (config.demoMode && service.listAgents().length === 0) {
+  await service.createAgent({
+    name: "Airlock Demo",
+    description: "Promote, quarantine, repair, and continue one Agent future",
+    instructions:
+      "Follow the deterministic demo objective exactly and keep all changes inside the isolated Candidate State.",
+  });
+}
 
 const app = await createApp(config, service);
 

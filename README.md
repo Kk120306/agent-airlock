@@ -1,30 +1,45 @@
-# Volc Agent Launchpad
+# Agent Airlock
 
-A minimal Agent platform for three-day middleware hackathons. It provides Agent
-CRUD, a browser Playground, persistent workspaces, and Codex CLI backed by the
-ModelArk Responses API.
+Agent Airlock is transactional execution middleware built inside the CodeJam Agent Launchpad starter kit.
+Every Agent task runs against isolated Candidate State, and only an outcome that satisfies its versioned Outcome Contract may become Canonical State.
+Rejected work remains inspectable and can be repaired without contaminating accepted files, Agent memory, SQLite data, or supported external actions.
 
-This repository is the foundation for **Agent Airlock**, transactional execution middleware that runs every Agent task against isolated Candidate State and promotes only outcomes that satisfy a versioned Outcome Contract.
+> Agents may explore many futures, but only validated futures become reality.
+
 Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), and [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
-Run it locally with Docker, Colima, or rootless Podman, or deploy it to
-Volcengine ECS.
+## Free one-command demo
+
+The judge-ready demo uses the real production React, Fastify, Airlock, workspace, SQLite, outbox, journal, and persistence paths with a deterministic local Codex protocol fixture.
+It binds only to loopback and makes no ModelArk request or paid inference call.
+
+```bash
+npm install
+npm run demo -- --reset
+```
+
+Open <http://127.0.0.1:3199> and follow the numbered buttons in the `Judge path` strip.
+The complete path promotes a four-resource release, quarantines a destructive future, repairs that retained future, and proves session continuity from the repaired Canonical State.
+Restart with `npm run demo` to preserve the story, or use `npm run demo -- --reset` for a clean rehearsal.
+
+ModelArk credentials are needed only for the separate live conformance path described below.
+The project will not silently switch the deterministic demo to paid inference.
 
 > [!WARNING]
-> This is a single-user proof of concept. It intentionally has no identity,
-> tracing, audit, or hardened sandbox middleware. Do not use production data or
-> credentials. See [SECURITY.md](SECURITY.md).
+> This is a single-user proof of concept, not a production multi-tenant sandbox.
+> Do not use production data or credentials.
+> See [SECURITY.md](SECURITY.md).
 
 ## Screenshots
 
-### Agent Playground
+### Four-step judge path
 
-![Agent Playground showing lifecycle controls, starter prompts, and the Codex Runtime](docs/assets/playground.jpg)
+![Agent Airlock deterministic demo showing its free local disclosure and four-step judge path](docs/assets/airlock-demo-desktop.jpg)
 
-### Create an Agent
+### Mobile evidence
 
-![Create Agent form with name, description, and workspace instructions](docs/assets/create-agent.jpg)
+![Agent Airlock demo at a 390-pixel mobile viewport](docs/assets/airlock-demo-mobile.jpg)
 
 ## Features
 
@@ -45,18 +60,25 @@ Volcengine ECS.
 
 ## Requirements
 
+- Free demo: Node.js 22+, npm 10+, and installed Google Chrome for browser verification.
+- Live ModelArk POC: the free-demo requirements plus Docker, Colima, or Podman and organizer-provided ModelArk credentials.
+
+Codex CLI is included in the Runtime image and is not required on the host for the credentialed container path.
+The deterministic demo uses the checked-in protocol fixture and does not require a container engine.
+
+## Credentialed ModelArk browser SOP
+
+Use this path only after organizer credentials arrive.
+The free demo above is the default development and judging rehearsal path.
+
 - Node.js 22+
 - npm 10+
 - Docker, Colima, or Podman
 - A ModelArk API key and endpoint or model that supports the Responses API
 
-Codex CLI is included in the Runtime image and is not required on the host.
-
 The automated proof does not require ModelArk credentials or paid inference.
-Run `npm run test:e2e` to exercise the production browser, deterministic Codex fixture, SQLite transaction, and mock external effect locally.
+Run `npm run test:demo:e2e` to exercise the exact four-step production browser story locally.
 Organizer-provided credentials are needed only for the final live ModelArk conformance journey.
-
-## Local browser SOP
 
 ### 1. Check the local tools
 
@@ -226,6 +248,9 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `AIRLOCK_MAX_REPAIR_DEPTH` | `2` | Maximum bounded Repair Runs in one Quarantine lineage. |
 | `AIRLOCK_CANDIDATE_RETENTION_HOURS` | `24` | Mutable Candidate retention window in positive hours. |
 | `AIRLOCK_QUARANTINE_RETENTION_HOURS` | `168` | Mutable Quarantine retention window in positive hours while bounded evidence remains. |
+| `AIRLOCK_DEMO_MODE` | `false` | Internal fixture-mode marker set by `npm run demo`; do not enable it for a credentialed POC. |
+| `AIRLOCK_DEMO_PORT` | `3199` | Loopback port used by the deterministic demo launcher. |
+| `AIRLOCK_DEMO_DATA_ROOT` | `.local/airlock-demo` | Persistent isolated state used by the deterministic demo launcher. |
 | `LOCAL_POC_DATA_ROOT` | Platform-specific | Local metadata, workspace, and session directory. |
 
 See [.env.example](.env.example) for all Runtime and resource-limit options.
@@ -263,6 +288,9 @@ boundaries.
 ```bash
 npm run check
 npm run test:e2e
+npm run test:demo
+npm run test:demo:e2e
+npm run audit:release
 npm run test:codex-session-container
 npm run test:validation-container
 terraform fmt -check -recursive deploy/volcengine
@@ -276,6 +304,7 @@ Use `npm run check:phase3` to add the pinned Codex session-isolation and real va
 Use `npm run check:phase4` for the complete no-cost four-resource proof.
 Use `npm run check:phase5` for the complete no-cost Quarantine, Repair, lineage, and discard proof.
 Use `npm run check:phase6` to add all eight Promotion interruption seams, repeated restart convergence, retention, and path-abuse proof.
+Use `npm run check:phase7` for the complete prior suite, launcher lifecycle proof, four-step production demo, mobile layout check, and release audit.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.
@@ -287,6 +316,7 @@ The credentialed ModelArk acceptance journey remains the browser SOP documented 
 - [Agent Airlock architecture](docs/architecture/agent-airlock.md)
 - [One-page judging architecture](docs/demo/architecture-one-page.md)
 - [Three-minute live demo](docs/demo/three-minute-demo.md)
+- [Judge checklist](docs/demo/JUDGE_CHECKLIST.md)
 - [Product requirements](docs/product/PRD.md)
 - [Outcome roadmap](docs/product/OUTCOME_ROADMAP.md)
 - [Local POC](docs/LOCAL_POC.md)

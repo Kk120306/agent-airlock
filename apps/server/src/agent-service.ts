@@ -725,6 +725,10 @@ export class AgentService {
 
   async systemInfo(): Promise<Record<string, unknown>> {
     return {
+      demoMode: this.config.demoMode,
+      inferenceMode: this.config.demoMode
+        ? "deterministic-local-fixture"
+        : "modelark",
       arkConfigured: isArkConfigured(this.config),
       arkBaseUrl: this.config.arkBaseUrl,
       arkModel: this.config.arkModel || null,
@@ -736,7 +740,9 @@ export class AgentService {
           ? this.config.containerEngine
           : null,
       runtime:
-        this.config.runtimeProvider === "container"
+        this.config.demoMode
+          ? "Deterministic Codex protocol fixture"
+          : this.config.runtimeProvider === "container"
           ? "Codex CLI in " + this.config.containerEngine + " Runtime"
           : "Codex CLI in application container",
     };

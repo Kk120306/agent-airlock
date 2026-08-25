@@ -25,6 +25,11 @@ credentials, personal data, or exploit details in an issue.
 
 ## Safe use
 
+- Prefer `npm run demo -- --reset` for judging rehearsal while organizer credentials are pending.
+- The deterministic demo binds only to loopback, uses an unreachable loopback Ark URL, and makes no paid inference request.
+- Startup rejects demo mode unless every no-cost fixture marker matches the launcher's loopback profile.
+- Treat the deterministic Codex protocol fixture as untrusted Runtime behavior even though its outputs are reproducible.
+- Do not enable `AIRLOCK_DEMO_MODE` manually for a credentialed POC or interpret fixture output as model-quality evidence.
 - Use a dedicated development machine or disposable ECS instance.
 - Use a scoped, revocable Ark key and a unique `APP_AUTH_TOKEN`.
 - Keep local use on loopback and restrict ECS Web and SSH CIDRs.

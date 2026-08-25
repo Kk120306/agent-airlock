@@ -82,51 +82,53 @@ if (!resumedThreadId) {
     'import { hello } from "../src/hello.js";\n\nif (hello() !== "hello") throw new Error("failed");\n',
     "utf8",
   );
-  } else if (repairRequest) {
-    if (!repairReferencePath) {
-      process.stderr.write("AIRLOCK_REPAIR_REFERENCE_PATH is required\n");
-      process.exit(7);
-    }
-    const canonicalInstructions = await readFile(
-      path.join(repairReferencePath, "AGENTS.md"),
-      "utf8",
-    );
-    await writeFile(
-      path.join(process.cwd(), "AGENTS.md"),
-      canonicalInstructions,
-      "utf8",
-    );
-    const retainedDamage = await readFile(
-      path.join(process.cwd(), "damage.txt"),
-      "utf8",
-    );
-    if (!retainedDamage.includes("must remain quarantined")) {
-      process.stderr.write("Useful quarantined workspace changes did not carry into repair\n");
-      process.exit(8);
-    }
-    const database = new DatabaseSync(
-      path.join(process.cwd(), ".airlock", "demo.sqlite"),
-    );
-    database
-      .prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?")
-      .run("repaired", "2026-08-25T00:01:00.000Z", "demo");
-    database.close();
-    if (!outboxPath) throw new Error("AIRLOCK_OUTBOX_PATH is required");
-    await writeFile(
-      outboxPath,
-      JSON.stringify({
-        schemaVersion: 1,
-        id: "repair-ready",
-        type: "demo.notification.requested",
-        payload: {
-          destination: "demo-console",
-          subject: "Repair accepted",
-          body: "The quarantined future was repaired and is ready.",
-        },
-      }) + "\n",
-      "utf8",
-    );
-  } else if (destructiveRequest) {
+}
+
+if (repairRequest) {
+  if (!repairReferencePath) {
+    process.stderr.write("AIRLOCK_REPAIR_REFERENCE_PATH is required\n");
+    process.exit(7);
+  }
+  const canonicalInstructions = await readFile(
+    path.join(repairReferencePath, "AGENTS.md"),
+    "utf8",
+  );
+  await writeFile(
+    path.join(process.cwd(), "AGENTS.md"),
+    canonicalInstructions,
+    "utf8",
+  );
+  const retainedDamage = await readFile(
+    path.join(process.cwd(), "damage.txt"),
+    "utf8",
+  );
+  if (!retainedDamage.includes("must remain quarantined")) {
+    process.stderr.write("Useful quarantined workspace changes did not carry into repair\n");
+    process.exit(8);
+  }
+  const database = new DatabaseSync(
+    path.join(process.cwd(), ".airlock", "demo.sqlite"),
+  );
+  database
+    .prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?")
+    .run("repaired", "2026-08-25T00:01:00.000Z", "demo");
+  database.close();
+  if (!outboxPath) throw new Error("AIRLOCK_OUTBOX_PATH is required");
+  await writeFile(
+    outboxPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "repair-ready",
+      type: "demo.notification.requested",
+      payload: {
+        destination: "demo-console",
+        subject: "Repair accepted",
+        body: "The quarantined future was repaired and is ready.",
+      },
+    }) + "\n",
+    "utf8",
+  );
+} else if (destructiveRequest) {
   const source = await readFile(path.join(process.cwd(), "src", "hello.ts"), "utf8");
   if (!source.includes('"hello"')) {
     process.stderr.write("Baseline workspace did not persist before destructive turn\n");
@@ -184,7 +186,7 @@ if (!resumedThreadId) {
     }) + "\n",
     "utf8",
   );
-} else {
+} else if (resumedThreadId) {
   const source = await readFile(path.join(process.cwd(), "src", "hello.ts"), "utf8");
   if (!source.includes('"hello"')) {
     process.stderr.write("Baseline workspace did not persist\n");

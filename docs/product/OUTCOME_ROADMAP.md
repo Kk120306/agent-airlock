@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 6
+**Delivered:** Phases 0 through 7
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -280,6 +280,8 @@ The submission can make a credible reliability claim instead of relying on the h
 
 ### Phase 7: Judge-ready release
 
+**Status:** Delivered and regression-locked
+
 **Outcome**
 
 A reviewer can understand, run, test, and remember Agent Airlock with almost no cognitive overhead.
@@ -308,6 +310,15 @@ The final impression should be a working product with a falsifiable guarantee, n
 **What this unlocks**
 
 Agent Airlock becomes a coherent hackathon submission that directly addresses all four judging categories.
+
+**Delivered evidence**
+
+- `npm run demo -- --reset` builds production, binds to loopback, seeds one Agent, and requires no ModelArk credential or container engine.
+- The terminal, `/api/system`, sidebar, and main UI identify deterministic fixture mode and no paid inference.
+- The four-step guide stages the complete Promotion, Quarantine, Repair, and continuity story through real backend behavior.
+- The dedicated production Chrome path completed in 6.3 seconds and asserted the 390-pixel viewport without document overflow.
+- Launcher integration proves port conflicts, reset, graceful stop, restart persistence, and deterministic seeding.
+- ADR 0009 freezes P0 scope and separates the release proof from pending organizer-credential ModelArk conformance.
 
 ## Post-hackathon phases
 
