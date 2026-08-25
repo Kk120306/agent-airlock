@@ -4,6 +4,10 @@ A minimal Agent platform for three-day middleware hackathons. It provides Agent
 CRUD, a browser Playground, persistent workspaces, and Codex CLI backed by the
 Volcengine Ark Responses API.
 
+This repository is the foundation for **Agent Airlock**, transactional execution middleware that runs every Agent task against isolated Candidate State and promotes only outcomes that satisfy a versioned Outcome Contract.
+Read the [product requirements](docs/product/PRD.md), [architecture](docs/architecture/agent-airlock.md), and [implementation plan](.omx/plans/agent-airlock.md) before starting Airlock work.
+Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
+
 Run it locally with Docker, Colima, or rootless Podman, or deploy it to
 Volcengine ECS.
 
