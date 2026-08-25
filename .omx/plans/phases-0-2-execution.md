@@ -160,6 +160,16 @@ The final qualifying audit was repeated on 2026-08-25 after the judging document
 All relative Markdown links resolve across the tracked documentation, `.env` is ignored, and a history scan found no private-key, GitHub-token, AWS-access-key, or JWT signatures.
 The repository now includes a one-page trust-boundary architecture and a three-minute live script that does not claim later SQLite, outbox, Repair Run, transactional-session, or crash-journal features.
 
+## Credentialed acceptance status
+
+A real production-browser attempt on 2026-08-25 reached the container Runtime and ModelArk data-plane API without exposing or committing the configured credential.
+The first attempt proved that the self-service BytePlus key did not belong to the starter default's mainland Volcengine region.
+After configuring the correct BytePlus Asia Pacific base URL, authentication succeeded but the supplied `ARK_MODEL` was not an accessible model or endpoint.
+A bounded probe of BytePlus's documented direct model returned `ModelNotOpen`, confirming that the account has no compatible model activated.
+No billable model inference completed, both failed Runtime Runs were quarantined, and Canonical State remained unchanged.
+The operator elected not to activate a paid model and will wait for organizer-provided credentials.
+The live ModelArk Promotion and destructive-Quarantine journey therefore remains the only pending gate.
+
 ## Stop conditions
 
 - Stop Phase 1 if the Runtime can still receive any writable canonical workspace path.

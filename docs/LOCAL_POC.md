@@ -2,7 +2,7 @@
 
 The local profile runs the React/Fastify control plane on macOS or Linux and
 starts every Codex turn in a disposable Docker, Colima, or Podman container.
-Only the Volcengine Ark model API is remote.
+Only the configured ModelArk model API is remote.
 
 ## Start
 
@@ -10,11 +10,24 @@ Requirements:
 
 - Node.js 22+
 - Docker, Colima, or Podman
-- An Ark API key and Responses-capable endpoint
+- A ModelArk API key and Responses-capable endpoint or model
 
 ```bash
-ARK_API_KEY=your-ark-api-key ARK_MODEL=ep-your-endpoint-id npm run poc
+cp .env.example .env
+# Fill ARK_API_KEY, ARK_MODEL, and the region-matching ARK_BASE_URL.
+npm run poc
 ```
+
+`npm run poc` loads `.env` automatically.
+Explicit process environment variables take precedence.
+Keep the Beijing default for mainland Volcengine credentials.
+For BytePlus Asia Pacific credentials, use:
+
+```dotenv
+ARK_BASE_URL=https://ark.ap-southeast.bytepluses.com/api/v3
+```
+
+See [BytePlus region availability](https://docs.byteplus.com/en/docs/ModelArk/2191806) when selecting a regional data-plane URL.
 
 Open <http://localhost:3000>. Press `Ctrl+C` to stop the server and remove this
 instance's remaining Runtime containers.
@@ -115,6 +128,11 @@ Resource limits are controlled by `CONTAINER_CPU_LIMIT`,
 `CONTAINER_MEMORY_LIMIT`, and `CONTAINER_PIDS_LIMIT`.
 
 ## Troubleshooting
+
+ModelArk credentials and endpoints are isolated by provider and region.
+A `401` response saying that the API key does not exist usually means the key is invalid or `ARK_BASE_URL` points to the wrong provider or region.
+A `404` response saying that a model or endpoint does not exist usually means `ARK_MODEL` is incorrect, unavailable to the API key, not activated, or belongs to another region.
+Confirm all three Ark values together before retrying.
 
 Check Runtime readiness:
 

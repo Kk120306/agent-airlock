@@ -2,7 +2,7 @@
   "name": "volc-agent-launchpad",
   "version": "1.0.0",
   "private": true,
-  "description": "Transactional Agent middleware built on the CodeJam starter kit and Volcengine Ark.",
+  "description": "Transactional Agent middleware built on the CodeJam starter kit and ModelArk.",
   "type": "module",
   "workspaces": [
     "apps/*"
@@ -16,11 +16,12 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w @launchpad/server",
     "test:e2e": "npm run build && playwright test",
-    "check": "npm run typecheck && npm run test && npm run build",
+    "check": "npm run check:scripts && npm run typecheck && npm run test && npm run build",
+    "check:scripts": "node --check scripts/run-local-poc.mjs && bash -n scripts/start-local-poc.sh && node --test scripts/run-local-poc.test.mjs",
     "check:phase0": "npm run check && npm run test:e2e",
     "check:phase2": "npm run check && npm run test:e2e && npm audit",
     "test:validation-container": "AIRLOCK_TEST_CONTAINER=1 npm test -w @launchpad/server -- --run src/validation-command-runner.test.ts",
-    "poc": "./scripts/start-local-poc.sh",
+    "poc": "node --env-file-if-exists=.env scripts/run-local-poc.mjs",
     "start": "npm run start -w @launchpad/server"
   },
   "devDependencies": {

@@ -14,7 +14,7 @@ flowchart LR
     Validate --> ValidationContainer["Constrained validation container"]
     Runner -->|Local POC| Container["Disposable Runtime container"]
     Runner -->|ECS| Process["Codex child process"]
-    Container --> Ark["Volcengine Ark"]
+    Container --> Ark["ModelArk"]
     Process --> Ark
 ```
 
