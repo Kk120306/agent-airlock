@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 2", async () => {
+  it("migrates starter version 1 data to version 3", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,11 +59,16 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 2,
-      agents: [{ canonicalStateId: "" }],
+      version: 3,
+      agents: [
+        {
+          canonicalStateId: "",
+          outcomeContract: { schemaVersion: 1, version: 2 },
+        },
+      ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 2 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 3 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -103,5 +108,95 @@ describe("JsonStore", () => {
     expect(store.snapshot().messages.map((message) => message.content)).toEqual([
       "queue recovered",
     ]);
+  });
+
+  it("migrates Phase 1 transactions without inventing historical evidence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v2-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 2,
+        agents: [
+          {
+            id: "agent-2",
+            name: "Phase One",
+            description: "",
+            instructions: "",
+            status: "ready",
+            workspacePath: "/tmp/phase-one",
+            canonicalStateId: "state-1",
+            codexThreadId: null,
+            lastError: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-02T00:00:00.000Z",
+          },
+        ],
+        messages: [],
+        runs: [
+          {
+            id: "run-2",
+            agentId: "agent-2",
+            status: "completed",
+            prompt: "hello",
+            output: "done",
+            error: null,
+            usage: null,
+            transaction: {
+              id: "run-2",
+              status: "promoted",
+              disposition: "promoted",
+              candidateStateId: "state-2",
+              canonicalStateIdBefore: "state-1",
+              canonicalStateIdAfter: "state-2",
+              canonicalContentHashBefore: "sha256:before",
+              canonicalContentHashAfter: "sha256:after",
+              outcomeContractVersion: 1,
+              changes: null,
+              validations: [
+                {
+                  name: "required-paths",
+                  status: "passed",
+                  summary: "present",
+                  durationMs: 1,
+                  output: null,
+                },
+              ],
+              events: [],
+              quarantinePath: null,
+            },
+            startedAt: "2026-01-02T00:00:01.000Z",
+            completedAt: "2026-01-02T00:00:02.000Z",
+            createdAt: "2026-01-02T00:00:00.000Z",
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 3,
+      agents: [
+        {
+          outcomeContract: {
+            schemaVersion: 1,
+            version: 2,
+            createdAt: "2026-01-02T00:00:00.000Z",
+          },
+        },
+      ],
+      runs: [
+        {
+          transaction: {
+            outcomeContract: { version: 1, requiredPaths: ["AGENTS.md"] },
+            promotionReceipt: null,
+            validations: [{ required: true }],
+          },
+        },
+      ],
+    });
   });
 });

@@ -45,4 +45,47 @@ describe("HTTP boundary", () => {
     expect(oversized.statusCode).toBe(413);
     await app.close();
   });
+
+  it("exposes the bounded Outcome Contract update boundary", async () => {
+    let received: unknown = null;
+    const contractService = {
+      updateOutcomeContract: async (_id: string, input: unknown) => {
+        received = input;
+        return { schemaVersion: 1, version: 2, ...input };
+      },
+    } as unknown as AgentService;
+    const app = await createApp(loadConfig({ NODE_ENV: "test" }), contractService);
+    const payload = {
+      requiredPaths: ["AGENTS.md"],
+      protectedPaths: ["AGENTS.md"],
+      maxChangedFiles: 50,
+      maxAddedBytes: 100_000,
+      secretPatterns: [{ name: "token", pattern: "token=[^\\s]+" }],
+      validationCommands: [
+        { name: "test", command: "npm test", required: true, timeoutMs: 30_000 },
+      ],
+    };
+
+    const accepted = await app.inject({
+      method: "PUT",
+      url: "/api/agents/11111111-1111-4111-8111-111111111111/outcome-contract",
+      payload,
+    });
+    const rejected = await app.inject({
+      method: "PUT",
+      url: "/api/agents/11111111-1111-4111-8111-111111111111/outcome-contract",
+      payload: {
+        ...payload,
+        validationCommands: [
+          { name: "test", command: "npm test", required: true, timeoutMs: 999 },
+        ],
+      },
+    });
+
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toMatchObject({ outcomeContract: { version: 2 } });
+    expect(received).toEqual(payload);
+    expect(rejected.statusCode).toBe(400);
+    await app.close();
+  });
 });

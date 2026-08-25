@@ -18,6 +18,8 @@
     "test:e2e": "npm run build && playwright test",
     "check": "npm run typecheck && npm run test && npm run build",
     "check:phase0": "npm run check && npm run test:e2e",
+    "check:phase2": "npm run check && npm run test:e2e && npm audit",
+    "test:validation-container": "AIRLOCK_TEST_CONTAINER=1 npm test -w @launchpad/server -- --run src/validation-command-runner.test.ts",
     "poc": "./scripts/start-local-poc.sh",
     "start": "npm run start -w @launchpad/server"
   },

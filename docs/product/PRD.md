@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Wayfinding draft
+**Status:** Phase 2 implemented, later phases planned
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -181,8 +181,6 @@ These capabilities shape stable extension points but are not hackathon dependenc
 ## Open Wayfinder decisions
 
 - [Prove safe Codex session isolation](https://github.com/Kk120306/agent-airlock/issues/3).
-- [Freeze Outcome Contract semantics and defaults](https://github.com/Kk120306/agent-airlock/issues/4).
-- [Choose Validation containment and evidence limits](https://github.com/Kk120306/agent-airlock/issues/5).
 - [Define Promotion journal and crash recovery semantics](https://github.com/Kk120306/agent-airlock/issues/6).
 - [Define External Action Intent delivery guarantees](https://github.com/Kk120306/agent-airlock/issues/7).
 - [Design Quarantine and Repair Run experience](https://github.com/Kk120306/agent-airlock/issues/8).

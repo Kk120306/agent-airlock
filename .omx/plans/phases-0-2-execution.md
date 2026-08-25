@@ -144,6 +144,16 @@ git diff --check
 
 After Phase 2, run the credentialed local POC and repeat the documented browser acceptance journey with ModelArk.
 
+## Execution evidence
+
+Phase 0 was committed as `5856442` after the production browser baseline, restart persistence, type checks, build, and dependency audit passed.
+Phase 1 was committed as `e88690d` after Promotion, Quarantine, runtime failure, cancellation, legacy migration, immutable-version, and browser regression checks passed.
+Phase 2 passes 46 server tests with one opt-in container test skipped in the ordinary suite.
+The production Playwright journey covers Promotion, destructive Quarantine, unchanged Canonical State, matching API evidence, recovery, lifecycle controls, and reload persistence.
+The opt-in validation-container suite passes three tests against the built `volc-agent-runtime:local` image, including the real Docker boundary.
+The Phase 2 check includes type checks, all ordinary server tests, production builds, the browser journey, and an audit reporting zero known vulnerabilities.
+The external credentialed ModelArk browser journey remains pending until `ARK_API_KEY` and `ARK_MODEL` are available locally.
+
 ## Stop conditions
 
 - Stop Phase 1 if the Runtime can still receive any writable canonical workspace path.

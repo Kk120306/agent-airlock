@@ -9,6 +9,23 @@ export type RunTransactionStatus =
   | "quarantined"
   | "cancelled";
 
+export interface OutcomeContract {
+  schemaVersion: 1;
+  version: number;
+  requiredPaths: string[];
+  protectedPaths: string[];
+  maxChangedFiles: number;
+  maxAddedBytes: number;
+  secretPatterns: Array<{ name: string; pattern: string }>;
+  validationCommands: Array<{
+    name: string;
+    command: string;
+    required: boolean;
+    timeoutMs: number;
+  }>;
+  createdAt: string;
+}
+
 export interface RunTransaction {
   id: string;
   status: RunTransactionStatus;
@@ -19,6 +36,7 @@ export interface RunTransaction {
   canonicalContentHashBefore: string;
   canonicalContentHashAfter: string | null;
   outcomeContractVersion: number;
+  outcomeContract: OutcomeContract;
   changes: {
     files: Array<{
       path: string;
@@ -32,6 +50,7 @@ export interface RunTransaction {
   validations: Array<{
     name: string;
     status: "passed" | "failed" | "error";
+    required: boolean;
     summary: string;
     durationMs: number;
     output: string | null;
@@ -42,6 +61,17 @@ export interface RunTransaction {
     summary: string;
   }>;
   quarantinePath: string | null;
+  promotionReceipt: {
+    runTransactionId: string;
+    disposition: "promoted" | "quarantined" | "cancelled";
+    outcomeContractVersion: number;
+    canonicalStateIdBefore: string;
+    canonicalStateIdAfter: string;
+    canonicalContentHashBefore: string;
+    canonicalContentHashAfter: string;
+    validationEvidenceHash: string;
+    createdAt: string;
+  } | null;
 }
 
 export interface Agent {
@@ -52,6 +82,7 @@ export interface Agent {
   status: AgentStatus;
   workspacePath: string;
   canonicalStateId: string;
+  outcomeContract: OutcomeContract;
   codexThreadId: string | null;
   lastError: string | null;
   createdAt: string;

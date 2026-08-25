@@ -122,14 +122,25 @@ describe("Phase 1 transactional workspace", () => {
       canonicalStateIdAfter: before.stateId,
       canonicalContentHashBefore: before.contentHash,
       canonicalContentHashAfter: before.contentHash,
-      validations: [
-        {
+      promotionReceipt: {
+        disposition: "quarantined",
+        outcomeContractVersion: 1,
+      },
+    });
+    expect(completed.transaction?.validations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "protected-paths",
+          status: "failed",
+          summary: "Protected paths changed: AGENTS.md",
+        }),
+        expect.objectContaining({
           name: "required-paths",
           status: "failed",
-          summary: "Required path AGENTS.md is missing",
-        },
-      ],
-    });
+          summary: "Required path patterns are missing: AGENTS.md",
+        }),
+      ]),
+    );
     expect(after).toEqual(before);
     await expect(readFile(path.join(after.workspacePath, "AGENTS.md"), "utf8"))
       .resolves.toContain("Platform-managed Agent instructions");

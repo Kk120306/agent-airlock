@@ -26,6 +26,81 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await expect(page.getByText(/Continued baseline-thread with the existing hello-world/))
     .toBeVisible({ timeout: 15_000 });
 
+  const agentBeforeRejectionResponse = await request.get("/api/agents");
+  expect(agentBeforeRejectionResponse.ok()).toBe(true);
+  const agentBeforeRejection = (
+    await agentBeforeRejectionResponse.json() as {
+      agents: Array<{
+        id: string;
+        workspacePath: string;
+        canonicalStateId: string;
+      }>;
+    }
+  ).agents[0];
+  expect(agentBeforeRejection).toBeTruthy();
+
+  await composer.fill("Delete AGENTS.md and create damage.txt.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(/Attempted the destructive workspace change/))
+    .toBeVisible({ timeout: 15_000 });
+  const evidence = page.getByRole("article", { name: "Agent Airlock evidence" });
+  await expect(evidence.getByRole("heading", { name: "Quarantined" })).toBeVisible();
+  await expect(evidence.getByText("Canonical State unchanged")).toBeVisible();
+  await expect(evidence.getByText("Decisive Validation")).toBeVisible();
+  await expect(evidence.getByText("protected-paths", { exact: true }).first()).toBeVisible();
+  await expect(evidence.getByText("Outcome Contract v1")).toBeVisible();
+
+  const runsResponse = await request.get(
+    "/api/agents/" + (agentBeforeRejection?.id ?? "") + "/runs",
+  );
+  expect(runsResponse.ok()).toBe(true);
+  const quarantinedRun = (
+    await runsResponse.json() as {
+      runs: Array<{
+        transaction: {
+          disposition: string;
+          canonicalStateIdBefore: string;
+          canonicalStateIdAfter: string;
+          canonicalContentHashBefore: string;
+          canonicalContentHashAfter: string;
+          promotionReceipt: { disposition: string };
+        } | null;
+      }>;
+    }
+  ).runs[0];
+  expect(quarantinedRun?.transaction).toMatchObject({
+    disposition: "quarantined",
+    canonicalStateIdBefore: agentBeforeRejection?.canonicalStateId,
+    canonicalStateIdAfter: agentBeforeRejection?.canonicalStateId,
+    promotionReceipt: { disposition: "quarantined" },
+  });
+  expect(quarantinedRun?.transaction?.canonicalContentHashAfter)
+    .toBe(quarantinedRun?.transaction?.canonicalContentHashBefore);
+
+  const agentAfterRejectionResponse = await request.get("/api/agents");
+  const agentAfterRejection = (
+    await agentAfterRejectionResponse.json() as {
+      agents: Array<{ workspacePath: string; canonicalStateId: string }>;
+    }
+  ).agents[0];
+  expect(agentAfterRejection).toMatchObject({
+    workspacePath: agentBeforeRejection?.workspacePath,
+    canonicalStateId: agentBeforeRejection?.canonicalStateId,
+  });
+  await expect(
+    readFile(path.join(agentAfterRejection?.workspacePath ?? "", "AGENTS.md"), "utf8"),
+  ).resolves.toContain("Platform-managed Agent instructions");
+  await expect(
+    access(path.join(agentAfterRejection?.workspacePath ?? "", "damage.txt")),
+  ).rejects.toThrow();
+
+  await composer.fill("Confirm recovery from the unchanged Canonical State.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(/Continued baseline-thread.*Confirm recovery/))
+    .toBeVisible({ timeout: 15_000 });
+  await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
+  await expect(evidence.getByText("Candidate became Canonical State")).toBeVisible();
+
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator(".status-stopped")).toBeVisible();
   await page.getByRole("button", { name: "Start", exact: true }).click();
@@ -34,7 +109,7 @@ test("preserves the complete starter Playground journey", async ({ page, request
   await page.reload();
   await expect(page.getByRole("heading", { name: "Baseline Builder", exact: true }))
     .toBeVisible();
-  await expect(page.getByText(/Continued baseline-thread with the existing hello-world/))
+  await expect(page.getByText(/Continued baseline-thread.*Confirm recovery/))
     .toBeVisible();
   await expect(page.getByText("Session connected")).toBeVisible();
 

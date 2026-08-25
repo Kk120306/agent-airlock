@@ -22,6 +22,17 @@ function formatTime(value: string): string {
   }).format(new Date(value));
 }
 
+function shortHash(value: string | null): string {
+  if (!value) return "pending";
+  return value.startsWith("sha256:") ? value.slice(7, 19) : value.slice(0, 12);
+}
+
+function formatBytes(value: number): string {
+  if (value < 1_024) return value + " B";
+  if (value < 1_048_576) return (value / 1_024).toFixed(1) + " KB";
+  return (value / 1_048_576).toFixed(1) + " MB";
+}
+
 function StatusPill({ status }: { status: Agent["status"] }) {
   return (
     <span className={"status status-" + status}>
@@ -33,6 +44,161 @@ function StatusPill({ status }: { status: Agent["status"] }) {
 
 function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
+}
+
+function AirlockEvidence({ run }: { run: AgentRun }) {
+  const transaction = run.transaction;
+  if (!transaction) return null;
+  const disposition = transaction.disposition ?? transaction.status;
+  const decisiveValidation = transaction.validations.find(
+    (validation) => validation.required && validation.status !== "passed",
+  );
+  const title =
+    disposition === "promoted"
+      ? "Promoted"
+      : disposition === "quarantined"
+        ? "Quarantined"
+        : disposition === "cancelled"
+          ? "Cancelled"
+          : "Airlock evaluating";
+  const outcome =
+    disposition === "promoted"
+      ? "Candidate became Canonical State"
+      : disposition === "quarantined"
+        ? "Canonical State unchanged"
+        : disposition === "cancelled"
+          ? "Candidate discarded before Promotion"
+          : "Canonical State remains protected during this Run";
+
+  return (
+    <article
+      className={"airlock-card airlock-" + disposition}
+      aria-label="Agent Airlock evidence"
+      data-disposition={disposition}
+    >
+      <header className="airlock-heading">
+        <div>
+          <span className="eyebrow">Agent Airlock</span>
+          <div className="airlock-title-row">
+            <h3>{title}</h3>
+            <span className="contract-badge">
+              Outcome Contract v{transaction.outcomeContractVersion}
+            </span>
+          </div>
+          <p>{outcome}</p>
+        </div>
+        <span className="airlock-shield" aria-hidden="true">
+          {disposition === "promoted" ? "✓" : disposition === "quarantined" ? "!" : "◇"}
+        </span>
+      </header>
+
+      {decisiveValidation && (
+        <div className="decisive-validation" role="alert">
+          <span>Decisive Validation</span>
+          <strong>{decisiveValidation.name}</strong>
+          <p>{decisiveValidation.summary}</p>
+        </div>
+      )}
+
+      <div className="airlock-metrics">
+        <div>
+          <span>Canonical fingerprint</span>
+          <strong>{shortHash(transaction.canonicalContentHashAfter)}</strong>
+          <small>
+            {transaction.canonicalContentHashAfter ===
+            transaction.canonicalContentHashBefore
+              ? "unchanged"
+              : "advanced from " + shortHash(transaction.canonicalContentHashBefore)}
+          </small>
+        </div>
+        <div>
+          <span>Changed files</span>
+          <strong>{transaction.changes?.totalChangedFiles ?? "pending"}</strong>
+          <small>{formatBytes(transaction.changes?.totalAddedBytes ?? 0)} changed payload</small>
+        </div>
+        <div>
+          <span>Validation result</span>
+          <strong>
+            {transaction.validations.filter((item) => item.status === "passed").length}/
+            {transaction.validations.length || "pending"}
+          </strong>
+          <small>required failures block Promotion</small>
+        </div>
+      </div>
+
+      <div className="airlock-columns">
+        <section className="evidence-section">
+          <h4>Run timeline</h4>
+          <ol className="airlock-timeline">
+            {transaction.events.map((event, index) => (
+              <li key={event.status + event.at + index}>
+                <span className="timeline-marker" />
+                <div>
+                  <strong>{event.status}</strong>
+                  <p>{event.summary}</p>
+                </div>
+                <time>{formatTime(event.at)}</time>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section className="evidence-section">
+          <h4>Validation evidence</h4>
+          {transaction.validations.length === 0 ? (
+            <p className="evidence-empty">Validations begin after Runtime execution.</p>
+          ) : (
+            <ul className="validation-list">
+              {transaction.validations.map((validation) => (
+                <li key={validation.name} className={"validation-" + validation.status}>
+                  <span className="validation-icon">
+                    {validation.status === "passed" ? "✓" : "!"}
+                  </span>
+                  <div>
+                    <div className="validation-name">
+                      <strong>{validation.name}</strong>
+                      <span>{validation.required ? "required" : "optional"}</span>
+                    </div>
+                    <p>{validation.summary}</p>
+                    {validation.output && <pre>{validation.output}</pre>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      {transaction.changes && transaction.changes.files.length > 0 && (
+        <details className="change-evidence">
+          <summary>
+            Inspect {transaction.changes.totalChangedFiles} workspace change
+            {transaction.changes.totalChangedFiles === 1 ? "" : "s"}
+          </summary>
+          <ul>
+            {transaction.changes.files.map((change) => (
+              <li key={change.path}>
+                <span className={"change-kind change-" + change.kind}>{change.kind}</span>
+                <code>{change.path}</code>
+                <small>{formatBytes(change.addedBytes)}</small>
+              </li>
+            ))}
+          </ul>
+          {transaction.changes.truncated && (
+            <p>Only the first 200 paths are retained in evidence.</p>
+          )}
+        </details>
+      )}
+
+      {transaction.promotionReceipt && (
+        <footer className="receipt-row">
+          <span>Promotion Receipt</span>
+          <code>{shortHash(transaction.promotionReceipt.validationEvidenceHash)}</code>
+          <small>{transaction.promotionReceipt.disposition}</small>
+        </footer>
+      )}
+    </article>
+  );
 }
 
 export default function App() {
@@ -468,6 +634,54 @@ export default function App() {
                     maxLength={10_000}
                   />
                 </label>
+                <section className="contract-overview" aria-label="Outcome Contract summary">
+                  <div className="contract-overview-heading">
+                    <div>
+                      <span className="eyebrow">Promotion rules</span>
+                      <h3>Outcome Contract</h3>
+                    </div>
+                    <span className="contract-badge">
+                      Version {selected.outcomeContract.version}
+                    </span>
+                  </div>
+                  <div className="contract-rules">
+                    <div>
+                      <span>Required paths</span>
+                      <div className="rule-tags">
+                        {selected.outcomeContract.requiredPaths.map((rule) => (
+                          <code key={rule}>{rule}</code>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span>Protected paths</span>
+                      <div className="rule-tags">
+                        {selected.outcomeContract.protectedPaths.map((rule) => (
+                          <code key={rule}>{rule}</code>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span>Change budget</span>
+                      <strong>
+                        {selected.outcomeContract.maxChangedFiles} files · {formatBytes(
+                          selected.outcomeContract.maxAddedBytes,
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Safety checks</span>
+                      <strong>
+                        {selected.outcomeContract.secretPatterns.length} secret patterns · {" "}
+                        {selected.outcomeContract.validationCommands.length} commands
+                      </strong>
+                    </div>
+                  </div>
+                  <p>
+                    Every Run snapshots this version. Required failures enter Quarantine and
+                    leave Canonical State unchanged.
+                  </p>
+                </section>
                 <div className="panel-footer">
                   <code>{selected.workspacePath}</code>
                   <button className="button button-primary" disabled={busy}>
@@ -483,9 +697,14 @@ export default function App() {
                   <span className="eyebrow">Playground</span>
                   <h2>Build something with your Agent</h2>
                 </div>
-                <div className="session-info">
-                  <span className="pulse" />
-                  {selected.codexThreadId ? "Session connected" : "New session"}
+                <div className="playground-state">
+                  <span className="contract-badge">
+                    Outcome Contract v{selected.outcomeContract.version}
+                  </span>
+                  <div className="session-info">
+                    <span className="pulse" />
+                    {selected.codexThreadId ? "Session connected" : "New session"}
+                  </div>
                 </div>
               </div>
 
@@ -538,6 +757,7 @@ export default function App() {
                     <span>{activeRun.error}</span>
                   </article>
                 )}
+                {activeRun && <AirlockEvidence run={activeRun} />}
                 <div ref={messageEnd} />
               </div>
 

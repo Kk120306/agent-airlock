@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { AgentService } from "./agent-service.js";
 import { loadConfig } from "./config.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
+import type { ValidationCommandExecutor } from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
 
 class FakeRunner implements AgentRunner {
@@ -35,7 +36,10 @@ afterEach(async () => {
   );
 });
 
-async function makeService(runner: AgentRunner = new FakeRunner()): Promise<AgentService> {
+async function makeService(
+  runner: AgentRunner = new FakeRunner(),
+  validationCommandExecutor?: ValidationCommandExecutor,
+): Promise<AgentService> {
   const root = await mkdtemp(path.join(tmpdir(), "launchpad-test-"));
   temporaryDirectories.push(root);
   const config = loadConfig({
@@ -51,6 +55,7 @@ async function makeService(runner: AgentRunner = new FakeRunner()): Promise<Agen
     new JsonStore(path.join(root, "data", "db.json")),
     new WorkspaceManager(path.join(root, "workspaces")),
     runner,
+    validationCommandExecutor,
   );
   await service.initialize();
   return service;
@@ -130,4 +135,205 @@ describe("Agent lifecycle", () => {
     finish({ output: "done", threadId: "thread", usage: null });
     await expect.poll(() => service.getRun(run.id).status).toBe("completed");
   });
+
+  it("versions Outcome Contracts for future Runs without rewriting history", async () => {
+    const service = await makeService();
+    const agent = await service.createAgent({ name: "Versioned" });
+    const first = await service.sendMessage(agent.id, "first contract");
+    await expect.poll(() => service.getRun(first.run.id).status).toBe("completed");
+
+    const current = service.getAgent(agent.id).outcomeContract;
+    const updated = await service.updateOutcomeContract(agent.id, {
+      requiredPaths: [...current.requiredPaths, "src/**"],
+      protectedPaths: current.protectedPaths,
+      maxChangedFiles: current.maxChangedFiles,
+      maxAddedBytes: current.maxAddedBytes,
+      secretPatterns: current.secretPatterns,
+      validationCommands: current.validationCommands,
+    });
+    const second = await service.sendMessage(agent.id, "second contract");
+    await expect.poll(() => service.getRun(second.run.id).status).toBe("completed");
+
+    expect(updated.version).toBe(2);
+    expect(service.getRun(first.run.id).transaction).toMatchObject({
+      outcomeContractVersion: 1,
+      outcomeContract: { version: 1, requiredPaths: ["AGENTS.md", "README.md"] },
+    });
+    expect(service.getRun(second.run.id).transaction).toMatchObject({
+      outcomeContractVersion: 2,
+      disposition: "quarantined",
+      outcomeContract: {
+        version: 2,
+        requiredPaths: ["AGENTS.md", "README.md", "src/**"],
+      },
+    });
+  });
+
+  it("rejects Outcome Contract changes while a Run owns the Agent", async () => {
+    let finish!: (result: RunnerResult) => void;
+    const pending = new Promise<RunnerResult>((resolve) => {
+      finish = resolve;
+    });
+    const service = await makeService({
+      run: () => pending,
+      cancel: async () => false,
+      isAvailable: async () => true,
+    });
+    const agent = await service.createAgent({ name: "Busy contract" });
+    const { run } = await service.sendMessage(agent.id, "hold the lock");
+    const current = agent.outcomeContract;
+
+    await expect(
+      service.updateOutcomeContract(agent.id, {
+        requiredPaths: current.requiredPaths,
+        protectedPaths: current.protectedPaths,
+        maxChangedFiles: current.maxChangedFiles,
+        maxAddedBytes: current.maxAddedBytes,
+        secretPatterns: current.secretPatterns,
+        validationCommands: current.validationCommands,
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    finish({ output: "done", threadId: "thread", usage: null });
+    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+  });
+
+  it.each([
+    [true, "quarantined"],
+    [false, "promoted"],
+  ] as const)(
+    "treats a failing required=%s command as %s",
+    async (required, expectedDisposition) => {
+      const service = await makeService(
+        new FakeRunner(),
+        {
+          execute: async () => ({
+            exitCode: 1,
+            output: "controlled failure",
+            durationMs: 2,
+            timedOut: false,
+            outputExceeded: false,
+          }),
+        },
+      );
+      const agent = await service.createAgent({ name: "Command severity" });
+      const current = agent.outcomeContract;
+      await service.updateOutcomeContract(agent.id, {
+        requiredPaths: current.requiredPaths,
+        protectedPaths: current.protectedPaths,
+        maxChangedFiles: current.maxChangedFiles,
+        maxAddedBytes: current.maxAddedBytes,
+        secretPatterns: current.secretPatterns,
+        validationCommands: [
+          { name: "test", command: "npm test", required, timeoutMs: 30_000 },
+        ],
+      });
+
+      const { run } = await service.sendMessage(agent.id, "validate command severity");
+      await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+      const completed = service.getRun(run.id);
+
+      expect(completed.transaction?.disposition).toBe(expectedDisposition);
+      expect(completed.transaction?.validations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "command:test",
+            required,
+            status: "failed",
+          }),
+        ]),
+      );
+    },
+  );
+
+  it.each([
+    {
+      label: "symlink",
+      validation: "path-safety",
+      mutate: (request: RunnerRequest) =>
+        symlink("/etc/passwd", path.join(request.workspacePath, "escape")),
+      maxChangedFiles: 200,
+      maxAddedBytes: 2_097_152,
+    },
+    {
+      label: "required path",
+      validation: "required-paths",
+      mutate: (request: RunnerRequest) =>
+        rm(path.join(request.workspacePath, "README.md")),
+      maxChangedFiles: 200,
+      maxAddedBytes: 2_097_152,
+    },
+    {
+      label: "change limit",
+      validation: "change-limits",
+      mutate: async (request: RunnerRequest) => {
+        await writeFile(path.join(request.workspacePath, "one.txt"), "one\n");
+        await writeFile(path.join(request.workspacePath, "two.txt"), "two\n");
+      },
+      maxChangedFiles: 1,
+      maxAddedBytes: 2_097_152,
+    },
+    {
+      label: "added byte limit",
+      validation: "change-limits",
+      mutate: (request: RunnerRequest) =>
+        writeFile(path.join(request.workspacePath, "bytes.txt"), "bytes\n"),
+      maxChangedFiles: 200,
+      maxAddedBytes: 0,
+    },
+    {
+      label: "secret pattern",
+      validation: "secret-patterns",
+      mutate: (request: RunnerRequest) =>
+        writeFile(
+          path.join(request.workspacePath, "leak.txt"),
+          "ARK_API_KEY=must-never-promote-12345\n",
+        ),
+      maxChangedFiles: 200,
+      maxAddedBytes: 2_097_152,
+    },
+  ])(
+    "prevents Promotion after a $label failure",
+    async ({ validation, mutate, maxChangedFiles, maxAddedBytes }) => {
+      const service = await makeService({
+        run: async (request) => {
+          await mutate(request);
+          return { output: "candidate changed", threadId: "future-thread", usage: null };
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      });
+      const agent = await service.createAgent({ name: "Structural gate" });
+      if (
+        maxChangedFiles !== agent.outcomeContract.maxChangedFiles ||
+        maxAddedBytes !== agent.outcomeContract.maxAddedBytes
+      ) {
+        const current = agent.outcomeContract;
+        await service.updateOutcomeContract(agent.id, {
+          requiredPaths: current.requiredPaths,
+          protectedPaths: current.protectedPaths,
+          maxChangedFiles,
+          maxAddedBytes,
+          secretPatterns: current.secretPatterns,
+          validationCommands: current.validationCommands,
+        });
+      }
+
+      const { run } = await service.sendMessage(agent.id, "exercise structural gate");
+      await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+      const transaction = service.getRun(run.id).transaction;
+
+      expect(transaction).toMatchObject({
+        disposition: "quarantined",
+        canonicalStateIdAfter: transaction?.canonicalStateIdBefore,
+        canonicalContentHashAfter: transaction?.canonicalContentHashBefore,
+      });
+      expect(transaction?.validations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: validation, required: true, status: "failed" }),
+        ]),
+      );
+      expect(service.getAgent(agent.id).codexThreadId).toBeNull();
+    },
+  );
 });

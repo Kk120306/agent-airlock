@@ -32,6 +32,9 @@ Volcengine ECS.
 - Agent create, edit, start, stop, delete, and multi-turn chat
 - Fastify control plane with asynchronous Run state
 - Persistent Agent workspaces and Codex sessions
+- Immutable Candidate and Canonical workspace versions with Promotion or Quarantine
+- Versioned Outcome Contracts with bounded, redacted Validation evidence
+- Compact Airlock timeline, change summary, canonical fingerprint, and Promotion Receipt
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
 
@@ -219,10 +222,13 @@ See [.env.example](.env.example) for all Runtime and resource-limit options.
 ```mermaid
 flowchart LR
     UI["React Web UI"] --> API["Fastify control plane"]
-    API --> Store["JSON metadata and Agent workspaces"]
-    API --> Runtime{"Runtime provider"}
+    API --> Airlock["Agent Airlock"]
+    Airlock --> Store["Candidate and Canonical State"]
+    Airlock --> Runtime{"Runtime provider"}
     Runtime -->|Local POC| Container["Disposable Docker / Colima / Podman container"]
     Runtime -->|ECS profile| Codex["Codex CLI in application container"]
+    Airlock --> Validate["Bounded Validations"]
+    Validate --> Decision{"Promote or Quarantine"}
     Container --> Ark["Volcengine Ark Responses API"]
     Codex --> Ark
 ```
@@ -238,12 +244,16 @@ boundaries.
 ```bash
 npm run check
 npm run test:e2e
+npm run test:validation-container
 terraform fmt -check -recursive deploy/volcengine
 docker compose config
 ```
 
 `npm run test:e2e` runs the production React and Fastify path in installed Google Chrome against a deterministic Codex protocol fixture.
 Use `npm run check:phase0` to run the starter checks and this complete baseline journey together.
+Use `npm run check:phase2` to run the full qualifying proof, browser journey, and dependency audit.
+Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running `npm run test:validation-container`.
+That opt-in test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.
 The credentialed ModelArk acceptance journey remains the browser SOP documented above.
 
 ## Documentation

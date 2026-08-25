@@ -1,9 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  createDefaultOutcomeContract,
+  createLegacyPhaseOneContract,
+} from "./outcome-contract.js";
 import type { Database } from "./types.js";
 
 const emptyDatabase = (): Database => ({
-  version: 2,
+  version: 3,
   agents: [],
   messages: [],
   runs: [],
@@ -16,18 +20,63 @@ interface VersionOneDatabase {
   runs: Array<Record<string, unknown>>;
 }
 
-function migrateVersionOne(database: VersionOneDatabase): Database {
+interface VersionTwoDatabase {
+  version: 2;
+  agents: Array<Record<string, unknown>>;
+  messages: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+}
+
+function migrateVersionOne(database: VersionOneDatabase): VersionTwoDatabase {
   return {
     version: 2,
     agents: database.agents.map((agent) => ({
       ...agent,
       canonicalStateId: "",
-    })) as unknown as Database["agents"],
-    messages: database.messages as unknown as Database["messages"],
+    })),
+    messages: database.messages,
     runs: database.runs.map((run) => ({
       ...run,
       transaction: null,
-    })) as unknown as Database["runs"],
+    })),
+  };
+}
+
+function migrateVersionTwo(database: VersionTwoDatabase): Database {
+  return {
+    version: 3,
+    agents: database.agents.map((agent) => ({
+      ...agent,
+      outcomeContract: createDefaultOutcomeContract(
+        2,
+        typeof agent.updatedAt === "string" ? agent.updatedAt : undefined,
+      ),
+    })) as unknown as Database["agents"],
+    messages: database.messages as unknown as Database["messages"],
+    runs: database.runs.map((run) => {
+      const transaction =
+        run.transaction && typeof run.transaction === "object"
+          ? (run.transaction as Record<string, unknown>)
+          : null;
+      return {
+        ...run,
+        transaction: transaction
+          ? {
+              ...transaction,
+              outcomeContract: createLegacyPhaseOneContract(
+                typeof run.createdAt === "string" ? run.createdAt : undefined,
+              ),
+              promotionReceipt: null,
+              validations: Array.isArray(transaction.validations)
+                ? transaction.validations.map((validation) => ({
+                    ...(validation as Record<string, unknown>),
+                    required: true,
+                  }))
+                : [],
+            }
+          : null,
+      };
+    }) as unknown as Database["runs"],
   };
 }
 
@@ -41,14 +90,24 @@ export class JsonStore {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as Database | VersionOneDatabase;
-      if (!Array.isArray(parsed.agents) || !Array.isArray(parsed.messages) || !Array.isArray(parsed.runs)) {
+      const parsed = JSON.parse(raw) as
+        | Database
+        | VersionOneDatabase
+        | VersionTwoDatabase;
+      if (
+        !Array.isArray(parsed.agents) ||
+        !Array.isArray(parsed.messages) ||
+        !Array.isArray(parsed.runs)
+      ) {
         throw new Error("Unsupported database format");
       }
       if (parsed.version === 1) {
-        this.data = migrateVersionOne(parsed);
+        this.data = migrateVersionTwo(migrateVersionOne(parsed));
         await this.persist();
       } else if (parsed.version === 2) {
+        this.data = migrateVersionTwo(parsed);
+        await this.persist();
+      } else if (parsed.version === 3) {
         this.data = parsed;
       } else {
         throw new Error("Unsupported database format");

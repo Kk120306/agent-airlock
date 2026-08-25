@@ -18,6 +18,35 @@ export interface CanonicalStateReference {
   contentHash: string;
 }
 
+export interface SecretPattern {
+  name: string;
+  pattern: string;
+}
+
+export interface ValidationCommand {
+  name: string;
+  command: string;
+  required: boolean;
+  timeoutMs: number;
+}
+
+export interface OutcomeContract {
+  schemaVersion: 1;
+  version: number;
+  requiredPaths: string[];
+  protectedPaths: string[];
+  maxChangedFiles: number;
+  maxAddedBytes: number;
+  secretPatterns: SecretPattern[];
+  validationCommands: ValidationCommand[];
+  createdAt: string;
+}
+
+export type OutcomeContractInput = Omit<
+  OutcomeContract,
+  "schemaVersion" | "version" | "createdAt"
+>;
+
 export interface RunTransactionEvent {
   status: RunTransactionStatus;
   at: string;
@@ -27,9 +56,22 @@ export interface RunTransactionEvent {
 export interface ValidationEvidence {
   name: string;
   status: ValidationStatus;
+  required: boolean;
   summary: string;
   durationMs: number;
   output: string | null;
+}
+
+export interface PromotionReceipt {
+  runTransactionId: string;
+  disposition: RunTransactionDisposition;
+  outcomeContractVersion: number;
+  canonicalStateIdBefore: string;
+  canonicalStateIdAfter: string;
+  canonicalContentHashBefore: string;
+  canonicalContentHashAfter: string;
+  validationEvidenceHash: string;
+  createdAt: string;
 }
 
 export interface WorkspaceChange {
@@ -55,10 +97,12 @@ export interface RunTransaction {
   canonicalContentHashBefore: string;
   canonicalContentHashAfter: string | null;
   outcomeContractVersion: number;
+  outcomeContract: OutcomeContract;
   changes: WorkspaceChangeSummary | null;
   validations: ValidationEvidence[];
   events: RunTransactionEvent[];
   quarantinePath: string | null;
+  promotionReceipt: PromotionReceipt | null;
 }
 
 export interface Agent {
@@ -69,6 +113,7 @@ export interface Agent {
   status: AgentStatus;
   workspacePath: string;
   canonicalStateId: string;
+  outcomeContract: OutcomeContract;
   codexThreadId: string | null;
   lastError: string | null;
   createdAt: string;
@@ -105,7 +150,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 2;
+  version: 3;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];

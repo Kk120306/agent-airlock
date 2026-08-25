@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import { RunCancelledError } from "./errors.js";
+import { OutcomeValidator } from "./outcome-validator.js";
 import type {
   AgentRunner,
   CanonicalStateReference,
+  OutcomeContract,
+  PromotionReceipt,
   RunTransaction,
   RunTransactionStatus,
   RunnerRequest,
   RunnerResult,
-  ValidationEvidence,
 } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 
@@ -39,6 +42,7 @@ export class AirlockRunError extends Error {
 export function createRunTransaction(
   runId: string,
   canonicalState: CanonicalStateReference,
+  outcomeContract: OutcomeContract,
 ): RunTransaction {
   return {
     id: runId,
@@ -49,7 +53,8 @@ export function createRunTransaction(
     canonicalStateIdAfter: null,
     canonicalContentHashBefore: canonicalState.contentHash,
     canonicalContentHashAfter: null,
-    outcomeContractVersion: 1,
+    outcomeContractVersion: outcomeContract.version,
+    outcomeContract: structuredClone(outcomeContract),
     changes: null,
     validations: [],
     events: [
@@ -60,6 +65,7 @@ export function createRunTransaction(
       },
     ],
     quarantinePath: null,
+    promotionReceipt: null,
   };
 }
 
@@ -70,6 +76,7 @@ export class AirlockRunner {
   constructor(
     private readonly inner: AgentRunner,
     private readonly workspaces: WorkspaceManager,
+    private readonly validator: OutcomeValidator,
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -97,6 +104,8 @@ export class AirlockRunner {
         request.runId,
       );
       candidatePrepared = true;
+      const candidateWorkspacePath =
+        await this.workspaces.candidateWorkspacePath(request.runId);
       this.assertNotCancelled(request.agentId);
       if (candidate.canonicalStateIdBefore !== request.canonicalStateId) {
         throw new Error("Agent metadata does not match the current Canonical State");
@@ -111,7 +120,7 @@ export class AirlockRunner {
 
       const result = await this.inner.run({
         agentId: request.agentId,
-        workspacePath: candidate.workspacePath,
+        workspacePath: candidateWorkspacePath,
         prompt: request.prompt,
         threadId: request.threadId,
       });
@@ -123,23 +132,20 @@ export class AirlockRunner {
         "Evaluating the Candidate State outcome",
         onProgress,
       );
-      const validationStarted = Date.now();
-      const hasInstructions = await this.workspaces.candidateHasPath(
+      const canonical = await this.workspaces.readCanonical(request.agentId);
+      const validationResult = await this.validator.validate(
+        canonical.workspacePath,
+        candidateWorkspacePath,
+        transaction.outcomeContract,
         request.runId,
-        "AGENTS.md",
       );
-      const requiredPathValidation: ValidationEvidence = {
-        name: "required-paths",
-        status: hasInstructions ? "passed" : "failed",
-        summary: hasInstructions
-          ? "Required platform instructions remain present"
-          : "Required path AGENTS.md is missing",
-        durationMs: Date.now() - validationStarted,
-        output: null,
-      };
-      transaction.validations = [requiredPathValidation];
+      transaction.changes = validationResult.changes;
+      transaction.validations = validationResult.validations;
+      const failedRequiredValidation = transaction.validations.find(
+        (validation) => validation.required && validation.status !== "passed",
+      );
 
-      if (!hasInstructions) {
+      if (failedRequiredValidation) {
         transaction.quarantinePath = await this.workspaces.quarantineCandidate(
           request.runId,
         );
@@ -148,10 +154,11 @@ export class AirlockRunner {
         transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
         transaction.canonicalContentHashAfter =
           transaction.canonicalContentHashBefore;
+        transaction.promotionReceipt = createPromotionReceipt(transaction);
         transaction = await this.transition(
           transaction,
           "quarantined",
-          "Candidate State failed required Validation",
+          "Candidate State failed " + failedRequiredValidation.name,
           onProgress,
         );
         return { ...result, transaction, canonicalState: null };
@@ -172,6 +179,7 @@ export class AirlockRunner {
       transaction.disposition = "promoted";
       transaction.canonicalStateIdAfter = canonicalState.stateId;
       transaction.canonicalContentHashAfter = canonicalState.contentHash;
+      transaction.promotionReceipt = createPromotionReceipt(transaction);
       transaction = this.recordTransition(
         transaction,
         "promoted",
@@ -193,6 +201,7 @@ export class AirlockRunner {
       transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
       transaction.canonicalContentHashAfter =
         transaction.canonicalContentHashBefore;
+      transaction.promotionReceipt = createPromotionReceipt(transaction);
       transaction = await this.transition(
         transaction,
         cancelled ? "cancelled" : "quarantined",
@@ -234,4 +243,32 @@ export class AirlockRunner {
     next.events.push({ status, at: now(), summary });
     return next;
   }
+}
+
+export function createPromotionReceipt(
+  transaction: RunTransaction,
+): PromotionReceipt {
+  if (
+    !transaction.disposition ||
+    !transaction.canonicalStateIdAfter ||
+    !transaction.canonicalContentHashAfter
+  ) {
+    throw new Error("Cannot create a receipt for an incomplete Run Transaction");
+  }
+  const validationEvidenceHash =
+    "sha256:" +
+    createHash("sha256")
+      .update(JSON.stringify(transaction.validations))
+      .digest("hex");
+  return {
+    runTransactionId: transaction.id,
+    disposition: transaction.disposition,
+    outcomeContractVersion: transaction.outcomeContractVersion,
+    canonicalStateIdBefore: transaction.canonicalStateIdBefore,
+    canonicalStateIdAfter: transaction.canonicalStateIdAfter,
+    canonicalContentHashBefore: transaction.canonicalContentHashBefore,
+    canonicalContentHashAfter: transaction.canonicalContentHashAfter,
+    validationEvidenceHash,
+    createdAt: now(),
+  };
 }

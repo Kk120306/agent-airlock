@@ -2,11 +2,17 @@ import { randomUUID } from "node:crypto";
 import {
   AirlockRunError,
   AirlockRunner,
+  createPromotionReceipt,
   createRunTransaction,
 } from "./airlock-runner.js";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import {
+  createDefaultOutcomeContract,
+  createNextOutcomeContract,
+} from "./outcome-contract.js";
+import { OutcomeValidator } from "./outcome-validator.js";
 import { JsonStore } from "./store.js";
 import type {
   Agent,
@@ -15,8 +21,14 @@ import type {
   CanonicalStateReference,
   CreateAgentInput,
   Message,
+  OutcomeContract,
+  OutcomeContractInput,
   UpdateAgentInput,
 } from "./types.js";
+import {
+  ContainerValidationCommandExecutor,
+  type ValidationCommandExecutor,
+} from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
@@ -32,8 +44,14 @@ export class AgentService {
     private readonly store: JsonStore,
     private readonly workspaces: WorkspaceManager,
     runner: AgentRunner,
+    validationCommandExecutor: ValidationCommandExecutor =
+      new ContainerValidationCommandExecutor(config),
   ) {
-    this.runner = new AirlockRunner(runner, workspaces);
+    this.runner = new AirlockRunner(
+      runner,
+      workspaces,
+      new OutcomeValidator(validationCommandExecutor),
+    );
   }
 
   async initialize(): Promise<void> {
@@ -67,6 +85,9 @@ export class AgentService {
               at: now(),
               summary: "Server restarted while the Run Transaction was active",
             });
+            run.transaction.promotionReceipt = createPromotionReceipt(
+              run.transaction,
+            );
           }
         }
       }
@@ -108,6 +129,7 @@ export class AgentService {
       status: "ready",
       workspacePath: "",
       canonicalStateId: "",
+      outcomeContract: createDefaultOutcomeContract(),
       codexThreadId: null,
       lastError: null,
       createdAt: timestamp,
@@ -174,6 +196,38 @@ export class AgentService {
     return { archivedWorkspace };
   }
 
+  async updateOutcomeContract(
+    id: string,
+    input: OutcomeContractInput,
+  ): Promise<OutcomeContract> {
+    const current = this.getAgent(id);
+    if (current.status === "busy" || this.configuringAgents.has(id)) {
+      throw new HttpError(
+        409,
+        "Stop the active run before updating the Outcome Contract",
+      );
+    }
+    this.configuringAgents.add(id);
+    try {
+      return await this.store.mutate((database) => {
+        const agent = database.agents.find((item) => item.id === id);
+        if (!agent) throw new HttpError(404, "Agent not found");
+        if (agent.status === "busy") {
+          throw new HttpError(
+            409,
+            "Stop the active run before updating the Outcome Contract",
+          );
+        }
+        const next = createNextOutcomeContract(agent.outcomeContract, input);
+        agent.outcomeContract = next;
+        agent.updatedAt = now();
+        return structuredClone(next);
+      });
+    } finally {
+      this.configuringAgents.delete(id);
+    }
+  }
+
   async startAgent(id: string): Promise<Agent> {
     return this.setStatus(id, "ready");
   }
@@ -230,7 +284,7 @@ export class AgentService {
       output: null,
       error: null,
       usage: null,
-      transaction: createRunTransaction(runId, canonical),
+      transaction: null,
       startedAt: null,
       completedAt: null,
       createdAt: timestamp,
@@ -257,6 +311,11 @@ export class AgentService {
       if (this.configuringAgents.has(agentId)) {
         throw new HttpError(409, "Wait for the Agent configuration update to finish");
       }
+      run.transaction = createRunTransaction(
+        runId,
+        canonical,
+        storedAgent.outcomeContract,
+      );
       database.runs.push(run);
       database.messages.push(message);
       const snapshot = structuredClone(storedAgent);
@@ -321,6 +380,7 @@ export class AgentService {
           createRunTransaction(
             run.id,
             await this.workspaces.readCanonical(agentAtStart.id),
+            agentAtStart.outcomeContract,
           ),
         async (transaction) => {
           await this.store.mutate((database) => {
@@ -384,6 +444,9 @@ export class AgentService {
               at: completedAt,
               summary: "Run Transaction was cancelled before execution",
             });
+            storedRun.transaction.promotionReceipt = createPromotionReceipt(
+              storedRun.transaction,
+            );
           }
           storedRun.completedAt = completedAt;
         }

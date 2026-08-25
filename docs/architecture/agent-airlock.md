@@ -18,15 +18,15 @@ flowchart LR
     UI["Existing React Playground"] --> API["Existing Fastify API"]
     API --> AS["AgentService"]
     AS --> AR["AirlockRunner"]
-    AR --> TM["RunTransactionManager"]
-    TM --> SR["State Registry"]
-    TM --> CR["Candidate Resource Adapters"]
-    TM --> RR["Existing AgentRunner"]
+    AR --> SR["Workspace State Registry"]
+    SR --> CS["Candidate State"]
+    AR --> RR["Existing AgentRunner"]
     RR --> RC["Disposable Runtime container"]
-    RC --> CS["Candidate State only"]
-    TM --> VE["Validation Engine"]
+    RC --> CS
+    AR --> VE["Outcome Validator"]
     VE --> VC["Constrained validation container"]
-    TM --> PR["Promotion or Quarantine"]
+    VE --> CS
+    AR --> PR["Promotion or Quarantine"]
     PR --> ST["Run evidence and Promotion Receipt"]
     ST --> UI
 ```
@@ -47,30 +47,31 @@ interface AirlockRunner {
 }
 ```
 
-Preparation, resource coordination, validators, receipts, recovery journals, and retention remain inside the module.
+Preparation, workspace coordination, validators, and receipts remain inside the module.
+Recovery journals, retention, and additional Transactional Resource adapters remain later-phase extension seams.
 
 ## State layout
 
 ADR 0002 selects immutable state-version directories with an atomically replaced canonical manifest:
 
 ```text
-airlock-state/
-├── agents/<agent-id>/
+workspaces/
+├── <agent-id>/
 │   ├── canonical.json
-│   └── versions/<state-id>/
-│       ├── workspace/
-│       ├── codex-home/
-│       └── resources/
+│   └── versions/<state-id>/workspace/
 ├── .candidates/<run-id>/
-├── .quarantine/<run-id>/
-├── receipts/<run-id>.json
-└── promotion-journal/
+│   ├── candidate.json
+│   └── workspace/
+└── .quarantine/<run-id>/
+    ├── candidate.json
+    └── workspace/
 ```
 
 `canonical.json` identifies the accepted resource versions.
 A Candidate State is mutable only while its Run Transaction is active.
 A promoted state version becomes immutable and may be used as the source for a later candidate.
 Phase 1 verifies the manifest content hash whenever Canonical State is resolved.
+Codex session state and additional resource versions join the canonical manifest in later phases.
 
 ## Run Transaction lifecycle
 
@@ -110,6 +111,17 @@ Validation proceeds in a deterministic order so evidence remains understandable:
 
 All required Validations must pass before promotion begins.
 
+Outcome Contract schema version 1 is a bounded data model rather than a policy language.
+Its default requires `AGENTS.md` and `README.md`, protects `AGENTS.md`, limits a Run to 200 changed files and 2 MiB of candidate payload across added or modified files, scans for Ark key assignments and bearer tokens, and defines no command Validations until the operator adds them.
+The complete contract is snapshotted into the Run Transaction, so a later contract update cannot change a historical decision.
+Operator-defined commands run against disposable Candidate State copies in fresh containers with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
+Command build artifacts are deleted with the validation copy and can never enter Promotion.
+
+Candidate inventory is limited to 10,000 entries and persisted change evidence is limited to 200 paths.
+Changed files larger than 1 MiB fail the secret scan.
+Command output is terminated above 65,536 bytes, redacted, and persisted up to 16,384 bytes.
+Command duration is bounded by the contract between 1 second and 300 seconds.
+
 ## Transactional Resources
 
 The internal Transactional Resource seam lets Airlock apply one lifecycle to different mutable resources:
@@ -139,7 +151,7 @@ It does not claim to intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The version 2 JSON store remains the control-plane metadata source for Agents, messages, Runs, and operator-visible evidence.
+The version 3 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
 Promotion uses a durable journal so startup reconciliation can distinguish completed, incomplete, and impossible transitions.
 
@@ -160,7 +172,7 @@ Schema evolution must increment the database version and include a tested migrat
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives Candidate State only.
-- Validation code from the candidate project is untrusted and runs inside a constrained container.
+- Validation code from the candidate project is untrusted and runs from a disposable copy inside a constrained container.
 - The Fastify control plane and Airlock state manager form the trusted POC boundary.
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
 - The outbox protects only external actions routed through its interface.
@@ -179,5 +191,6 @@ Each Run Transaction records:
 
 ## Open architectural decisions
 
-The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Codex session isolation, contract semantics, validator containment, Promotion recovery, outbox delivery, and the operator experience.
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns unresolved decisions about Codex session isolation, Promotion recovery, outbox delivery, the operator experience, and the judging cutoff.
+Outcome Contract semantics and Validation containment are resolved by ADR 0003 and ADR 0004.
 This document must be revised when those tickets close.

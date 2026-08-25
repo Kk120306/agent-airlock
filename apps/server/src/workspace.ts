@@ -8,6 +8,7 @@ import {
   readFile,
   readdir,
   readlink,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -253,6 +254,19 @@ export class WorkspaceManager {
       throw new Error("Invalid Candidate State manifest");
     }
     return fileExists(target);
+  }
+
+  async candidateWorkspacePath(runId: string): Promise<string> {
+    await this.readCandidate(runId);
+    const candidatesRoot = await realpath(path.join(this.root, ".candidates"));
+    const workspacePath = await realpath(
+      path.join(this.candidateRoot(runId), "workspace"),
+    );
+    const relative = path.relative(candidatesRoot, workspacePath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("Candidate workspace escapes the Candidate State root");
+    }
+    return workspacePath;
   }
 
   async updateInstructions(agent: Agent): Promise<CanonicalStateReference> {

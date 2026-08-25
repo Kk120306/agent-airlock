@@ -22,6 +22,31 @@ const updateAgentBody = createAgentBody.partial().refine(
 const messageBody = z.object({
   content: z.string().trim().min(1).max(50_000),
 });
+const contractName = z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.-]+$/);
+const outcomeContractBody = z.object({
+  requiredPaths: z.array(z.string().trim().min(1).max(240)).max(100),
+  protectedPaths: z.array(z.string().trim().min(1).max(240)).max(100),
+  maxChangedFiles: z.number().int().min(1).max(10_000),
+  maxAddedBytes: z.number().int().min(0).max(1_073_741_824),
+  secretPatterns: z
+    .array(
+      z.object({
+        name: contractName,
+        pattern: z.string().min(1).max(1_000),
+      }),
+    )
+    .max(50),
+  validationCommands: z
+    .array(
+      z.object({
+        name: contractName,
+        command: z.string().trim().min(1).max(2_000),
+        required: z.boolean(),
+        timeoutMs: z.number().int().min(1_000).max(300_000),
+      }),
+    )
+    .max(20),
+});
 
 export async function createApp(
   config: AppConfig,
@@ -89,6 +114,14 @@ export async function createApp(
     const { id } = agentIdParams.parse(request.params);
     const body = updateAgentBody.parse(request.body);
     return { agent: await service.updateAgent(id, body) };
+  });
+
+  app.put("/api/agents/:id/outcome-contract", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    const body = outcomeContractBody.parse(request.body);
+    return {
+      outcomeContract: await service.updateOutcomeContract(id, body),
+    };
   });
 
   app.delete("/api/agents/:id", async (request) => {

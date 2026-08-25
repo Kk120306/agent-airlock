@@ -1,4 +1,10 @@
-import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import type {
+  Agent,
+  AgentRun,
+  Message,
+  OutcomeContract,
+  SystemInfo,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -53,6 +59,17 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  updateOutcomeContract: (
+    id: string,
+    body: Omit<OutcomeContract, "schemaVersion" | "version" | "createdAt">,
+  ) =>
+    request<{ outcomeContract: OutcomeContract }>(
+      "/api/agents/" + id + "/outcome-contract",
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+    ),
   deleteAgent: (id: string) =>
     request<{ archivedWorkspace: string }>("/api/agents/" + id, {
       method: "DELETE",
