@@ -226,6 +226,11 @@ class BudgetCancellationRunner extends CompetingFuturesRunner {
       /Competitor ([A-Za-z0-9._:-]+)\./,
     )?.[1];
     if (competitor !== "slow-valid") return super.run(request);
+    if (!request.executionId) {
+      throw new Error(
+        "Budget cancellation fixture requires an exact execution identity",
+      );
+    }
 
     this.requests.push(structuredClone(request));
     this.active += 1;
@@ -243,7 +248,7 @@ class BudgetCancellationRunner extends CompetingFuturesRunner {
   }
 
   override async cancel(
-    _agentId: string,
+    _agentId?: string,
     executionId?: string,
   ): Promise<boolean> {
     if (
@@ -256,7 +261,7 @@ class BudgetCancellationRunner extends CompetingFuturesRunner {
     const reject = this.rejectSlowRun;
     this.rejectSlowRun = null;
     this.cancelledExecutionIds.push(executionId);
-    reject(new RunCancelledError("fixture cancelled the over-budget Runtime"));
+    reject(new RunCancelledError());
     return true;
   }
 }

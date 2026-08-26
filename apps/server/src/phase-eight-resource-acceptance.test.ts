@@ -2034,8 +2034,8 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         runner: {
           discardProviderQuarantines(
             agentId: string,
-            transaction: NonNullable<typeof transaction>,
-          ): Promise<NonNullable<typeof transaction>>;
+            transaction: RunTransaction,
+          ): Promise<RunTransaction>;
         };
       }
     ).runner;

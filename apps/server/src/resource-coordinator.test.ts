@@ -378,7 +378,9 @@ describe("Resource Coordinator", () => {
       runId: "run-001",
       candidateStateId: "candidate-001",
       candidateResourcesRoot: path.join(root, "resources"),
-      onEvent: (event: ResourceLifecycleEvent) => events.push(event),
+      onEvent: (event: ResourceLifecycleEvent) => {
+        events.push(event);
+      },
     };
     const prepared = await coordinator.prepareAll({ ...base, sourceVersions: sources });
     expect(prepared.map((resource) => resource.resourceKind)).toEqual(["alpha", "zeta"]);
@@ -595,7 +597,9 @@ describe("Resource Coordinator", () => {
         candidateStateId: "candidate-003",
         candidateResourcesRoot,
         sourceVersions: [sourceVersion(first), sourceVersion(broken)],
-        onEvent: (event) => events.push(event),
+        onEvent: (event) => {
+          events.push(event);
+        },
       }),
     ).rejects.toMatchObject({
       name: "ResourcePreparationError",
@@ -653,7 +657,9 @@ describe("Resource Coordinator", () => {
         candidateStateId: "candidate-004",
         candidateResourcesRoot: path.join(root, "resources"),
         sourceVersions: [sourceVersion(unsafe)],
-        onEvent: (event) => events.push(event),
+        onEvent: (event) => {
+          events.push(event);
+        },
       }),
     ).rejects.toMatchObject({
       cleanupCompleted: true,

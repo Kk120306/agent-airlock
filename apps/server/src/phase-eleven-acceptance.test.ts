@@ -5,6 +5,8 @@ import {
   verifySignedTransparencyCheckpoint,
   verifyTransparencyInclusion,
   type PortablePromotionEnvelope,
+  type SignedTransparencyCheckpoint,
+  type TransparencyInclusionProof,
 } from "@agent-airlock/portable-promotion-receipt";
 import { createHash } from "node:crypto";
 import {
@@ -1988,10 +1990,8 @@ interface PortableExportResponse {
   };
   availableDisclosureIdentities: string[];
   anchor: {
-    checkpoint: Parameters<typeof verifySignedTransparencyCheckpoint>[0] & {
-      checkpoint: { treeSize: number };
-    };
-    inclusionProof: Parameters<typeof verifyTransparencyInclusion>[0];
+    checkpoint: SignedTransparencyCheckpoint;
+    inclusionProof: TransparencyInclusionProof;
   } | null;
   evmPayload: {
     receiptDigest: string;

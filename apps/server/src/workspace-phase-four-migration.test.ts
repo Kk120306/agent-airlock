@@ -88,6 +88,7 @@ describe("Phase 4 canonical migration", () => {
     const migrated = await manager.ensureCanonical(agent);
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       schemaVersion: number;
+      providerVersions: unknown[];
     };
 
     expect(manifest.schemaVersion).toBe(4);
