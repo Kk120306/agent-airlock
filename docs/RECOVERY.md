@@ -28,7 +28,10 @@ Recovery verifies the physical sources first and repairs control-plane metadata 
 It never rolls `canonical.json` backward.
 Portable Decision Authority is captured before terminal Run metadata is committed, but it does not authorize Promotion recovery and is never recreated from mutable control-plane metadata.
 Restart-created terminal decisions are written to Decision Authority before the recovered mutable database state is committed.
+Normal execution also withholds a terminal Run Transaction from the control-plane store until its enclosing Run and Agent lifecycle update can be committed together.
+Candidate Set cancellation, winner completion, and loser retention or Discard each publish their own authority before their terminal mutable projection, and Candidate Set completion never backfills missing authority.
 Decision Authority and historical Canonical manifests use synchronized temporary files and non-replacing atomic publication, so a process interruption can leave only a removable temporary remnant or a complete deterministic target.
+Historical Canonical manifests use the originating Candidate or Registry Transition timestamp instead of recovery time, so a retry after history publication derives byte-identical immutable content.
 
 ## Journal phases
 
@@ -79,7 +82,8 @@ Candidate Set recovery also uses each competitor's persisted historical provider
 | Local Quarantine missing without complete provider Discard evidence | The Run enters `recovery-error`, and Airlock does not claim remote cleanup. |
 | Before a Registry Transition journal exists | The prior canonical manifest and registry generation remain authoritative. |
 | After a Registry Transition plan is durable | An unaccepted target is removed and the verified transition is retried. |
-| After a Registry Transition target is installed | Its exact local and provider fingerprints are checked before canonical advancement. |
+| After a Registry Transition target is installed | Its exact local and provider fingerprints are checked, its journal timestamp is reused, and recovery advances that installed target instead of deleting and recreating it. |
+| After immutable Registry Transition history is published but before `canonical.json` replacement | Recovery derives the same byte-identical manifest from the installed target and durable journal, verifies the existing history, and advances `canonical.json` once. |
 | After canonical advancement but before Registry Transition cleanup | The exact accepted target is recognized, the journal is removed, and no second state is installed. |
 | A Registry Transition journal has altered identifiers, fingerprints, fields, or verifications | Recovery rejects it before the target path can authorize deletion or canonical rewriting. |
 | One Agent fails provider onboarding | The prior Resource Registry generation remains authoritative, successful Agent transitions remain recoverable, and no unverifiable source becomes accepted. |
@@ -106,7 +110,7 @@ Candidate Set recovery also uses each competitor's persisted historical provider
 | A portable signing key is missing or substituted while its identity marker remains | Export fails closed without silently rotating the signing identity, and existing envelopes remain independently verifiable. |
 | A transparency append completes but its response is lost | A retry recognizes the existing receipt digest and returns the same tree position without appending a duplicate. |
 | The optional local transparency log or checkpoint chain is malformed | Anchored export fails closed, while signature-only export remains available when the operator disables anchoring. |
-| A transparency writer or stale-lock reclaimer exits | A live writer remains protected, while nonce-bound recovery claims elect one reclaimer and dead claims cannot strand later appenders. |
+| A transparency writer or stale-lock reclaimer exits | A live writer remains protected, nonce-bound recovery claims elect one reclaimer, concurrent lock-release identity changes retry as contention, and dead claims cannot strand later appenders. |
 | Provider removal or contract replacement is configured | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied. |
 | Any physical contradiction | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed. |
 

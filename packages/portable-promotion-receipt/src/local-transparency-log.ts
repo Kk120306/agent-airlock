@@ -45,6 +45,8 @@ interface TransparencyLockOwner {
   createdAt: string;
 }
 
+class ConcurrentLockReadError extends Error {}
+
 export class LocalTransparencyLog {
   private data: PortableTransparencyLogFile | null = null;
 
@@ -253,7 +255,8 @@ export class LocalTransparencyLog {
 async function clearDeadStaleLock(
   lockPath: string,
 ): Promise<boolean> {
-  const before = await readLockOwnerSnapshot(lockPath);
+  const before = await readStableLockOwnerSnapshot(lockPath);
+  if (!before) return false;
   if (
     Date.now() - before.stats.mtimeMs <= LOCK_STALE_MS ||
     isProcessAlive(before.owner.pid)
@@ -284,7 +287,8 @@ async function clearDeadStaleLock(
     await delay(RECLAIM_ELECTION_SETTLE_MS);
     const elected = await electedReclaimClaim(lockPath);
     if (elected?.owner.nonce !== claimOwner.nonce) return false;
-    const after = await readLockOwnerSnapshot(lockPath);
+    const after = await readStableLockOwnerSnapshot(lockPath);
+    if (!after) return false;
     if (
       before.stats.dev !== after.stats.dev ||
       before.stats.ino !== after.stats.ino ||
@@ -298,8 +302,7 @@ async function clearDeadStaleLock(
     }
     const finalElection = await electedReclaimClaim(lockPath);
     if (finalElection?.owner.nonce !== claimOwner.nonce) return false;
-    await unlink(lockPath);
-    return true;
+    return unlinkOwnedLock(lockPath, before.owner.nonce);
   } finally {
     await unlinkOwnedClaim(claimPath, claimOwner.nonce);
     await unlink(temporaryPath).catch(() => undefined);
@@ -320,7 +323,8 @@ async function electedReclaimClaim(
   const active: Array<{ path: string; owner: TransparencyLockOwner }> = [];
   for (const name of names) {
     const claimPath = path.join(directory, name);
-    const snapshot = await readLockOwnerSnapshot(claimPath);
+    const snapshot = await readStableLockOwnerSnapshot(claimPath);
+    if (!snapshot) continue;
     const nameNonce = name.slice(prefix.length, -".claim".length);
     if (snapshot.owner.nonce !== nameNonce) {
       throw new Error("Local transparency reclaim claim identity is invalid");
@@ -343,25 +347,34 @@ async function electedReclaimClaim(
 }
 
 async function unlinkOwnedClaim(claimPath: string, nonce: string): Promise<void> {
-  try {
-    const snapshot = await readLockOwnerSnapshot(claimPath);
-    if (snapshot.owner.nonce === nonce) await unlink(claimPath);
-  } catch (error) {
+  const snapshot = await readStableLockOwnerSnapshot(claimPath);
+  if (snapshot?.owner.nonce === nonce) await unlink(claimPath).catch((error) => {
     if (!isMissing(error)) throw error;
+  });
+}
+
+async function unlinkOwnedLock(lockPath: string, nonce: string): Promise<boolean> {
+  const snapshot = await readStableLockOwnerSnapshot(lockPath);
+  if (snapshot?.owner.nonce !== nonce) return false;
+  try {
+    await unlink(lockPath);
+    return true;
+  } catch (error) {
+    if (isMissing(error)) return false;
+    throw error;
   }
 }
 
-async function unlinkOwnedLock(lockPath: string, nonce: string): Promise<void> {
+async function readStableLockOwnerSnapshot(lockPath: string): Promise<{
+  owner: TransparencyLockOwner;
+  stats: Stats;
+} | null> {
   try {
-    const owner = await readLockOwner(lockPath);
-    if (owner.nonce === nonce) await unlink(lockPath);
+    return await readLockOwnerSnapshot(lockPath);
   } catch (error) {
-    if (!isMissing(error)) throw error;
+    if (isMissing(error) || error instanceof ConcurrentLockReadError) return null;
+    throw error;
   }
-}
-
-async function readLockOwner(lockPath: string): Promise<TransparencyLockOwner> {
-  return (await readLockOwnerSnapshot(lockPath)).owner;
 }
 
 async function readLockOwnerSnapshot(lockPath: string): Promise<{
@@ -444,7 +457,7 @@ async function readBoundedRegularFile(
       after.mtimeMs !== before.mtimeMs ||
       after.ctimeMs !== before.ctimeMs
     ) {
-      throw new Error(`${label} changed while it was being read`);
+      throw new ConcurrentLockReadError(`${label} changed while it was being read`);
     }
     return {
       source: buffer.subarray(0, offset).toString("utf8"),

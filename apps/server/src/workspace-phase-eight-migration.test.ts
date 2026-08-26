@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ResourceVersionReference } from "@agent-airlock/transactional-resource-sdk";
@@ -126,7 +126,12 @@ describe("Phase 8 canonical manifest migration", () => {
     ).rejects.toThrow(/removal or contract replacement/);
   });
 
-  it.each(["after-plan", "after-install", "after-manifest"] as const)(
+  it.each([
+    "after-plan",
+    "after-install",
+    "after-history",
+    "after-manifest",
+  ] as const)(
     "recovers an interrupted provider registry transition at %s",
     async (faultPoint) => {
       const root = await temporaryRoot();
@@ -176,6 +181,53 @@ describe("Phase 8 canonical manifest migration", () => {
       ).rejects.toThrow();
     },
   );
+
+  it("reuses the Candidate timestamp after historical publication precedes Canonical replacement", async () => {
+    const root = await temporaryRoot();
+    const agent = fixtureAgent();
+    const manager = new WorkspaceManager(root);
+    await manager.initialize();
+    const source = await manager.create(agent);
+    const runId = "crash-idempotent-promotion";
+    await manager.prepareCandidate(agent.id, runId);
+    const plan = await manager.planPromotion(agent.id, runId);
+    const installed = await manager.installPromotion(plan);
+    const candidateManifest = JSON.parse(
+      await readFile(
+        path.join(
+          root,
+          agent.id,
+          "versions",
+          installed.stateId,
+          "candidate.json",
+        ),
+        "utf8",
+      ),
+    ) as { createdAt: string };
+    const historyDirectory = path.join(
+      root,
+      agent.id,
+      ".canonical-history",
+    );
+    const historicalPath = path.join(historyDirectory, installed.stateId + ".json");
+    await mkdir(historyDirectory, { recursive: true });
+    await writeFile(
+      historicalPath,
+      JSON.stringify({
+        schemaVersion: 4,
+        agentId: agent.id,
+        ...installed,
+        createdAt: candidateManifest.createdAt,
+        sourceRunId: runId,
+      }) + "\n",
+      "utf8",
+    );
+
+    await expect(manager.readCanonical(agent.id)).resolves.toEqual(source);
+    const promoted = await manager.advancePromotion(plan, installed);
+    expect(promoted).toEqual(installed);
+    await expect(manager.readCanonical(agent.id)).resolves.toEqual(installed);
+  });
 
   it.each([
     {

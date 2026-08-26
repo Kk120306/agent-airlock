@@ -137,6 +137,7 @@ describe("Phase 11 Portable Trust acceptance", () => {
     await expect
       .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
       .toBe("promoted");
+    expect(harness.service.getAgent(agent.id).status).toBe("ready");
 
     const response = await harness.app.inject({
       method: "POST",
@@ -316,6 +317,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
             harness.service.getRun(admitted.run.id).transaction?.status,
         )
         .toBe("quarantined");
+      await expect
+        .poll(() => harness.service.getAgent(agent.id).status)
+        .toBe("ready");
     }
     const proposal = await harness.service.deriveAssuranceProposal(agent.id);
     expect(proposal).not.toBeNull();
@@ -738,6 +742,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
     await expect
       .poll(() => harness.service.getRun(first.run.id).transaction?.status)
       .toBe("promoted");
+    await expect
+      .poll(() => harness.service.getAgent(agent.id).status)
+      .toBe("ready");
     const historyDirectory = path.join(
       harness.config.workspaceRoot,
       agent.id,
@@ -768,6 +775,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
     await expect
       .poll(() => harness.service.getRun(second.run.id).transaction?.status)
       .toBe("promoted");
+    await expect
+      .poll(() => harness.service.getAgent(agent.id).status)
+      .toBe("ready");
     expect(
       (await readdir(historyDirectory)).filter((name) => name.endsWith(".tmp")),
     ).toEqual([]);

@@ -134,6 +134,46 @@ describe("durable local transparency log", () => {
     expect(log.snapshot().entries).toHaveLength(1);
   });
 
+  it("elects one stale-lock reclaimer while concurrent contenders keep retrying", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "airlock-log-election-"));
+    const filePath = path.join(directory, "transparency.json");
+    const lockPath = `${filePath}.lock`;
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore",
+    });
+    const exitedPid = child.pid!;
+    await once(child, "exit");
+    await writeFile(
+      lockPath,
+      JSON.stringify({
+        createdAt: "2026-08-26T00:00:00.000Z",
+        nonce: "00000000-0000-4000-8000-000000000000",
+        pid: exitedPid,
+      }),
+      { mode: 0o600 },
+    );
+    await utimes(lockPath, new Date(0), new Date(0));
+    const key = generatePortableSigningKey();
+    const logs = Array.from(
+      { length: 8 },
+      () => new LocalTransparencyLog(filePath, key.privateKeyPem),
+    );
+
+    await Promise.all(logs.map((log) => log.initialize()));
+    await Promise.all(
+      logs.map((log, index) =>
+        log.append(
+          digest(`contender-${index}`),
+          `2026-08-26T00:00:${String(index).padStart(2, "0")}.000Z`,
+        ),
+      ),
+    );
+
+    const reopened = new LocalTransparencyLog(filePath, key.privateKeyPem);
+    await reopened.initialize();
+    expect(reopened.snapshot().entries).toHaveLength(logs.length);
+  });
+
   it("recovers when an earlier reclaimer was interrupted", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "airlock-log-dead-reclaimer-"),

@@ -263,6 +263,8 @@ Promotion journal schema 2 additionally persists the exact Candidate Set winner 
 Phase 10 persists versioned Assurance evidence, deterministic monotonic proposals, historical simulation results, explicit operator decisions, and append-only Outcome Contract history.
 Phase 11 derives Portable Promotion Envelopes from complete versioned durable evidence and requires a separate append-only Decision Authority record captured before terminal control-plane metadata.
 Immutable historical Canonical manifests let export recompute the complete physical Whole-Agent state for every referenced accepted state identifier.
+Terminal progress is withheld from the mutable store until the enclosing Run and Agent lifecycle update is ready, and Candidate Set terminal branches publish their own authority without completion-time synthesis.
+Promotion and Registry Transition historical manifests reuse timestamps from their durable Candidate or transition source so interruption recovery derives byte-identical immutable content.
 Receipt and transparency private keys remain separate operator-owned files, and the optional transparency log persists only portable receipt digests and signed checkpoint evidence.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.

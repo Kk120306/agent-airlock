@@ -165,6 +165,7 @@ Consistency verification authenticates both signed checkpoints and requires one 
 The local implementation serializes writers across processes, revalidates the current log under the lock, uses an incremental Merkle accumulator for prefix verification, and persists with an atomic replace plus file and directory synchronization.
 Lock ownership is nonce-bound, and an old lock is recoverable only after its recorded process is no longer alive.
 Stale-lock recovery uses unique nonce-bound claims and deterministic election, so an interrupted reclaimer cannot strand a second global mutex.
+If a lock or claim is released while a contender is reading its pinned file handle, that identity change is treated as contention and retried, while malformed or unsafe surviving lock content still fails closed.
 A log history accepts exactly one checkpoint key identity, so transparency-key rotation starts a new log and explicit trust epoch.
 
 The optional EVM reference is limited to a contract interface and offline payload encoder for one receipt digest.
@@ -176,10 +177,13 @@ The server builds a portable receipt only from strictly parsed durable Run Trans
 Before mutable control-plane metadata is persisted, Airlock writes an immutable Decision Authority record for each terminal Run decision.
 That record commits the exact terminal Run Transaction, the frozen parent authority for Repair ancestry, and the final Candidate Set source, contract, competitor seals, Selection Decision, and winner when applicable.
 Export requires an exact match against this authority and never synthesizes a missing record from mutable database content.
+Terminal progress callbacks may publish authority, but they do not expose the terminal transaction through the mutable store before the enclosing Run and Agent lifecycle update is complete.
+Candidate Set cancellation and cleanup record authority at the branch that makes the terminal decision, while aggregate completion performs no authority reconstruction.
 Decision Authority records and historical Canonical manifests are first written and synchronized under unique same-directory temporary names, then installed through non-replacing hard-link publication and directory synchronization.
 Recognizable temporary remnants from interruption are removed before retry, while an existing deterministic authority target is verified rather than replaced.
 
 Every schema 4 Canonical State also has an immutable historical manifest keyed by state identifier.
+Promotion manifests reuse the installed Candidate timestamp, and Registry Transition manifests reuse the durable transition timestamp, so retry derives the exact bytes already published before an interruption.
 Before signing, Airlock rebuilds the complete physical Whole-Agent state reference from the exact historical workspace, Codex home, deterministic SQLite resource, outbox, Codex thread identity, and Resource Provider versions.
 It compares the rebuilt composite and every component fingerprint with both the historical manifest and the terminal decision authority.
 Non-Promotion dispositions require identical before and after commitments.

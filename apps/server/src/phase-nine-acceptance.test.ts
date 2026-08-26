@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   unlink,
   writeFile,
@@ -716,6 +717,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
     await expect
       .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
       .toBe("promoting");
+    await expect
+      .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
+      .not.toBeNull();
     expect(first.getCandidateSet(admitted.candidateSet.id).selectedCompetitorId)
       .toBe("focused-valid");
 
@@ -790,6 +794,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
     await expect
       .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
       .toBe("promoting");
+    await expect
+      .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
+      .not.toBeNull();
     await expect(first.deleteAgent(agent.id)).rejects.toMatchObject({
       statusCode: 409,
       message: expect.stringContaining("Promotion recovery"),
@@ -936,6 +943,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
     await expect
       .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
       .toBe("promoting");
+    await expect
+      .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
+      .not.toBeNull();
 
     const initialValue = { release: "canonical" };
     const initialVersion = versionReference(
@@ -1053,6 +1063,16 @@ describe("Phase 9 Competing Futures acceptance", () => {
       expect(loserRun?.transaction?.disposition).toBe(
         policy === "retain" ? "quarantined" : "discarded",
       );
+      const authorityFiles = (
+        await readdir(
+          path.join(
+            config.dataDirectory,
+            "portable-decision-journal",
+            loserRun!.id,
+          ),
+        )
+      ).filter((entry) => entry.endsWith(".json"));
+      expect(authorityFiles).toHaveLength(1);
       const interrupted = structuredClone(loserRun?.transaction);
       if (!interrupted) throw new Error("Fixture loser transaction is missing");
       interrupted.status = "sealed";
@@ -1395,6 +1415,17 @@ describe("Phase 9 Competing Futures acceptance", () => {
         "quarantined",
       ]).toContain(transaction?.disposition);
       expect(transaction?.promotionReceipt).not.toBeNull();
+      expect(
+        (
+          await readdir(
+            path.join(
+              config.dataDirectory,
+              "portable-decision-journal",
+              competitor.runId,
+            ),
+          )
+        ).filter((name) => name.endsWith(".json")),
+      ).toHaveLength(1);
     }
     const canonical = await workspaces.readCanonical(agent.id);
     expect(canonical.stateId).toBe(source.stateId);

@@ -1672,6 +1672,13 @@ export class AgentService {
     transaction: RunTransaction,
   ): Promise<void> {
     await this.recordPortableDecisionAuthority(runId, transaction);
+    if (
+      transaction.disposition &&
+      transaction.status === transaction.disposition &&
+      transaction.promotionReceipt
+    ) {
+      return;
+    }
     await this.store.mutate((database) => {
       const storedRun = database.runs.find((item) => item.id === runId);
       if (storedRun) storedRun.transaction = structuredClone(transaction);
@@ -2701,30 +2708,30 @@ export class AgentService {
   ): Promise<void> {
     await this.updateCandidateSetPhase(admitted.id, "evaluating");
     let nextIndex = 0;
-    const workers = Array.from(
-      { length: admitted.maxConcurrency },
-      async () => {
-        while (true) {
-          const index = nextIndex;
-          nextIndex += 1;
-          const competitor = admitted.competitors[index];
-          if (!competitor) return;
-          const current = this.getCandidateSet(admitted.id);
-          if (current.cancellationRequested) {
-            await this.markPendingCompetitorCancelled(admitted.id, competitor.id);
-            continue;
-          }
-          await this.evaluateCandidateSetCompetitor(
-            agentAtStart,
-            admitted,
-            competitor,
-          );
-        }
-      },
-    );
-    await Promise.all(workers);
-
     try {
+      const workers = Array.from(
+        { length: admitted.maxConcurrency },
+        async () => {
+          while (true) {
+            const index = nextIndex;
+            nextIndex += 1;
+            const competitor = admitted.competitors[index];
+            if (!competitor) return;
+            const current = this.getCandidateSet(admitted.id);
+            if (current.cancellationRequested) {
+              await this.markPendingCompetitorCancelled(admitted.id, competitor.id);
+              continue;
+            }
+            await this.evaluateCandidateSetCompetitor(
+              agentAtStart,
+              admitted,
+              competitor,
+            );
+          }
+        },
+      );
+      await Promise.all(workers);
+
       const canonical = await this.workspaces.readCanonical(admitted.agentId);
       if (
         canonical.stateId !== admitted.source.stateId ||
@@ -2826,6 +2833,17 @@ export class AgentService {
       }
       if (error instanceof AirlockRunError) {
         const safeError = boundedCandidateSetError(error);
+        const authorityCandidateSet = this.getCandidateSet(admitted.id);
+        const winnerRunId = authorityCandidateSet.winnerRunId;
+        if (winnerRunId) {
+          await this.recordPortableDecisionAuthority(
+            winnerRunId,
+            error.transaction,
+            authorityCandidateSet.selectionDecision
+              ? authorityCandidateSet
+              : null,
+          );
+        }
         await this.store.mutate((database) => {
           const candidateSet = database.candidateSets.find(
             (item) => item.id === admitted.id,
@@ -3016,6 +3034,13 @@ export class AgentService {
       const message = durationBudgetExpired
         ? "Candidate evaluation exceeded its duration budget"
         : boundedCandidateSetError(error);
+      if (error instanceof AirlockRunError) {
+        await this.recordPortableDecisionAuthority(
+          competitorAtAdmission.runId,
+          error.transaction,
+          null,
+        );
+      }
       await this.store.mutate((database) => {
         const storedSet = database.candidateSets.find(
           (item) => item.id === candidateSet.id,
@@ -3100,6 +3125,11 @@ export class AgentService {
       },
     );
     const promotedAt = now();
+    await this.recordPortableDecisionAuthority(
+      run.id,
+      result.transaction,
+      candidateSet,
+    );
     await this.store.mutate((database) => {
       const storedSet = database.candidateSets.find(
         (item) => item.id === candidateSetId,
@@ -3141,15 +3171,11 @@ export class AgentService {
     const candidateSet = this.getCandidateSet(candidateSetId);
     for (const competitor of candidateSet.competitors) {
       if (competitor.id === winnerId) continue;
-      let run = this.getRun(competitor.runId);
+      const run = this.getRun(competitor.runId);
       if (!run.transaction) {
-        await this.updateCompetitorDisposition(
-          candidateSetId,
-          competitor.id,
-          "discarded",
-          "discarded",
+        throw new Error(
+          "Candidate Set loser cleanup requires its admitted Run Transaction",
         );
-        continue;
       }
       let transaction = run.transaction;
       if (transaction.status === "sealed" && transaction.disposition === null) {
@@ -3173,12 +3199,28 @@ export class AgentService {
         await this.workspaces.discardQuarantine(run.id);
         transaction = markTransactionDiscarded(transaction, now(), false);
       }
+      if (
+        !transaction.disposition ||
+        transaction.status !== transaction.disposition ||
+        !transaction.promotionReceipt
+      ) {
+        throw new Error(
+          "Candidate Set loser cleanup did not produce a terminal Run decision",
+        );
+      }
       const disposition =
         transaction.disposition === "quarantined" ? "retained" : "discarded";
-      await this.store.mutate((database) => {
-        const storedRun = database.runs.find((item) => item.id === run.id);
-        if (storedRun) storedRun.transaction = structuredClone(transaction);
-      });
+      if (stableJson(transaction) !== stableJson(run.transaction)) {
+        await this.recordPortableDecisionAuthority(
+          run.id,
+          transaction,
+          candidateSet.selectionDecision ? candidateSet : null,
+        );
+        await this.store.mutate((database) => {
+          const storedRun = database.runs.find((item) => item.id === run.id);
+          if (storedRun) storedRun.transaction = structuredClone(transaction);
+        });
+      }
       await this.updateCompetitorDisposition(
         candidateSetId,
         competitor.id,
@@ -3220,31 +3262,59 @@ export class AgentService {
     competitorId: string,
   ): Promise<void> {
     const completedAt = now();
+    const snapshot = this.store.snapshot();
+    const candidateSet = snapshot.candidateSets.find(
+      (item) => item.id === candidateSetId,
+    );
+    const competitor = candidateSet?.competitors.find(
+      (item) => item.id === competitorId,
+    );
+    const run = snapshot.runs.find((item) => item.id === competitor?.runId);
+    if (!candidateSet || !competitor || !run) {
+      throw new Error("Candidate Set pending competitor disappeared");
+    }
+    if (competitor.status !== "pending" || run.status !== "queued") {
+      throw new Error("Candidate Set pending competitor changed before cancellation");
+    }
+    if (!run.transaction) {
+      throw new Error("Candidate Set pending competitor has no Run Transaction");
+    }
+    const terminalTransaction = markTransactionCancelledBeforeStart(
+      run.transaction,
+      completedAt,
+    );
+    await this.recordPortableDecisionAuthority(
+      run.id,
+      terminalTransaction,
+      null,
+    );
     await this.store.mutate((database) => {
-      const candidateSet = database.candidateSets.find(
+      const storedCandidateSet = database.candidateSets.find(
         (item) => item.id === candidateSetId,
       );
-      const competitor = candidateSet?.competitors.find(
+      const storedCompetitor = storedCandidateSet?.competitors.find(
         (item) => item.id === competitorId,
       );
-      const run = database.runs.find((item) => item.id === competitor?.runId);
-      if (competitor?.status === "pending") {
-        competitor.status = "cancelled";
-        competitor.exclusions = ["candidate-set-cancelled"];
-        competitor.completedAt = completedAt;
+      const storedRun = database.runs.find(
+        (item) => item.id === storedCompetitor?.runId,
+      );
+      if (
+        !storedCandidateSet ||
+        !storedCompetitor ||
+        !storedRun ||
+        storedCompetitor.status !== "pending" ||
+        storedRun.status !== "queued"
+      ) {
+        throw new Error("Candidate Set pending competitor changed during cancellation");
       }
-      if (run?.status === "queued") {
-        run.status = "cancelled";
-        run.error = "Candidate Set was cancelled before this competitor started";
-        run.completedAt = completedAt;
-        if (run.transaction) {
-          run.transaction = markTransactionCancelledBeforeStart(
-            run.transaction,
-            completedAt,
-          );
-        }
-      }
-      if (candidateSet) candidateSet.updatedAt = completedAt;
+      storedCompetitor.status = "cancelled";
+      storedCompetitor.exclusions = ["candidate-set-cancelled"];
+      storedCompetitor.completedAt = completedAt;
+      storedRun.status = "cancelled";
+      storedRun.error = "Candidate Set was cancelled before this competitor started";
+      storedRun.completedAt = completedAt;
+      storedRun.transaction = structuredClone(terminalTransaction);
+      storedCandidateSet.updatedAt = completedAt;
     });
   }
 
@@ -3281,22 +3351,6 @@ export class AgentService {
     candidateSetId: string,
     winnerId: string | null,
   ): Promise<void> {
-    const authoritySnapshot = this.store.snapshot();
-    const authorityCandidateSet = authoritySnapshot.candidateSets.find(
-      (candidate) => candidate.id === candidateSetId,
-    );
-    if (!authorityCandidateSet) {
-      throw new Error("Candidate Set disappeared before decision authority was recorded");
-    }
-    for (const candidateRun of authoritySnapshot.runs.filter(
-      (run) => run.candidateSetId === candidateSetId && run.transaction,
-    )) {
-      await this.recordPortableDecisionAuthority(
-        candidateRun.id,
-        candidateRun.transaction!,
-        authorityCandidateSet,
-      );
-    }
     const completedAt = now();
     await this.store.mutate((database) => {
       const candidateSet = database.candidateSets.find(
@@ -3391,6 +3445,7 @@ export class AgentService {
         },
       );
       const completedAt = now();
+      await this.recordPortableDecisionAuthority(run.id, result.transaction);
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);
@@ -3818,6 +3873,10 @@ function markTransactionCancelledBeforeStart(
     deliveredAt: null,
   }));
   if (next.sqlite?.before) next.sqlite.after = structuredClone(next.sqlite.before);
+  next = completeInterruptedValidationEvidence(
+    next,
+    "Validation could not run because the Candidate Set cancelled this Run before execution",
+  );
   next = finalizeResources(next, "cancelled");
   next.events.push({
     status: "cancelled",

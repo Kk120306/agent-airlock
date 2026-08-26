@@ -148,6 +148,7 @@ export interface ProviderRegistryVerification {
 export type ProviderRegistryFaultPoint =
   | "after-plan"
   | "after-install"
+  | "after-history"
   | "after-manifest";
 
 export type ProviderRegistryFaultInjector = (
@@ -627,13 +628,19 @@ export class WorkspaceManager {
     journal.targetContentHash = target.contentHash;
     await this.writeJsonAtomically(journalPath, journal);
     await this.providerRegistryFaultInjector?.("after-install", agent.id);
-    await this.replaceCanonicalManifest(agent.id, {
-      schemaVersion: 4,
-      agentId: agent.id,
-      ...target,
-      createdAt: now(),
-      sourceRunId: transitionId,
-    });
+    await this.replaceCanonicalManifest(
+      agent.id,
+      {
+        schemaVersion: 4,
+        agentId: agent.id,
+        ...target,
+        createdAt: journal.createdAt,
+        sourceRunId: transitionId,
+      },
+      async () => {
+        await this.providerRegistryFaultInjector?.("after-history", agent.id);
+      },
+    );
     await this.providerRegistryFaultInjector?.("after-manifest", agent.id);
     await rm(journalPath, { force: true });
     return target;
@@ -1031,12 +1038,18 @@ export class WorkspaceManager {
       }
       return current;
     }
+    const installedCandidate = await this.readCandidateAt(
+      this.versionRoot(plan.agentId, plan.targetStateId),
+      plan.runId,
+      plan.sourceProviderVersions,
+    );
+    this.assertCandidateMatchesPlan(installedCandidate, plan);
     this.assertSourceMatchesPlan(current, plan);
     await this.replaceCanonicalManifest(plan.agentId, {
       schemaVersion: 4,
       agentId: plan.agentId,
       ...installed,
-      createdAt: now(),
+      createdAt: installedCandidate.createdAt,
       sourceRunId: plan.runId,
     });
     return this.readCanonicalForProviderTransition(plan.agentId);
@@ -1724,8 +1737,10 @@ export class WorkspaceManager {
   private async replaceCanonicalManifest(
     agentId: string,
     manifest: CanonicalManifestV4,
+    afterHistory?: () => void | Promise<void>,
   ): Promise<void> {
     await this.writeHistoricalCanonicalManifest(manifest);
+    await afterHistory?.();
     const target = this.canonicalManifestPath(agentId);
     const temporary = target + "." + randomUUID() + ".tmp";
     await mkdir(path.dirname(target), { recursive: true });
@@ -2139,6 +2154,33 @@ export class WorkspaceManager {
         current.contentHash === journal.sourceContentHash &&
         sameProviderVersions(current.providerVersions, journal.sourceProviderVersions)
       ) {
+        if (journal.phase === "installed") {
+          if (journal.targetContentHash === null) {
+            throw new Error(
+              "Installed Resource Provider registry transition lacks a target fingerprint",
+            );
+          }
+          const target = await this.buildStateReference(
+            journal.agentId,
+            journal.targetStateId,
+            current.codexThreadId,
+            journal.targetProviderVersions,
+          );
+          if (target.contentHash !== journal.targetContentHash) {
+            throw new Error(
+              "Installed Resource Provider registry transition target contradicts its durable fingerprint",
+            );
+          }
+          await this.replaceCanonicalManifest(journal.agentId, {
+            schemaVersion: 4,
+            agentId: journal.agentId,
+            ...target,
+            createdAt: journal.createdAt,
+            sourceRunId: journal.transitionId,
+          });
+          await rm(journalPath, { force: true });
+          continue;
+        }
         await rm(this.versionRoot(journal.agentId, journal.targetStateId), {
           recursive: true,
           force: true,

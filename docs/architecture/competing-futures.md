@@ -190,6 +190,7 @@ Admission accepts an objective, two through eight trusted competitor profile ide
 It rejects credentials, unknown fields, duplicate competitor identifiers, unbounded strategy text, unsupported evaluator versions, an inactive Agent, an active Agent operation, an uncommitted Resource Registry generation, or a stale Canonical source.
 
 Cancellation before a winner decision quarantines or discards every sibling according to policy and leaves Canonical State unchanged.
+Each terminal cancellation and loser-cleanup branch publishes immutable Decision Authority before its Run or competitor metadata, and Candidate Set completion never reconstructs missing authority from the mutable aggregate.
 Cancellation after a winner decision cannot reverse the durable selection or approved Promotion and instead follows existing forward-recovery semantics.
 
 ## Initial deterministic proof
@@ -221,6 +222,7 @@ Additional crash injection at every non-authoritative presentation-only phase re
 - A Candidate Set recovery failure prevents a new provider generation from being onboarded or committed.
 - Crash recovery after canonical advancement dispatches only winner intents and completes loser cleanup.
 - Crash recovery after physical loser Quarantine or removal but before terminal metadata reconciles that exact disposition without recreating Candidate State.
+- Terminal Candidate Set Run status is published with its enclosing Agent lifecycle update, so an observer never sees a completed disposition while the Agent still appears busy for that same operation.
 - Winner Promotion contradiction produces `recovery-error` and never promotes a runner-up.
 - Retained losers remain Repair-ineligible until a later explicit lineage decision.
 - Ordinary Run and Repair regression suites remain byte-compatible.
