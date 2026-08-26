@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { RunCancelledError } from "./errors.js";
+import { resourceEnvironmentName } from "./resource-registry.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -18,6 +19,7 @@ export function buildCodexEnvironment(
   codexHomePath: string,
   outboxPath?: string,
   repairReferencePath?: string | null,
+  resourceBindings: RunnerRequest["resourceBindings"] = [],
 ): NodeJS.ProcessEnv {
   const inheritedNames = [
     "PATH",
@@ -42,6 +44,9 @@ export function buildCodexEnvironment(
       ? { AIRLOCK_REPAIR_REFERENCE_PATH: repairReferencePath }
       : {}),
   };
+  for (const binding of resourceBindings) {
+    environment[resourceEnvironmentName(binding.providerId)] = binding.hostPath;
+  }
   for (const name of inheritedNames) {
     if (process.env[name] !== undefined) environment[name] = process.env[name];
   }
@@ -61,6 +66,7 @@ export function buildCodexArgs(
   workspacePath = request.workspacePath,
   outboxDirectory = path.dirname(request.outboxPath),
   repairReferencePath = request.repairReferencePath,
+  resourcePaths = request.resourceBindings?.map((binding) => binding.hostPath) ?? [],
 ): string[] {
   const args = [
     "exec",
@@ -73,6 +79,7 @@ export function buildCodexArgs(
     "--add-dir",
     outboxDirectory,
     ...(repairReferencePath ? ["--add-dir", repairReferencePath] : []),
+    ...resourcePaths.flatMap((resourcePath) => ["--add-dir", resourcePath]),
   ];
   if (request.threadId) {
     args.push("resume", request.threadId, request.prompt);
@@ -169,6 +176,11 @@ export class CodexRunner implements AgentRunner {
     if (this.active.has(request.agentId)) {
       throw new Error("Agent already has an active Codex process");
     }
+    if (request.resourceBindings?.some((binding) => binding.access === "read-only")) {
+      throw new Error(
+        "Local-process Runtime cannot enforce read-only Transactional Resource bindings",
+      );
+    }
 
     const args = buildCodexArgs(request, this.config.codexSandboxMode);
     const child = spawn(this.config.codexBin, args, {
@@ -178,6 +190,7 @@ export class CodexRunner implements AgentRunner {
         request.codexHomePath,
         request.outboxPath,
         request.repairReferencePath,
+        request.resourceBindings,
       ),
       stdio: ["ignore", "pipe", "pipe"],
     });

@@ -22,6 +22,8 @@ import {
 } from "./outcome-contract.js";
 import { OutcomeValidator } from "./outcome-validator.js";
 import { PromotionJournal } from "./promotion-journal.js";
+import { ResourceCoordinator } from "./resource-coordinator.js";
+import { ResourceRegistry } from "./resource-registry.js";
 import { JsonStore } from "./store.js";
 import { SqliteResource } from "./sqlite-resource.js";
 import type {
@@ -52,6 +54,7 @@ export class AgentService {
   private readonly runner: AirlockRunner;
   private readonly actionDispatcher: MockExternalActionDispatcher;
   private readonly promotionJournal: PromotionJournal;
+  private providerRegistryReady = false;
 
   constructor(
     private readonly config: AppConfig,
@@ -61,6 +64,9 @@ export class AgentService {
     validationCommandExecutor: ValidationCommandExecutor =
       new ContainerValidationCommandExecutor(config),
     promotionFaultInjector?: PromotionFaultInjector,
+    private readonly resourceCoordinator: ResourceCoordinator = new ResourceCoordinator(
+      new ResourceRegistry(),
+    ),
   ) {
     this.actionDispatcher = new MockExternalActionDispatcher(
       path.join(config.dataDirectory, "mock-deliveries.json"),
@@ -76,15 +82,21 @@ export class AgentService {
       new ExternalActionOutbox(),
       this.actionDispatcher,
       this.promotionJournal,
+      this.resourceCoordinator,
       promotionFaultInjector,
     );
   }
 
   async initialize(): Promise<void> {
+    this.providerRegistryReady = false;
     await this.store.initialize();
     await this.workspaces.initialize();
     await this.actionDispatcher.initialize();
     await this.promotionJournal.initialize();
+    const registryDescriptors = this.resourceCoordinator.registryDescriptors();
+    const registryGeneration = await this.workspaces.nextProviderRegistryGeneration(
+      registryDescriptors,
+    );
     const snapshot = this.store.snapshot();
     const recoverCompletedRunIds = new Set(
       snapshot.runs
@@ -119,22 +131,57 @@ export class AgentService {
 
     const canonicalStates = new Map<string, CanonicalStateReference>();
     const canonicalErrors = new Map<string, string>();
-    for (const agent of snapshot.agents) {
-      try {
-        canonicalStates.set(agent.id, await this.workspaces.ensureCanonical(agent));
-      } catch (error) {
+    if (recovery.failures.length === 0) {
+      for (const agent of snapshot.agents) {
+        try {
+          const current = await this.workspaces.ensureCanonicalForProviderTransition(
+            agent,
+          );
+          const additions = this.workspaces.providerVersionsToOnboard(
+            current.providerVersions,
+          );
+          const verifications =
+            await this.resourceCoordinator.verifyProviderOnboarding(
+              agent.id,
+              additions,
+            );
+          const transitioned = await this.workspaces.transitionProviderRegistry(
+            agent,
+            current,
+            verifications,
+            registryGeneration,
+          );
+          canonicalStates.set(agent.id, transitioned);
+        } catch (error) {
+          canonicalErrors.set(
+            agent.id,
+            "Canonical State reconciliation failed: " +
+              (error instanceof Error ? error.message : String(error)),
+          );
+        }
+      }
+    } else {
+      for (const agent of snapshot.agents) {
         canonicalErrors.set(
           agent.id,
-          "Canonical State reconciliation failed: " +
-            (error instanceof Error ? error.message : String(error)),
+          "Resource Registry transition deferred until every prior-generation Promotion recovers",
         );
       }
+    }
+    if (canonicalErrors.size === 0 && recovery.failures.length === 0) {
+      await this.workspaces.commitProviderRegistryGeneration(
+        registryDescriptors,
+        registryGeneration,
+      );
+      this.providerRegistryReady = true;
     }
 
     const protectedRunIds = new Set([
       ...recovery.protectedRunIds,
       ...activeRunIds,
     ]);
+    const cleanupTransactions = new Map<string, RunTransaction>();
+    const runsById = new Map(snapshot.runs.map((run) => [run.id, run]));
     const startupTime = Date.now();
     const cleanup = await this.workspaces.cleanupExpiredState({
       candidateOlderThan: new Date(
@@ -144,7 +191,65 @@ export class AgentService {
         startupTime - this.config.quarantineRetentionMs,
       ).toISOString(),
       protectedRunIds,
+      beforeRemove: async ({ runId, root }) => {
+        const run = runsById.get(runId);
+        if (
+          !run?.transaction ||
+          (run.transaction.providerResources.length === 0 &&
+            !run.transaction.providerResourceEvents.some(
+              (event) => event.stage === "prepare" && event.status === "failed",
+            ))
+        ) {
+          return;
+        }
+        const cleaned = await this.runner.discardRetainedProviderState(
+          run.agentId,
+          cleanupTransactions.get(runId) ?? run.transaction,
+          root,
+          async (progress) => {
+            cleanupTransactions.set(runId, structuredClone(progress));
+            await this.store.mutate((database) => {
+              const storedRun = database.runs.find((item) => item.id === runId);
+              if (storedRun?.transaction) {
+                storedRun.transaction = structuredClone(progress);
+              }
+            });
+          },
+        );
+        cleanupTransactions.set(runId, cleaned);
+        await this.store.mutate((database) => {
+          const storedRun = database.runs.find((item) => item.id === runId);
+          if (storedRun?.transaction) {
+            storedRun.transaction = structuredClone(cleaned);
+          }
+        });
+      },
     });
+
+    const missingQuarantineDisposition = new Map<
+      string,
+      "discarded" | "recovery-error"
+    >();
+    for (const run of snapshot.runs) {
+      if (
+        run.transaction?.disposition !== "quarantined" ||
+        !run.transaction.quarantineAvailable ||
+        cleanup.quarantineRunIds.includes(run.id)
+      ) {
+        continue;
+      }
+      try {
+        if (await this.workspaces.quarantineExists(run.id)) continue;
+        missingQuarantineDisposition.set(
+          run.id,
+          this.runner.providerDiscardCompleted(run.transaction)
+            ? "discarded"
+            : "recovery-error",
+        );
+      } catch {
+        missingQuarantineDisposition.set(run.id, "recovery-error");
+      }
+    }
 
     await this.store.mutate((database) => {
       for (const recovered of recovery.recovered) {
@@ -263,7 +368,47 @@ export class AgentService {
           continue;
         }
         const discardedAt = now();
-        run.transaction = markTransactionDiscarded(run.transaction, discardedAt, true);
+        run.transaction = markTransactionDiscarded(
+          cleanupTransactions.get(runId) ?? run.transaction,
+          discardedAt,
+          true,
+        );
+      }
+
+      for (const runId of cleanup.candidateRunIds) {
+        const run = database.runs.find((item) => item.id === runId);
+        const cleaned = cleanupTransactions.get(runId);
+        if (run?.transaction && cleaned) {
+          run.transaction = structuredClone(cleaned);
+        }
+      }
+
+      for (const [runId, disposition] of missingQuarantineDisposition) {
+        const run = database.runs.find((item) => item.id === runId);
+        if (!run?.transaction || run.transaction.disposition !== "quarantined") {
+          continue;
+        }
+        if (disposition === "discarded") {
+          run.transaction = markTransactionDiscarded(
+            run.transaction,
+            now(),
+            false,
+          );
+          run.transaction.events.at(-1)!.summary =
+            "Interrupted Discard completed; bounded decision evidence remains";
+          continue;
+        }
+        run.status = "failed";
+        run.error =
+          "Quarantine recovery failed: mutable state is missing without complete provider Discard evidence";
+        run.transaction.status = "recovery-error";
+        run.transaction.quarantineAvailable = false;
+        run.transaction.recovery = {
+          ...run.transaction.recovery,
+          recoveredAfterRestart: true,
+          recoveryError:
+            "Mutable Quarantine is missing without complete provider Discard evidence",
+        };
       }
 
       for (const agent of database.agents) {
@@ -312,8 +457,13 @@ export class AgentService {
   }
 
   async createAgent(input: CreateAgentInput): Promise<Agent> {
+    this.assertProviderRegistryReady();
     const timestamp = now();
     const id = randomUUID();
+    await this.resourceCoordinator.verifyProviderOnboarding(
+      id,
+      this.resourceCoordinator.initialVersions(),
+    );
     const agent: Agent = {
       id,
       name: input.name.trim(),
@@ -464,6 +614,7 @@ export class AgentService {
     agentId: string,
     prompt: string,
   ): Promise<{ run: AgentRun; message: Message }> {
+    this.assertProviderRegistryReady();
     if (!isArkConfigured(this.config)) {
       throw new HttpError(
         503,
@@ -534,6 +685,7 @@ export class AgentService {
     sourceRunId: string,
     objective?: string,
   ): Promise<{ run: AgentRun; message: Message }> {
+    this.assertProviderRegistryReady();
     if (!isArkConfigured(this.config)) {
       throw new HttpError(
         503,
@@ -553,6 +705,12 @@ export class AgentService {
         !sourceTransaction.quarantineAvailable
       ) {
         throw new HttpError(409, "Only an available Quarantine can start a Repair Run");
+      }
+      if (!this.runner.canRepairProviderQuarantine(sourceTransaction)) {
+        throw new HttpError(
+          409,
+          "This Quarantine was retained for Resource cleanup and cannot start a Repair Run",
+        );
       }
       if (sourceTransaction.lineage.depth >= sourceTransaction.lineage.maxDepth) {
         throw new HttpError(
@@ -669,7 +827,7 @@ export class AgentService {
     try {
       const snapshot = this.store.snapshot();
       const run = snapshot.runs.find((item) => item.id === runId);
-      const transaction = run?.transaction;
+      let transaction = run?.transaction;
       const agent = run
         ? snapshot.agents.find((item) => item.id === run.agentId)
         : undefined;
@@ -693,6 +851,29 @@ export class AgentService {
         throw new HttpError(409, "Wait for the active Repair Run to finish");
       }
 
+      let retainedTransaction: RunTransaction = transaction;
+      retainedTransaction = await this.runner.discardProviderQuarantines(
+        run.agentId,
+        retainedTransaction,
+        async (progress) => {
+          retainedTransaction = structuredClone(progress);
+          await this.store.mutate((database) => {
+            const storedRun = database.runs.find((item) => item.id === runId);
+            if (storedRun?.transaction) {
+              storedRun.transaction = structuredClone(progress);
+            }
+          });
+        },
+      );
+      await this.store.mutate((database) => {
+        const storedRun = database.runs.find((item) => item.id === runId);
+        if (
+          storedRun?.transaction &&
+          storedRun.transaction.disposition === "quarantined"
+        ) {
+          storedRun.transaction = structuredClone(retainedTransaction);
+        }
+      });
       await this.workspaces.discardQuarantine(runId);
       const discardedAt = now();
       return await this.store.mutate((database) => {
@@ -704,7 +885,7 @@ export class AgentService {
           return structuredClone(storedRun);
         }
         storedRun.transaction = markTransactionDiscarded(
-          storedRun.transaction,
+          retainedTransaction,
           discardedAt,
           false,
         );
@@ -761,6 +942,15 @@ export class AgentService {
         throw new RunCancelledError();
       }
       const canonical = await this.workspaces.readCanonical(agentAtStart.id);
+      const repairSourceRunId = run.transaction?.lineage.parentRunId ?? null;
+      const repairProviderQuarantines = repairSourceRunId
+        ? this.store
+            .snapshot()
+            .runs.find((candidate) => candidate.id === repairSourceRunId)
+            ?.transaction?.providerResources.flatMap((resource) =>
+              resource.quarantine ? [resource.quarantine] : [],
+            ) ?? []
+        : [];
       const result = await this.runner.run(
         {
           runId: run.id,
@@ -770,7 +960,8 @@ export class AgentService {
           prompt: run.prompt,
           threadId: canonical.codexThreadId,
           canonicalStateId: canonical.stateId,
-          repairSourceRunId: run.transaction?.lineage.parentRunId ?? null,
+          repairSourceRunId,
+          repairProviderQuarantines,
         },
         run.transaction ??
           createRunTransaction(
@@ -859,6 +1050,15 @@ export class AgentService {
           agent.updatedAt = completedAt;
         }
       });
+    }
+  }
+
+  private assertProviderRegistryReady(): void {
+    if (!this.providerRegistryReady) {
+      throw new HttpError(
+        503,
+        "Resource Registry transition is incomplete; resolve provider onboarding errors before creating or running Agents",
+      );
     }
   }
 

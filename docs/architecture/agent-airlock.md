@@ -11,7 +11,7 @@ The original `AgentService` passed the persistent workspace path and canonical C
 The original local Runtime also bind-mounted that workspace and one shared Codex home as writable container paths.
 Phase 1 isolated workspace files, but the shared Codex home remained a hidden mutation path until Phase 3.
 
-## Implemented Phase 6 architecture
+## Implemented Phase 8 architecture
 
 ```mermaid
 flowchart LR
@@ -20,6 +20,9 @@ flowchart LR
     AS --> AR["AirlockRunner"]
     AR --> PJ["Platform-owned Promotion journal"]
     AR --> SR["Workspace State Registry"]
+    AR --> RCO["Resource Coordinator"]
+    RCO --> RREG["Capability-checked Resource Registry"]
+    RREG --> HTTP["Remote immutable HTTP object provider"]
     SR --> CS["Candidate workspace, Codex home, SQLite, and outbox"]
     SR --> Q["Quarantined Whole-Agent future"]
     SR --> CR["Disposable canonical repair reference"]
@@ -28,6 +31,7 @@ flowchart LR
     AR --> RR["Existing AgentRunner"]
     RR --> RC["Disposable Runtime container"]
     RC --> CS
+    RC -->|Candidate-only derived binding| HTTP
     AR --> VE["Outcome Validator"]
     AR --> ED["Post-Promotion effect dispatcher"]
     ED --> MS["Atomic mock-delivery store"]
@@ -57,7 +61,7 @@ interface AirlockRunner {
 ```
 
 Preparation, workspace coordination, validators, and receipts remain inside the module.
-Additional Transactional Resource adapters remain a later-phase extension seam.
+Additional Transactional Resource Providers register at the composition root through the provider-neutral SDK without changing `AirlockRunner` lifecycle branches.
 Repair preparation, ancestry, freshness checks, and discard remain inside the same Airlock boundary.
 Promotion journaling, forward recovery, and bounded retention are implemented inside that boundary.
 
@@ -68,6 +72,8 @@ ADR 0005 makes the workspace and Codex home one versioned Whole-Agent state:
 
 ```text
 workspaces/
+├── .resource-registry.json
+├── .registry-transitions/<agent-id>.json
 ├── <agent-id>/
 │   ├── canonical.json
 │   └── versions/<state-id>/
@@ -75,22 +81,34 @@ workspaces/
 │       ├── workspace/
 │       │   └── .airlock/demo.sqlite
 │       ├── codex-home/
-│       └── outbox/intents.jsonl
+│       ├── outbox/intents.jsonl
+│       └── resources/<provider-id>/
 ├── .candidates/<run-id>/
 │   ├── candidate.json
 │   ├── workspace/
 │   │   └── .airlock/demo.sqlite
 │   ├── codex-home/
 │   ├── outbox/
+│   ├── resources/<provider-id>/
 │   └── repair-reference/ (Repair Runs only, removed before Promotion)
 └── .quarantine/<run-id>/
     ├── candidate.json
     ├── workspace/
     ├── codex-home/
-    └── outbox/intents.jsonl
+    ├── outbox/intents.jsonl
+    └── resources/<provider-id>/
 ```
 
-`canonical.json` identifies the accepted workspace path, Codex home path, Codex thread identifier, resource fingerprints, and composite state fingerprint.
+`canonical.json` schema 4 identifies the accepted workspace path, Codex home path, Codex thread identifier, sorted provider version vector, built-in resource fingerprints, and composite state fingerprint.
+`.resource-registry.json` records the accepted additive provider contract set and its monotonic generation.
+Each `.registry-transitions/<agent-id>.json` record binds one verified provider addition to exact source and target state identifiers, built-in hashes, provider vectors, and registry generation before canonical advancement.
+Recovery gives that journal no deletion authority until its exact schema, deterministic transition and target identifiers, additive evolution, credential-free verification set, and source and target fingerprints have all been validated.
+Provider onboarding copies the complete immutable source state into a new immutable target, changes only the provider vector and composite fingerprint, and atomically replaces `canonical.json` after the target is verified.
+Startup removes an unaccepted target or recognizes an exact already-accepted target before completing the transition.
+The registry generation advances only after every existing Agent converges.
+An unresolved Promotion from the prior generation prevents both Registry Transition execution and generation commit.
+Agent creation and new ordinary or Repair Runs remain unavailable while that generation is uncommitted, preventing a partially onboarded provider set from becoming an execution boundary.
+Creating the first Agent after a provider contract is registered performs the same exact immutable-source reconciliation before writing that Agent's initial canonical manifest.
 A Candidate State is mutable only while its Run Transaction is active.
 A promoted state version becomes immutable and may be used as the source for a later candidate.
 Airlock verifies the workspace hash, session hash, and composite hash whenever Canonical State is resolved.
@@ -113,6 +131,7 @@ APP_DATA_DIR/
 ```
 
 Each record advances atomically through `validated`, `version-installed`, `canonical-advanced`, `effects-delivered`, and `completed`.
+Provider Promotion plans, exact target versions, Capability Claims, and bounded lifecycle events are part of the same record.
 The record contains bounded redacted transaction evidence and a neutral recovery result, not a duplicate of arbitrary Runtime output.
 
 ## Run Transaction lifecycle
@@ -172,22 +191,51 @@ Command duration is bounded by the contract between 1 second and 300 seconds.
 
 ## Transactional Resources
 
-The current release implements the workspace lifecycle directly.
-The planned Transactional Resource seam will apply the same lifecycle to other mutable resources:
+Phase 8 implements a provider-neutral lifecycle package and a trusted core coordinator:
 
 ```ts
-interface TransactionalResource {
-  prepare(context: PrepareContext): Promise<CandidateResource>;
-  describe(candidate: CandidateResource): Promise<ResourceChangeSet>;
-  validate(candidate: CandidateResource, contract: ResourceContract): Promise<Validation[]>;
-  finalize(candidate: CandidateResource): Promise<ResourceVersion>;
-  discard(candidate: CandidateResource): Promise<void>;
+interface TransactionalResourceProvider {
+  readonly manifest: ResourceProviderManifest;
+  prepare(context: ResourcePrepareContext): Promise<PreparedResource>;
+  describe(context: ResourceCandidateContext): Promise<ResourceChangeEvidence>;
+  validate(context: ResourceCandidateContext): Promise<ResourceValidationEvidence[]>;
+  planPromotion(context: ResourceCandidateContext): Promise<ResourcePromotionPlan>;
+  promote(context: ResourcePromotionContext): Promise<ResourceVersionReference>;
+  quarantine(context: ResourceQuarantineContext): Promise<ResourceQuarantineHandle>;
+  discard(context: ResourceDiscardContext): Promise<ResourceDiscardResult>;
+  reconcile(context: ResourceReconcileContext): Promise<ResourceReconciliationResult>;
 }
 ```
 
 Workspace, Codex Session, SQLite, and External Action Intent behavior are implemented in Phase 4.
 SQLite lives inside the versioned workspace and receives a semantic snapshot in addition to the workspace fingerprint.
 The outbox is a separate candidate-owned mount so a prior accepted intent is never copied into the next candidate as a new request.
+
+Every registered Phase 8 provider is required and must pass exact capability eligibility at startup.
+Required Phase 8 providers must use `canonical-manifest` Promotion visibility.
+Claims such as post-Promotion reconciliation remain representable in the SDK but are not admissible for the required all-or-nothing composition.
+The core calls providers in stable provider-identifier order and derives both `AIRLOCK_RESOURCE_<PROVIDER>_PATH` and `/airlock/resources/<provider-id>/<relative-path>` from validated identifiers.
+The Runtime receives only Candidate-local bindings and never a provider credential, host service object, or mutable Canonical path.
+Composition rejects an access claim the selected Runtime cannot enforce, including read-only provider bindings in local-process mode.
+After Runtime exit, the core rescans each provider root for symbolic links and re-resolves the binding before any trusted provider hook can inspect Candidate content.
+
+`canonical-manifest` visibility means that an immutable provider version becomes accepted only when the Airlock manifest names its exact version identifier and fingerprint.
+The HTTP object provider uses that mode and does not advance a provider-native mutable pointer.
+Airlock therefore provides one recoverable acceptance decision without claiming distributed atomic commit across the filesystem and remote service.
+
+Provider preparation failure triggers evidence-preserving Discard before Runtime.
+Accepted provider preparation, Quarantine, and Discard results are persisted incrementally so partial multi-provider progress survives a later failure.
+Prepare replay and null-handle Discard are Run-scoped, allowing recovery when a provider created remote state but its response was lost.
+Any required provider Validation failure quarantines every built-in and registered resource under one disposition.
+The Promotion journal records provider plans before immutable installation, and restart reconciliation verifies the exact installed fingerprint before canonical advancement.
+Historical Promotion recovery selects the exact provider subset persisted in that plan, so adding provider B cannot strand a transaction created under `{}` or `{A}`.
+Provider Discard events are persisted before local mutable state is removed so an interrupted cleanup can converge without inventing success.
+Cancellation with an unavailable provider Discard moves the complete local Candidate into cleanup-only Quarantine rather than deleting its recovery handle.
+Retained Quarantine cleanup likewise uses its persisted historical provider subset and never invokes a provider that was added after the Run.
+
+An existing deployment onboards a provider through an additive Registry Transition.
+The coordinator reconciles the exact configured initial version and fingerprint before the workspace manager writes a transition plan.
+Provider removal, provider identity replacement, and Capability Claim replacement are rejected because Phase 8 does not yet define export-and-retire semantics.
 
 ## External Action Intent outbox
 
@@ -202,13 +250,14 @@ The POC does not intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The version 7 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
+The version 8 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
 Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
 Startup reconciliation treats the journal as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the atomic mock-delivery store as effect truth.
 It verifies physical fingerprints before repairing cached workspace, state, thread, Run, message, receipt, and effect metadata in the JSON store.
 Phase 5 persists repair ancestry, mutable Quarantine availability, discard timestamps, and the same lineage in each Promotion Receipt.
 Phase 6 persists Promotion journal position, recovered-after-restart evidence, and bounded recovery errors.
+Phase 8 persists provider resource records, Capability Claims, immutable source and installed versions, Validation evidence, Quarantine handles, dispositions, and bounded lifecycle events.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -226,8 +275,22 @@ Schema evolution must increment the database version and include a tested migrat
 | Process stops after an approved journal | Reconcile the same decision forward to one target version and at most one supported mock effect. |
 | Journal and physical state contradict | Preserve current Canonical State, dispatch no new effect, and surface `recovery-error`. |
 | Candidate or Quarantine retention expires | Remove only unprotected mutable state and retain bounded control-plane evidence. |
+| Resource Provider preparation fails | Do not invoke Runtime, discard every possible provider Candidate idempotently, and retain a composite Quarantine when cleanup cannot finish. |
+| Provider onboarding source cannot be verified | Preserve the prior canonical manifest and Resource Registry generation and place the affected Agent in an explicit error state. |
+| Registry Transition is interrupted | Reconcile the journal against exact installed and canonical fingerprints, then either retry from the prior state or finish the accepted transition. |
+| Registry Transition journal is malformed or forged | Reject it before deleting any state or rewriting Canonical State. |
+| Prior-generation Promotion recovery fails | Preserve its historical state, defer every Registry Transition and registry-generation commit, and surface `recovery-error`. |
+| Provider removal or contract replacement is configured | Reject the non-additive registry evolution before changing Canonical State. |
+| Required provider Validation fails | Quarantine every built-in and provider resource while leaving the canonical manifest unchanged. |
+| Provider Promotion or reconciliation contradicts the durable plan | Preserve current Canonical State and surface `recovery-error`. |
+| Provider cleanup is unavailable | Retain local mutable state and retry before removal. |
+| Local Quarantine is missing without complete provider Discard evidence | Fail recovery closed and do not claim remote cleanup. |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
+
+The proposed Phase 9 split between reversible Candidate evaluation, deterministic one-winner Selection, and irreversible Promotion is documented in the [Competing Futures architecture](competing-futures.md) and ADR 0011.
+The proposed Phase 10 separation between evidence-backed assurance advice and operator policy authority is documented in the [Adaptive Assurance architecture](adaptive-assurance.md) and ADR 0012.
+The proposed Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](portable-trust.md) and ADR 0013.
 
 ## Trust boundaries
 
@@ -239,6 +302,9 @@ The exact recovery sequence and fault matrix are documented in the [recovery gui
 - The implemented outbox protects only external actions routed through its interface.
 - The platform-owned mock delivery store is never mounted into the Runtime.
 - The platform-owned Promotion journal is never mounted into the Runtime.
+- Resource Providers run inside the trusted control plane, receive bounded lifecycle context, and never receive the application store or arbitrary environment variables.
+- Provider Runtime bindings are rooted under the isolated Candidate and are derived by the trusted core.
+- Resource Provider source verification and Registry Transition journals remain inside the trusted control plane and are never exposed to Runtime.
 
 ## Evidence model
 
@@ -254,6 +320,7 @@ Each Run Transaction records:
 - Typed intent identities, idempotency keys, statuses, and bounded post-Promotion delivery receipts.
 - Root Run identifier, parent Run identifier, repair depth, configured depth bound, and mutable Quarantine availability.
 - Monotonic Promotion journal phase, recovered-after-restart status, and bounded fail-closed recovery error.
+- Provider identity, Capability Claim, immutable source and target references, fingerprint transition, bounded Validation evidence, Quarantine handle, disposition, and lifecycle events.
 
 ## Open architectural decisions
 
@@ -262,5 +329,5 @@ Codex session isolation is resolved by ADR 0005.
 External action ordering and idempotency are resolved by ADR 0006.
 Repair ancestry, canonical freshness, fresh outbox, canonical reference, and discard semantics are resolved by ADR 0007.
 Promotion journal ordering, forward recovery, contradiction handling, and bounded retention are resolved by ADR 0008.
+The public Resource Provider contract, capability eligibility, and canonical-manifest consistency model are resolved by ADR 0010.
 Outcome Contract semantics and Validation containment are resolved by ADR 0003 and ADR 0004.
-This document must be revised when those tickets close.

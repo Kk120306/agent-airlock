@@ -102,6 +102,13 @@ function AirlockEvidence({
   const decisiveValidation = transaction.validations.find(
     (validation) => validation.required && validation.status !== "passed",
   );
+  const providerPreparationFailed = transaction.providerResourceEvents.some(
+    (event) => event.stage === "prepare" && event.status === "failed",
+  );
+  const providerRepairUnavailable =
+    providerPreparationFailed ||
+    (transaction.providerResources.length > 0 &&
+      transaction.providerResources.some((resource) => !resource.quarantine));
   const title =
     recoveryFailed
       ? "Recovery needs attention"
@@ -181,7 +188,9 @@ function AirlockEvidence({
               className="button button-primary"
               onClick={onRepair}
               disabled={
-                actionBusy || transaction.lineage.depth >= transaction.lineage.maxDepth
+                actionBusy ||
+                providerRepairUnavailable ||
+                transaction.lineage.depth >= transaction.lineage.maxDepth
               }
             >
               {actionBusy ? <Spinner /> : "Repair this future"}
@@ -196,6 +205,14 @@ function AirlockEvidence({
           </div>
         )}
         {disposition === "quarantined" &&
+          providerRepairUnavailable && (
+            <p className="repair-limit" role="status">
+              A provider retained this Candidate for cleanup only. Discard it after the
+              provider recovers.
+            </p>
+          )}
+        {disposition === "quarantined" &&
+          !providerRepairUnavailable &&
           transaction.lineage.depth >= transaction.lineage.maxDepth && (
             <p className="repair-limit" role="status">
               Repair depth exhausted. Inspect or discard this Quarantine.
@@ -277,6 +294,116 @@ function AirlockEvidence({
                 <p>{resource.summary}</p>
               </article>
             ))}
+          </div>
+        </section>
+      )}
+
+      {transaction.providerResources.length > 0 && (
+        <section
+          className="provider-resource-ledger"
+          aria-label="Registered Transactional Resources"
+        >
+          <div className="resource-ledger-heading">
+            <div>
+              <span className="eyebrow">Provider registry</span>
+              <h4>Transactional Resources</h4>
+            </div>
+            <span>
+              {transaction.providerResources.length} required provider
+              {transaction.providerResources.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="provider-resource-grid">
+            {transaction.providerResources.map((resource) => {
+              const providerEvents = transaction.providerResourceEvents.filter(
+                (event) => event.providerId === resource.providerId,
+              );
+              const target = resource.installedVersion ?? resource.source;
+              const degraded =
+                resource.capabilities.promotionVisibility === "best-effort" ||
+                resource.capabilities.promotionIdempotency === "none" ||
+                resource.capabilities.reconciliation !== "forward";
+              return (
+                <article key={resource.providerId}>
+                  <header>
+                    <div>
+                      <span className="provider-kind">{resource.resourceKind}</span>
+                      <strong>{resource.label}</strong>
+                      <code>{resource.providerId}</code>
+                    </div>
+                    <span
+                      className={
+                        "provider-disposition provider-" +
+                        (resource.disposition ?? "pending")
+                      }
+                    >
+                      {resource.disposition ?? "pending"}
+                    </span>
+                  </header>
+                  <div className="provider-version-row">
+                    <div>
+                      <span>Version</span>
+                      <strong>{target.versionId}</strong>
+                    </div>
+                    <code>{shortHash(target.fingerprint)}</code>
+                  </div>
+                  <div className="provider-fingerprint-flow">
+                    <code>{shortHash(resource.source.fingerprint)}</code>
+                    <span aria-hidden="true">→</span>
+                    <code>
+                      {shortHash(
+                        resource.installedVersion?.fingerprint ??
+                          resource.change?.fingerprintCandidate ??
+                          resource.candidate.candidateFingerprint,
+                      )}
+                    </code>
+                  </div>
+                  <div className="provider-guarantees">
+                    <span>{resource.required ? "required-v1" : "optional"}</span>
+                    <span>{resource.capabilities.isolation}</span>
+                    <span>{resource.capabilities.promotionVisibility}</span>
+                    <span>{resource.capabilities.runtimeAccess}</span>
+                    <span>{resource.capabilities.reconciliation}</span>
+                  </div>
+                  <p>{resource.summary}</p>
+                  <p className={degraded ? "provider-caveat degraded" : "provider-caveat"}>
+                    {degraded
+                      ? "This provider declares degraded guarantees and cannot silently claim all-or-nothing Promotion."
+                      : "Canonical manifest acceptance is authoritative; distributed atomic commit is not claimed."}
+                  </p>
+                  <details>
+                    <summary>
+                      Inspect {resource.validations.length} Validation
+                      {resource.validations.length === 1 ? "" : "s"} and {providerEvents.length}
+                      {" lifecycle events"}
+                    </summary>
+                    <div className="provider-details-grid">
+                      <div>
+                        <span className="eyebrow">Validation evidence</span>
+                        {resource.validations.length === 0 ? (
+                          <p>No provider Validation has completed.</p>
+                        ) : (
+                          resource.validations.map((validation) => (
+                            <p key={validation.name}>
+                              <strong>{validation.status}</strong> {validation.name} -{" "}
+                              {validation.summary}
+                            </p>
+                          ))
+                        )}
+                      </div>
+                      <div>
+                        <span className="eyebrow">Lifecycle evidence</span>
+                        {providerEvents.map((event, index) => (
+                          <p key={event.stage + event.at + index}>
+                            <strong>{event.status}</strong> {event.stage} - {event.summary}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                </article>
+              );
+            })}
           </div>
         </section>
       )}

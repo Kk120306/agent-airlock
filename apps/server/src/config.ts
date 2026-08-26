@@ -30,6 +30,16 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  AIRLOCK_HTTP_OBJECT_URL: z.string().url().optional(),
+  AIRLOCK_HTTP_OBJECT_SOCKET: z.string().min(1).optional(),
+  AIRLOCK_HTTP_OBJECT_VERSION_ID: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/)
+    .optional(),
+  AIRLOCK_HTTP_OBJECT_FINGERPRINT: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   RUNTIME_PROVIDER: z.enum(["local-process", "container"]).default("local-process"),
   CONTAINER_ENGINE: z.string().min(1).default("docker"),
   CONTAINER_RUNTIME_IMAGE: z.string().min(1).default("volc-agent-runtime:local"),
@@ -94,6 +104,21 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     typeof process.getuid === "function" && typeof process.getgid === "function"
       ? process.getuid() + ":" + process.getgid()
       : "1000:1000";
+  const httpObjectValues = [
+    env.AIRLOCK_HTTP_OBJECT_URL,
+    env.AIRLOCK_HTTP_OBJECT_VERSION_ID,
+    env.AIRLOCK_HTTP_OBJECT_FINGERPRINT,
+  ];
+  if (httpObjectValues.some(Boolean) && !httpObjectValues.every(Boolean)) {
+    throw new Error(
+      "AIRLOCK_HTTP_OBJECT_URL, AIRLOCK_HTTP_OBJECT_VERSION_ID, and AIRLOCK_HTTP_OBJECT_FINGERPRINT must be configured together",
+    );
+  }
+  if (env.AIRLOCK_HTTP_OBJECT_SOCKET && !env.AIRLOCK_HTTP_OBJECT_URL) {
+    throw new Error(
+      "AIRLOCK_HTTP_OBJECT_SOCKET requires AIRLOCK_HTTP_OBJECT_URL and an initial version",
+    );
+  }
   return {
     host: env.HOST,
     port: env.PORT,
@@ -110,6 +135,19 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     quarantineRetentionMs:
       env.AIRLOCK_QUARANTINE_RETENTION_HOURS * 60 * 60 * 1_000,
     demoMode: env.AIRLOCK_DEMO_MODE,
+    httpObjectResource:
+      env.AIRLOCK_HTTP_OBJECT_URL &&
+      env.AIRLOCK_HTTP_OBJECT_VERSION_ID &&
+      env.AIRLOCK_HTTP_OBJECT_FINGERPRINT
+        ? {
+            baseUrl: env.AIRLOCK_HTTP_OBJECT_URL,
+            socketPath: env.AIRLOCK_HTTP_OBJECT_SOCKET
+              ? path.resolve(env.AIRLOCK_HTTP_OBJECT_SOCKET)
+              : null,
+            initialVersionId: env.AIRLOCK_HTTP_OBJECT_VERSION_ID,
+            initialFingerprint: env.AIRLOCK_HTTP_OBJECT_FINGERPRINT,
+          }
+        : null,
     runtimeProvider: env.RUNTIME_PROVIDER,
     containerEngine: env.CONTAINER_ENGINE,
     containerRuntimeImage: env.CONTAINER_RUNTIME_IMAGE,

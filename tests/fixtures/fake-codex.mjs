@@ -24,6 +24,7 @@ const multiResourceRequest = /multi-resource release/i.test(prompt);
 const codexHome = process.env.CODEX_HOME;
 const outboxPath = process.env.AIRLOCK_OUTBOX_PATH;
 const repairReferencePath = process.env.AIRLOCK_REPAIR_REFERENCE_PATH;
+const httpObjectPath = process.env.AIRLOCK_RESOURCE_HTTP_OBJECT_PATH;
 
 if (!codexHome) {
   process.stderr.write("CODEX_HOME is required\n");
@@ -128,6 +129,13 @@ if (repairRequest) {
     }) + "\n",
     "utf8",
   );
+  if (httpObjectPath) {
+    await writeFile(
+      httpObjectPath,
+      JSON.stringify({ release: "repaired", source: "retained-quarantine" }) + "\n",
+      "utf8",
+    );
+  }
 } else if (destructiveRequest) {
   const source = await readFile(path.join(process.cwd(), "src", "hello.ts"), "utf8");
   if (!source.includes('"hello"')) {
@@ -158,6 +166,13 @@ if (repairRequest) {
     }) + "\n",
     "utf8",
   );
+  if (httpObjectPath) {
+    await writeFile(
+      httpObjectPath,
+      JSON.stringify({ release: "rejected", mustRemainQuarantined: true }) + "\n",
+      "utf8",
+    );
+  }
 } else if (multiResourceRequest) {
   const database = new DatabaseSync(
     path.join(process.cwd(), ".airlock", "demo.sqlite"),
@@ -186,6 +201,13 @@ if (repairRequest) {
     }) + "\n",
     "utf8",
   );
+  if (httpObjectPath) {
+    await writeFile(
+      httpObjectPath,
+      JSON.stringify({ release: "accepted", resources: 5 }) + "\n",
+      "utf8",
+    );
+  }
 } else if (resumedThreadId) {
   const source = await readFile(path.join(process.cwd(), "src", "hello.ts"), "utf8");
   if (!source.includes('"hello"')) {

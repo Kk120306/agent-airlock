@@ -1,3 +1,15 @@
+import type {
+  ResourceCandidateHandle,
+  ResourceCapabilityClaim,
+  ResourceChangeEvidence,
+  ResourceLifecycleStage,
+  ResourcePromotionPlan,
+  ResourceQuarantineHandle,
+  ResourceRuntimeBinding,
+  ResourceValidationEvidence,
+  ResourceVersionReference,
+} from "@agent-airlock/transactional-resource-sdk";
+
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type MessageRole = "user" | "assistant";
@@ -33,6 +45,7 @@ export interface CanonicalStateReference {
   sessionContentHash: string;
   sqliteContentHash: string;
   outboxContentHash: string;
+  providerVersions: ResourceVersionReference[];
   contentHash: string;
 }
 
@@ -135,6 +148,35 @@ export interface TransactionResourceEvidence {
   summary: string;
 }
 
+export interface ProviderResourceEvidence {
+  schemaVersion: 1;
+  providerId: string;
+  resourceKind: string;
+  label: string;
+  required: boolean;
+  capabilities: ResourceCapabilityClaim;
+  source: ResourceVersionReference;
+  candidate: ResourceCandidateHandle;
+  runtimeBinding: ResourceRuntimeBinding | null;
+  change: ResourceChangeEvidence | null;
+  validations: ResourceValidationEvidence[];
+  promotionPlan: ResourcePromotionPlan | null;
+  installedVersion: ResourceVersionReference | null;
+  quarantine: ResourceQuarantineHandle | null;
+  disposition: RunTransactionDisposition | null;
+  summary: string;
+}
+
+export interface ProviderResourceLifecycleEvent {
+  schemaVersion: 1;
+  providerId: string;
+  resourceKind: string;
+  stage: ResourceLifecycleStage;
+  status: "passed" | "failed";
+  summary: string;
+  at: string;
+}
+
 export interface SqliteSnapshot {
   contentHash: string;
   rowCount: number;
@@ -188,6 +230,8 @@ export interface RunTransaction {
   outcomeContractVersion: number;
   outcomeContract: OutcomeContract;
   resources: TransactionResourceEvidence[];
+  providerResources: ProviderResourceEvidence[];
+  providerResourceEvents: ProviderResourceLifecycleEvent[];
   sqlite: SqliteResourceEvidence | null;
   externalActions: ExternalActionEvidence;
   changes: WorkspaceChangeSummary | null;
@@ -246,7 +290,7 @@ export interface AgentRun {
 }
 
 export interface Database {
-  version: 7;
+  version: 8;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
@@ -276,8 +320,16 @@ export interface RunnerRequest {
   codexHomePath: string;
   outboxPath: string;
   repairReferencePath?: string | null;
+  resourceBindings?: RunnerResourceBinding[];
   prompt: string;
   threadId: string | null;
+}
+
+export interface RunnerResourceBinding {
+  providerId: string;
+  hostPath: string;
+  runtimePath: string;
+  access: "read-only" | "read-write";
 }
 
 export interface AgentRunner {

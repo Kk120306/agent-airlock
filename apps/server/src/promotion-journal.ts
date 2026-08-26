@@ -1,6 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  AIRLOCK_RESOURCE_FAILURE_SEMANTICS,
+  parsePreparedResource,
+  parseResourceChangeEvidence,
+  parseResourcePromotionPlan,
+  parseResourceProviderManifest,
+  parseResourceQuarantineHandle,
+  parseResourceValidationEvidence,
+  parseResourceVersionReference,
+  type ResourcePromotionPlan,
+  type ResourceVersionReference,
+} from "@agent-airlock/transactional-resource-sdk";
 import type {
   CanonicalStateReference,
   PromotionJournalPhase,
@@ -17,6 +29,9 @@ const phaseOrder: PromotionJournalPhase[] = [
   "completed",
 ];
 const safeIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const maximumJournalBytes = 2_000_000;
+const maximumProviders = 64;
+const maximumProviderEvents = 256;
 const recoveryOutput =
   "Agent Airlock recovered this approved Promotion after a server restart. The original Runtime response was not duplicated into the Promotion journal.";
 
@@ -205,7 +220,13 @@ export class PromotionJournal {
 
   async read(runId: string): Promise<PromotionJournalRecord> {
     this.assertIdentifier(runId, "Run");
-    const parsed = JSON.parse(await readFile(this.filePath(runId), "utf8")) as unknown;
+    const raw = await readFile(this.filePath(runId), "utf8");
+    if (Buffer.byteLength(raw, "utf8") > maximumJournalBytes) {
+      throw new Error("Promotion journal exceeds 2000000 bytes");
+    }
+    const parsed = upgradeLegacyResourcePlan(
+      JSON.parse(raw) as unknown,
+    );
     this.validateRecord(parsed);
     return structuredClone(parsed);
   }
@@ -272,6 +293,7 @@ export class PromotionJournal {
     ) {
       throw new Error("Promotion journal target does not match its plan");
     }
+    validateResourceEvidence(record);
   }
 
   private async persist(record: PromotionJournalRecord): Promise<void> {
@@ -294,4 +316,282 @@ export class PromotionJournal {
       throw new Error(label + " identifier is not safe");
     }
   }
+}
+
+function validateResourceEvidence(record: PromotionJournalRecord): void {
+  const sourceVersions = parseVersionVector(
+    record.plan.sourceProviderVersions,
+    "source provider versions",
+  );
+  const targetVersions = parseVersionVector(
+    record.plan.targetProviderVersions,
+    "target provider versions",
+  );
+  const resourcePlans = parsePromotionPlanVector(record.plan.resourcePlans);
+  assertSameProviderSet(sourceVersions, targetVersions, "provider version vectors");
+  assertSameProviderSet(sourceVersions, resourcePlans, "Resource Promotion plans");
+
+  for (const [providerId, plan] of resourcePlans) {
+    const source = sourceVersions.get(providerId);
+    const target = targetVersions.get(providerId);
+    if (
+      !source ||
+      !target ||
+      source.resourceKind !== plan.resourceKind ||
+      target.resourceKind !== plan.resourceKind ||
+      source.versionId !== plan.sourceVersionId ||
+      source.fingerprint !== plan.sourceFingerprint ||
+      target.versionId !== plan.targetVersionId ||
+      target.fingerprint !== plan.targetFingerprint
+    ) {
+      throw new Error("Resource Promotion plan contradicts its version vectors");
+    }
+  }
+
+  if (!Array.isArray(record.transaction.providerResources)) {
+    throw new Error("Promotion journal provider resources must be an array");
+  }
+  if (record.transaction.providerResources.length > maximumProviders) {
+    throw new Error("Promotion journal exceeds 64 Resource Providers");
+  }
+  const evidenceByProvider = new Map<string, string>();
+  for (const resource of record.transaction.providerResources) {
+    if (
+      resource.schemaVersion !== 1 ||
+      resource.required !== true ||
+      typeof resource.label !== "string" ||
+      resource.label.length === 0 ||
+      resource.label.length > 160 ||
+      typeof resource.summary !== "string" ||
+      resource.summary.length > 512
+    ) {
+      throw new Error("Promotion journal provider evidence is invalid");
+    }
+    const manifest = parseResourceProviderManifest({
+      sdkSchemaVersion: 1,
+      providerId: resource.providerId,
+      resourceKind: resource.resourceKind,
+      label: resource.label,
+      capabilities: resource.capabilities,
+      failureSemantics: AIRLOCK_RESOURCE_FAILURE_SEMANTICS,
+      metadata: {},
+    });
+    if (evidenceByProvider.has(manifest.providerId)) {
+      throw new Error("Promotion journal has duplicate provider evidence");
+    }
+    parsePreparedResource(
+      {
+        schemaVersion: 1,
+        candidate: resource.candidate,
+        runtimeBinding: resource.runtimeBinding,
+      },
+      manifest,
+    );
+    const source = parseResourceVersionReference(resource.source, manifest);
+    if (
+      resource.change !== null &&
+      parseResourceChangeEvidence(resource.change, manifest).fingerprintBefore !==
+        source.fingerprint
+    ) {
+      throw new Error("Promotion journal Resource change contradicts its source");
+    }
+    if (!Array.isArray(resource.validations) || resource.validations.length > 64) {
+      throw new Error("Promotion journal Resource Validations are invalid");
+    }
+    for (const validation of resource.validations) {
+      parseResourceValidationEvidence(validation, manifest);
+    }
+    const evidencePlan =
+      resource.promotionPlan === null
+        ? null
+        : parseResourcePromotionPlan(resource.promotionPlan, manifest);
+    const installed =
+      resource.installedVersion === null
+        ? null
+        : parseResourceVersionReference(resource.installedVersion, manifest);
+    if (resource.quarantine !== null) {
+      parseResourceQuarantineHandle(resource.quarantine, manifest);
+    }
+    if (
+      resource.disposition !== null &&
+      !["promoted", "quarantined", "discarded", "cancelled"].includes(
+        resource.disposition,
+      )
+    ) {
+      throw new Error("Promotion journal provider disposition is invalid");
+    }
+    const plan = resourcePlans.get(manifest.providerId);
+    const plannedSource = sourceVersions.get(manifest.providerId);
+    const plannedTarget = targetVersions.get(manifest.providerId);
+    if (
+      !plan ||
+      !evidencePlan ||
+      !plannedSource ||
+      !plannedTarget ||
+      stableJson(plan) !== stableJson(evidencePlan) ||
+      stableJson(source) !== stableJson(plannedSource) ||
+      (installed !== null && stableJson(installed) !== stableJson(plannedTarget))
+    ) {
+      throw new Error("Promotion journal provider evidence contradicts its durable plan");
+    }
+    evidenceByProvider.set(manifest.providerId, manifest.resourceKind);
+  }
+  assertSameProviderSet(sourceVersions, evidenceByProvider, "provider evidence");
+
+  if (
+    !Array.isArray(record.transaction.providerResourceEvents) ||
+    record.transaction.providerResourceEvents.length > maximumProviderEvents
+  ) {
+    throw new Error("Promotion journal Resource lifecycle events are invalid");
+  }
+  const lifecycleStages = new Set([
+    "prepare",
+    "runtime",
+    "describe",
+    "validate",
+    "plan-promotion",
+    "promote",
+    "quarantine",
+    "discard",
+    "reconcile",
+  ]);
+  for (const event of record.transaction.providerResourceEvents) {
+    if (
+      event.schemaVersion !== 1 ||
+      evidenceByProvider.get(event.providerId) !== event.resourceKind ||
+      !lifecycleStages.has(event.stage) ||
+      (event.status !== "passed" && event.status !== "failed") ||
+      typeof event.summary !== "string" ||
+      event.summary.length === 0 ||
+      event.summary.length > 512 ||
+      !Number.isFinite(Date.parse(event.at))
+    ) {
+      throw new Error("Promotion journal Resource lifecycle event is invalid");
+    }
+  }
+
+  if (record.targetCanonical) {
+    const canonicalVersions = parseVersionVector(
+      record.targetCanonical.providerVersions,
+      "target Canonical provider versions",
+    );
+    assertSameProviderSet(targetVersions, canonicalVersions, "target Canonical versions");
+    for (const [providerId, version] of targetVersions) {
+      if (stableJson(version) !== stableJson(canonicalVersions.get(providerId))) {
+        throw new Error("Target Canonical provider version contradicts its plan");
+      }
+    }
+  }
+}
+
+function parseVersionVector(
+  values: readonly ResourceVersionReference[],
+  label: string,
+): Map<string, ResourceVersionReference> {
+  if (!Array.isArray(values) || values.length > maximumProviders) {
+    throw new Error("Promotion journal " + label + " are invalid");
+  }
+  const indexed = new Map<string, ResourceVersionReference>();
+  for (const value of values) {
+    const accepted = parseResourceVersionReference(value);
+    if (indexed.has(accepted.providerId)) {
+      throw new Error("Promotion journal has duplicate " + label);
+    }
+    indexed.set(accepted.providerId, accepted);
+  }
+  return indexed;
+}
+
+function parsePromotionPlanVector(
+  values: readonly ResourcePromotionPlan[],
+): Map<string, ResourcePromotionPlan> {
+  if (!Array.isArray(values) || values.length > maximumProviders) {
+    throw new Error("Promotion journal Resource Promotion plans are invalid");
+  }
+  const indexed = new Map<string, ResourcePromotionPlan>();
+  for (const value of values) {
+    const accepted = parseResourcePromotionPlan(value);
+    if (indexed.has(accepted.providerId)) {
+      throw new Error("Promotion journal has duplicate Resource Promotion plan");
+    }
+    indexed.set(accepted.providerId, accepted);
+  }
+  return indexed;
+}
+
+function assertSameProviderSet(
+  expected: ReadonlyMap<string, unknown>,
+  actual: ReadonlyMap<string, unknown>,
+  label: string,
+): void {
+  const expectedIds = [...expected.keys()].sort();
+  const actualIds = [...actual.keys()].sort();
+  if (
+    expectedIds.length !== actualIds.length ||
+    expectedIds.some((providerId, index) => providerId !== actualIds[index])
+  ) {
+    throw new Error("Promotion journal " + label + " provider set is inconsistent");
+  }
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
+  if (value && typeof value === "object") {
+    return (
+      "{" +
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => JSON.stringify(key) + ":" + stableJson(item))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value);
+}
+
+function upgradeLegacyResourcePlan(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (!record.plan || typeof record.plan !== "object") return value;
+  const plan = record.plan as Record<string, unknown>;
+  const transaction =
+    record.transaction && typeof record.transaction === "object"
+      ? (record.transaction as Record<string, unknown>)
+      : null;
+  return {
+    ...record,
+    targetCanonical:
+      record.targetCanonical && typeof record.targetCanonical === "object"
+        ? {
+            ...(record.targetCanonical as Record<string, unknown>),
+            providerVersions: Array.isArray(
+              (record.targetCanonical as Record<string, unknown>).providerVersions,
+            )
+              ? (record.targetCanonical as Record<string, unknown>).providerVersions
+              : [],
+          }
+        : record.targetCanonical,
+    transaction:
+      transaction
+        ? {
+            ...transaction,
+            providerResources: Array.isArray(transaction.providerResources)
+              ? transaction.providerResources
+              : [],
+            providerResourceEvents: Array.isArray(transaction.providerResourceEvents)
+              ? transaction.providerResourceEvents
+              : [],
+          }
+        : record.transaction,
+    plan: {
+      ...plan,
+      sourceProviderVersions: Array.isArray(plan.sourceProviderVersions)
+        ? plan.sourceProviderVersions
+        : [],
+      targetProviderVersions: Array.isArray(plan.targetProviderVersions)
+        ? plan.targetProviderVersions
+        : [],
+      resourcePlans: Array.isArray(plan.resourcePlans) ? plan.resourcePlans : [],
+    },
+  };
 }

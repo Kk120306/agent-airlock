@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
 import { RunCancelledError } from "./errors.js";
+import { resourceEnvironmentName } from "./resource-registry.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -82,6 +83,10 @@ export function buildContainerRunArgs(
     ...(request.repairReferencePath
       ? ["--env", "AIRLOCK_REPAIR_REFERENCE_PATH=/airlock-repair-reference"]
       : []),
+    ...(request.resourceBindings ?? []).flatMap((binding) => [
+      "--env",
+      resourceEnvironmentName(binding.providerId) + "=" + binding.runtimePath,
+    ]),
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
@@ -96,6 +101,14 @@ export function buildContainerRunArgs(
             ",dst=/airlock-repair-reference,readonly",
         ]
       : []),
+    ...(request.resourceBindings ?? []).flatMap((binding) => [
+      "--mount",
+      "type=bind,src=" +
+        binding.hostPath +
+        ",dst=" +
+        binding.runtimePath +
+        (binding.access === "read-only" ? ",readonly" : ""),
+    ]),
     "--workdir",
     "/workspace",
     config.containerRuntimeImage,
@@ -106,6 +119,7 @@ export function buildContainerRunArgs(
       "/workspace",
       "/airlock-outbox",
       request.repairReferencePath ? "/airlock-repair-reference" : undefined,
+      request.resourceBindings?.map((binding) => binding.runtimePath),
     ),
   ];
 }

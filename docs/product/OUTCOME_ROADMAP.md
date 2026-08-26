@@ -324,6 +324,8 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 
 ### Phase 8: Transactional Resource SDK
 
+**Status:** Release candidate implemented on `post-hackathon/phases-8-11`; final unrestricted browser and clean-clone gates pending.
+
 **Outcome**
 
 Developers can bring a new resource under Airlock without changing the core Run Transaction engine.
@@ -343,6 +345,26 @@ Developers can bring a new resource under Airlock without changing the core Run 
 **Beyond-expectations finish**
 
 Make the conformance suite executable so provider claims can be verified, not merely documented.
+
+**Delivered evidence**
+
+- The zero-runtime-dependency SDK exports strict JSON-safe lifecycle contracts, Capability Claim validation, deterministic Promotion keys, and eight provider-neutral conformance cases.
+- The server registers providers once, enforces exact required capability compatibility, derives Candidate-only Runtime bindings, and persists a sorted provider version vector in canonical manifest schema 4.
+- Existing deployments add providers through independently verified, additive Registry Transitions with per-Agent crash journals and a globally committed registry generation.
+- Historical Promotions and retained Quarantines recover against their persisted provider subset before any additive Registry Transition or generation commit can proceed.
+- Registry Transition recovery rejects forged identifiers, fingerprints, fields, or verification sets before any immutable state path can be removed.
+- New Agents independently verify every configured immutable provider source before their first Canonical State is created.
+- Promotion journal validation bounds provider plans and lifecycle evidence, and provider crash recovery verifies exact immutable target fingerprints before canonical advancement.
+- The SDK and core share one exact Promotion-plan admission rule, including rejection of a reused source version identifier with a changed fingerprint.
+- Every provider-controlled persisted or displayed string is bounded and credential-checked, including identifiers, Runtime-relative paths, keyed assignments, summaries, reconciliation evidence, and multiline raw errors.
+- The credential-free HTTP object provider depends only on the SDK and fails closed for timeout, oversized, malformed, wrong-content-type, unavailable, source-mismatch, and tampered responses.
+- Provider preparation failure prevents Runtime invocation, provider-only rejection quarantines the whole Candidate, and repeated Promotion installs one immutable version.
+- Lost prepare responses, partial multi-provider progress, cancellation cleanup outages, and post-Runtime symbolic-link substitutions retain retryable evidence while Canonical State remains unchanged.
+- Provider Discard evidence is persisted before local removal, cleanup outage retains composite Quarantine, and missing contradictory state becomes `recovery-error`.
+- Provider removal and contract replacement fail closed until an explicit export-and-retire migration exists.
+- `npm run check:phase8:conformance` emits readable and JSON evidence from the public CLI.
+- `npm run demo:phase8 -- --reset` and the dedicated production Chrome specification exercise remote Promotion and Quarantine while leaving the Phase 7 judge launcher unchanged.
+- ADR 0010 records the public provider contract and its explicit canonical-manifest consistency boundary.
 
 ### Phase 9: Competing futures
 

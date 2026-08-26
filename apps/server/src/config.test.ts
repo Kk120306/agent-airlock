@@ -30,3 +30,37 @@ describe("deterministic demo configuration", () => {
     ).toThrow(/loopback-only deterministic fixture profile/);
   });
 });
+
+describe("HTTP object Resource Provider configuration", () => {
+  it("accepts one complete credential-free initial version", () => {
+    expect(
+      loadConfig({
+        NODE_ENV: "test",
+        AIRLOCK_HTTP_OBJECT_URL: "http://127.0.0.1:4500",
+        AIRLOCK_HTTP_OBJECT_VERSION_ID: "version-source",
+        AIRLOCK_HTTP_OBJECT_FINGERPRINT: "a".repeat(64),
+      }).httpObjectResource,
+    ).toEqual({
+      baseUrl: "http://127.0.0.1:4500",
+      socketPath: null,
+      initialVersionId: "version-source",
+      initialFingerprint: "a".repeat(64),
+    });
+  });
+
+  it.each([
+    ["URL only", { AIRLOCK_HTTP_OBJECT_URL: "http://127.0.0.1:4500" }],
+    [
+      "version only",
+      {
+        AIRLOCK_HTTP_OBJECT_VERSION_ID: "version-source",
+        AIRLOCK_HTTP_OBJECT_FINGERPRINT: "a".repeat(64),
+      },
+    ],
+    ["socket only", { AIRLOCK_HTTP_OBJECT_SOCKET: "/tmp/object.sock" }],
+  ])("rejects incomplete %s configuration", (_label, environment) => {
+    expect(() => loadConfig({ NODE_ENV: "test", ...environment })).toThrow(
+      /AIRLOCK_HTTP_OBJECT/,
+    );
+  });
+});

@@ -13,6 +13,9 @@ A Run without that durable decision never becomes Canonical State during recover
 | Immutable version directory | The planned physical Whole-Agent state was installed. |
 | `canonical.json` | The currently accepted Whole-Agent state. |
 | Atomic mock-delivery store | The supported local external effect was claimed. |
+| Resource Provider immutable version | The exact provider target in the durable Promotion plan was installed. |
+| Resource Registry generation | The exact additive provider contracts accepted by this deployment. |
+| Registry Transition journal | A provider addition was verified and planned for one Agent before canonical advancement. |
 | JSON control-plane store | Operator-facing Agent, Run, message, and receipt metadata. |
 
 Recovery verifies the physical sources first and repairs control-plane metadata last.
@@ -32,11 +35,17 @@ The journal contains bounded redacted evidence and a neutral recovery message, n
 ## Startup order
 
 1. Load and migrate the control-plane store.
-2. Scan and reconcile Promotion journals.
+2. Scan and reconcile Promotion journals and exact Resource Provider target fingerprints.
 3. Retain a valid interrupted pre-decision Candidate in Quarantine or cancel the Run when no Candidate exists.
-4. Reconcile each Agent's canonical reference from `canonical.json`.
-5. Remove expired unprotected Candidate or Quarantine directories.
-6. Persist recovered Runs, receipts, assistant messages, Agent states, and retention dispositions.
+4. Verify configured provider additions against their exact immutable source versions.
+5. Reconcile each Agent's additive Registry Transition journal and canonical reference from `canonical.json`.
+6. Commit the new Resource Registry generation only after every Agent converges.
+7. Ask every configured Resource Provider to discard expired remote Candidate or Quarantine state before removing local mutable state.
+8. Persist recovered Runs, receipts, assistant messages, Agent states, and retention dispositions.
+
+Promotion recovery and retained Quarantine cleanup use the provider vector persisted with that historical transaction.
+The current configured registry may contain additive providers, but a provider added later is not part of earlier recovery work.
+Any unresolved prior-generation Promotion recovery defers Registry Transitions and the registry-generation commit.
 
 ## Fault outcomes
 
@@ -50,6 +59,21 @@ The journal contains bounded redacted evidence and a neutral recovery message, n
 | After `canonical-advanced` | Supported intents are parsed from the immutable accepted outbox and claimed idempotently. |
 | After physical effect dispatch | The same idempotency keys return the existing receipts before completion. |
 | After `effects-delivered` or `completed` | Final Run and Agent metadata is reconstructed without another version, effect, or assistant message. |
+| During provider preparation cleanup | Runtime does not start, Canonical State stays unchanged, and failed cleanup retains a retryable composite Quarantine. |
+| During cancellation while provider cleanup is unavailable | Canonical State stays unchanged, the complete Candidate becomes cleanup-only Quarantine, and Discard remains retryable. |
+| After provider Discard but before local Quarantine removal | Repeated Discard is idempotent, and local removal continues only after all providers pass. |
+| After local Quarantine removal but before final metadata | Persisted provider Discard evidence lets startup complete the disposition without recreating mutable state. |
+| Local Quarantine missing without complete provider Discard evidence | The Run enters `recovery-error`, and Airlock does not claim remote cleanup. |
+| Before a Registry Transition journal exists | The prior canonical manifest and registry generation remain authoritative. |
+| After a Registry Transition plan is durable | An unaccepted target is removed and the verified transition is retried. |
+| After a Registry Transition target is installed | Its exact local and provider fingerprints are checked before canonical advancement. |
+| After canonical advancement but before Registry Transition cleanup | The exact accepted target is recognized, the journal is removed, and no second state is installed. |
+| A Registry Transition journal has altered identifiers, fingerprints, fields, or verifications | Recovery rejects it before the target path can authorize deletion or canonical rewriting. |
+| One Agent fails provider onboarding | The prior Resource Registry generation remains authoritative, successful Agent transitions remain recoverable, and no unverifiable source becomes accepted. |
+| A Resource Registry generation remains uncommitted | Agent creation and ordinary or Repair Run execution remain unavailable until every Agent converges. |
+| A prior-generation Promotion remains unresolved after a provider is added | Recovery uses the Promotion plan's historical provider subset, defers onboarding, and leaves the new generation uncommitted. |
+| A retained historical Quarantine is discarded after a provider is added | Only the providers recorded by that Quarantine receive idempotent Discard; the later provider is not invoked. |
+| Provider removal or contract replacement is configured | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied. |
 | Any physical contradiction | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed. |
 
 ## Retention
@@ -61,6 +85,9 @@ Both settings accept positive values up to 8,760 hours.
 Active or unresolved journal Run identifiers are protected from cleanup.
 Cleanup accepts no caller-supplied path, rejects unsafe identifiers, does not traverse symbolic links, and scans only `.candidates` and `.quarantine`.
 Expired Quarantine loses mutable files but retains output, Validation evidence, hashes, lineage, timeline, and its Promotion Receipt.
+Provider Discard evidence is persisted before the local Quarantine directory is removed.
+If a provider is unavailable, cleanup retains the complete local Quarantine and retries on the next startup.
+Every provider-controlled lifecycle string is bounded and credential-checked before it can enter durable evidence or an operator response.
 
 ## Operator response
 
@@ -90,3 +117,12 @@ npm run demo -- --reset
 Complete the four guided steps, stop the process with `Ctrl+C`, and restart with `npm run demo` without `--reset`.
 The same Agent identifier, messages, immutable versions, canonical manifest, Promotion evidence, and mock effect receipts must reappear.
 Use `npm run test:demo` for the automated launcher restart assertion and `npm run check:phase7` for the complete recovery and release gate.
+
+Run the provider recovery and crash matrix with:
+
+```bash
+npm run test -w @launchpad/server -- --run src/phase-eight-resource-acceptance.test.ts
+npm run check:phase8:provider
+```
+
+These tests cover deployment onboarding, unverifiable-source rejection, Registry Transition crash recovery, prepare abort, provider-only rejection, idempotent Promotion, cancellation cleanup outage, post-Runtime symbolic-link substitution, Quarantine and Discard, missing-state contradiction, cleanup retry, and restart at every provider Promotion seam without paid inference.

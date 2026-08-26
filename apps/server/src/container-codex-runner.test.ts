@@ -25,6 +25,20 @@ describe("Container Codex runner", () => {
         codexHomePath: "/tmp/candidate-codex-home",
         outboxPath: "/tmp/candidate-outbox/intents.jsonl",
         repairReferencePath: "/tmp/candidate/repair-reference",
+        resourceBindings: [
+          {
+            providerId: "acceptance-object",
+            hostPath: "/tmp/candidate/resources/acceptance-object/object.json",
+            runtimePath: "/airlock/resources/acceptance-object/object.json",
+            access: "read-write",
+          },
+          {
+            providerId: "policy-bundle",
+            hostPath: "/tmp/candidate/resources/policy-bundle/policy.json",
+            runtimePath: "/airlock/resources/policy-bundle/policy.json",
+            access: "read-only",
+          },
+        ],
         prompt: "write a small program",
         threadId: null,
       },
@@ -48,6 +62,25 @@ describe("Container Codex runner", () => {
     );
     expect(args).toContain("AIRLOCK_REPAIR_REFERENCE_PATH=/airlock-repair-reference");
     expect(args).toContain("/airlock-repair-reference");
+    expect(args).toContain(
+      "AIRLOCK_RESOURCE_ACCEPTANCE_OBJECT_PATH=/airlock/resources/acceptance-object/object.json",
+    );
+    expect(args).toContain(
+      "AIRLOCK_RESOURCE_POLICY_BUNDLE_PATH=/airlock/resources/policy-bundle/policy.json",
+    );
+    expect(args).toContain(
+      "type=bind,src=/tmp/candidate/resources/acceptance-object/object.json,dst=/airlock/resources/acceptance-object/object.json",
+    );
+    expect(args).toContain(
+      "type=bind,src=/tmp/candidate/resources/policy-bundle/policy.json,dst=/airlock/resources/policy-bundle/policy.json,readonly",
+    );
+    expect(args).toContain(
+      "/airlock/resources/acceptance-object/object.json",
+    );
+    expect(args).toContain("/airlock/resources/policy-bundle/policy.json");
+    expect(args).not.toContain(
+      "AIRLOCK_RESOURCE_ACCEPTANCE_OBJECT_PATH=/tmp/candidate/resources/acceptance-object/object.json",
+    );
     expect(args).toContain("io.codejam.instance-id=test-instance");
     expect(args).toContain("keep-id");
     expect(args).not.toContain("secret-that-must-not-appear-in-argv");

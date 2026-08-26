@@ -67,6 +67,80 @@ export interface RunTransaction {
     fingerprintAfter: string | null;
     summary: string;
   }>;
+  providerResources: Array<{
+    schemaVersion: 1;
+    providerId: string;
+    resourceKind: string;
+    label: string;
+    required: boolean;
+    capabilities: {
+      schemaVersion: 1;
+      isolation: "candidate-copy" | "provider-branch" | "deferred-intent";
+      promotionVisibility:
+        | "canonical-manifest"
+        | "post-promotion-reconciled"
+        | "best-effort";
+      promotionIdempotency: "run-keyed" | "none";
+      reconciliation: "forward" | "observe-only" | "none";
+      quarantine: "retained" | "evidence-only";
+      discard: "idempotent" | "best-effort";
+      repair: "fork" | "unsupported";
+      runtimeAccess: "none" | "read-only" | "read-write";
+    };
+    source: ProviderVersionReference;
+    candidate: {
+      candidateId: string;
+      candidateFingerprint: string;
+    };
+    runtimeBinding: {
+      relativePath: string;
+      access: "read-only" | "read-write";
+    } | null;
+    change: {
+      changed: boolean;
+      fingerprintBefore: string;
+      fingerprintCandidate: string;
+      summary: string;
+    } | null;
+    validations: Array<{
+      name: string;
+      status: "passed" | "failed" | "error";
+      required: boolean;
+      summary: string;
+      durationMs: number;
+      output: string | null;
+    }>;
+    promotionPlan: {
+      idempotencyKey: string;
+      targetVersionId: string;
+      targetFingerprint: string;
+    } | null;
+    installedVersion: ProviderVersionReference | null;
+    quarantine: {
+      quarantineId: string;
+      candidateFingerprint: string;
+    } | null;
+    disposition: "promoted" | "quarantined" | "discarded" | "cancelled" | null;
+    summary: string;
+  }>;
+  providerResourceEvents: Array<{
+    schemaVersion: 1;
+    providerId: string;
+    resourceKind: string;
+    stage:
+      | "prepare"
+      | "runtime"
+      | "describe"
+      | "validate"
+      | "plan-promotion"
+      | "promote"
+      | "quarantine"
+      | "discard"
+      | "reconcile";
+    status: "passed" | "failed";
+    summary: string;
+    at: string;
+  }>;
   sqlite: {
     databasePath: ".airlock/demo.sqlite";
     integrity: "passed" | "failed" | "error";
@@ -128,6 +202,11 @@ export interface RunTransaction {
     lineage: RunLineage;
     createdAt: string;
   } | null;
+}
+
+interface ProviderVersionReference {
+  versionId: string;
+  fingerprint: string;
 }
 
 interface SqliteSnapshot {

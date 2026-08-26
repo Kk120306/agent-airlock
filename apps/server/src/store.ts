@@ -8,7 +8,7 @@ import { EXTERNAL_ACTION_BYPASS_DISCLOSURE } from "./external-actions.js";
 import type { Database } from "./types.js";
 
 const emptyDatabase = (): Database => ({
-  version: 7,
+  version: 8,
   agents: [],
   messages: [],
   runs: [],
@@ -51,6 +51,13 @@ interface VersionFiveDatabase {
 
 interface VersionSixDatabase {
   version: 6;
+  agents: Array<Record<string, unknown>>;
+  messages: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+}
+
+interface VersionSevenDatabase {
+  version: 7;
   agents: Array<Record<string, unknown>>;
   messages: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
@@ -205,11 +212,11 @@ function migrateVersionFive(database: VersionFiveDatabase): VersionSixDatabase {
   };
 }
 
-function migrateVersionSix(database: VersionSixDatabase): Database {
+function migrateVersionSix(database: VersionSixDatabase): VersionSevenDatabase {
   return {
     version: 7,
-    agents: database.agents as unknown as Database["agents"],
-    messages: database.messages as unknown as Database["messages"],
+    agents: database.agents as unknown as VersionSevenDatabase["agents"],
+    messages: database.messages as unknown as VersionSevenDatabase["messages"],
     runs: database.runs.map((run) => {
       const transaction =
         run.transaction && typeof run.transaction === "object"
@@ -225,6 +232,29 @@ function migrateVersionSix(database: VersionSixDatabase): Database {
             recoveredAfterRestart: false,
             recoveryError: null,
           },
+        },
+      };
+    }) as unknown as VersionSevenDatabase["runs"],
+  };
+}
+
+function migrateVersionSeven(database: VersionSevenDatabase): Database {
+  return {
+    version: 8,
+    agents: database.agents as unknown as Database["agents"],
+    messages: database.messages as unknown as Database["messages"],
+    runs: database.runs.map((run) => {
+      const transaction =
+        run.transaction && typeof run.transaction === "object"
+          ? (run.transaction as Record<string, unknown>)
+          : null;
+      if (!transaction) return run;
+      return {
+        ...run,
+        transaction: {
+          ...transaction,
+          providerResources: [],
+          providerResourceEvents: [],
         },
       };
     }) as unknown as Database["runs"],
@@ -248,7 +278,8 @@ export class JsonStore {
         | VersionThreeDatabase
         | VersionFourDatabase
         | VersionFiveDatabase
-        | VersionSixDatabase;
+        | VersionSixDatabase
+        | VersionSevenDatabase;
       if (
         !Array.isArray(parsed.agents) ||
         !Array.isArray(parsed.messages) ||
@@ -257,36 +288,47 @@ export class JsonStore {
         throw new Error("Unsupported database format");
       }
       if (parsed.version === 1) {
-        this.data = migrateVersionSix(
-          migrateVersionFive(
-            migrateVersionFour(
-              migrateVersionThree(migrateVersionTwo(migrateVersionOne(parsed))),
+        this.data = migrateVersionSeven(
+          migrateVersionSix(
+            migrateVersionFive(
+              migrateVersionFour(
+                migrateVersionThree(migrateVersionTwo(migrateVersionOne(parsed))),
+              ),
             ),
           ),
         );
         await this.persist();
       } else if (parsed.version === 2) {
-        this.data = migrateVersionSix(
-          migrateVersionFive(
-            migrateVersionFour(migrateVersionThree(migrateVersionTwo(parsed))),
+        this.data = migrateVersionSeven(
+          migrateVersionSix(
+            migrateVersionFive(
+              migrateVersionFour(migrateVersionThree(migrateVersionTwo(parsed))),
+            ),
           ),
         );
         await this.persist();
       } else if (parsed.version === 3) {
-        this.data = migrateVersionSix(
-          migrateVersionFive(migrateVersionFour(migrateVersionThree(parsed))),
+        this.data = migrateVersionSeven(
+          migrateVersionSix(
+            migrateVersionFive(migrateVersionFour(migrateVersionThree(parsed))),
+          ),
         );
         await this.persist();
       } else if (parsed.version === 4) {
-        this.data = migrateVersionSix(migrateVersionFive(migrateVersionFour(parsed)));
+        this.data = migrateVersionSeven(
+          migrateVersionSix(migrateVersionFive(migrateVersionFour(parsed))),
+        );
         await this.persist();
       } else if (parsed.version === 5) {
-        this.data = migrateVersionSix(migrateVersionFive(parsed));
+        this.data = migrateVersionSeven(migrateVersionSix(migrateVersionFive(parsed)));
         await this.persist();
       } else if (parsed.version === 6) {
-        this.data = migrateVersionSix(parsed);
+        this.data = migrateVersionSeven(migrateVersionSix(parsed));
         await this.persist();
       } else if (parsed.version === 7) {
+        this.data = migrateVersionSeven(parsed);
+        await this.persist();
+      } else if (parsed.version === 8) {
         this.data = parsed;
       } else {
         throw new Error("Unsupported database format");

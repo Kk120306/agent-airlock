@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 7", async () => {
+  it("migrates starter version 1 data to version 8", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,7 +59,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 8,
       agents: [
         {
           canonicalStateId: "",
@@ -68,7 +68,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 7 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 8 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -178,7 +178,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 8,
       agents: [
         {
           outcomeContract: {
@@ -237,7 +237,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 8,
       runs: [
         {
           transaction: {
@@ -276,7 +276,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 8,
       runs: [
         {
           transaction: {
@@ -321,7 +321,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 8,
       runs: [
         {
           transaction: {
@@ -375,7 +375,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 8,
       runs: [
         {
           transaction: {
@@ -386,6 +386,60 @@ describe("JsonStore", () => {
               recoveryError: null,
             },
           },
+        },
+      ],
+    });
+  });
+
+  it("adds empty provider evidence vectors to Phase 7 transactions", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v7-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 7,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-7-run",
+            transaction: {
+              id: "phase-7-run",
+              status: "promoted",
+              disposition: "promoted",
+              recovery: {
+                journalPhase: "completed",
+                recoveredAfterRestart: false,
+                recoveryError: null,
+              },
+            },
+          },
+          {
+            id: "phase-7-run-without-transaction",
+            transaction: null,
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 8,
+      runs: [
+        {
+          id: "phase-7-run",
+          transaction: {
+            providerResources: [],
+            providerResourceEvents: [],
+            recovery: { journalPhase: "completed" },
+          },
+        },
+        {
+          id: "phase-7-run-without-transaction",
+          transaction: null,
         },
       ],
     });

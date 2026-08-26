@@ -45,6 +45,26 @@ _Avoid_: Retry, rerun
 A mutable resource that Airlock can prepare as Candidate State and later promote or discard.
 _Avoid_: Adapter, database copy, state handler
 
+**Resource Provider**:
+An implementation that brings one kind of mutable resource under the Transactional Resource lifecycle.
+_Avoid_: Adapter, plugin, state handler
+
+**Capability Claim**:
+A versioned statement of the isolation, Promotion visibility, idempotency, reconciliation, and cleanup guarantees a Resource Provider can supply.
+_Avoid_: Feature flag, support matrix, marketing claim
+
+**Resource Registry Generation**:
+The persisted additive set of exact Resource Provider contracts accepted by one Airlock deployment.
+_Avoid_: Plugin list, enabled integrations, adapter config
+
+**Registry Transition**:
+A recoverable per-Agent operation that verifies a new provider's immutable source and adds its version reference to Canonical State before a Resource Registry generation is accepted.
+_Avoid_: Auto-migration, provider toggle, manifest patch
+
+**Historical Provider Subset**:
+The exact Resource Provider vector persisted by an earlier Promotion or Quarantine and used to recover that work after the configured registry expands additively.
+_Avoid_: Current providers, best-effort providers, inferred generation
+
 **External Action Intent**:
 A validated description of an irreversible external operation that remains deferred until promotion.
 _Avoid_: Tool call, queued action, side effect

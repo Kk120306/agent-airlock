@@ -6,7 +6,7 @@ Rejected work remains inspectable and can be repaired without contaminating acce
 
 > Agents may explore many futures, but only validated futures become reality.
 
-Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), and [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md) before extending Airlock.
+Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
 ## Free one-command demo
@@ -31,6 +31,30 @@ The project will not silently switch the deterministic demo to paid inference.
 > Do not use production data or credentials.
 > See [SECURITY.md](SECURITY.md).
 
+## Phase 8 provider extension demo
+
+Phase 8 adds a capability-checked Transactional Resource SDK and a credential-free remote versioned-object provider without changing the frozen Phase 7 judge path.
+The provider runs as a separate local HTTP process and its Candidate-only `object.json` binding participates in the same Promotion, Quarantine, Discard, Repair, journal, and canonical fingerprint decision as the four built-in resources.
+When a provider is added to an existing deployment, Airlock verifies its exact immutable source and completes a crash-recoverable additive Registry Transition for every Agent before accepting the next registry generation.
+Interrupted older Promotions and retained Quarantines continue through their persisted historical provider subset before onboarding can advance.
+Strict journal admission prevents a malformed transition record from authorizing state deletion, and every provider-controlled evidence string is bounded and credential-checked before persistence or display.
+
+```bash
+npm run demo:phase8 -- --reset
+```
+
+Open <http://127.0.0.1:3199> and complete the first two guided steps.
+The `Transactional Resources` panel shows the provider identity, immutable source and target fingerprints, disposition, Capability Claim, bounded Validation evidence, and lifecycle evidence.
+No ModelArk key, provider credential, blockchain transaction, or paid request is used.
+
+Provider authors can execute the shared contract directly:
+
+```bash
+npm run check:phase8:conformance
+```
+
+The command emits readable case results and a schema-versioned JSON conformance report.
+
 ## Screenshots
 
 ### Four-step judge path
@@ -54,6 +78,10 @@ The project will not silently switch the deterministic demo to paid inference.
 - Bounded Repair Runs that preserve useful quarantined work, resume rejected Agent memory, and use a fresh outbox
 - Canonical freshness checks, receipt lineage, and idempotent Quarantine discard with retained evidence
 - Durable five-phase Promotion journal with forward startup reconciliation and visible fail-closed errors
+- Provider-neutral Transactional Resource SDK with strict Capability Claims and executable conformance
+- Credential-free remote versioned-object provider with bounded HTTP, immutable versions, and forward reconciliation
+- Compact provider registry evidence with explicit unsupported distributed-atomicity claims
+- Additive provider onboarding with immutable-source verification, crash journaling, and generation-wide convergence
 - Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
@@ -248,6 +276,10 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `AIRLOCK_MAX_REPAIR_DEPTH` | `2` | Maximum bounded Repair Runs in one Quarantine lineage. |
 | `AIRLOCK_CANDIDATE_RETENTION_HOURS` | `24` | Mutable Candidate retention window in positive hours. |
 | `AIRLOCK_QUARANTINE_RETENTION_HOURS` | `168` | Mutable Quarantine retention window in positive hours while bounded evidence remains. |
+| `AIRLOCK_HTTP_OBJECT_URL` | Unset | Base URL for the optional credential-free versioned-object provider. |
+| `AIRLOCK_HTTP_OBJECT_VERSION_ID` | Unset | Trusted immutable source version registered with the HTTP object provider. |
+| `AIRLOCK_HTTP_OBJECT_FINGERPRINT` | Unset | Exact 64-character lowercase SHA-256 fingerprint of the registered source. |
+| `AIRLOCK_HTTP_OBJECT_SOCKET` | Unset | Optional local Unix socket for the HTTP object provider. |
 | `AIRLOCK_DEMO_MODE` | `false` | Internal fixture-mode marker set by `npm run demo`; do not enable it for a credentialed POC. |
 | `AIRLOCK_DEMO_PORT` | `3199` | Loopback port used by the deterministic demo launcher. |
 | `AIRLOCK_DEMO_DATA_ROOT` | `.local/airlock-demo` | Persistent isolated state used by the deterministic demo launcher. |
@@ -264,6 +296,8 @@ flowchart LR
     Airlock --> Journal["Durable Promotion journal"]
     Airlock --> Store["Candidate and Canonical workspace, session, and SQLite"]
     Airlock --> Effects["Deferred post-Promotion mock effects"]
+    Airlock --> Registry["Capability-checked Resource Registry"]
+    Registry --> Provider["Remote immutable resource versions"]
     Airlock --> Runtime{"Runtime provider"}
     Runtime -->|Local POC| Container["Disposable Docker / Colima / Podman container"]
     Runtime -->|ECS profile| Codex["Codex CLI in application container"]
@@ -272,6 +306,7 @@ flowchart LR
     Decision -->|Rejected| Repair["Bounded Repair or Discard"]
     Journal -->|Verified startup replay| Store
     Journal -->|After canonical advance| Effects
+    Journal -->|Exact plan and fingerprint replay| Provider
     Repair -->|Fresh candidate and outbox| Airlock
     Container --> Ark["ModelArk Responses API"]
     Codex --> Ark

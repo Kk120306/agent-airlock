@@ -86,7 +86,8 @@ describe("Phase 4 canonical migration", () => {
       schemaVersion: number;
     };
 
-    expect(manifest.schemaVersion).toBe(3);
+    expect(manifest.schemaVersion).toBe(4);
+    expect(manifest.providerVersions).toEqual([]);
     expect((await new SqliteResource().inspect(migrated.workspacePath)).rowCount).toBe(1);
     await expect(manager.ensureCanonical(agent)).resolves.toEqual(migrated);
   });

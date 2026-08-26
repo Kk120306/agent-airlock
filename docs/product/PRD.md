@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 7 implemented and regression-locked
+**Status:** Phases 0 through 7 regression-locked; Phase 8 release candidate implemented
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -26,6 +26,10 @@ A platform-owned Promotion journal now reconciles every approved decision forwar
 Positive Candidate and Quarantine retention windows remove only expired mutable state while preserving bounded decision evidence.
 The judge-ready release adds a loopback-only deterministic launcher, one seeded hero Agent, a four-step guided Playground story, restart-safe fixture state, a dedicated production Chrome acceptance path, and an automated release audit.
 The deterministic fixture replaces only paid model inference and is disclosed in the terminal, system API, sidebar, and main UI.
+The Phase 8 release candidate adds a provider-neutral SDK, strict Capability Claims, a shared executable conformance suite, and a credential-free remote versioned-object provider.
+Registered provider state now participates in the same Candidate preparation, required Validation, Promotion journal, Quarantine, Discard, Repair, canonical fingerprint, and restart-reconciliation decision as built-in resources.
+Existing deployments add providers through a verified, additive, crash-recoverable Registry Transition, and Airlock commits a registry generation only after every Agent converges.
+The existing Playground shows provider guarantees and bounded lifecycle evidence while explicitly refusing to claim distributed atomic commit.
 
 ## Problem
 
@@ -49,6 +53,7 @@ Operators currently cannot answer these questions before accepting a Run:
 4. Preserve the starter kit's Agent lifecycle, Codex continuity, and local Runtime path.
 5. Provide evidence that rejected Runs leave protected state unchanged.
 6. Demonstrate that the transactional model can extend beyond files through a SQLite Transactional Resource and an External Action Intent outbox.
+7. Let a developer add a capability-checked Transactional Resource Provider without editing core Run Transaction lifecycle branches.
 
 ## Non-goals
 
@@ -112,6 +117,21 @@ This journey describes the complete product direction, including later roadmap p
 - External Action Intents must remain deferred until promotion.
 - Every External Action Intent must carry a stable idempotency key derived from the Run Transaction and intent identity.
 - The POC must disclose that Agent-controlled network egress can bypass the outbox unless egress is restricted.
+- A provider-neutral SDK must define bounded JSON-safe lifecycle values and strict runtime validators.
+- Every registered provider must publish a machine-readable Capability Claim and fixed failure semantics.
+- The trusted core must own lifecycle order, exact provider membership, Runtime path derivation, evidence bounds, journal persistence, and the final disposition.
+- Provider Candidate bindings must never expose a mutable Canonical path or provider credential to Runtime.
+- Airlock must reject a provider access claim that the selected Runtime cannot enforce.
+- Airlock must revalidate Candidate provider paths after Runtime and before trusted provider lifecycle hooks.
+- Provider Promotion must be idempotent from one deterministic Run key and install an exact immutable target reference.
+- Restart reconciliation must verify the provider target fingerprint before canonical advancement.
+- Adding a provider to an existing deployment must verify its exact immutable source and use a recoverable per-Agent Registry Transition.
+- A Resource Registry generation must advance only after every existing Agent converges.
+- Historical Promotion and Quarantine recovery must use the exact provider subset persisted by that transaction, and any unresolved prior-generation recovery must defer provider onboarding and generation commit.
+- Agent creation and Run execution must remain unavailable while a Resource Registry generation is uncommitted.
+- Creating a new Agent must verify every configured initial provider version before writing its first canonical manifest.
+- Phase 8 provider evolution must be additive and must reject removal, identity replacement, or Capability Claim replacement.
+- Unsupported native-pointer atomicity and distributed atomic commit must remain explicit in machine evidence and the Playground.
 
 ### Promotion and quarantine
 
@@ -130,6 +150,7 @@ This journey describes the complete product direction, including later roadmap p
 - The operator must be able to inspect a bounded file-change summary and Validation output.
 - The operator must be able to discard Quarantine or request a Repair Run.
 - The interface must not display credentials, environment values, or unredacted sensitive content.
+- The interface must show registered provider identity, source and target fingerprints, disposition, conformance profile, Promotion visibility, and bounded lifecycle evidence.
 
 ### Judge-ready release experience
 
@@ -175,7 +196,17 @@ This journey describes the complete product direction, including later roadmap p
 - Discard removes mutable Quarantine state idempotently while retaining bounded decision evidence.
 - Interruption at each Promotion seam converges after restart to one canonical version, one assistant message, and at most one supported mock effect.
 - A contradictory journal, installed version, or canonical manifest produces an explicit `recovery-error` without rewriting Canonical State.
+- A malformed or forged Registry Transition journal must be rejected before it can authorize deletion or Canonical State rewriting.
 - Candidate and Quarantine cleanup is root-confined, symlink-safe, active-Run-aware, and evidence preserving.
+- A third-party-style provider package imports only the SDK and passes the same eight-case conformance suite used by built-in fixtures.
+- Provider prepare failure prevents Runtime invocation and either completes idempotent cleanup or retains a retryable composite Quarantine.
+- Provider-only Validation rejection leaves the complete canonical composite fingerprint unchanged.
+- Duplicate provider Promotion installs one immutable version, and every tested interruption converges without replaying Runtime.
+- Provider cleanup evidence is durable before local mutable state removal, and missing contradictory state fails recovery closed.
+- Provider onboarding preserves every built-in Canonical fingerprint, fails closed on an unverifiable source, and converges after interruption at every Registry Transition seam.
+- A lost prepare response, partial multi-provider failure, cancellation cleanup outage, oversized source, redirect, or post-Runtime symbolic-link substitution cannot change Canonical State or erase the recovery handle.
+- Provider-controlled identifiers, summaries, metadata, lifecycle evidence, reconciliation evidence, and errors must remain bounded and credential-free before persistence or display.
+- A production browser journey promotes and quarantines the remote resource while showing its real persisted evidence.
 
 ## Later-phase success metrics
 
@@ -201,8 +232,9 @@ Later-phase work cannot enter the judging path before submission.
 
 ### Post-hackathon expansion
 
-Phases 8 through 11 define a Transactional Resource SDK, competing Agent futures, adaptive assurance, and portable Promotion Receipts.
-These capabilities shape stable extension points but are not hackathon dependencies.
+Phase 8 delivers the Transactional Resource SDK on the isolated post-hackathon branch.
+Phases 9 through 11 continue with competing Agent futures, adaptive assurance, and portable Promotion Receipts.
+These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations
 
@@ -221,5 +253,6 @@ External Action Intent delivery is resolved in [ADR 0006](../adr/0006-defer-exte
 Quarantine repair, lineage, freshness, and discard semantics are resolved in [ADR 0007](../adr/0007-repair-quarantined-futures.md).
 Promotion journal, forward recovery, contradiction handling, and retention semantics are resolved in [ADR 0008](../adr/0008-reconcile-approved-promotions-forward.md).
 The deterministic judge path, fixture disclosure, and post-hackathon cutoff are resolved in [ADR 0009](../adr/0009-freeze-the-judge-release-boundary.md).
+The Resource Provider lifecycle, capability eligibility, and canonical-manifest consistency model are resolved in [ADR 0010](../adr/0010-open-the-run-transaction-through-capability-checked-resource-providers.md).
 
 The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) is the canonical index for these decisions.
