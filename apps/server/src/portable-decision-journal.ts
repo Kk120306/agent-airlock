@@ -13,6 +13,7 @@ const safeIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const temporaryRecordPattern = /^\.authority-[0-9a-f-]{36}\.tmp$/;
 const candidateSetDirectoryName = ".candidate-sets";
+const discardCleanupDirectoryName = ".discard-cleanup";
 
 export interface PortableDecisionAuthorityRecord {
   schemaVersion: 1;
@@ -25,6 +26,18 @@ export interface PortableDecisionAuthorityRecord {
   disposition: NonNullable<RunTransaction["disposition"]>;
   decidedAt: string;
   transaction: RunTransaction;
+}
+
+export interface PortableDiscardCleanupRecord {
+  schemaVersion: 1;
+  cleanupDigest: string;
+  authorityDigest: string;
+  authorityTransactionEvidenceHash: string;
+  parentAuthorityDigest: string | null;
+  candidateSetAuthorityDigest: string | null;
+  runId: string;
+  agentId: string;
+  providerDiscardEvents: RunTransaction["providerResourceEvents"];
 }
 
 export type PortableCandidateSetAuthority = ReturnType<
@@ -44,6 +57,8 @@ export interface CandidateSetDecisionAuthorityRecord {
 export class PortableDecisionJournal {
   private rootIdentity: { dev: number; ino: number } | null = null;
   private candidateSetRootIdentity: { dev: number; ino: number } | null = null;
+  private discardCleanupRootIdentity: { dev: number; ino: number } | null =
+    null;
 
   constructor(private readonly root: string) {}
 
@@ -59,6 +74,15 @@ export class PortableDecisionJournal {
     this.candidateSetRootIdentity = {
       dev: candidateSetStats.dev,
       ino: candidateSetStats.ino,
+    };
+    await mkdir(this.discardCleanupRoot(), { recursive: true, mode: 0o700 });
+    const discardCleanupStats = await this.assertDirectory(
+      this.discardCleanupRoot(),
+      "Discard cleanup root",
+    );
+    this.discardCleanupRootIdentity = {
+      dev: discardCleanupStats.dev,
+      ino: discardCleanupStats.ino,
     };
   }
 
@@ -442,6 +466,101 @@ export class PortableDecisionJournal {
     throw new Error("Portable terminal decision authority is ambiguous");
   }
 
+  async recordDiscardCleanup(
+    authority: PortableDecisionAuthorityRecord,
+    completedTransaction: RunTransaction,
+  ): Promise<PortableDiscardCleanupRecord> {
+    if (authority.disposition !== "discarded") {
+      throw new Error("Provider Discard cleanup requires Discard authority");
+    }
+    assertDiscardCleanupCompletion(authority.transaction, completedTransaction);
+    const providerDiscardEvents =
+      completedTransaction.providerResourceEvents.slice(
+        authority.transaction.providerResourceEvents.length,
+      );
+    const unsigned = {
+      schemaVersion: 1 as const,
+      authorityDigest: authority.authorityDigest,
+      authorityTransactionEvidenceHash: authority.transactionEvidenceHash,
+      parentAuthorityDigest: authority.parentAuthorityDigest,
+      candidateSetAuthorityDigest: authority.candidateSetAuthorityDigest,
+      runId: authority.runId,
+      agentId: authority.agentId,
+      providerDiscardEvents: structuredClone(providerDiscardEvents),
+    };
+    const record: PortableDiscardCleanupRecord = {
+      ...unsigned,
+      cleanupDigest: digest(unsigned),
+    };
+    this.validateDiscardCleanupRecord(record);
+    const directory = this.discardCleanupDirectory(authority.runId);
+    await this.ensureDiscardCleanupDirectory(directory);
+    await this.cleanupTemporaryRecords(directory);
+    const target = this.discardCleanupRecordPath(
+      authority.runId,
+      record.cleanupDigest,
+    );
+    await this.publishRecord(directory, target, record);
+    const published = await this.readDiscardCleanup(authority);
+    if (published?.cleanupDigest !== record.cleanupDigest) {
+      throw new Error("Provider Discard cleanup fact did not converge");
+    }
+    return structuredClone(record);
+  }
+
+  async readDiscardCleanup(
+    authority: PortableDecisionAuthorityRecord,
+  ): Promise<PortableDiscardCleanupRecord | null> {
+    if (authority.disposition !== "discarded") {
+      throw new Error("Provider Discard cleanup requires Discard authority");
+    }
+    const directory = this.discardCleanupDirectory(authority.runId);
+    try {
+      await this.assertDiscardCleanupRoot();
+      await this.assertDirectory(directory, "Discard cleanup Run");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    await this.cleanupTemporaryRecords(directory);
+    const entries = await readdir(directory, { withFileTypes: true });
+    if (entries.length === 0) return null;
+    if (entries.length !== 1) {
+      throw new Error("Provider Discard cleanup fact is ambiguous");
+    }
+    const entry = entries[0]!;
+    if (!entry.isFile() || !/^sha256-[a-f0-9]{64}\.json$/.test(entry.name)) {
+      throw new Error("Provider Discard cleanup filename is unsafe");
+    }
+    const record = JSON.parse(
+      await this.readRecordFile(path.join(directory, entry.name)),
+    ) as unknown;
+    this.validateDiscardCleanupRecord(record);
+    if (
+      record.cleanupDigest !==
+        entry.name.slice(0, -".json".length).replace("sha256-", "sha256:") ||
+      record.authorityDigest !== authority.authorityDigest ||
+      record.authorityTransactionEvidenceHash !==
+        authority.transactionEvidenceHash ||
+      record.parentAuthorityDigest !== authority.parentAuthorityDigest ||
+      record.candidateSetAuthorityDigest !==
+        authority.candidateSetAuthorityDigest ||
+      record.runId !== authority.runId ||
+      record.agentId !== authority.agentId
+    ) {
+      throw new Error(
+        "Provider Discard cleanup fact contradicts its authority",
+      );
+    }
+    assertDiscardProviderEvents(
+      authority.transaction,
+      record.providerDiscardEvents,
+      false,
+    );
+    await this.assertDiscardCleanupRoot();
+    return structuredClone(record);
+  }
+
   private validateRecord(
     value: unknown,
   ): asserts value is PortableDecisionAuthorityRecord {
@@ -510,6 +629,62 @@ export class PortableDecisionJournal {
       digest(unsigned) !== record.authorityDigest
     ) {
       throw new Error("Portable decision authority content is contradictory");
+    }
+  }
+
+  private validateDiscardCleanupRecord(
+    value: unknown,
+  ): asserts value is PortableDiscardCleanupRecord {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Provider Discard cleanup fact must be an object");
+    }
+    const record = value as Record<string, unknown>;
+    const keys = [
+      "schemaVersion",
+      "cleanupDigest",
+      "authorityDigest",
+      "authorityTransactionEvidenceHash",
+      "parentAuthorityDigest",
+      "candidateSetAuthorityDigest",
+      "runId",
+      "agentId",
+      "providerDiscardEvents",
+    ];
+    if (
+      Object.keys(record).length !== keys.length ||
+      keys.some((key) => !(key in record)) ||
+      record.schemaVersion !== 1 ||
+      !digestPattern.test(String(record.cleanupDigest)) ||
+      !digestPattern.test(String(record.authorityDigest)) ||
+      !digestPattern.test(String(record.authorityTransactionEvidenceHash)) ||
+      !(
+        record.parentAuthorityDigest === null ||
+        digestPattern.test(String(record.parentAuthorityDigest))
+      ) ||
+      !(
+        record.candidateSetAuthorityDigest === null ||
+        digestPattern.test(String(record.candidateSetAuthorityDigest))
+      ) ||
+      typeof record.runId !== "string" ||
+      typeof record.agentId !== "string" ||
+      !safeIdentifierPattern.test(record.runId) ||
+      !safeIdentifierPattern.test(record.agentId) ||
+      !Array.isArray(record.providerDiscardEvents)
+    ) {
+      throw new Error("Provider Discard cleanup fact fields are invalid");
+    }
+    const unsigned = {
+      schemaVersion: 1 as const,
+      authorityDigest: record.authorityDigest,
+      authorityTransactionEvidenceHash: record.authorityTransactionEvidenceHash,
+      parentAuthorityDigest: record.parentAuthorityDigest,
+      candidateSetAuthorityDigest: record.candidateSetAuthorityDigest,
+      runId: record.runId,
+      agentId: record.agentId,
+      providerDiscardEvents: record.providerDiscardEvents,
+    };
+    if (digest(unsigned) !== record.cleanupDigest) {
+      throw new Error("Provider Discard cleanup fact content is contradictory");
     }
   }
 
@@ -603,7 +778,9 @@ export class PortableDecisionJournal {
     directory: string,
     target: string,
     record:
-      PortableDecisionAuthorityRecord | CandidateSetDecisionAuthorityRecord,
+      | PortableDecisionAuthorityRecord
+      | CandidateSetDecisionAuthorityRecord
+      | PortableDiscardCleanupRecord,
   ): Promise<void> {
     const serialized = JSON.stringify(record) + "\n";
     if (
@@ -652,9 +829,18 @@ export class PortableDecisionJournal {
     return path.join(this.root, candidateSetDirectoryName);
   }
 
+  private discardCleanupRoot(): string {
+    return path.join(this.root, discardCleanupDirectoryName);
+  }
+
   private candidateSetDirectory(candidateSetId: string): string {
     this.assertIdentifier(candidateSetId, "Candidate Set");
     return path.join(this.candidateSetRoot(), candidateSetId);
+  }
+
+  private discardCleanupDirectory(runId: string): string {
+    this.assertIdentifier(runId, "Run");
+    return path.join(this.discardCleanupRoot(), runId);
   }
 
   private candidateSetRecordPath(
@@ -671,6 +857,16 @@ export class PortableDecisionJournal {
     return path.join(
       this.runDirectory(runId),
       authorityDigest.replace("sha256:", "sha256-") + ".json",
+    );
+  }
+
+  private discardCleanupRecordPath(
+    runId: string,
+    cleanupDigest: string,
+  ): string {
+    return path.join(
+      this.discardCleanupDirectory(runId),
+      cleanupDigest.replace("sha256:", "sha256-") + ".json",
     );
   }
 
@@ -708,6 +904,22 @@ export class PortableDecisionJournal {
     await this.assertCandidateSetRoot();
   }
 
+  private async ensureDiscardCleanupDirectory(
+    directory: string,
+  ): Promise<void> {
+    await this.assertDiscardCleanupRoot();
+    if (path.dirname(directory) !== path.resolve(this.discardCleanupRoot())) {
+      throw new Error("Provider Discard cleanup fact escaped its root");
+    }
+    try {
+      await mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    await this.assertDirectory(directory, "Discard cleanup Run");
+    await this.assertDiscardCleanupRoot();
+  }
+
   private async assertPinnedRoot(): Promise<void> {
     if (!this.rootIdentity) {
       throw new Error("Portable decision authority is not initialized");
@@ -735,6 +947,23 @@ export class PortableDecisionJournal {
       stats.ino !== this.candidateSetRootIdentity.ino
     ) {
       throw new Error("Candidate Set decision authority root identity changed");
+    }
+  }
+
+  private async assertDiscardCleanupRoot(): Promise<void> {
+    await this.assertPinnedRoot();
+    if (!this.discardCleanupRootIdentity) {
+      throw new Error("Provider Discard cleanup fact is not initialized");
+    }
+    const stats = await this.assertDirectory(
+      this.discardCleanupRoot(),
+      "Discard cleanup root",
+    );
+    if (
+      stats.dev !== this.discardCleanupRootIdentity.dev ||
+      stats.ino !== this.discardCleanupRootIdentity.ino
+    ) {
+      throw new Error("Provider Discard cleanup root identity changed");
     }
   }
 
@@ -1063,6 +1292,13 @@ export function assertQuarantineCleanupProgress(
   }
 }
 
+export function assertPromotionRecoveryProgress(
+  authoritative: RunTransaction,
+  progress: RunTransaction,
+): void {
+  assertPromotedRecoveryTransition(progress, authoritative);
+}
+
 function assertQuarantineDiscardTransition(
   quarantined: RunTransaction,
   discarded: RunTransaction,
@@ -1146,19 +1382,10 @@ function assertQuarantineDiscardTransition(
 function assertDiscardProviderEvents(
   quarantined: RunTransaction,
   discardEvents: RunTransaction["providerResourceEvents"],
+  allowEmpty = true,
 ): void {
-  if (discardEvents.length === 0) return;
-  const providerKinds = new Map<string, string>();
-  for (const resource of quarantined.providerResources) {
-    providerKinds.set(resource.providerId, resource.resourceKind);
-  }
-  for (const event of quarantined.providerResourceEvents) {
-    const knownKind = providerKinds.get(event.providerId);
-    if (knownKind && knownKind !== event.resourceKind) {
-      throwInvalidTerminalTransition("discard provider identity");
-    }
-    providerKinds.set(event.providerId, event.resourceKind);
-  }
+  if (discardEvents.length === 0 && allowEmpty) return;
+  const providerKinds = discardProviderKinds(quarantined);
   if (discardEvents.length !== providerKinds.size) {
     throwInvalidTerminalTransition("discard provider coverage");
   }
@@ -1189,6 +1416,56 @@ function assertDiscardProviderEvents(
     }
     seen.add(event.providerId);
   }
+}
+
+function assertDiscardCleanupCompletion(
+  authority: RunTransaction,
+  completed: RunTransaction,
+): void {
+  if (
+    authority.status !== "discarded" ||
+    authority.disposition !== "discarded" ||
+    completed.status !== "discarded" ||
+    completed.disposition !== "discarded" ||
+    completed.providerResourceEvents.length <=
+      authority.providerResourceEvents.length ||
+    stableJson(
+      completed.providerResourceEvents.slice(
+        0,
+        authority.providerResourceEvents.length,
+      ),
+    ) !== stableJson(authority.providerResourceEvents)
+  ) {
+    throwInvalidTerminalTransition("Discard cleanup state");
+  }
+  const providerDiscardEvents = completed.providerResourceEvents.slice(
+    authority.providerResourceEvents.length,
+  );
+  assertDiscardProviderEvents(authority, providerDiscardEvents, false);
+  const expected = structuredClone(authority);
+  expected.providerResourceEvents = structuredClone(
+    completed.providerResourceEvents,
+  );
+  if (stableJson(expected) !== stableJson(completed)) {
+    throwInvalidTerminalTransition("Discard cleanup evidence");
+  }
+}
+
+function discardProviderKinds(
+  transaction: RunTransaction,
+): Map<string, string> {
+  const providerKinds = new Map<string, string>();
+  for (const resource of transaction.providerResources) {
+    providerKinds.set(resource.providerId, resource.resourceKind);
+  }
+  for (const event of transaction.providerResourceEvents) {
+    const knownKind = providerKinds.get(event.providerId);
+    if (knownKind && knownKind !== event.resourceKind) {
+      throwInvalidTerminalTransition("discard provider identity");
+    }
+    providerKinds.set(event.providerId, event.resourceKind);
+  }
+  return providerKinds;
 }
 
 function normalizeResourceEvidence<

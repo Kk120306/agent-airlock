@@ -59,6 +59,7 @@ import {
 } from "./portable-receipt.js";
 import {
   PortableDecisionJournal,
+  assertPromotionRecoveryProgress,
   assertQuarantineCleanupProgress,
   portableCandidateSetAuthorityHash,
   portableDecisionTransactionHash,
@@ -231,6 +232,7 @@ export class AgentService {
     const quarantineCleanupProgressRunIds = new Set<string>();
     const authoritativeDiscardQuarantineRoots = new Set<string>();
     const authoritativeDiscardCandidateRoots = new Set<string>();
+    const authoritativeDiscardMissingRoots = new Set<string>();
     const missingQuarantineRunIds = new Set<string>();
     for (const run of snapshot.runs) {
       try {
@@ -266,6 +268,7 @@ export class AgentService {
           ? portableDecisionTransactionHash(run.transaction)
           : null;
         let quarantineCleanupProgress = false;
+        let promotionRecoveryProgress = false;
         if (
           currentTransactionHash !== authority.transactionEvidenceHash &&
           run.transaction?.disposition === "quarantined" &&
@@ -280,8 +283,22 @@ export class AgentService {
         }
         if (
           currentTransactionHash !== authority.transactionEvidenceHash &&
+          run.transaction?.disposition === "promoted" &&
+          authority.disposition === "promoted" &&
+          authority.transaction.recovery.recoveredAfterRestart &&
+          !run.transaction.recovery.recoveredAfterRestart
+        ) {
+          assertPromotionRecoveryProgress(
+            authority.transaction,
+            run.transaction,
+          );
+          promotionRecoveryProgress = true;
+        }
+        if (
+          currentTransactionHash !== authority.transactionEvidenceHash &&
           run.transaction?.disposition &&
           !quarantineCleanupProgress &&
+          !promotionRecoveryProgress &&
           !(
             run.transaction.disposition === "quarantined" &&
             authority.disposition === "discarded"
@@ -325,6 +342,9 @@ export class AgentService {
           if (candidateExists) {
             authoritativeDiscardCandidateRoots.add(run.id);
           }
+          if (!quarantineExists && !candidateExists) {
+            authoritativeDiscardMissingRoots.add(run.id);
+          }
         }
         terminalAuthorities.set(run.id, authority);
         if (requiresRecovery) {
@@ -357,6 +377,22 @@ export class AgentService {
           throw new Error("Authoritative Discard evidence disappeared");
         }
         await this.completeAuthorizedDiscard(authority, "candidate");
+      } catch (error) {
+        terminalAuthorityRecoveries.delete(runId);
+        terminalAuthorityFailures.set(
+          runId,
+          "Authoritative Discard cleanup failed: " +
+            boundedCandidateSetError(error),
+        );
+      }
+    }
+    for (const runId of authoritativeDiscardMissingRoots) {
+      try {
+        const authority = terminalAuthorities.get(runId);
+        if (!authority) {
+          throw new Error("Authoritative Discard evidence disappeared");
+        }
+        await this.completeAuthorizedDiscard(authority, null);
       } catch (error) {
         terminalAuthorityRecoveries.delete(runId);
         terminalAuthorityFailures.set(
@@ -438,11 +474,17 @@ export class AgentService {
           }
           cleanupAuthorities.set(runId, authority);
           cleanupTransactions.set(runId, finalTransaction);
-          await this.runner.discardRetainedProviderState(
+          const cleaned = await this.runner.discardRetainedProviderState(
             run.agentId,
             finalTransaction,
             root,
           );
+          if (requiresProviderDiscard(finalTransaction)) {
+            await this.portableDecisionJournal.recordDiscardCleanup(
+              authority,
+              cleaned,
+            );
+          }
           return;
         }
         const cleaned = await this.runner.discardRetainedProviderState(
@@ -536,9 +578,15 @@ export class AgentService {
         const recoveryTransactionHash = portableDecisionTransactionHash(
           recovered.transaction,
         );
-        const authorityAlreadyRecovered =
-          existingAuthority?.transactionEvidenceHash ===
-          recoveryTransactionHash;
+        const authorityAlreadyRecovered = Boolean(
+          existingAuthority &&
+          (existingAuthority.transactionEvidenceHash ===
+            recoveryTransactionHash ||
+            isEquivalentRecoveredPromotionReplay(
+              existingAuthority.transaction,
+              recovered.transaction,
+            )),
+        );
         run.transaction = structuredClone(
           authorityAlreadyRecovered && existingAuthority
             ? existingAuthority.transaction
@@ -2205,7 +2253,7 @@ export class AgentService {
 
   private async completeAuthorizedDiscard(
     authority: PortableDecisionAuthorityRecord,
-    kind: "candidate" | "quarantine",
+    kind: "candidate" | "quarantine" | null,
   ): Promise<void> {
     if (authority.disposition !== "discarded") {
       throw new Error("Physical Discard requires immutable Discard authority");
@@ -2215,22 +2263,40 @@ export class AgentService {
       retainedStateRoot = await this.workspaces.retainedQuarantinePath(
         authority.runId,
       );
-    } else if (await this.workspaces.candidateExists(authority.runId, true)) {
+    } else if (
+      kind === "candidate" &&
+      (await this.workspaces.candidateExists(authority.runId, true))
+    ) {
       retainedStateRoot = path.dirname(
         await this.workspaces.candidateResourcesPath(authority.runId, true),
       );
     } else {
       retainedStateRoot = null;
     }
+    if (requiresProviderDiscard(authority.transaction)) {
+      const completed =
+        await this.portableDecisionJournal.readDiscardCleanup(authority);
+      if (!completed) {
+        if (!retainedStateRoot) {
+          throw new Error(
+            "Authoritative Discard is missing provider cleanup evidence and retained recovery state",
+          );
+        }
+        const cleaned = await this.runner.discardRetainedProviderState(
+          authority.agentId,
+          authority.transaction,
+          retainedStateRoot,
+        );
+        await this.portableDecisionJournal.recordDiscardCleanup(
+          authority,
+          cleaned,
+        );
+      }
+    }
     if (!retainedStateRoot) return;
-    await this.runner.discardRetainedProviderState(
-      authority.agentId,
-      authority.transaction,
-      retainedStateRoot,
-    );
     if (kind === "quarantine") {
       await this.workspaces.discardQuarantine(authority.runId);
-    } else {
+    } else if (kind === "candidate") {
       await this.workspaces.cancelCandidate(authority.runId, true);
     }
   }
@@ -2760,6 +2826,24 @@ export class AgentService {
           "Authoritative Quarantine is missing from physical Candidate State",
         );
       }
+      const candidateSetAtDiscard = run.candidateSetId
+        ? (snapshot.candidateSets.find(
+            (candidateSet) => candidateSet.id === run.candidateSetId,
+          ) ?? null)
+        : null;
+      if (run.candidateSetId) {
+        if (
+          !candidateSetAtDiscard ||
+          !candidateSetAtDiscard.competitors.some(
+            (competitor) => competitor.runId === run.id,
+          )
+        ) {
+          throw new Error(
+            "Discarded Candidate Set Run contradicts its competitor lifecycle",
+          );
+        }
+        terminalCompetitorLifecycle(candidateSetAtDiscard, run, "discarded");
+      }
       transaction = structuredClone(terminalAuthority.transaction);
       const discardedAt = now();
       const discardedTransaction = markTransactionDiscarded(
@@ -2770,11 +2854,7 @@ export class AgentService {
       const discardAuthority = await this.recordPortableDecisionAuthority(
         runId,
         discardedTransaction,
-        run.candidateSetId
-          ? (snapshot.candidateSets.find(
-              (candidateSet) => candidateSet.id === run.candidateSetId,
-            ) ?? null)
-          : null,
+        candidateSetAtDiscard,
       );
       if (!discardAuthority) {
         throw new Error("Discard did not publish terminal decision authority");
@@ -2795,9 +2875,7 @@ export class AgentService {
         );
         if (
           storedRun.candidateSetId &&
-          (!storedCandidateSet ||
-            !storedCompetitor ||
-            storedCandidateSet.winnerRunId === storedRun.id)
+          (!storedCandidateSet || !storedCompetitor)
         ) {
           throw new Error(
             "Discarded Candidate Set Run contradicts its competitor lifecycle",
@@ -3828,7 +3906,7 @@ export class AgentService {
               progress.status === progress.disposition &&
               progress.promotionReceipt
             ) {
-              await this.recordPortableDecisionAuthority(
+              terminalAuthority = await this.recordPortableDecisionAuthority(
                 run.id,
                 progress,
                 candidateSet,
@@ -3836,6 +3914,25 @@ export class AgentService {
               return;
             }
             await this.persistRunProgress(run.id, progress);
+          },
+          async (cleaned) => {
+            if (!requiresProviderDiscard(cleaned)) return;
+            const authority =
+              terminalAuthority ??
+              (await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
+                run.id,
+                run.agentId,
+              ));
+            if (!authority || authority.disposition !== "discarded") {
+              throw new Error(
+                "Candidate Set loser provider cleanup has no Discard authority",
+              );
+            }
+            await this.portableDecisionJournal.recordDiscardCleanup(
+              authority,
+              cleaned,
+            );
+            terminalAuthority = authority;
           },
         );
       } else if (
@@ -4574,6 +4671,104 @@ function markTransactionDiscarded(
   return next;
 }
 
+function requiresProviderDiscard(transaction: RunTransaction): boolean {
+  return (
+    transaction.providerResources.length > 0 ||
+    transaction.providerResourceEvents.some(
+      (event) => event.stage === "prepare" && event.status === "failed",
+    )
+  );
+}
+
+function isEquivalentRecoveredPromotionReplay(
+  authority: RunTransaction,
+  replay: RunTransaction,
+): boolean {
+  if (
+    authority.status !== "promoted" ||
+    authority.disposition !== "promoted" ||
+    authority.recovery.journalPhase !== "completed" ||
+    !authority.recovery.recoveredAfterRestart ||
+    authority.recovery.recoveryError !== null ||
+    replay.status !== "promoted" ||
+    replay.disposition !== "promoted" ||
+    replay.recovery.journalPhase !== "completed" ||
+    !replay.recovery.recoveredAfterRestart ||
+    replay.recovery.recoveryError !== null
+  ) {
+    return false;
+  }
+  const providerCount = authority.providerResources.length;
+  if (
+    replay.providerResources.length !== providerCount ||
+    authority.providerResourceEvents.length < providerCount ||
+    replay.providerResourceEvents.length < providerCount ||
+    !isExactPromotionReconciliationSuffix(replay, providerCount)
+  ) {
+    return false;
+  }
+  const replayBeforeLatest = structuredClone(replay);
+  replayBeforeLatest.providerResourceEvents =
+    replay.providerResourceEvents.slice(
+      0,
+      providerCount === 0 ? undefined : -providerCount,
+    );
+  if (stableJson(replayBeforeLatest) === stableJson(authority)) {
+    return true;
+  }
+  if (
+    stableJson(
+      authority.providerResourceEvents.slice(
+        0,
+        providerCount === 0 ? undefined : -providerCount,
+      ),
+    ) !==
+    stableJson(
+      replay.providerResourceEvents.slice(
+        0,
+        providerCount === 0 ? undefined : -providerCount,
+      ),
+    )
+  ) {
+    return false;
+  }
+  const expected = structuredClone(authority);
+  expected.providerResourceEvents = structuredClone(
+    replay.providerResourceEvents,
+  );
+  return stableJson(expected) === stableJson(replay);
+}
+
+function isExactPromotionReconciliationSuffix(
+  transaction: RunTransaction,
+  providerCount: number,
+): boolean {
+  if (providerCount === 0) return true;
+  const providerKinds = new Map(
+    transaction.providerResources.map((resource) => [
+      resource.providerId,
+      resource.resourceKind,
+    ]),
+  );
+  const seen = new Set<string>();
+  const events = transaction.providerResourceEvents.slice(-providerCount);
+  return (
+    events.length === providerCount &&
+    events.every((event) => {
+      if (
+        providerKinds.get(event.providerId) !== event.resourceKind ||
+        seen.has(event.providerId) ||
+        event.stage !== "reconcile" ||
+        event.status !== "passed"
+      ) {
+        return false;
+      }
+      seen.add(event.providerId);
+      return true;
+    })
+  );
+}
+
 function terminalRunStatus(
   disposition: NonNullable<RunTransaction["disposition"]>,
 ): AgentRun["status"] {
@@ -4615,11 +4810,6 @@ function terminalCompetitorLifecycle(
       );
     }
     return { status: "promoted", loserDisposition: "winner" };
-  }
-  if (candidateSet.winnerRunId === run.id) {
-    throw new Error(
-      "Losing terminal authority contradicts the Candidate Set winner",
-    );
   }
   if (disposition === "quarantined") {
     return { status: "retained", loserDisposition: "retained" };

@@ -1270,6 +1270,7 @@ export class AirlockRunner {
     sealedTransaction: RunTransaction,
     policy: "retain" | "discard",
     onProgress: TransactionProgress,
+    onProviderDiscarded?: (transaction: RunTransaction) => Promise<void>,
   ): Promise<RunTransaction> {
     let transaction = structuredClone(sealedTransaction);
     if (
@@ -1365,11 +1366,12 @@ export class AirlockRunner {
       null,
       onProgress,
     );
-    await this.discardRetainedProviderState(
+    const cleaned = await this.discardRetainedProviderState(
       agentId,
       finalized,
       path.dirname(candidateResourcesRoot),
     );
+    await onProviderDiscarded?.(cleaned);
     await this.workspaces.cancelCandidate(transaction.id, true);
     return finalized;
   }

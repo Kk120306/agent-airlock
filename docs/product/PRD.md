@@ -282,7 +282,7 @@ This journey describes the complete product direction, including later roadmap p
 - Provider prepare failure prevents Runtime invocation and either completes idempotent cleanup or retains a retryable composite Quarantine.
 - Provider-only Validation rejection leaves the complete canonical composite fingerprint unchanged.
 - Duplicate provider Promotion installs one immutable version, and every tested interruption converges without replaying Runtime.
-- Immutable Discard authority exists before provider or local mutable state removal, cleanup remains idempotently recoverable, and missing state without that authority fails recovery closed.
+- Immutable Discard authority exists before provider or local mutable state removal, successful provider cleanup gains an authority-bound immutable completion fact before local removal, and missing state without both records fails recovery closed.
 - Provider onboarding preserves every built-in Canonical fingerprint, fails closed on an unverifiable source, and converges after interruption at every Registry Transition seam.
 - A lost prepare response, partial multi-provider failure, cancellation cleanup outage, oversized source, redirect, or post-Runtime symbolic-link substitution cannot change Canonical State or erase the recovery handle.
 - Provider-controlled identifiers, summaries, metadata, lifecycle evidence, reconciliation evidence, and errors must remain bounded and credential-free before persistence or display.
