@@ -3071,7 +3071,13 @@ export class AgentService {
     if (!run.transaction || run.output === null) {
       throw new Error("Selected Candidate Run evidence is incomplete");
     }
-    await this.updateCandidateSetPhase(candidateSetId, "promoting");
+    if (candidateSet.phase === "selected") {
+      await this.updateCandidateSetPhase(candidateSetId, "promoting");
+    } else if (candidateSet.phase !== "promoting") {
+      throw new Error(
+        "Candidate Set cannot resume Promotion from " + candidateSet.phase,
+      );
+    }
     const canonical = await this.workspaces.readCanonicalForProviderTransition(
       candidateSet.agentId,
     );
