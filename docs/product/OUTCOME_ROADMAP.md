@@ -361,7 +361,7 @@ Make the conformance suite executable so provider claims can be verified, not me
 - The credential-free HTTP object provider depends only on the SDK and fails closed for timeout, oversized, malformed, wrong-content-type, unavailable, source-mismatch, and tampered responses.
 - Provider preparation failure prevents Runtime invocation, provider-only rejection quarantines the whole Candidate, and repeated Promotion installs one immutable version.
 - Lost prepare responses, partial multi-provider progress, cancellation cleanup outages, and post-Runtime symbolic-link substitutions retain retryable evidence while Canonical State remains unchanged.
-- Immutable Discard authority is persisted before provider or local removal, cleanup outage retains the local recovery root, and missing contradictory state becomes `recovery-error`.
+- Immutable Discard authority is persisted before provider or local removal, successful provider cleanup gains an authority-bound immutable completion fact before local removal, and missing contradictory state becomes `recovery-error`.
 - Provider removal and contract replacement fail closed until an explicit export-and-retire migration exists.
 - `npm run check:phase8:conformance` emits readable and JSON evidence from the public CLI.
 - `npm run demo:phase8 -- --reset` and the dedicated production Chrome specification exercise remote Promotion and Quarantine while leaving the Phase 7 judge launcher unchanged.
@@ -403,7 +403,7 @@ This is Agent Airlock's category-defining expansion because ordinary sandboxes i
 - The complete ordered scorecard, one-winner or no-winner result, tie-break rule, and SHA-256 decision digest are persisted before the existing Promotion journal begins.
 - A changed or contradictory selected winner enters `recovery-error`; Airlock never falls through to a runner-up and never dispatches a losing External Action Intent.
 - Restart recovery finishes the exact persisted winner, reconciles loser retention or Discard idempotently, and completes older-generation Candidate Sets before onboarding a newly configured provider.
-- Discard authority is published before provider and local loser cleanup, so restart can complete an authorized remnant without trusting mutable cleanup claims.
+- Discard authority is published before provider and local loser cleanup, then an immutable authority-bound provider-cleanup completion fact is published before local removal, so restart never trusts mutable cleanup claims.
 - The real no-cost HTTP-to-CodexRunner fixture launches three isolated processes, excludes `unsafe-fast`, selects `focused-valid`, advances Canonical State once, and delivers exactly one supported effect.
 - The Playground `Explore futures` journey shows shared-source evidence, competitor eligibility, normalized scores, winner rationale, decision digest, and loser disposition at desktop and 390-pixel layouts.
 - `npm run check:phase9:selection` and `npm run check:phase9:boundaries` lock the schema migration, admission bounds, deterministic replay, scoped duration cancellation, operator cancellation, tamper, recovery, provider-generation, and irreversible-boundary guarantees without credentials or paid inference.

@@ -1633,6 +1633,72 @@ describe("Phase 9 Competing Futures acceptance", () => {
       access(path.join(canonical.workspacePath, "src", "broad-a.ts")),
     ).rejects.toThrow();
     expect(await service.listExternalEffects()).toEqual([]);
+
+    const winnerRunId = failed.winnerRunId;
+    if (!winnerRunId) throw new Error("Tampered Selection has no winner Run");
+    const restarted = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await restarted.initialize();
+    expect(restarted.getCandidateSet(admitted.candidateSet.id)).toMatchObject({
+      phase: "recovery-error",
+      winnerRunId,
+      competitors: expect.arrayContaining([
+        expect.objectContaining({
+          runId: winnerRunId,
+          status: "retained",
+          loserDisposition: "retained",
+        }),
+      ]),
+    });
+    expect(restarted.getRun(winnerRunId).transaction).toMatchObject({
+      status: "quarantined",
+      disposition: "quarantined",
+      quarantineAvailable: true,
+    });
+
+    await expect(restarted.discardRun(winnerRunId)).resolves.toMatchObject({
+      transaction: {
+        status: "discarded",
+        disposition: "discarded",
+        quarantineAvailable: false,
+      },
+    });
+    expect(restarted.getCandidateSet(admitted.candidateSet.id)).toMatchObject({
+      phase: "recovery-error",
+      winnerRunId,
+      competitors: expect.arrayContaining([
+        expect.objectContaining({
+          runId: winnerRunId,
+          status: "discarded",
+          loserDisposition: "discarded",
+        }),
+      ]),
+    });
+
+    const afterDiscardRestart = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await afterDiscardRestart.initialize();
+    expect(afterDiscardRestart.getRun(winnerRunId).transaction).toMatchObject({
+      status: "discarded",
+      disposition: "discarded",
+      quarantineAvailable: false,
+    });
+    expect(
+      afterDiscardRestart
+        .getCandidateSet(admitted.candidateSet.id)
+        .competitors.find((competitor) => competitor.runId === winnerRunId),
+    ).toMatchObject({
+      status: "discarded",
+      loserDisposition: "discarded",
+    });
   });
 
   it("keeps the Agent busy until stale Candidate cleanup is durably complete", async () => {

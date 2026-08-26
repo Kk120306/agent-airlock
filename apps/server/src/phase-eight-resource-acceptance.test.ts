@@ -1921,6 +1921,16 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       "simulated interruption after Discard authority",
     );
     await expect(access(quarantinePath)).resolves.toBeUndefined();
+    expect(
+      await readdir(
+        path.join(
+          fixture.config.dataDirectory,
+          "portable-decision-journal",
+          ".discard-cleanup",
+          fixture.runId,
+        ),
+      ),
+    ).toHaveLength(1);
 
     const restarted = new AgentService(
       fixture.config,
@@ -1948,6 +1958,169 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       },
     });
     await expect(access(quarantinePath)).rejects.toThrow();
+  });
+
+  it("fails closed when Discard authority outlives both provider cleanup and its local recovery handle", async () => {
+    const fixture = await createRejectedProviderFixture(
+      "discard-authority-without-cleanup",
+    );
+    const quarantinePath = fixture.rejected.transaction?.quarantinePath;
+    const providerQuarantineId =
+      fixture.rejected.transaction?.providerResources[0]?.quarantine
+        ?.quarantineId;
+    if (!quarantinePath || !providerQuarantineId) {
+      throw new Error("Fixture did not retain a composite Quarantine");
+    }
+
+    fixture.provider.failDiscard = true;
+    await expect(fixture.service.discardRun(fixture.runId)).rejects.toThrow(
+      "evidence-preserving Discard",
+    );
+    await expect(access(quarantinePath)).resolves.toBeUndefined();
+    expect(fixture.provider.quarantines.has(providerQuarantineId)).toBe(true);
+
+    await fixture.workspaces.discardQuarantine(fixture.runId);
+    fixture.provider.failDiscard = false;
+    const restarted = new AgentService(
+      fixture.config,
+      new JsonStore(path.join(fixture.config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        fixture.config.workspaceRoot,
+        undefined,
+        undefined,
+        fixture.coordinator.initialVersions(),
+      ),
+      fixture.runtime,
+      undefined,
+      undefined,
+      fixture.coordinator,
+    );
+    await restarted.initialize();
+
+    expect(restarted.getRun(fixture.runId)).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("missing provider cleanup evidence"),
+      transaction: {
+        status: "recovery-error",
+        recovery: {
+          recoveredAfterRestart: true,
+          recoveryError: expect.stringContaining(
+            "missing provider cleanup evidence",
+          ),
+        },
+      },
+    });
+    expect(fixture.provider.quarantines.has(providerQuarantineId)).toBe(true);
+    expect(restarted.getAgent(fixture.agentId)).toMatchObject({
+      status: "error",
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "retains local recovery state when provider cleanup fact publication fails",
+    async () => {
+      const fixture = await createRejectedProviderFixture(
+        "discard-cleanup-publication",
+      );
+      const quarantinePath = fixture.rejected.transaction?.quarantinePath;
+      const providerQuarantineId =
+        fixture.rejected.transaction?.providerResources[0]?.quarantine
+          ?.quarantineId;
+      if (!quarantinePath || !providerQuarantineId) {
+        throw new Error("Fixture did not retain a composite Quarantine");
+      }
+      const cleanupRoot = path.join(
+        fixture.config.dataDirectory,
+        "portable-decision-journal",
+        ".discard-cleanup",
+      );
+      await chmod(cleanupRoot, 0o500);
+      try {
+        await expect(
+          fixture.service.discardRun(fixture.runId),
+        ).rejects.toThrow();
+      } finally {
+        await chmod(cleanupRoot, 0o700);
+      }
+
+      expect(fixture.provider.quarantines.has(providerQuarantineId)).toBe(
+        false,
+      );
+      await expect(access(quarantinePath)).resolves.toBeUndefined();
+      await expect(
+        fixture.service.discardRun(fixture.runId),
+      ).resolves.toMatchObject({
+        transaction: {
+          status: "discarded",
+          disposition: "discarded",
+        },
+      });
+      await expect(access(quarantinePath)).rejects.toThrow();
+    },
+  );
+
+  it("rejects a structurally valid cleanup fact with forged provider coverage", async () => {
+    const fixture = await createRejectedProviderFixture(
+      "forged-discard-cleanup",
+    );
+    await fixture.service.discardRun(fixture.runId);
+    const cleanupDirectory = path.join(
+      fixture.config.dataDirectory,
+      "portable-decision-journal",
+      ".discard-cleanup",
+      fixture.runId,
+    );
+    const originalName = (await readdir(cleanupDirectory)).find((entry) =>
+      entry.endsWith(".json"),
+    );
+    if (!originalName) throw new Error("Discard cleanup fact is missing");
+    const originalPath = path.join(cleanupDirectory, originalName);
+    const forged = JSON.parse(await readFile(originalPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const events = forged.providerDiscardEvents as Array<
+      Record<string, unknown>
+    >;
+    events[0]!.providerId = "forged-provider";
+    const { cleanupDigest: _cleanupDigest, ...unsigned } = forged;
+    const forgedDigest = "sha256:" + fingerprint(unsigned);
+    forged.cleanupDigest = forgedDigest;
+    await unlink(originalPath);
+    await writeFile(
+      path.join(
+        cleanupDirectory,
+        forgedDigest.replace("sha256:", "sha256-") + ".json",
+      ),
+      JSON.stringify(forged) + "\n",
+      "utf8",
+    );
+
+    const restarted = new AgentService(
+      fixture.config,
+      new JsonStore(path.join(fixture.config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        fixture.config.workspaceRoot,
+        undefined,
+        undefined,
+        fixture.coordinator.initialVersions(),
+      ),
+      fixture.runtime,
+      undefined,
+      undefined,
+      fixture.coordinator,
+    );
+    await restarted.initialize();
+    expect(restarted.getRun(fixture.runId)).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("discard provider evidence"),
+      transaction: {
+        status: "recovery-error",
+        recovery: {
+          recoveryError: expect.stringContaining("discard provider evidence"),
+        },
+      },
+    });
   });
 
   it.skipIf(process.platform === "win32")(
@@ -2125,6 +2298,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       );
       const interrupted = await waitForRun(firstService, started.run.id);
       expect(interrupted.status).toBe("failed");
+      const databaseBeforeRecovery = await readFile(
+        path.join(config.dataDirectory, "db.json"),
+        "utf8",
+      );
 
       const restartedCoordinator = new ResourceCoordinator(
         new ResourceRegistry([{ provider, initialVersion }]),
@@ -2173,6 +2350,42 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
           canonical.providerVersions[0]?.versionId ?? "missing",
         ),
       ).toEqual({ release: "crash-safe" });
+
+      if (faultPoint === "after-completed") {
+        await writeFile(
+          path.join(config.dataDirectory, "db.json"),
+          databaseBeforeRecovery,
+          "utf8",
+        );
+        const secondRestart = new AgentService(
+          config,
+          new JsonStore(path.join(config.dataDirectory, "db.json")),
+          new WorkspaceManager(
+            config.workspaceRoot,
+            undefined,
+            undefined,
+            restartedCoordinator.initialVersions(),
+          ),
+          restartedRunner,
+          undefined,
+          undefined,
+          restartedCoordinator,
+        );
+        await secondRestart.initialize();
+        expect(secondRestart.getRun(started.run.id)).toMatchObject({
+          status: "completed",
+          error: null,
+          transaction: {
+            disposition: "promoted",
+            recovery: {
+              journalPhase: "completed",
+              recoveredAfterRestart: true,
+              recoveryError: null,
+            },
+          },
+        });
+        expect(provider.versions.size).toBe(2);
+      }
     },
   );
 });
