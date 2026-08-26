@@ -76,13 +76,17 @@ export interface PromotionRecoveryAuthorityContext {
 }
 
 export class StaleCandidateSourceError extends Error {
-  constructor(message = "Canonical State changed before selected Candidate Promotion") {
+  constructor(
+    message = "Canonical State changed before selected Candidate Promotion",
+  ) {
     super(message);
     this.name = "StaleCandidateSourceError";
   }
 }
 
-export type TransactionProgress = (transaction: RunTransaction) => Promise<void>;
+export type TransactionProgress = (
+  transaction: RunTransaction,
+) => Promise<void>;
 
 export type PromotionFaultPoint =
   | "after-validated"
@@ -272,25 +276,6 @@ export class AirlockRunner {
     return manifests.every((manifest) => quarantines.has(manifest.providerId));
   }
 
-  providerDiscardCompleted(transaction: RunTransaction): boolean {
-    const hasProviderEvidence =
-      transaction.providerResources.length > 0 ||
-      transaction.providerResourceEvents.length > 0;
-    if (!hasProviderEvidence) return true;
-    const providerIds = new Set([
-      ...transaction.providerResources.map((resource) => resource.providerId),
-      ...transaction.providerResourceEvents.map((event) => event.providerId),
-    ]);
-    return [...providerIds].every((providerId) =>
-      transaction.providerResourceEvents.some(
-        (event) =>
-          event.providerId === providerId &&
-          event.stage === "discard" &&
-          event.status === "passed",
-      ),
-    );
-  }
-
   async discardProviderQuarantines(
     agentId: string,
     transaction: RunTransaction,
@@ -324,7 +309,9 @@ export class AirlockRunner {
       return structuredClone(transaction);
     }
     if (!transaction.candidateStateId) {
-      throw new Error("Provider Candidate has no retained Candidate State identifier");
+      throw new Error(
+        "Provider Candidate has no retained Candidate State identifier",
+      );
     }
     const candidateResourcesRoot = path.join(retainedStateRoot, "resources");
     const providerIds = await this.workspaces.retainedProviderIds(
@@ -403,7 +390,10 @@ export class AirlockRunner {
             request.repairSourceRunId,
             request.runId,
           )
-        : await this.workspaces.prepareCandidate(request.agentId, request.runId);
+        : await this.workspaces.prepareCandidate(
+            request.agentId,
+            request.runId,
+          );
       candidatePrepared = true;
       candidateStateId = candidate.candidateStateId;
       transaction.candidateStateId = candidate.candidateStateId;
@@ -411,14 +401,22 @@ export class AirlockRunner {
         await this.workspaces.candidateWorkspacePath(request.runId);
       const candidateCodexHomePath =
         await this.workspaces.candidateCodexHomePath(request.runId);
-      const candidateOutboxPath =
-        await this.workspaces.candidateOutboxPath(request.runId);
-      candidateResourcesRoot =
-        await this.workspaces.candidateResourcesPath(request.runId);
-      const canonicalBefore = await this.workspaces.readCanonical(request.agentId);
-      const sqliteBefore = await this.sqlite.inspect(canonicalBefore.workspacePath);
+      const candidateOutboxPath = await this.workspaces.candidateOutboxPath(
+        request.runId,
+      );
+      candidateResourcesRoot = await this.workspaces.candidateResourcesPath(
+        request.runId,
+      );
+      const canonicalBefore = await this.workspaces.readCanonical(
+        request.agentId,
+      );
+      const sqliteBefore = await this.sqlite.inspect(
+        canonicalBefore.workspacePath,
+      );
       if (sqliteBefore.contentHash !== canonicalBefore.sqliteContentHash) {
-        throw new Error("Canonical SQLite snapshot does not match its manifest");
+        throw new Error(
+          "Canonical SQLite snapshot does not match its manifest",
+        );
       }
       transaction.sqlite = {
         databasePath: SQLITE_RELATIVE_PATH,
@@ -438,11 +436,13 @@ export class AirlockRunner {
         onEvent: recordResourceEvent,
         onPrepared: async (resources) => {
           preparedResources = structuredClone([...resources]);
-          transaction.providerResources = providerRecordsFromPrepared(resources);
+          transaction.providerResources =
+            providerRecordsFromPrepared(resources);
           await onProgress(transaction);
         },
       });
-      transaction.providerResources = providerRecordsFromPrepared(preparedResources);
+      transaction.providerResources =
+        providerRecordsFromPrepared(preparedResources);
       await onProgress(transaction);
       this.assertNotCancelled(request.agentId, request.executionId);
       if (
@@ -485,7 +485,10 @@ export class AirlockRunner {
         prompt: request.prompt,
         threadId: candidate.runtimeThreadId,
       });
-      await this.workspaces.recordCandidateThread(request.runId, result.threadId);
+      await this.workspaces.recordCandidateThread(
+        request.runId,
+        result.threadId,
+      );
       this.assertNotCancelled(request.agentId, request.executionId);
       await this.resources.assertRuntimeBindingsSafe(preparedResources);
 
@@ -502,21 +505,22 @@ export class AirlockRunner {
         transaction.outcomeContract,
         request.runId,
       );
-      const [sqliteValidation, actionValidation, resourceValidation] = await Promise.all([
-        this.sqlite.validate(
-          candidateWorkspacePath,
-          transaction.outcomeContract.secretPatterns,
-        ),
-        this.actionOutbox.validate(candidateOutboxPath, request.runId),
-        this.resources.describeAndValidate({
-          agentId: request.agentId,
-          runId: request.runId,
-          candidateStateId: candidate.candidateStateId,
-          candidateResourcesRoot,
-          prepared: preparedResources,
-          onEvent: recordResourceEvent,
-        }),
-      ]);
+      const [sqliteValidation, actionValidation, resourceValidation] =
+        await Promise.all([
+          this.sqlite.validate(
+            candidateWorkspacePath,
+            transaction.outcomeContract.secretPatterns,
+          ),
+          this.actionOutbox.validate(candidateOutboxPath, request.runId),
+          this.resources.describeAndValidate({
+            agentId: request.agentId,
+            runId: request.runId,
+            candidateStateId: candidate.candidateStateId,
+            candidateResourcesRoot,
+            prepared: preparedResources,
+            onEvent: recordResourceEvent,
+          }),
+        ]);
       const repairReferenceValidation =
         await this.workspaces.repairReferenceEvidence(request.runId);
       parsedIntents = actionValidation.intents;
@@ -677,15 +681,16 @@ export class AirlockRunner {
       await onProgress(transaction);
       await this.injectPromotionFault?.("after-validated", request.runId);
 
-      const installedBeforeCanonical = await this.resources.promoteBeforeCanonical({
-        agentId: request.agentId,
-        runId: request.runId,
-        candidateStateId: candidate.candidateStateId,
-        candidateResourcesRoot,
-        prepared: preparedResources,
-        plans: providerPlans,
-        onEvent: recordResourceEvent,
-      });
+      const installedBeforeCanonical =
+        await this.resources.promoteBeforeCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          onEvent: recordResourceEvent,
+        });
       transaction.providerResources = mergeInstalledProviderVersions(
         transaction.providerResources,
         installedBeforeCanonical,
@@ -701,11 +706,20 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-version-installed", request.runId);
+      await this.injectPromotionFault?.(
+        "after-version-installed",
+        request.runId,
+      );
 
-      const canonicalState = await this.workspaces.advancePromotion(plan, installed);
+      const canonicalState = await this.workspaces.advancePromotion(
+        plan,
+        installed,
+      );
       transaction = this.recordCanonicalAdvance(transaction, canonicalState);
-      await this.injectPromotionFault?.("after-canonical-advance", request.runId);
+      await this.injectPromotionFault?.(
+        "after-canonical-advance",
+        request.runId,
+      );
       journal = await this.promotionJournal.advance(
         request.runId,
         "canonical-advanced",
@@ -713,21 +727,26 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-canonical-advanced", request.runId);
-
-      const installedResourcesRoot = await this.workspaces.installedResourcesPath(
-        request.agentId,
-        plan.targetStateId,
+      await this.injectPromotionFault?.(
+        "after-canonical-advanced",
+        request.runId,
       );
-      const installedAfterCanonical = await this.resources.promoteAfterCanonical({
-        agentId: request.agentId,
-        runId: request.runId,
-        candidateStateId: candidate.candidateStateId,
-        candidateResourcesRoot: installedResourcesRoot,
-        prepared: preparedResources,
-        plans: providerPlans,
-        onEvent: recordResourceEvent,
-      });
+
+      const installedResourcesRoot =
+        await this.workspaces.installedResourcesPath(
+          request.agentId,
+          plan.targetStateId,
+        );
+      const installedAfterCanonical =
+        await this.resources.promoteAfterCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot: installedResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          onEvent: recordResourceEvent,
+        });
       transaction.providerResources = mergeInstalledProviderVersions(
         transaction.providerResources,
         installedAfterCanonical,
@@ -751,17 +770,24 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-effects-delivered", request.runId);
+      await this.injectPromotionFault?.(
+        "after-effects-delivered",
+        request.runId,
+      );
 
       transaction = this.recordTransition(
         transaction,
         "promoted",
         "Candidate State is now Canonical State",
       );
-      journal = await this.promotionJournal.advance(request.runId, "completed", {
-        transaction,
-        targetCanonical: canonicalState,
-      });
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "completed",
+        {
+          transaction,
+          targetCanonical: canonicalState,
+        },
+      );
       transaction = journal.transaction;
       await onProgress(transaction);
       await this.injectPromotionFault?.("after-completed", request.runId);
@@ -792,7 +818,8 @@ export class AirlockRunner {
       }
       if (error instanceof ResourcePreparationError) {
         preparedResources = error.prepared;
-        transaction.providerResources = providerRecordsFromPrepared(preparedResources);
+        transaction.providerResources =
+          providerRecordsFromPrepared(preparedResources);
         transaction.providerResources = error.cleanupCompleted
           ? markProviderDisposition(transaction.providerResources, "discarded")
           : markProviderPrepareRetained(transaction.providerResources);
@@ -801,9 +828,8 @@ export class AirlockRunner {
           if (error.cleanupCompleted) {
             await this.workspaces.cancelCandidate(request.runId);
           } else {
-            transaction.quarantinePath = await this.workspaces.quarantineCandidate(
-              request.runId,
-            );
+            transaction.quarantinePath =
+              await this.workspaces.quarantineCandidate(request.runId);
             transaction.quarantineAvailable = true;
           }
           candidatePrepared = false;
@@ -827,12 +853,7 @@ export class AirlockRunner {
             : "Resource preparation aborted before Runtime and cleanup requires retry",
           onProgress,
         );
-        throw new AirlockRunError(
-          error.message,
-          transaction,
-          false,
-          error,
-        );
+        throw new AirlockRunError(error.message, transaction, false, error);
       }
       const cancelled = error instanceof RunCancelledError;
       let providerCleanupError: unknown = null;
@@ -866,7 +887,9 @@ export class AirlockRunner {
               candidateStateId,
               candidateResourcesRoot,
               prepared: preparedResources,
-              ...(providerEvidence.length > 0 ? { evidence: providerEvidence } : {}),
+              ...(providerEvidence.length > 0
+                ? { evidence: providerEvidence }
+                : {}),
               failureStage: lifecycleFailureStage(error),
               onEvent: recordResourceEvent,
               onQuarantine: async (quarantines) => {
@@ -900,9 +923,8 @@ export class AirlockRunner {
         if (cancelledAndClean) {
           await this.workspaces.cancelCandidate(request.runId);
         } else {
-          transaction.quarantinePath = await this.workspaces.quarantineCandidate(
-            request.runId,
-          );
+          transaction.quarantinePath =
+            await this.workspaces.quarantineCandidate(request.runId);
           transaction.quarantineAvailable = true;
         }
       }
@@ -922,7 +944,7 @@ export class AirlockRunner {
           ? "Run Transaction was cancelled before Promotion"
           : cancelled
             ? "Cancellation retained cleanup-only Quarantine after provider cleanup failed"
-          : "Runtime failed and Candidate State was quarantined",
+            : "Runtime failed and Candidate State was quarantined",
         onProgress,
       );
       const message = error instanceof Error ? error.message : String(error);
@@ -967,7 +989,9 @@ export class AirlockRunner {
       transaction.disposition !== null ||
       !transaction.candidateStateId
     ) {
-      throw new Error("Selected Candidate seal contradicts its Run Transaction");
+      throw new Error(
+        "Selected Candidate seal contradicts its Run Transaction",
+      );
     }
     const candidateStateId = transaction.candidateStateId;
     const canonical = await this.workspaces.readCanonicalForProviderTransition(
@@ -1008,31 +1032,37 @@ export class AirlockRunner {
       await onProgress(transaction);
     };
 
-    await this.resources.assertRuntimeBindingsSafe(preparedResources, providerIds);
+    await this.resources.assertRuntimeBindingsSafe(
+      preparedResources,
+      providerIds,
+    );
     const validationResult = await this.validator.validate(
       canonical.workspacePath,
       candidateWorkspacePath,
       transaction.outcomeContract,
       request.runId,
     );
-    const [sqliteValidation, actionValidation, providerEvidence] = await Promise.all([
-      this.sqlite.validate(
-        candidateWorkspacePath,
-        transaction.outcomeContract.secretPatterns,
-      ),
-      this.actionOutbox.validate(candidateOutboxPath, request.runId),
-      this.resources.describeAndValidate({
-        agentId: request.agentId,
-        runId: request.runId,
-        candidateStateId: transaction.candidateStateId,
-        candidateResourcesRoot,
-        prepared: preparedResources,
-        providerIds,
-        onEvent: recordResourceEvent,
-      }),
-    ]);
+    const [sqliteValidation, actionValidation, providerEvidence] =
+      await Promise.all([
+        this.sqlite.validate(
+          candidateWorkspacePath,
+          transaction.outcomeContract.secretPatterns,
+        ),
+        this.actionOutbox.validate(candidateOutboxPath, request.runId),
+        this.resources.describeAndValidate({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: transaction.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          providerIds,
+          onEvent: recordResourceEvent,
+        }),
+      ]);
     if (!sqliteValidation.snapshot) {
-      throw new Error("Selected Candidate SQLite state could not be reverified");
+      throw new Error(
+        "Selected Candidate SQLite state could not be reverified",
+      );
     }
     assertSealedCandidateUnchanged({
       transaction,
@@ -1097,16 +1127,17 @@ export class AirlockRunner {
       await onProgress(transaction);
       await this.injectPromotionFault?.("after-validated", request.runId);
 
-      const installedBeforeCanonical = await this.resources.promoteBeforeCanonical({
-        agentId: request.agentId,
-        runId: request.runId,
-        candidateStateId,
-        candidateResourcesRoot,
-        prepared: preparedResources,
-        plans: providerPlans,
-        providerIds,
-        onEvent: recordResourceEvent,
-      });
+      const installedBeforeCanonical =
+        await this.resources.promoteBeforeCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          providerIds,
+          onEvent: recordResourceEvent,
+        });
       transaction.providerResources = mergeInstalledProviderVersions(
         transaction.providerResources,
         installedBeforeCanonical,
@@ -1121,11 +1152,20 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-version-installed", request.runId);
+      await this.injectPromotionFault?.(
+        "after-version-installed",
+        request.runId,
+      );
 
-      const canonicalState = await this.workspaces.advancePromotion(plan, installed);
+      const canonicalState = await this.workspaces.advancePromotion(
+        plan,
+        installed,
+      );
       transaction = this.recordCanonicalAdvance(transaction, canonicalState);
-      await this.injectPromotionFault?.("after-canonical-advance", request.runId);
+      await this.injectPromotionFault?.(
+        "after-canonical-advance",
+        request.runId,
+      );
       journal = await this.promotionJournal.advance(
         request.runId,
         "canonical-advanced",
@@ -1133,22 +1173,27 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-canonical-advanced", request.runId);
-
-      const installedResourcesRoot = await this.workspaces.installedResourcesPath(
-        request.agentId,
-        plan.targetStateId,
+      await this.injectPromotionFault?.(
+        "after-canonical-advanced",
+        request.runId,
       );
-      const installedAfterCanonical = await this.resources.promoteAfterCanonical({
-        agentId: request.agentId,
-        runId: request.runId,
-        candidateStateId,
-        candidateResourcesRoot: installedResourcesRoot,
-        prepared: preparedResources,
-        plans: providerPlans,
-        providerIds,
-        onEvent: recordResourceEvent,
-      });
+
+      const installedResourcesRoot =
+        await this.workspaces.installedResourcesPath(
+          request.agentId,
+          plan.targetStateId,
+        );
+      const installedAfterCanonical =
+        await this.resources.promoteAfterCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId,
+          candidateResourcesRoot: installedResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          providerIds,
+          onEvent: recordResourceEvent,
+        });
       transaction.providerResources = mergeInstalledProviderVersions(
         transaction.providerResources,
         installedAfterCanonical,
@@ -1172,17 +1217,24 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-effects-delivered", request.runId);
+      await this.injectPromotionFault?.(
+        "after-effects-delivered",
+        request.runId,
+      );
 
       transaction = this.recordTransition(
         transaction,
         "promoted",
         "Selected Candidate State is now Canonical State",
       );
-      journal = await this.promotionJournal.advance(request.runId, "completed", {
-        transaction,
-        targetCanonical: canonicalState,
-      });
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "completed",
+        {
+          transaction,
+          targetCanonical: canonicalState,
+        },
+      );
       transaction = journal.transaction;
       await onProgress(transaction);
       await this.injectPromotionFault?.("after-completed", request.runId);
@@ -1225,7 +1277,9 @@ export class AirlockRunner {
       transaction.disposition !== null ||
       !transaction.candidateStateId
     ) {
-      throw new Error("Only a sealed unselected Candidate can receive loser disposition");
+      throw new Error(
+        "Only a sealed unselected Candidate can receive loser disposition",
+      );
     }
     const candidateExists = await this.workspaces.candidateExists(
       transaction.id,
@@ -1240,18 +1294,6 @@ export class AirlockRunner {
           transaction,
           policy,
           retainedQuarantinePath,
-          onProgress,
-        );
-      }
-      if (
-        policy === "discard" &&
-        !retainedQuarantinePath &&
-        this.providerDiscardCompleted(transaction)
-      ) {
-        return this.finalizeSealedLoserDisposition(
-          transaction,
-          policy,
-          null,
           onProgress,
         );
       }
@@ -1280,7 +1322,6 @@ export class AirlockRunner {
       await onProgress(transaction);
     };
 
-    let quarantinePath: string | null = null;
     if (policy === "retain") {
       let quarantines: ResourceQuarantineHandle[] = [];
       quarantines = await this.resources.quarantineAll({
@@ -1306,36 +1347,31 @@ export class AirlockRunner {
         transaction.providerResources,
         quarantines,
       );
-      quarantinePath = await this.workspaces.quarantineCandidate(
+      const quarantinePath = await this.workspaces.quarantineCandidate(
         transaction.id,
         true,
       );
-    } else {
-      await this.resources.discardAll({
-        agentId,
-        runId: transaction.id,
-        candidateStateId: transaction.candidateStateId,
-        candidateResourcesRoot,
-        prepared,
-        quarantines: [],
-        providerIds,
-        onEvent: recordResourceEvent,
-        onDiscard: async (results) => {
-          transaction.providerResources = markProvidersDiscarded(
-            transaction.providerResources,
-            results.map((result) => result.providerId),
-          );
-          await onProgress(transaction);
-        },
-      });
-      await this.workspaces.cancelCandidate(transaction.id, true);
+      return this.finalizeSealedLoserDisposition(
+        transaction,
+        policy,
+        quarantinePath,
+        onProgress,
+      );
     }
-    return this.finalizeSealedLoserDisposition(
+
+    const finalized = await this.finalizeSealedLoserDisposition(
       transaction,
       policy,
-      quarantinePath,
+      null,
       onProgress,
     );
+    await this.discardRetainedProviderState(
+      agentId,
+      finalized,
+      path.dirname(candidateResourcesRoot),
+    );
+    await this.workspaces.cancelCandidate(transaction.id, true);
+    return finalized;
   }
 
   private finalizeSealedLoserDisposition(
@@ -1358,9 +1394,12 @@ export class AirlockRunner {
     transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
     transaction.canonicalContentHashAfter =
       transaction.canonicalContentHashBefore;
-    transaction.externalActions.intents = transaction.externalActions.intents.map(
-      (intent) => ({ ...intent, status: "rejected", deliveredAt: null }),
-    );
+    transaction.externalActions.intents =
+      transaction.externalActions.intents.map((intent) => ({
+        ...intent,
+        status: "rejected",
+        deliveredAt: null,
+      }));
     if (transaction.sqlite?.before) {
       transaction.sqlite.after = structuredClone(transaction.sqlite.before);
     }
@@ -1400,7 +1439,10 @@ export class AirlockRunner {
     }));
     const protectedRunIds = new Set<string>();
     for (const record of scan.records) {
-      if (record.phase === "completed" && !recoverCompletedRunIds.has(record.runId)) {
+      if (
+        record.phase === "completed" &&
+        !recoverCompletedRunIds.has(record.runId)
+      ) {
         continue;
       }
       protectedRunIds.add(record.runId);
@@ -1452,9 +1494,8 @@ export class AirlockRunner {
 
     if (record.phase === "validated") {
       const providerIds = providerIdsFromPlan(record.plan);
-      const candidateResourcesRoot = await this.workspaces.promotionResourcesPath(
-        record.plan,
-      );
+      const candidateResourcesRoot =
+        await this.workspaces.promotionResourcesPath(record.plan);
       const prepared = await this.resources.restorePrepared(
         candidateResourcesRoot,
         transaction.providerResources,
@@ -1463,7 +1504,8 @@ export class AirlockRunner {
       const installedVersions = await this.resources.promoteBeforeCanonical({
         agentId: record.agentId,
         runId: record.runId,
-        candidateStateId: transaction.candidateStateId ?? record.plan.targetStateId,
+        candidateStateId:
+          transaction.candidateStateId ?? record.plan.targetStateId,
         candidateResourcesRoot,
         prepared,
         plans: record.plan.resourcePlans,
@@ -1516,10 +1558,11 @@ export class AirlockRunner {
     if (record.phase === "canonical-advanced") {
       const providerIds = providerIdsFromPlan(record.plan);
       const canonical = await this.verifyJournalCanonical(record);
-      const installedResourcesRoot = await this.workspaces.installedResourcesPath(
-        record.agentId,
-        record.plan.targetStateId,
-      );
+      const installedResourcesRoot =
+        await this.workspaces.installedResourcesPath(
+          record.agentId,
+          record.plan.targetStateId,
+        );
       const prepared = await this.resources.restorePrepared(
         installedResourcesRoot,
         transaction.providerResources,
@@ -1528,7 +1571,8 @@ export class AirlockRunner {
       const installedVersions = await this.resources.promoteAfterCanonical({
         agentId: record.agentId,
         runId: record.runId,
-        candidateStateId: transaction.candidateStateId ?? record.plan.targetStateId,
+        candidateStateId:
+          transaction.candidateStateId ?? record.plan.targetStateId,
         candidateResourcesRoot: installedResourcesRoot,
         prepared,
         plans: record.plan.resourcePlans,
@@ -1791,7 +1835,7 @@ export function finalizeResources(
           : undefined;
     const fingerprintAfter =
       resource.kind in fingerprints
-        ? fingerprints[resource.kind] ?? null
+        ? (fingerprints[resource.kind] ?? null)
         : disposition === "promoted" && canonicalFingerprint
           ? canonicalFingerprint
           : resource.fingerprintBefore;
@@ -1803,8 +1847,9 @@ export function finalizeResources(
         disposition === "promoted"
           ? resource.label + " accepted in the new Canonical State"
           : disposition === "discarded"
-            ? resource.label + " Quarantine was discarded; Canonical State stayed unchanged"
-          : resource.label + " remained on the prior Canonical State",
+            ? resource.label +
+              " Quarantine was discarded; Canonical State stayed unchanged"
+            : resource.label + " remained on the prior Canonical State",
     };
   });
   return next;
@@ -1814,7 +1859,9 @@ function mergeProviderEvidence(
   existing: RunTransaction["providerResources"],
   evidence: readonly CoordinatedResourceEvidence[],
 ): RunTransaction["providerResources"] {
-  const byProvider = new Map(evidence.map((resource) => [resource.providerId, resource]));
+  const byProvider = new Map(
+    evidence.map((resource) => [resource.providerId, resource]),
+  );
   return existing.map((resource) => {
     const accepted = byProvider.get(resource.providerId);
     if (!accepted) return resource;
@@ -1863,7 +1910,8 @@ function mergeProviderPlans(
   const byProvider = new Map(plans.map((plan) => [plan.providerId, plan]));
   return existing.map((resource) => ({
     ...resource,
-    promotionPlan: byProvider.get(resource.providerId) ?? resource.promotionPlan,
+    promotionPlan:
+      byProvider.get(resource.providerId) ?? resource.promotionPlan,
   }));
 }
 
@@ -1871,10 +1919,13 @@ function mergeInstalledProviderVersions(
   existing: RunTransaction["providerResources"],
   versions: readonly ResourceVersionReference[],
 ): RunTransaction["providerResources"] {
-  const byProvider = new Map(versions.map((version) => [version.providerId, version]));
+  const byProvider = new Map(
+    versions.map((version) => [version.providerId, version]),
+  );
   return existing.map((resource) => ({
     ...resource,
-    installedVersion: byProvider.get(resource.providerId) ?? resource.installedVersion,
+    installedVersion:
+      byProvider.get(resource.providerId) ?? resource.installedVersion,
   }));
 }
 
@@ -1934,7 +1985,8 @@ function markProvidersDiscarded(
       ? {
           ...resource,
           disposition: "discarded" as const,
-          summary: resource.label + " Candidate was discarded with retained evidence",
+          summary:
+            resource.label + " Candidate was discarded with retained evidence",
         }
       : resource,
   );
@@ -1997,7 +2049,9 @@ function providerIdsFromTransaction(transaction: RunTransaction): string[] {
 }
 
 function lifecycleFailureStage(error: unknown) {
-  return error instanceof ResourceLifecycleError ? error.stage : ("runtime" as const);
+  return error instanceof ResourceLifecycleError
+    ? error.stage
+    : ("runtime" as const);
 }
 
 function externalActionFingerprint(
@@ -2008,7 +2062,9 @@ function externalActionFingerprint(
       idempotencyKey: receipt.idempotencyKey,
       deliveredAt: receipt.deliveredAt,
     }))
-    .sort((left, right) => left.idempotencyKey.localeCompare(right.idempotencyKey));
+    .sort((left, right) =>
+      left.idempotencyKey.localeCompare(right.idempotencyKey),
+    );
   return (
     "sha256:" +
     createHash("sha256").update(JSON.stringify(normalized)).digest("hex")
@@ -2070,7 +2126,9 @@ function verifySealedCandidateReference(
     seal.sourceContentHash !== transaction.canonicalContentHashBefore ||
     seal.outcomeContractVersion !== transaction.outcomeContractVersion
   ) {
-    throw new Error("Selected Candidate seal failed deterministic verification");
+    throw new Error(
+      "Selected Candidate seal failed deterministic verification",
+    );
   }
 }
 
@@ -2098,7 +2156,9 @@ function assertSealedCandidateUnchanged(input: {
     !input.transaction.sqlite?.candidate ||
     input.transaction.sqlite.candidate.contentHash !== input.sqliteContentHash
   ) {
-    throw new Error("Selected Candidate SQLite state changed after it was sealed");
+    throw new Error(
+      "Selected Candidate SQLite state changed after it was sealed",
+    );
   }
   if (
     evidenceHash(input.intents) !==
@@ -2113,14 +2173,17 @@ function assertSealedCandidateUnchanged(input: {
     ]),
   );
   if (storedProviders.size !== input.providerEvidence.length) {
-    throw new Error("Selected Candidate Resource Provider set changed after sealing");
+    throw new Error(
+      "Selected Candidate Resource Provider set changed after sealing",
+    );
   }
   for (const evidence of input.providerEvidence) {
     const stored = storedProviders.get(evidence.providerId);
     if (
       !stored ||
       evidenceHash(evidence.candidate) !== evidenceHash(stored.candidate) ||
-      evidence.change.fingerprintCandidate !== stored.change?.fingerprintCandidate ||
+      evidence.change.fingerprintCandidate !==
+        stored.change?.fingerprintCandidate ||
       evidence.change.fingerprintBefore !== stored.change?.fingerprintBefore
     ) {
       throw new Error(
@@ -2132,13 +2195,13 @@ function assertSealedCandidateUnchanged(input: {
 
 function evidenceHash(value: unknown): string {
   return (
-    "sha256:" +
-    createHash("sha256").update(canonicalJson(value)).digest("hex")
+    "sha256:" + createHash("sha256").update(canonicalJson(value)).digest("hex")
   );
 }
 
 function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (Array.isArray(value))
+    return "[" + value.map(canonicalJson).join(",") + "]";
   if (value && typeof value === "object") {
     return (
       "{" +
@@ -2163,7 +2226,9 @@ export function createPromotionReceipt(
     !transaction.canonicalStateIdAfter ||
     !transaction.canonicalContentHashAfter
   ) {
-    throw new Error("Cannot create a receipt for an incomplete Run Transaction");
+    throw new Error(
+      "Cannot create a receipt for an incomplete Run Transaction",
+    );
   }
   const validationEvidenceHash = promotionValidationEvidenceHash(transaction);
   return {

@@ -7,23 +7,23 @@ A Run without that durable decision never becomes Canonical State during recover
 
 ## Sources of truth
 
-| Evidence | Meaning |
-| --- | --- |
-| Promotion journal | A validated Candidate received an approved promotion decision. |
-| Immutable version directory | The planned physical Whole-Agent state was installed. |
-| `canonical.json` | The currently accepted Whole-Agent state. |
-| Immutable historical Canonical manifest | The complete workspace, Codex home, SQLite, outbox, thread, provider, and composite reference for one exact accepted state identifier. |
-| Atomic mock-delivery store | The supported local external effect was claimed. |
-| Resource Provider immutable version | The exact provider target in the durable Promotion plan was installed. |
-| Resource Registry generation | The exact additive provider contracts accepted by this deployment. |
-| Registry Transition journal | A provider addition was verified and planned for one Agent before canonical advancement. |
-| Candidate Set aggregate | One exact shared source, sealed competitor evidence, deterministic Selection Decision, and loser cleanup progress. |
-| Candidate Set Decision Authority journal | One immutable Selection projection published before its mutable Candidate Set fields. |
-| Agent deletion journal | A bounded archive audit was prepared before an Agent workspace rename or control-plane deletion. |
-| JSON control-plane store | Operator-facing Agent, Run, Candidate Set, Assurance Proposal, Outcome Contract history, message, and Promotion Receipt metadata. |
-| Portable Decision Authority journal | An append-only terminal Run Transaction commitment with frozen Repair-parent and Candidate Set authority used only for receipt export. |
-| Portable signing key and identity marker | The private Ed25519 signer and its non-secret expected public-key fingerprint. |
-| Local transparency log | An optional append-only digest sequence, signed checkpoints, and prior-checkpoint chain for shared observation. |
+| Evidence                                 | Meaning                                                                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Promotion journal                        | A validated Candidate received an approved promotion decision.                                                                         |
+| Immutable version directory              | The planned physical Whole-Agent state was installed.                                                                                  |
+| `canonical.json`                         | The currently accepted Whole-Agent state.                                                                                              |
+| Immutable historical Canonical manifest  | The complete workspace, Codex home, SQLite, outbox, thread, provider, and composite reference for one exact accepted state identifier. |
+| Atomic mock-delivery store               | The supported local external effect was claimed.                                                                                       |
+| Resource Provider immutable version      | The exact provider target in the durable Promotion plan was installed.                                                                 |
+| Resource Registry generation             | The exact additive provider contracts accepted by this deployment.                                                                     |
+| Registry Transition journal              | A provider addition was verified and planned for one Agent before canonical advancement.                                               |
+| Candidate Set aggregate                  | One exact shared source, sealed competitor evidence, deterministic Selection Decision, and loser cleanup progress.                     |
+| Candidate Set Decision Authority journal | One immutable Selection projection published before its mutable Candidate Set fields.                                                  |
+| Agent deletion journal                   | A bounded archive audit was prepared before an Agent workspace rename or control-plane deletion.                                       |
+| JSON control-plane store                 | Operator-facing Agent, Run, Candidate Set, Assurance Proposal, Outcome Contract history, message, and Promotion Receipt metadata.      |
+| Portable Decision Authority journal      | An append-only terminal Run Transaction commitment with frozen Repair-parent and Candidate Set authority used only for receipt export. |
+| Portable signing key and identity marker | The private Ed25519 signer and its non-secret expected public-key fingerprint.                                                         |
+| Local transparency log                   | An optional append-only digest sequence, signed checkpoints, and prior-checkpoint chain for shared observation.                        |
 
 Recovery verifies the physical sources first and repairs control-plane metadata last.
 It never rolls `canonical.json` backward.
@@ -71,56 +71,57 @@ Candidate Set recovery also uses each competitor's persisted historical provider
 
 ## Fault outcomes
 
-| Interruption | Restart result |
-| --- | --- |
-| Before the approved journal exists | Canonical State stays unchanged, and a valid Candidate is quarantined. |
-| After `validated` | The Candidate is installed, accepted, delivered, and completed once. |
-| After physical version installation | The installed fingerprints are verified before canonical advancement. |
-| After `version-installed` | The exact installed version becomes canonical, then supported effects are dispatched. |
-| After physical canonical advancement | The existing manifest is verified against the journal and recovery continues forward. |
-| After `canonical-advanced` | Supported intents are parsed from the immutable accepted outbox and claimed idempotently. |
-| After physical effect dispatch | The same idempotency keys return the existing receipts before completion. |
-| After `effects-delivered` or `completed` | Final Run and Agent metadata is reconstructed without another version, effect, or assistant message. |
-| During provider preparation cleanup | Runtime does not start, Canonical State stays unchanged, and failed cleanup retains a retryable composite Quarantine. |
-| During cancellation while provider cleanup is unavailable | Canonical State stays unchanged, the complete Candidate becomes cleanup-only Quarantine, and Discard remains retryable. |
-| After provider Discard but before local Quarantine removal | Repeated Discard is idempotent, and local removal continues only after all providers pass. |
-| After local Quarantine removal but before final metadata | Persisted provider Discard evidence lets startup complete the disposition without recreating mutable state. |
-| Local Quarantine missing without complete provider Discard evidence | The Run enters `recovery-error`, and Airlock does not claim remote cleanup. |
-| Before a Registry Transition journal exists | The prior canonical manifest and registry generation remain authoritative. |
-| After a Registry Transition plan is durable | An unaccepted target is removed and the verified transition is retried. |
-| After a Registry Transition target is installed | Its exact local and provider fingerprints are checked, its journal timestamp is reused, and recovery advances that installed target instead of deleting and recreating it. |
-| After immutable Registry Transition history is published but before `canonical.json` replacement | Recovery derives the same byte-identical manifest from the installed target and durable journal, verifies the existing history, and advances `canonical.json` once. |
-| After canonical advancement but before Registry Transition cleanup | The exact accepted target is recognized, the journal is removed, and no second state is installed. |
-| A Registry Transition journal has altered identifiers, fingerprints, fields, or verifications | Recovery rejects it before the target path can authorize deletion or canonical rewriting. |
-| One Agent fails provider onboarding | The prior Resource Registry generation remains authoritative, successful Agent transitions remain recoverable, and no unverifiable source becomes accepted. |
-| A Resource Registry generation remains uncommitted | Agent creation and ordinary or Repair Run execution remain unavailable until every Agent converges. |
-| A prior-generation Promotion remains unresolved after a provider is added | Recovery uses the Promotion plan's historical provider subset, defers onboarding, and leaves the new generation uncommitted. |
-| A retained historical Quarantine is discarded after a provider is added | Only the providers recorded by that Quarantine receive idempotent Discard; the later provider is not invoked. |
-| Before a Candidate Set Selection Decision exists | Complete seals remain eligible, partial evaluations become explicitly ineligible without Runtime replay, and Selection is recomputed from persisted evidence. |
-| After Candidate Set Decision Authority exists but before mutable Selection | Restore the exact authorized Selection, publish final Candidate Set-bound terminal Run authorities, and never recompute a different winner. |
-| After a Candidate Set Selection Decision exists | Recovery may promote only the named winner and may never fall through to a runner-up. |
-| During Candidate Set winner Promotion | The existing Promotion journal reconciles the exact selected Run, canonical version, and supported effects. |
-| During Candidate Set loser cleanup | Completed dispositions remain durable, unresolved retain or Discard work is retried idempotently, and no loser can change the winner. |
-| Candidate Set cleanup fails before every disposition is durable | The Candidate Set enters `recovery-error`, the Agent remains admission-locked across restart, and no new Run starts over unresolved mutable state. |
-| After physical loser Quarantine or removal but before terminal metadata | Recovery verifies the exact local state and complete provider cleanup evidence, then records the already completed disposition without recreating Candidate State. |
-| After terminal Run authority exists but before its mutable terminal projection | Recovery verifies stable Run identity plus any required physical Quarantine and replays the exact authoritative transaction instead of synthesizing cancellation. |
-| Selected Candidate seal or physical resource state contradicts persisted evidence | The Candidate Set enters `recovery-error`, Canonical State is preserved, and no losing effect is claimed. |
-| An older-generation Candidate Set remains unresolved when a provider is added | Winner Promotion and loser cleanup use only the historical provider subset, and onboarding waits until the set reaches a safe terminal state. |
-| Before an Agent deletion journal exists | The Agent, workspace, Runs, Candidate Sets, Assurance Proposals, and Outcome Contract history remain live. |
-| After deletion evidence is prepared but before workspace archival | Startup verifies the unchanged bounded audit and archives the workspace exactly once. |
-| After workspace archival but before control-plane deletion | Startup requires a regular deterministic archive directory and an exactly matching bounded tombstone before removing the exact Agent aggregates. |
-| After control-plane deletion but before journal completion | Startup verifies the existing archive destination and removes the already completed journal without recreating the Agent. |
-| Agent deletion audit or physical archive state contradicts the journal | Startup fails closed before Promotion or Resource Registry transition recovery begins. |
-| Receipt export stops before its response | Canonical State and Run evidence remain unchanged, and a retry derives and signs the same receipt content. |
-| A historical Canonical manifest is missing or contradicts its physical state | Receipt export fails closed without changing Canonical State or signing the contradictory projection. |
-| Mutable Run, Promotion Receipt, Candidate Set, Selection, or winner-seal metadata contradicts Portable Decision Authority | Receipt export fails closed even when the mutable records were changed consistently with one another. |
-| A completed legacy decision has no Portable Decision Authority record | Receipt export fails closed because Airlock cannot safely infer historical authority from mutable metadata. |
-| A portable signing key is missing or substituted while its identity marker remains | Export fails closed without silently rotating the signing identity, and existing envelopes remain independently verifiable. |
-| A transparency append completes but its response is lost | A retry recognizes the existing receipt digest and returns the same tree position without appending a duplicate. |
-| The optional local transparency log or checkpoint chain is malformed | Anchored export fails closed, while signature-only export remains available when the operator disables anchoring. |
-| A transparency writer exits | Its immutable queue turn remains, a later contender marks a dead stale predecessor abandoned, no successor pathname is unlinked, and every later turn remains serialized. |
-| Provider removal or contract replacement is configured | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied. |
-| Any physical contradiction | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed. |
+| Interruption                                                                                                              | Restart result                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before the approved journal exists                                                                                        | Canonical State stays unchanged, and a valid Candidate is quarantined.                                                                                                     |
+| After `validated`                                                                                                         | The Candidate is installed, accepted, delivered, and completed once.                                                                                                       |
+| After physical version installation                                                                                       | The installed fingerprints are verified before canonical advancement.                                                                                                      |
+| After `version-installed`                                                                                                 | The exact installed version becomes canonical, then supported effects are dispatched.                                                                                      |
+| After physical canonical advancement                                                                                      | The existing manifest is verified against the journal and recovery continues forward.                                                                                      |
+| After `canonical-advanced`                                                                                                | Supported intents are parsed from the immutable accepted outbox and claimed idempotently.                                                                                  |
+| After physical effect dispatch                                                                                            | The same idempotency keys return the existing receipts before completion.                                                                                                  |
+| After `effects-delivered` or `completed`                                                                                  | Final Run and Agent metadata is reconstructed without another version, effect, or assistant message.                                                                       |
+| During provider preparation cleanup                                                                                       | Runtime does not start, Canonical State stays unchanged, and failed cleanup retains a retryable composite Quarantine.                                                      |
+| During cancellation while provider cleanup is unavailable                                                                 | Canonical State stays unchanged, the complete Candidate becomes cleanup-only Quarantine, and Discard remains retryable.                                                    |
+| After Discard authority but before provider or local Quarantine cleanup                                                   | Repeated provider Discard is idempotent, and local removal continues only after all providers pass.                                                                        |
+| After local Quarantine removal but before final metadata                                                                  | Immutable Discard authority lets startup complete the disposition without recreating mutable state.                                                                        |
+| Local Quarantine missing without immutable Discard authority                                                              | The Run enters `recovery-error`, and Airlock does not claim remote cleanup.                                                                                                |
+| Before a Registry Transition journal exists                                                                               | The prior canonical manifest and registry generation remain authoritative.                                                                                                 |
+| After a Registry Transition plan is durable                                                                               | An unaccepted target is removed and the verified transition is retried.                                                                                                    |
+| After a Registry Transition target is installed                                                                           | Its exact local and provider fingerprints are checked, its journal timestamp is reused, and recovery advances that installed target instead of deleting and recreating it. |
+| After immutable Registry Transition history is published but before `canonical.json` replacement                          | Recovery derives the same byte-identical manifest from the installed target and durable journal, verifies the existing history, and advances `canonical.json` once.        |
+| After canonical advancement but before Registry Transition cleanup                                                        | The exact accepted target is recognized, the journal is removed, and no second state is installed.                                                                         |
+| A Registry Transition journal has altered identifiers, fingerprints, fields, or verifications                             | Recovery rejects it before the target path can authorize deletion or canonical rewriting.                                                                                  |
+| One Agent fails provider onboarding                                                                                       | The prior Resource Registry generation remains authoritative, successful Agent transitions remain recoverable, and no unverifiable source becomes accepted.                |
+| A Resource Registry generation remains uncommitted                                                                        | Agent creation and ordinary or Repair Run execution remain unavailable until every Agent converges.                                                                        |
+| A prior-generation Promotion remains unresolved after a provider is added                                                 | Recovery uses the Promotion plan's historical provider subset, defers onboarding, and leaves the new generation uncommitted.                                               |
+| A retained historical Quarantine is discarded after a provider is added                                                   | Only the providers recorded by that Quarantine receive idempotent Discard; the later provider is not invoked.                                                              |
+| Before a Candidate Set Selection Decision exists                                                                          | Complete seals remain eligible, partial evaluations become explicitly ineligible without Runtime replay, and Selection is recomputed from persisted evidence.              |
+| After Candidate Set Decision Authority exists but before mutable Selection                                                | Restore the exact authorized Selection, publish final Candidate Set-bound terminal Run authorities, and never recompute a different winner.                                |
+| After a Candidate Set Selection Decision exists                                                                           | Recovery may promote only the named winner and may never fall through to a runner-up.                                                                                      |
+| During Candidate Set winner Promotion                                                                                     | The existing Promotion journal reconciles the exact selected Run, canonical version, and supported effects.                                                                |
+| During Candidate Set loser cleanup                                                                                        | Completed dispositions remain durable, unresolved retain or Discard work is retried idempotently, and no loser can change the winner.                                      |
+| Candidate Set cleanup fails before every disposition is durable                                                           | The Candidate Set enters `recovery-error`, the Agent remains admission-locked across restart, and no new Run starts over unresolved mutable state.                         |
+| After Discard authority exists but before provider or local removal                                                       | Recovery retries provider cleanup, completes the authorized local removal, and atomically replays the exact Run plus Candidate competitor disposition.                     |
+| After local Quarantine disappears without Discard authority                                                               | Recovery rejects mutable cleanup claims and enters `recovery-error`; it never creates terminal authority from mutable progress.                                            |
+| After terminal Run authority exists but before its mutable terminal projection                                            | Recovery verifies stable Run identity plus any required physical Quarantine and replays the exact authoritative transaction instead of synthesizing cancellation.          |
+| Selected Candidate seal or physical resource state contradicts persisted evidence                                         | The Candidate Set enters `recovery-error`, Canonical State is preserved, and no losing effect is claimed.                                                                  |
+| An older-generation Candidate Set remains unresolved when a provider is added                                             | Winner Promotion and loser cleanup use only the historical provider subset, and onboarding waits until the set reaches a safe terminal state.                              |
+| Before an Agent deletion journal exists                                                                                   | The Agent, workspace, Runs, Candidate Sets, Assurance Proposals, and Outcome Contract history remain live.                                                                 |
+| After deletion evidence is prepared but before workspace archival                                                         | Startup verifies the unchanged bounded audit and archives the workspace exactly once.                                                                                      |
+| After workspace archival but before control-plane deletion                                                                | Startup requires a regular deterministic archive directory and an exactly matching bounded tombstone before removing the exact Agent aggregates.                           |
+| After control-plane deletion but before journal completion                                                                | Startup verifies the existing archive destination and removes the already completed journal without recreating the Agent.                                                  |
+| Agent deletion audit or physical archive state contradicts the journal                                                    | Startup fails closed before Promotion or Resource Registry transition recovery begins.                                                                                     |
+| Receipt export stops before its response                                                                                  | Canonical State and Run evidence remain unchanged, and a retry derives and signs the same receipt content.                                                                 |
+| A historical Canonical manifest is missing or contradicts its physical state                                              | Receipt export fails closed without changing Canonical State or signing the contradictory projection.                                                                      |
+| Mutable Run, Promotion Receipt, Candidate Set, Selection, or winner-seal metadata contradicts Portable Decision Authority | Receipt export fails closed even when the mutable records were changed consistently with one another.                                                                      |
+| A completed legacy decision has no Portable Decision Authority record                                                     | Receipt export fails closed because Airlock cannot safely infer historical authority from mutable metadata.                                                                |
+| A portable signing key is missing or substituted while its identity marker remains                                        | Export fails closed without silently rotating the signing identity, and existing envelopes remain independently verifiable.                                                |
+| A transparency append completes but its response is lost                                                                  | A retry recognizes the existing receipt digest and returns the same tree position without appending a duplicate.                                                           |
+| The optional local transparency log or checkpoint chain is malformed                                                      | Anchored export fails closed, while signature-only export remains available when the operator disables anchoring.                                                          |
+| A transparency writer exits                                                                                               | Its immutable queue turn remains, a later contender marks a dead stale predecessor abandoned, no successor pathname is unlinked, and every later turn remains serialized.  |
+| Provider removal or contract replacement is configured                                                                    | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied.                                                                    |
+| Any physical contradiction                                                                                                | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed.                                                                  |
 
 ## Retention
 
@@ -131,8 +132,9 @@ Both settings accept positive values up to 8,760 hours.
 Active or unresolved journal and Candidate Set Run identifiers are protected from cleanup.
 Cleanup accepts no caller-supplied path, rejects unsafe identifiers, does not traverse symbolic links, and scans only `.candidates` and `.quarantine`.
 Expired Quarantine loses mutable files but retains output, Validation evidence, hashes, lineage, timeline, and its Promotion Receipt.
-Provider Discard evidence is persisted before the local Quarantine directory is removed.
-If a provider is unavailable, cleanup retains the complete local Quarantine and retries on the next startup.
+Immutable Discard authority is persisted before any provider or local Quarantine removal begins.
+If authority publication fails, every provider and local Quarantine remains untouched.
+If a provider is unavailable after authority publication, cleanup retains the local Quarantine root and retries idempotently on the next startup.
 Every provider-controlled lifecycle string is bounded and credential-checked before it can enter durable evidence or an operator response.
 
 ## Operator response

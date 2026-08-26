@@ -75,13 +75,13 @@ Missing usage, invalid usage, or reported usage above a reservation fails that c
 
 The first schema supports an ordered list of closed criteria:
 
-| Criterion | Source | Direction | Bound |
-| --- | --- | --- | --- |
-| `quality-assertion` | Versioned trusted evaluator | Maximize | `0..1_000_000` |
-| `changed-files` | Persisted workspace change evidence | Minimize | `0..10_000` |
-| `added-bytes` | Persisted workspace change evidence | Minimize | `0..100_000_000` |
-| `latency-ms` | Trusted monotonic execution measurement | Minimize | `0..3_600_000` |
-| `total-tokens` | Trusted Runtime usage response | Minimize | `0..10_000_000` |
+| Criterion           | Source                                  | Direction | Bound            |
+| ------------------- | --------------------------------------- | --------- | ---------------- |
+| `quality-assertion` | Versioned trusted evaluator             | Maximize  | `0..1_000_000`   |
+| `changed-files`     | Persisted workspace change evidence     | Minimize  | `0..10_000`      |
+| `added-bytes`       | Persisted workspace change evidence     | Minimize  | `0..100_000_000` |
+| `latency-ms`        | Trusted monotonic execution measurement | Minimize  | `0..3_600_000`   |
+| `total-tokens`      | Trusted Runtime usage response          | Minimize  | `0..10_000_000`  |
 
 Every raw value is parsed as an integer and clamped only by rejection, never silent truncation.
 For a maximize criterion, the normalized score equals the raw value.
@@ -151,18 +151,18 @@ One immutable Candidate Set Decision Authority is published before the mutable S
 Promotion journal schema 2 stores a versioned authority that names the exact Candidate Set, competitor, winner Run, decision digest, seal digest, source identifier, and source content hash.
 Startup deterministically replays the persisted Selection Decision and compares the complete expected authority before any Promotion recovery step may install state, advance Canonical State, or dispatch effects.
 
-| Durable phase | Recovery action |
-| --- | --- |
-| `admitted` | Normalize every unstarted or interrupted evaluation without invoking Runtime again, then select only from complete sealed evidence. |
-| `evaluating` | Preserve complete sealed competitors and mark every partial competitor ineligible with restart evidence. |
-| `evaluated` | Restore an existing immutable Selection authority exactly, or compute and publish one authority before the mutable Selection projection. |
-| `selected` | Recheck source freshness and start Promotion for only the named winner. |
-| `promoting` | Delegate to the existing winner Promotion journal and never select another competitor. |
-| `promoted` | Verify the accepted Canonical State names the winner, then resume loser cleanup. |
-| `no-winner` | Preserve Canonical State and resume the declared loser dispositions. |
-| `cleaning-losers` | Retry provider Discard or retain Quarantine one competitor at a time with durable progress. |
-| `completed` | Reconstruct missing control-plane status without new execution, selection, Promotion, or effects. |
-| `stale` or `recovery-error` | Preserve Canonical State and all unresolved evidence for operator diagnosis. |
+| Durable phase               | Recovery action                                                                                                                          |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `admitted`                  | Normalize every unstarted or interrupted evaluation without invoking Runtime again, then select only from complete sealed evidence.      |
+| `evaluating`                | Preserve complete sealed competitors and mark every partial competitor ineligible with restart evidence.                                 |
+| `evaluated`                 | Restore an existing immutable Selection authority exactly, or compute and publish one authority before the mutable Selection projection. |
+| `selected`                  | Recheck source freshness and start Promotion for only the named winner.                                                                  |
+| `promoting`                 | Delegate to the existing winner Promotion journal and never select another competitor.                                                   |
+| `promoted`                  | Verify the accepted Canonical State names the winner, then resume loser cleanup.                                                         |
+| `no-winner`                 | Preserve Canonical State and resume the declared loser dispositions.                                                                     |
+| `cleaning-losers`           | Retry provider Discard or retain Quarantine one competitor at a time with durable progress.                                              |
+| `completed`                 | Reconstruct missing control-plane status without new execution, selection, Promotion, or effects.                                        |
+| `stale` or `recovery-error` | Preserve Canonical State and all unresolved evidence for operator diagnosis.                                                             |
 
 The Candidate Set journal protects every unresolved sibling from retention cleanup.
 Any pending competitor disposition or Run Transaction disposition keeps the Agent admission lease closed, including after restart.
@@ -193,7 +193,7 @@ It rejects credentials, unknown fields, duplicate competitor identifiers, unboun
 Cancellation before a winner decision quarantines or discards every sibling according to policy and leaves Canonical State unchanged.
 Each terminal cancellation and loser-cleanup branch publishes immutable Decision Authority before its Run or competitor metadata, and Candidate Set completion never reconstructs missing authority from the mutable aggregate.
 After immutable Selection authority is published, every already-terminal competitor receives a final Candidate Set-bound authority before mutable Selection becomes visible.
-Provider Discard events are durably projected before local removal, and final loser Run plus competitor lifecycle metadata are published in one control-plane mutation.
+Immutable Discard authority is published before provider or local removal, and final loser Run plus competitor lifecycle metadata are published in one control-plane mutation after cleanup succeeds.
 Startup audits even already-terminal loser Runs and replays the newest valid Candidate Set-bound authority when either child projection is behind.
 Cancellation after a winner decision cannot reverse the durable selection or approved Promotion and instead follows existing forward-recovery semantics.
 
@@ -225,7 +225,8 @@ Additional crash injection at every non-authoritative presentation-only phase re
 - A journal whose Candidate Set, competitor, winner Run, decision digest, seal digest, or source differs from the replayed Candidate Set authority cannot perform physical recovery.
 - A Candidate Set recovery failure prevents a new provider generation from being onboarded or committed.
 - Crash recovery after canonical advancement dispatches only winner intents and completes loser cleanup.
-- Crash recovery after physical loser Quarantine or removal but before terminal metadata reconciles that exact disposition without recreating Candidate State.
+- Discard authority is published before any provider or local loser removal, so crash recovery may complete an authorized remnant without recreating Candidate State or trusting mutable cleanup progress.
+- Physical loser state that disappears without matching terminal authority fails recovery closed.
 - A terminal Candidate Set Run and its competitor lifecycle status become visible together at the child boundary.
 - Immutable Selection authority binds the loser policy that authorizes irreversible cleanup.
 - The Agent deliberately remains busy until the aggregate Candidate Set completes Selection, winner Promotion, and loser cleanup.
