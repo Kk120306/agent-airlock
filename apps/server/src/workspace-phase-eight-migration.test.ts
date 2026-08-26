@@ -252,14 +252,17 @@ describe("Phase 8 canonical manifest migration", () => {
       label: "an additional verification",
       mutate: (journal: Record<string, unknown>) => {
         const verifications = journal.verifications as Record<string, unknown>[];
-        journal.verifications = [...verifications, structuredClone(verifications[0])];
+        journal.verifications = [
+          ...verifications,
+          structuredClone(verifications[0]!),
+        ];
       },
     },
     {
       label: "a mismatched verification",
       mutate: (journal: Record<string, unknown>) => {
         const verifications = journal.verifications as Record<string, unknown>[];
-        verifications[0].fingerprint = "e".repeat(64);
+        verifications[0]!.fingerprint = "e".repeat(64);
       },
     },
     {
@@ -272,7 +275,7 @@ describe("Phase 8 canonical manifest migration", () => {
       label: "an unknown verification field",
       mutate: (journal: Record<string, unknown>) => {
         const verifications = journal.verifications as Record<string, unknown>[];
-        verifications[0].credential = "hidden";
+        verifications[0]!.credential = "hidden";
       },
     },
   ])(

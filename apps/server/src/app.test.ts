@@ -49,7 +49,10 @@ describe("HTTP boundary", () => {
   it("exposes the bounded Outcome Contract update boundary", async () => {
     let received: unknown = null;
     const contractService = {
-      updateOutcomeContract: async (_id: string, input: unknown) => {
+      updateOutcomeContract: async (
+        _id: string,
+        input: Record<string, unknown>,
+      ) => {
         received = input;
         return { schemaVersion: 1, version: 2, ...input };
       },

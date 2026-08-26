@@ -226,6 +226,8 @@ describe("Phase 6 durable Promotion recovery", () => {
       database.runs.push({
         id: runId,
         agentId: agent.id,
+        candidateSetId: null,
+        competitorId: null,
         status: "running",
         prompt: "interrupted work",
         output: null,
