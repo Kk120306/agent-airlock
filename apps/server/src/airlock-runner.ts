@@ -73,6 +73,7 @@ export interface AirlockRunOptions {
 export interface PromotionRecoveryAuthorityContext {
   candidateSetRunIds: ReadonlySet<string>;
   expectedCandidateSetAuthorities: ReadonlyMap<string, PromotionAuthority>;
+  terminalPromotionTransactions: ReadonlyMap<string, RunTransaction>;
 }
 
 export class StaleCandidateSourceError extends Error {
@@ -1425,6 +1426,7 @@ export class AirlockRunner {
     authorityContext: PromotionRecoveryAuthorityContext = {
       candidateSetRunIds: new Set(),
       expectedCandidateSetAuthorities: new Map(),
+      terminalPromotionTransactions: new Map(),
     },
   ): Promise<{
     recovered: ReconciledPromotion[];
@@ -1450,7 +1452,13 @@ export class AirlockRunner {
       protectedRunIds.add(record.runId);
       try {
         assertRecoveryAuthority(record, authorityContext);
-        recovered.push(await this.reconcilePromotion(record));
+        recovered.push(
+          await this.reconcilePromotion(
+            record,
+            authorityContext.terminalPromotionTransactions.get(record.runId) ??
+              null,
+          ),
+        );
         protectedRunIds.delete(record.runId);
       } catch (error) {
         const message =
@@ -1475,14 +1483,18 @@ export class AirlockRunner {
 
   private async reconcilePromotion(
     initial: PromotionJournalRecord,
+    terminalAuthority: RunTransaction | null,
   ): Promise<ReconciledPromotion> {
     let record = structuredClone(initial);
     let transaction = structuredClone(record.transaction);
     const priorCompletedRecovery =
       record.phase === "completed" &&
       record.transaction.recovery.recoveredAfterRestart
-        ? inspectCompletedPromotionRecovery(record.transaction)
-        : { complete: false, partialEventCount: 0 };
+        ? inspectCompletedPromotionRecovery(
+            record.transaction,
+            terminalAuthority,
+          )
+        : { complete: false, normalizedProviderResourceEvents: null };
     const wasAlreadyRecovered = priorCompletedRecovery.complete;
     transaction.recovery = {
       ...transaction.recovery,
@@ -1653,10 +1665,15 @@ export class AirlockRunner {
       });
       await this.verifyDeliveredEffects(record, canonical);
       transaction.status = "promoted";
+      if (priorCompletedRecovery.normalizedProviderResourceEvents) {
+        transaction.providerResourceEvents =
+          priorCompletedRecovery.normalizedProviderResourceEvents;
+      }
       if (wasAlreadyRecovered) {
         if (
           record.transaction.status === "recovery-error" ||
-          record.transaction.recovery.recoveryError !== null
+          record.transaction.recovery.recoveryError !== null ||
+          priorCompletedRecovery.normalizedProviderResourceEvents !== null
         ) {
           record = await this.promotionJournal.updateTransaction(
             record.runId,
@@ -1665,11 +1682,6 @@ export class AirlockRunner {
         }
         transaction = record.transaction;
       } else {
-        if (priorCompletedRecovery.partialEventCount > 0) {
-          transaction.providerResourceEvents.splice(
-            -priorCompletedRecovery.partialEventCount,
-          );
-        }
         for (const event of verificationEvents) {
           appendBoundedResourceEvent(transaction.providerResourceEvents, event);
         }
@@ -1831,9 +1843,12 @@ export class AirlockRunner {
   }
 }
 
-function inspectCompletedPromotionRecovery(transaction: RunTransaction): {
+function inspectCompletedPromotionRecovery(
+  transaction: RunTransaction,
+  terminalAuthority: RunTransaction | null,
+): {
   complete: boolean;
-  partialEventCount: number;
+  normalizedProviderResourceEvents: RunTransaction["providerResourceEvents"] | null;
 } {
   const visibilityRank = {
     "canonical-manifest": 0,
@@ -1857,40 +1872,146 @@ function inspectCompletedPromotionRecovery(transaction: RunTransaction): {
       );
     });
   if (expectedProviders.length === 0) {
-    return { complete: true, partialEventCount: 0 };
+    return { complete: true, normalizedProviderResourceEvents: null };
   }
   const events = transaction.providerResourceEvents;
-  const suffixMatchesExpectedPrefix = (count: number): boolean => {
-    if (events.length < count) return false;
-    return events.slice(-count).every((event, index) => {
-      const expected = expectedProviders[index];
-      return Boolean(
-        expected &&
-        event.schemaVersion === 1 &&
-        event.providerId === expected.providerId &&
-        event.resourceKind === expected.resourceKind &&
-        event.stage === "reconcile" &&
-        event.status === "passed" &&
-        typeof event.summary === "string" &&
-        event.summary.length > 0 &&
-        event.summary.length <= 512 &&
-        Number.isFinite(Date.parse(event.at)),
+  let recoveryEventStart: number | null = null;
+  if (terminalAuthority) {
+    const authorityEvents = terminalAuthority.providerResourceEvents;
+    if (
+      events.length < authorityEvents.length ||
+      canonicalJson(events.slice(0, authorityEvents.length)) !==
+        canonicalJson(authorityEvents)
+    ) {
+      throw new Error(
+        "Completed Promotion journal contradicts immutable provider evidence",
       );
-    });
-  };
-  if (suffixMatchesExpectedPrefix(expectedProviders.length)) {
-    return { complete: true, partialEventCount: 0 };
-  }
-  for (
-    let count = Math.min(expectedProviders.length - 1, events.length);
-    count > 0;
-    count -= 1
-  ) {
-    if (suffixMatchesExpectedPrefix(count)) {
-      return { complete: false, partialEventCount: count };
+    }
+    recoveryEventStart = authorityEvents.length;
+  } else {
+    let start = events.length;
+    while (start > 0 && events[start - 1]?.stage === "reconcile") {
+      start -= 1;
+    }
+    if (start < events.length) {
+      recoveryEventStart = start;
     }
   }
-  return { complete: false, partialEventCount: 0 };
+  if (recoveryEventStart === null) {
+    return { complete: false, normalizedProviderResourceEvents: null };
+  }
+  const attempts = parseCompletedPromotionRecoveryAttempts(
+    events.slice(recoveryEventStart),
+    expectedProviders,
+  );
+  if (!attempts) {
+    throw new Error(
+      "Completed Promotion journal has malformed provider recovery evidence",
+    );
+  }
+  const authorityNeedsFirstRecovery = Boolean(
+    terminalAuthority && !terminalAuthority.recovery.recoveredAfterRestart,
+  );
+  const normalizedRecoveryEvents =
+    authorityNeedsFirstRecovery && attempts.completeEvents.length > 0
+      ? attempts.completeEvents.slice(-expectedProviders.length)
+      : attempts.completeEvents;
+  const normalizedProviderResourceEvents = [
+    ...events.slice(0, recoveryEventStart),
+    ...normalizedRecoveryEvents,
+  ];
+  const changed =
+    canonicalJson(normalizedProviderResourceEvents) !== canonicalJson(events);
+  return {
+    complete:
+      Boolean(terminalAuthority?.recovery.recoveredAfterRestart) ||
+      (authorityNeedsFirstRecovery && normalizedRecoveryEvents.length > 0) ||
+      attempts.lastAttemptComplete,
+    normalizedProviderResourceEvents: changed
+      ? normalizedProviderResourceEvents
+      : null,
+  };
+}
+
+function parseCompletedPromotionRecoveryAttempts(
+  events: RunTransaction["providerResourceEvents"],
+  expectedProviders: Array<{
+    providerId: string;
+    resourceKind: string;
+    visibility:
+      | "canonical-manifest"
+      | "post-promotion-reconciled"
+      | "best-effort";
+  }>,
+): {
+  completeEvents: RunTransaction["providerResourceEvents"];
+  lastAttemptComplete: boolean;
+} | null {
+  if (events.length === 0) {
+    return { completeEvents: [], lastAttemptComplete: false };
+  }
+  const exactEventKeys = [
+    "schemaVersion",
+    "providerId",
+    "resourceKind",
+    "stage",
+    "status",
+    "summary",
+    "at",
+  ].sort();
+  const completeEvents: RunTransaction["providerResourceEvents"] = [];
+  let attempt: RunTransaction["providerResourceEvents"] = [];
+  let expectedIndex = 0;
+  let lastAttemptComplete = false;
+  for (const event of events) {
+    let expected = expectedProviders[expectedIndex];
+    const firstExpected = expectedProviders[0]!;
+    if (
+      expectedIndex > 0 &&
+      (event.providerId !== expected?.providerId ||
+        event.resourceKind !== expected.resourceKind) &&
+      event.providerId === firstExpected.providerId &&
+      event.resourceKind === firstExpected.resourceKind
+    ) {
+      attempt = [];
+      expectedIndex = 0;
+      lastAttemptComplete = false;
+      expected = firstExpected;
+    }
+    if (
+      !expected ||
+      canonicalJson(Object.keys(event).sort()) !==
+        canonicalJson(exactEventKeys) ||
+      event.schemaVersion !== 1 ||
+      event.providerId !== expected.providerId ||
+      event.resourceKind !== expected.resourceKind ||
+      event.stage !== "reconcile" ||
+      (event.status !== "passed" && event.status !== "failed") ||
+      typeof event.summary !== "string" ||
+      event.summary.length === 0 ||
+      event.summary.length > 512 ||
+      !Number.isFinite(Date.parse(event.at))
+    ) {
+      return null;
+    }
+    attempt.push(structuredClone(event));
+    if (event.status === "failed") {
+      attempt = [];
+      expectedIndex = 0;
+      lastAttemptComplete = false;
+      continue;
+    }
+    expectedIndex += 1;
+    if (expectedIndex === expectedProviders.length) {
+      completeEvents.push(...attempt);
+      attempt = [];
+      expectedIndex = 0;
+      lastAttemptComplete = true;
+    } else {
+      lastAttemptComplete = false;
+    }
+  }
+  return { completeEvents, lastAttemptComplete };
 }
 
 function assertRecoveryAuthority(

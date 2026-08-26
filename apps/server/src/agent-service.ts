@@ -204,6 +204,8 @@ export class AgentService {
         candidateSetRunIds: promotionAuthority.candidateSetRunIds,
         expectedCandidateSetAuthorities:
           promotionAuthority.expectedCandidateSetAuthorities,
+        terminalPromotionTransactions:
+          promotionAuthority.terminalPromotionTransactions,
       },
     );
     const recoveredRunIds = new Set(
@@ -2978,6 +2980,7 @@ export class AgentService {
   ): Promise<{
     candidateSetRunIds: Set<string>;
     expectedCandidateSetAuthorities: Map<string, PromotionAuthority>;
+    terminalPromotionTransactions: Map<string, RunTransaction>;
     invalidCandidateSets: Map<string, string>;
   }> {
     const candidateSetRunIds = new Set(
@@ -2987,8 +2990,26 @@ export class AgentService {
       string,
       PromotionAuthority
     >();
+    const terminalPromotionTransactions = new Map<string, RunTransaction>();
     const invalidCandidateSets = new Map<string, string>();
     const runsById = new Map(runs.map((run) => [run.id, run]));
+    for (const run of runs) {
+      try {
+        const authority =
+          await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
+            run.id,
+            run.agentId,
+          );
+        if (authority?.disposition === "promoted") {
+          terminalPromotionTransactions.set(
+            run.id,
+            structuredClone(authority.transaction),
+          );
+        }
+      } catch {
+        // The existing authority scan below reports bounded per-Run failures.
+      }
+    }
     for (const candidateSet of candidateSets) {
       for (const competitor of candidateSet.competitors) {
         candidateSetRunIds.add(competitor.runId);
@@ -3011,6 +3032,7 @@ export class AgentService {
     return {
       candidateSetRunIds,
       expectedCandidateSetAuthorities,
+      terminalPromotionTransactions,
       invalidCandidateSets,
     };
   }

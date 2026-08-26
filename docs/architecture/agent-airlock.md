@@ -239,6 +239,7 @@ Any required provider Validation failure quarantines every built-in and register
 The Promotion journal records provider plans before immutable installation, and restart reconciliation verifies the exact installed fingerprint before canonical advancement.
 Historical Promotion recovery selects the exact provider subset persisted in that plan, so adding provider B cannot strand a transaction created under `{}` or `{A}`.
 Provider Discard events are persisted in an immutable authority-bound cleanup completion fact before local mutable state is removed so an interrupted terminal cleanup can converge without inventing success.
+The portable authority root and its top-level Candidate Set and cleanup namespaces are synchronized in their immediate parents before descendant authority can authorize destructive cleanup.
 Prepare-abort cleanup that must remove partial provider preparation before a terminal Run exists instead embeds exact successful provider coverage in the later Discard authority.
 Legacy prepare-abort evidence may contain successful no-op Discard events for unattempted providers, but those events are tolerated only as inert extras and cannot establish the known-provider set.
 Cancellation with an unavailable provider Discard moves the complete local Candidate into cleanup-only Quarantine rather than deleting its recovery handle.

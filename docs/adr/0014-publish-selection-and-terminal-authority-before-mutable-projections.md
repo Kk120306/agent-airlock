@@ -30,7 +30,8 @@ Authorities for the same Run must retain one exact parent authority digest and a
 An available Quarantine may later gain one authoritative Discard transaction before any provider or local physical removal begins.
 An interrupted completed Promotion may later gain one recovery authority after the completed Promotion journal is verified.
 The recovery authority changes `recoveredAfterRestart` from `false` to `true` and may append exactly one successful `reconcile` event for each provider already committed in the promoted transaction.
-Repeated verification reuses that complete immutable batch without growing evidence, and a predecessor partial batch is replaced by one complete batch after live verification succeeds.
+Repeated verification reuses authority-compatible complete evidence without growing it, and predecessor partial, failed, or duplicate attempts are normalized only after live verification succeeds.
+The immutable terminal authority fixes the prefix boundary, so compatibility normalization cannot rewrite evidence that was already authoritative.
 If later verification fails transiently, the mutable Run retains the last exact terminal authority while the Promotion journal records the bounded error, and a healthy retry clears the journal error without adding another batch.
 The earlier provider-event prefix and every other transaction field remain exact.
 These are the only accepted transitions between different terminal transaction hashes for one Run.

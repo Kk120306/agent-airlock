@@ -184,7 +184,8 @@ All authorities for one Run must retain one exact parent authority digest and at
 An available Quarantine may later add one different authoritative Discard transaction when the immutable Run core and event prefixes prove the valid lifecycle transition.
 An interrupted completed Promotion may add one recovery authority only after the completed Promotion journal is verified.
 That recovery authority must change `recoveredAfterRestart` from `false` to `true` and may append exactly one successful `reconcile` event for every provider already committed by the promoted transaction.
-Repeated verification preserves the complete batch byte-for-byte, while a predecessor partial batch is removed and replaced only after a full live verification succeeds.
+Repeated verification preserves authority-compatible complete evidence byte-for-byte, while predecessor partial, failed, or duplicate attempts are normalized only after a full live verification succeeds.
+When immutable terminal authority already exists, its provider event history defines the exact prefix that normalization cannot rewrite.
 If a later verification attempt fails, mutable Run evidence remains pinned to the last terminal authority while the journal carries the bounded recovery error until a healthy retry normalizes it.
 Every other transaction field and the complete earlier provider-event prefix remain exact.
 No other multi-hash terminal history is accepted.
@@ -199,6 +200,7 @@ If authority publication fails, every local and provider Quarantine remains avai
 The Agent remains busy until the complete Candidate Set finishes Selection, winner Promotion, and loser cleanup.
 Candidate Set cancellation and cleanup record authority at the branch that makes the terminal decision, while aggregate completion performs no authority reconstruction.
 Decision Authority records and historical Canonical manifests are first written and synchronized under unique same-directory temporary names, then installed through non-replacing hard-link publication and directory synchronization.
+The portable authority root is synchronized in its immediate data-directory parent, and its Candidate Set and provider-cleanup namespace entries are synchronized in that root during initialization.
 New per-Run authority, Candidate Set, and provider-cleanup directories are synchronized in their pinned parent namespace before their records can become prerequisites for destructive cleanup.
 Recognizable temporary remnants from interruption are removed before retry, while an existing deterministic authority target is verified rather than replaced.
 
