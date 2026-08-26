@@ -1299,6 +1299,48 @@ export function assertPromotionRecoveryProgress(
   assertPromotedRecoveryTransition(progress, authoritative);
 }
 
+export function hasCompleteProviderDiscardEvidence(
+  transaction: RunTransaction,
+): boolean {
+  if (
+    transaction.status !== "discarded" ||
+    transaction.disposition !== "discarded"
+  ) {
+    return false;
+  }
+  const knownProviderKinds = new Map(
+    transaction.providerResources.map((resource) => [
+      resource.providerId,
+      resource.resourceKind,
+    ]),
+  );
+  for (const event of transaction.providerResourceEvents) {
+    if (event.stage === "discard") continue;
+    const knownKind = knownProviderKinds.get(event.providerId);
+    if (knownKind && knownKind !== event.resourceKind) return false;
+    knownProviderKinds.set(event.providerId, event.resourceKind);
+  }
+  if (knownProviderKinds.size === 0) return false;
+  const successfulDiscardEvents = transaction.providerResourceEvents.filter(
+    (event) => event.stage === "discard" && event.status === "passed",
+  );
+  if (
+    successfulDiscardEvents.length !== knownProviderKinds.size ||
+    successfulDiscardEvents.some(
+      (event) =>
+        knownProviderKinds.get(event.providerId) !== event.resourceKind,
+    )
+  ) {
+    return false;
+  }
+  try {
+    assertDiscardProviderEvents(transaction, successfulDiscardEvents, false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function assertQuarantineDiscardTransition(
   quarantined: RunTransaction,
   discarded: RunTransaction,

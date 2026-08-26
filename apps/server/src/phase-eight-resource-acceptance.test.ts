@@ -33,7 +33,7 @@ import { RunCancelledError } from "./errors.js";
 import { ResourceCoordinator } from "./resource-coordinator.js";
 import { ResourceRegistry } from "./resource-registry.js";
 import { JsonStore } from "./store.js";
-import type { AgentRunner, RunnerResult } from "./types.js";
+import type { AgentRunner, RunTransaction, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
 
@@ -1320,6 +1320,46 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       canonicalBefore,
     );
     expect(runtimeCalls).toBe(0);
+
+    const cleanupFactPath = path.join(
+      config.dataDirectory,
+      "portable-decision-journal",
+      ".discard-cleanup",
+      retried.run.id,
+    );
+    await expect(access(cleanupFactPath)).rejects.toThrow();
+    const restartedAfterCleanAbort = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        config.workspaceRoot,
+        undefined,
+        undefined,
+        coordinator.initialVersions(),
+      ),
+      runner,
+      undefined,
+      undefined,
+      coordinator,
+    );
+    await restartedAfterCleanAbort.initialize();
+    expect(restartedAfterCleanAbort.getRun(retried.run.id)).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("before Runtime"),
+      transaction: {
+        disposition: "discarded",
+        quarantinePath: null,
+        quarantineAvailable: false,
+        providerResourceEvents: [
+          { stage: "prepare", status: "failed" },
+          { stage: "discard", status: "passed" },
+        ],
+      },
+    });
+    expect(restartedAfterCleanAbort.getAgent(agent.id)).toMatchObject({
+      status: "error",
+      lastError: cleanAbort.error,
+    });
   });
 
   it("promotes, rejects, repairs, and discards one provider without core-specific code", async () => {
@@ -2352,12 +2392,93 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       ).toEqual({ release: "crash-safe" });
 
       if (faultPoint === "after-completed") {
+        const recoveredProviderEventCount =
+          recovered.transaction?.providerResourceEvents.length;
+        if (recoveredProviderEventCount === undefined) {
+          throw new Error("Recovered Promotion has no provider evidence");
+        }
+        for (let repeatedCrash = 1; repeatedCrash <= 3; repeatedCrash += 1) {
+          await writeFile(
+            path.join(config.dataDirectory, "db.json"),
+            databaseBeforeRecovery,
+            "utf8",
+          );
+          const repeatedRestart = new AgentService(
+            config,
+            new JsonStore(path.join(config.dataDirectory, "db.json")),
+            new WorkspaceManager(
+              config.workspaceRoot,
+              undefined,
+              undefined,
+              restartedCoordinator.initialVersions(),
+            ),
+            restartedRunner,
+            undefined,
+            undefined,
+            restartedCoordinator,
+          );
+          await repeatedRestart.initialize();
+          expect(repeatedRestart.getRun(started.run.id)).toMatchObject({
+            status: "completed",
+            error: null,
+            transaction: {
+              disposition: "promoted",
+              recovery: {
+                journalPhase: "completed",
+                recoveredAfterRestart: true,
+                recoveryError: null,
+              },
+            },
+          });
+          const journal = JSON.parse(
+            await readFile(
+              path.join(
+                config.dataDirectory,
+                "promotion-journal",
+                started.run.id + ".json",
+              ),
+              "utf8",
+            ),
+          ) as { transaction: RunTransaction };
+          expect(journal.transaction.providerResourceEvents).toHaveLength(
+            recoveredProviderEventCount,
+          );
+          expect(provider.versions.size).toBe(2);
+        }
+
+        const promotionJournalPath = path.join(
+          config.dataDirectory,
+          "promotion-journal",
+          started.run.id + ".json",
+        );
+        const accumulatedJournal = JSON.parse(
+          await readFile(promotionJournalPath, "utf8"),
+        ) as { transaction: RunTransaction };
+        const providerCount =
+          accumulatedJournal.transaction.providerResources.length;
+        const priorRecoveryBatch =
+          accumulatedJournal.transaction.providerResourceEvents.slice(
+            -providerCount,
+          );
+        for (let batch = 1; batch <= 2; batch += 1) {
+          for (const event of priorRecoveryBatch) {
+            accumulatedJournal.transaction.providerResourceEvents.push({
+              ...structuredClone(event),
+              at: new Date(Date.parse(event.at) + batch).toISOString(),
+            });
+          }
+        }
+        await writeFile(
+          promotionJournalPath,
+          JSON.stringify(accumulatedJournal, null, 2) + "\n",
+          "utf8",
+        );
         await writeFile(
           path.join(config.dataDirectory, "db.json"),
           databaseBeforeRecovery,
           "utf8",
         );
-        const secondRestart = new AgentService(
+        const compatibilityRestart = new AgentService(
           config,
           new JsonStore(path.join(config.dataDirectory, "db.json")),
           new WorkspaceManager(
@@ -2371,8 +2492,8 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
           undefined,
           restartedCoordinator,
         );
-        await secondRestart.initialize();
-        expect(secondRestart.getRun(started.run.id)).toMatchObject({
+        await compatibilityRestart.initialize();
+        expect(compatibilityRestart.getRun(started.run.id)).toMatchObject({
           status: "completed",
           error: null,
           transaction: {
