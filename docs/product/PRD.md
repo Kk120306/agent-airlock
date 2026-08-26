@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 8 regression-locked; Phase 9 release candidate implemented
+**Status:** Phases 0 through 9 regression-locked; Phase 10 release candidate implemented
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -18,7 +18,7 @@ The product promise is simple:
 
 ## Current release
 
-Phases 0 through 8 are regression-locked, and Phase 9 is implemented at release-candidate verification.
+Phases 0 through 9 are regression-locked, and Phase 10 is implemented at release-candidate verification.
 The release makes workspace, Codex-session, and SQLite changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
 Typed notification intents use a candidate-owned outbox and an idempotent mock consumer that can claim an effect only after the canonical manifest advances.
 An operator can now repair or discard a Quarantine, while bounded ancestry, canonical freshness checks, a fresh outbox, and the original Outcome Contract keep recovery fail-closed.
@@ -34,6 +34,9 @@ Phase 9 adds durable Candidate Sets that evaluate two through eight isolated app
 Only Candidates that pass every required Validation enter a deterministic bounded-integer Selection Contract, and Airlock persists the complete scorecard and exact winner before Promotion begins.
 The selected winner is re-verified and promoted through a decision-and-seal-bound journal authority, while losers are retained or discarded without dispatching their effects and can never become an automatic fallback.
 Strict Candidate Set parsing, deterministic aggregate token reservations, terminal evidence for never-started siblings, authority-bound restart recovery, and provider-generation deferral keep the release fail-closed under corrupted or interrupted state.
+Phase 10 adds deterministic Assurance Proposals that cite recurring bounded Run evidence, replay monotonic policy changes against retained history, and label unavailable inputs as unknown.
+Advice has no policy authority until an explicit operator acceptance atomically creates the next Outcome Contract version.
+Rejection remains durable without changing policy, rollback creates another immutable version, and Agent deletion archives proposal and contract-history digests in a crash-recoverable credential-free tombstone.
 
 ## Problem
 
@@ -169,6 +172,22 @@ This journey describes the complete product direction, including later roadmap p
 - A Candidate Set Promotion journal must bind the Candidate Set, competitor, winner Run, Selection Decision digest, seal digest, and exact source before recovery may install state, advance Canonical State, or dispatch effects.
 - Any unresolved Candidate Set recovery failure must defer Resource Registry onboarding and generation commit.
 
+### Adaptive Assurance
+
+- An Assurance Proposal is durable advice and has no execution, Promotion, or Outcome Contract authority.
+- Proposal derivation must use only bounded persisted transaction fields and trusted versioned catalogs, never raw prompts, Runtime output, environment values, expired Candidate files, or provider-private metadata.
+- Generated operations must come from the closed monotonic-strengthening set and may never remove a rule, raise a limit, alter an existing command, make a required command optional, or introduce an arbitrary command or regular expression.
+- Every operation must cite distinct root Run lineages, exact evidence selectors, evidence hashes, and one closed derivation rule at or above its minimum support threshold.
+- Historical simulation must classify each retained compatible Run as exact, conservative, or unknown and must never treat missing or truncated evidence as a pass, failure, benefit, or avoided incident.
+- Equivalent base contracts, operations, citations, and simulation evidence must produce the same proposal identifier, order, and digest.
+- Acceptance must rederive the proposal from retained evidence, verify all digests and catalog references, enforce exact-base optimistic concurrency, and prove structural monotonic strengthening in one store transaction.
+- Only an explicit operator action may accept or reject a ready proposal.
+- Acceptance must create an ordinary future-only Outcome Contract version and must not alter a Run already admitted under an earlier snapshot.
+- Rejection must preserve the proposal and byte-bounded credential-free operator reason without changing any Outcome Contract field.
+- Rollback must require explicit confirmation, disclose removed required paths, protected paths, secret detectors, required Validation commands, and raised limits, and create another immutable Outcome Contract version without mutating historical Runs, contracts, proposals, or receipts.
+- Database version 10 must strictly reject unknown or malformed nested Assurance Proposal, simulation, decision, and Outcome Contract history fields before startup recovery.
+- Agent deletion must be crash-recoverable and preserve bounded proposal, decision, contract-version, and lifecycle digests in its archived tombstone.
+
 ### Operator experience
 
 - The existing Playground must remain the primary task-entry surface.
@@ -265,7 +284,8 @@ Later-phase work cannot enter the judging path before submission.
 
 Phase 8 delivers the Transactional Resource SDK on the isolated post-hackathon branch.
 Phase 9 delivers competing Agent futures with deterministic one-winner Selection on the same branch.
-Phases 10 and 11 continue with adaptive assurance and portable Promotion Receipts.
+Phase 10 delivers deterministic, operator-controlled Adaptive Assurance on the same branch.
+Phase 11 continues with portable Promotion Receipts.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations

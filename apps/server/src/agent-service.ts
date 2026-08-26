@@ -16,9 +16,23 @@ import {
   selectCandidates,
   stableJson,
 } from "./candidate-selection.js";
+import {
+  applyAssuranceOperations,
+  deriveAssuranceProposal,
+  outcomeContractHash,
+  verifyAssuranceProposalIntegrity,
+} from "./assurance.js";
 import { validateCandidateSetInput } from "./candidate-set.js";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
+import {
+  AgentDeletionJournal,
+  MAXIMUM_ARCHIVED_CANDIDATE_SET_SUMMARIES,
+  MAXIMUM_ARCHIVED_CONTRACT_VERSION_SUMMARIES,
+  MAXIMUM_ARCHIVED_PROPOSAL_SUMMARIES,
+  MAXIMUM_ARCHIVED_RUN_SUMMARIES,
+  type AgentArchiveAudit,
+} from "./agent-deletion-journal.js";
 import { HttpError, RunCancelledError } from "./errors.js";
 import {
   ExternalActionOutbox,
@@ -42,6 +56,7 @@ import type {
   Agent,
   AgentRun,
   AgentRunner,
+  AssuranceProposal,
   CandidateSet,
   CandidateSetCompetitor,
   CanonicalStateReference,
@@ -50,6 +65,7 @@ import type {
   Message,
   OutcomeContract,
   OutcomeContractInput,
+  OutcomeContractVersionRecord,
   RunTransaction,
   UpdateAgentInput,
 } from "./types.js";
@@ -57,7 +73,7 @@ import {
   ContainerValidationCommandExecutor,
   type ValidationCommandExecutor,
 } from "./validation-command-runner.js";
-import { WorkspaceManager, type AgentArchiveAudit } from "./workspace.js";
+import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
 
@@ -65,10 +81,12 @@ export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
   private readonly configuringAgents = new Set<string>();
+  private readonly deletingAgents = new Set<string>();
   private readonly quarantineOperations = new Set<string>();
   private readonly runner: AirlockRunner;
   private readonly actionDispatcher: MockExternalActionDispatcher;
   private readonly promotionJournal: PromotionJournal;
+  private readonly agentDeletionJournal: AgentDeletionJournal;
   private readonly runnerEnforcesTokenBudgets: boolean;
   private providerRegistryReady = false;
 
@@ -92,6 +110,9 @@ export class AgentService {
     this.promotionJournal = new PromotionJournal(
       path.join(config.dataDirectory, "promotion-journal"),
     );
+    this.agentDeletionJournal = new AgentDeletionJournal(
+      path.join(config.dataDirectory, "agent-deletion-journal"),
+    );
     this.runner = new AirlockRunner(
       runner,
       workspaces,
@@ -108,9 +129,12 @@ export class AgentService {
   async initialize(): Promise<void> {
     this.providerRegistryReady = false;
     await this.store.initialize();
-    await this.workspaces.initialize();
+    await this.workspaces.initialize({ recoverProviderRegistryTransitions: false });
     await this.actionDispatcher.initialize();
     await this.promotionJournal.initialize();
+    await this.agentDeletionJournal.initialize();
+    await this.reconcileAgentDeletions();
+    await this.workspaces.recoverProviderRegistryTransitions();
     const registryDescriptors = this.resourceCoordinator.registryDescriptors();
     const registryGeneration = await this.workspaces.nextProviderRegistryGeneration(
       registryDescriptors,
@@ -574,7 +598,17 @@ export class AgentService {
     const canonical = await this.workspaces.create(agent);
     agent.workspacePath = canonical.workspacePath;
     agent.canonicalStateId = canonical.stateId;
-    await this.store.mutate((database) => database.agents.push(agent));
+    await this.store.mutate((database) => {
+      database.agents.push(agent);
+      database.outcomeContractVersions.push({
+        schemaVersion: 1,
+        agentId: agent.id,
+        contract: structuredClone(agent.outcomeContract),
+        provenance: "created",
+        sourceProposalId: null,
+        rollbackFromVersion: null,
+      });
+    });
     return agent;
   }
 
@@ -583,7 +617,7 @@ export class AgentService {
     if (current.status === "busy") {
       throw new HttpError(409, "Stop the active run before editing this Agent");
     }
-    if (this.configuringAgents.has(id)) {
+    if (this.isAgentLocked(id)) {
       throw new HttpError(409, "This Agent is already being updated");
     }
     this.configuringAgents.add(id);
@@ -619,8 +653,8 @@ export class AgentService {
   }
 
   async deleteAgent(id: string): Promise<{ archivedWorkspace: string }> {
-    const agent = this.getAgent(id);
-    if (this.configuringAgents.has(id)) {
+    this.getAgent(id);
+    if (this.configuringAgents.has(id) || this.deletingAgents.has(id)) {
       throw new HttpError(409, "Wait for the Agent configuration update to finish");
     }
     this.configuringAgents.add(id);
@@ -669,48 +703,202 @@ export class AgentService {
           "Agent deletion is blocked until its Promotion recovery completes",
         );
       }
-      const audit: AgentArchiveAudit = {
-        schemaVersion: 1,
-        agentId: id,
-        archivedAt: now(),
-        runs: agentRuns.map((run) => ({
-          runId: run.id,
-          status: run.status,
-          candidateSetId: run.candidateSetId,
-          disposition: run.transaction?.disposition ?? null,
-          promotionReceiptDigest: run.transaction?.promotionReceipt
-            ? createHash("sha256")
-                .update(stableJson(run.transaction.promotionReceipt))
-                .digest("hex")
-            : null,
-        })),
-        candidateSets: agentCandidateSets.map((candidateSet) => {
-          const winner = candidateSet.competitors.find(
-            (competitor) => competitor.runId === candidateSet.winnerRunId,
-          );
-          return {
-            candidateSetId: candidateSet.id,
-            phase: candidateSet.phase,
-            winnerRunId: candidateSet.winnerRunId,
-            selectionDecisionDigest:
-              candidateSet.selectionDecision?.decisionDigest ?? null,
-            winnerSealDigest: winner?.seal?.sealDigest ?? null,
-          };
-        }),
-      };
-      const archivedWorkspace = await this.workspaces.archive(agent, audit);
-      await this.store.mutate((database) => {
-        database.agents = database.agents.filter((item) => item.id !== id);
-        database.messages = database.messages.filter((item) => item.agentId !== id);
-        database.runs = database.runs.filter((item) => item.agentId !== id);
-        database.candidateSets = database.candidateSets.filter(
-          (item) => item.agentId !== id,
+      if (this.hasUnresolvedCandidateDisposition(id)) {
+        throw new HttpError(
+          409,
+          "Agent deletion is blocked until Candidate cleanup resolves every disposition",
         );
-      });
+      }
+      const deletionScan = await this.agentDeletionJournal.scan();
+      if (deletionScan.errors.length > 0) {
+        throw new Error("Agent deletion journal recovery is required");
+      }
+      const pendingDeletion = deletionScan.records.find(
+        (record) => record.agentId === id,
+      );
+      const archivedAt = pendingDeletion?.audit.archivedAt ?? now();
+      const audit = this.buildAgentArchiveAudit(
+        id,
+        archivedAt,
+        agentRuns,
+        agentCandidateSets,
+        persisted.assuranceProposals.filter((proposal) => proposal.agentId === id),
+        persisted.outcomeContractVersions.filter((record) => record.agentId === id),
+        pendingDeletion?.audit.schemaVersion ?? 2,
+      );
+      await this.agentDeletionJournal.begin(id, audit);
+      this.deletingAgents.add(id);
+      const archivedWorkspace = await this.workspaces.archiveAgent(id, audit);
+      await this.agentDeletionJournal.markWorkspaceArchived(id);
+      await this.removeAgentRecords(id);
+      await this.agentDeletionJournal.complete(id);
+      this.deletingAgents.delete(id);
       return { archivedWorkspace };
     } finally {
       this.configuringAgents.delete(id);
     }
+  }
+
+  private async reconcileAgentDeletions(): Promise<void> {
+    const scan = await this.agentDeletionJournal.scan();
+    if (scan.errors.length > 0) {
+      throw new Error(
+        "Agent deletion recovery failed closed: " +
+          scan.errors.map((error) => error.message).join("; "),
+      );
+    }
+    for (const record of scan.records) {
+      this.deletingAgents.add(record.agentId);
+      const snapshot = this.store.snapshot();
+      const agent = snapshot.agents.find((item) => item.id === record.agentId);
+      if (agent) {
+        const expectedAudit = this.buildAgentArchiveAudit(
+          record.agentId,
+          record.audit.archivedAt,
+          snapshot.runs.filter((run) => run.agentId === record.agentId),
+          snapshot.candidateSets.filter(
+            (candidateSet) => candidateSet.agentId === record.agentId,
+          ),
+          snapshot.assuranceProposals.filter(
+            (proposal) => proposal.agentId === record.agentId,
+          ),
+          snapshot.outcomeContractVersions.filter(
+            (history) => history.agentId === record.agentId,
+          ),
+          record.audit.schemaVersion,
+        );
+        if (stableJson(expectedAudit) !== stableJson(record.audit)) {
+          throw new Error(
+            "Agent deletion recovery failed closed because its evidence changed",
+          );
+        }
+      }
+      await this.workspaces.archiveAgent(record.agentId, record.audit);
+      await this.agentDeletionJournal.markWorkspaceArchived(record.agentId);
+      await this.removeAgentRecords(record.agentId);
+      await this.agentDeletionJournal.complete(record.agentId);
+      this.deletingAgents.delete(record.agentId);
+    }
+  }
+
+  private buildAgentArchiveAudit(
+    agentId: string,
+    archivedAt: string,
+    runs: AgentRun[],
+    candidateSets: CandidateSet[],
+    proposals: AssuranceProposal[] = [],
+    contractVersions: OutcomeContractVersionRecord[] = [],
+    schemaVersion: 1 | 2 = 2,
+  ): AgentArchiveAudit {
+    const runSummaries = [...runs]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((run) => ({
+        runId: run.id,
+        status: run.status,
+        candidateSetId: run.candidateSetId,
+        disposition: run.transaction?.disposition ?? null,
+        promotionReceiptDigest: run.transaction?.promotionReceipt
+          ? createHash("sha256")
+              .update(stableJson(run.transaction.promotionReceipt))
+              .digest("hex")
+          : null,
+      }));
+    const candidateSetSummaries = [...candidateSets]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((candidateSet) => {
+        const winner = candidateSet.competitors.find(
+          (competitor) => competitor.runId === candidateSet.winnerRunId,
+        );
+        return {
+          candidateSetId: candidateSet.id,
+          phase: candidateSet.phase,
+          winnerRunId: candidateSet.winnerRunId,
+          selectionDecisionDigest:
+            candidateSet.selectionDecision?.decisionDigest ?? null,
+          winnerSealDigest: winner?.seal?.sealDigest ?? null,
+        };
+      });
+    const common = {
+      agentId,
+      archivedAt,
+      runs: runSummaries,
+      candidateSets: candidateSetSummaries,
+    };
+    if (schemaVersion === 1) {
+      return { schemaVersion: 1, ...common };
+    }
+    const proposalSummaries = [...proposals]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((proposal) => ({
+        proposalId: proposal.id,
+        state: proposal.state,
+        baseContractVersion: proposal.baseContractVersion,
+        proposalDigest: proposal.proposalDigest,
+        decisionAction: proposal.decision?.action ?? null,
+        decisionDigest: proposal.decision
+          ? airlockEvidenceHash(proposal.decision)
+          : null,
+        resultingContractVersion:
+          proposal.decision?.resultingContractVersion ?? null,
+      }));
+    const contractVersionSummaries = [...contractVersions]
+      .sort((left, right) => left.contract.version - right.contract.version)
+      .map((record) => ({
+        version: record.contract.version,
+        contractHash: outcomeContractHash(record.contract),
+        provenance: record.provenance,
+        sourceProposalId: record.sourceProposalId,
+        rollbackFromVersion: record.rollbackFromVersion,
+      }));
+    return {
+      schemaVersion: 2,
+      agentId,
+      archivedAt,
+      runs: runSummaries.slice(0, MAXIMUM_ARCHIVED_RUN_SUMMARIES),
+      candidateSets: candidateSetSummaries.slice(
+        0,
+        MAXIMUM_ARCHIVED_CANDIDATE_SET_SUMMARIES,
+      ),
+      assuranceProposals: proposalSummaries.slice(
+        0,
+        MAXIMUM_ARCHIVED_PROPOSAL_SUMMARIES,
+      ),
+      outcomeContractVersions: contractVersionSummaries.slice(
+        0,
+        MAXIMUM_ARCHIVED_CONTRACT_VERSION_SUMMARIES,
+      ),
+      aggregate: {
+        runCount: runSummaries.length,
+        candidateSetCount: candidateSetSummaries.length,
+        assuranceProposalCount: proposalSummaries.length,
+        outcomeContractVersionCount: contractVersionSummaries.length,
+        evidenceDigest: airlockEvidenceHash({
+          runs: runSummaries,
+          candidateSets: candidateSetSummaries,
+          assuranceProposals: proposalSummaries,
+          outcomeContractVersions: contractVersionSummaries,
+        }),
+      },
+    };
+  }
+
+  private async removeAgentRecords(agentId: string): Promise<void> {
+    await this.store.mutate((database) => {
+      database.agents = database.agents.filter((item) => item.id !== agentId);
+      database.messages = database.messages.filter(
+        (item) => item.agentId !== agentId,
+      );
+      database.runs = database.runs.filter((item) => item.agentId !== agentId);
+      database.candidateSets = database.candidateSets.filter(
+        (item) => item.agentId !== agentId,
+      );
+      database.assuranceProposals = database.assuranceProposals.filter(
+        (item) => item.agentId !== agentId,
+      );
+      database.outcomeContractVersions = database.outcomeContractVersions.filter(
+        (item) => item.agentId !== agentId,
+      );
+    });
   }
 
   async updateOutcomeContract(
@@ -718,7 +906,7 @@ export class AgentService {
     input: OutcomeContractInput,
   ): Promise<OutcomeContract> {
     const current = this.getAgent(id);
-    if (current.status === "busy" || this.configuringAgents.has(id)) {
+    if (current.status === "busy" || this.isAgentLocked(id)) {
       throw new HttpError(
         409,
         "Stop the active run before updating the Outcome Contract",
@@ -738,11 +926,358 @@ export class AgentService {
         const next = createNextOutcomeContract(agent.outcomeContract, input);
         agent.outcomeContract = next;
         agent.updatedAt = now();
+        database.outcomeContractVersions.push({
+          schemaVersion: 1,
+          agentId: id,
+          contract: structuredClone(next),
+          provenance: "manual",
+          sourceProposalId: null,
+          rollbackFromVersion: null,
+        });
+        for (const proposal of database.assuranceProposals) {
+          if (proposal.agentId === id && proposal.state === "ready") {
+            proposal.state = "stale";
+            proposal.updatedAt = agent.updatedAt;
+          }
+        }
         return structuredClone(next);
       });
     } finally {
       this.configuringAgents.delete(id);
     }
+  }
+
+  listAssuranceProposals(agentId: string): AssuranceProposal[] {
+    this.getAgent(agentId);
+    return this.store
+      .snapshot()
+      .assuranceProposals.filter((proposal) => proposal.agentId === agentId)
+      .sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) ||
+          left.id.localeCompare(right.id),
+      );
+  }
+
+  listOutcomeContractVersions(agentId: string): OutcomeContractVersionRecord[] {
+    this.getAgent(agentId);
+    return this.store
+      .snapshot()
+      .outcomeContractVersions.filter((record) => record.agentId === agentId)
+      .sort((left, right) => right.contract.version - left.contract.version);
+  }
+
+  async deriveAssuranceProposal(agentId: string): Promise<AssuranceProposal | null> {
+    this.assertAgentConfigurationAvailable(agentId);
+    this.configuringAgents.add(agentId);
+    try {
+      const snapshot = this.store.snapshot();
+      const agent = snapshot.agents.find((item) => item.id === agentId);
+      if (!agent) throw new HttpError(404, "Agent not found");
+      const proposal = deriveAssuranceProposal(
+        agentId,
+        agent.outcomeContract,
+        snapshot.runs,
+      );
+      if (!proposal) return null;
+      return await this.store.mutate((database) => {
+        const currentAgent = database.agents.find(
+          (candidate) => candidate.id === agentId,
+        );
+        if (!currentAgent) throw new HttpError(404, "Agent not found");
+        if (
+          currentAgent.outcomeContract.version !== proposal.baseContractVersion ||
+          outcomeContractHash(currentAgent.outcomeContract) !==
+            proposal.baseContractHash
+        ) {
+          throw new HttpError(
+            409,
+            "Outcome Contract changed while Assurance evidence was derived",
+          );
+        }
+        const existing = database.assuranceProposals.find(
+          (candidate) => candidate.id === proposal.id,
+        );
+        if (existing) return structuredClone(existing);
+        if (
+          database.assuranceProposals.filter(
+            (candidate) => candidate.agentId === agentId,
+          ).length >= 100
+        ) {
+          throw new HttpError(
+            409,
+            "Assurance Proposal retention reached its per-Agent bound",
+          );
+        }
+        const updatedAt = now();
+        for (const candidate of database.assuranceProposals) {
+          if (candidate.agentId !== agentId || candidate.state !== "ready") continue;
+          candidate.state =
+            candidate.baseContractVersion === proposal.baseContractVersion &&
+            candidate.baseContractHash === proposal.baseContractHash
+              ? "superseded"
+              : "stale";
+          candidate.updatedAt = updatedAt;
+        }
+        database.assuranceProposals.push(structuredClone(proposal));
+        return structuredClone(proposal);
+      });
+    } finally {
+      this.configuringAgents.delete(agentId);
+    }
+  }
+
+  async acceptAssuranceProposal(
+    proposalId: string,
+    reason: string,
+  ): Promise<{ proposal: AssuranceProposal; outcomeContract: OutcomeContract }> {
+    const decisionReason = normalizeAssuranceDecisionReason(reason);
+    const snapshot = this.store.snapshot();
+    const pending = snapshot.assuranceProposals.find(
+      (proposal) => proposal.id === proposalId,
+    );
+    if (!pending) throw new HttpError(404, "Assurance Proposal not found");
+    this.assertAgentConfigurationAvailable(pending.agentId);
+    this.configuringAgents.add(pending.agentId);
+    try {
+      const result = await this.store.mutate((database) => {
+        const proposal = database.assuranceProposals.find(
+          (candidate) => candidate.id === proposalId,
+        );
+        const agent = proposal
+          ? database.agents.find((candidate) => candidate.id === proposal.agentId)
+          : null;
+        if (!proposal || !agent) {
+          return { kind: "missing" as const };
+        }
+        if (proposal.state !== "ready") {
+          return { kind: "not-ready" as const, state: proposal.state };
+        }
+        verifyAssuranceProposalIntegrity(proposal);
+        if (
+          agent.outcomeContract.version !== proposal.baseContractVersion ||
+          outcomeContractHash(agent.outcomeContract) !== proposal.baseContractHash
+        ) {
+          proposal.state = "stale";
+          proposal.updatedAt = now();
+          return { kind: "stale" as const };
+        }
+        const reproduced = deriveAssuranceProposal(
+          agent.id,
+          agent.outcomeContract,
+          database.runs,
+          proposal.createdAt,
+        );
+        if (!reproduced || reproduced.proposalDigest !== proposal.proposalDigest) {
+          throw new HttpError(
+            409,
+            "Assurance Proposal no longer reproduces from retained evidence",
+          );
+        }
+        const baseRecord = database.outcomeContractVersions.find(
+          (record) =>
+            record.agentId === agent.id &&
+            record.contract.version === proposal.baseContractVersion,
+        );
+        if (
+          !baseRecord ||
+          outcomeContractHash(baseRecord.contract) !== proposal.baseContractHash
+        ) {
+          throw new HttpError(
+            409,
+            "Assurance Proposal base contract history is unavailable",
+          );
+        }
+        const next = applyAssuranceOperations(
+          agent.outcomeContract,
+          proposal.operations,
+        );
+        const decidedAt = now();
+        agent.outcomeContract = next;
+        agent.updatedAt = decidedAt;
+        proposal.state = "accepted";
+        proposal.decision = {
+          action: "accepted",
+          reason: decisionReason,
+          decidedAt,
+          resultingContractVersion: next.version,
+        };
+        proposal.updatedAt = decidedAt;
+        database.outcomeContractVersions.push({
+          schemaVersion: 1,
+          agentId: agent.id,
+          contract: structuredClone(next),
+          provenance: "assurance-proposal",
+          sourceProposalId: proposal.id,
+          rollbackFromVersion: null,
+        });
+        for (const other of database.assuranceProposals) {
+          if (
+            other.agentId === agent.id &&
+            other.id !== proposal.id &&
+            other.state === "ready"
+          ) {
+            other.state = "stale";
+            other.updatedAt = decidedAt;
+          }
+        }
+        return {
+          kind: "accepted" as const,
+          proposal: structuredClone(proposal),
+          outcomeContract: structuredClone(next),
+        };
+      });
+      if (result.kind === "missing") {
+        throw new HttpError(404, "Assurance Proposal not found");
+      }
+      if (result.kind === "not-ready") {
+        throw new HttpError(
+          409,
+          "Assurance Proposal is not ready: " + result.state,
+        );
+      }
+      if (result.kind === "stale") {
+        throw new HttpError(
+          409,
+          "Assurance Proposal is stale and must be derived again",
+        );
+      }
+      return result;
+    } finally {
+      this.configuringAgents.delete(pending.agentId);
+    }
+  }
+
+  async rejectAssuranceProposal(
+    proposalId: string,
+    reason: string,
+  ): Promise<AssuranceProposal> {
+    const decisionReason = normalizeAssuranceDecisionReason(reason);
+    const snapshot = this.store.snapshot();
+    const pending = snapshot.assuranceProposals.find(
+      (proposal) => proposal.id === proposalId,
+    );
+    if (!pending) throw new HttpError(404, "Assurance Proposal not found");
+    this.assertAgentConfigurationAvailable(pending.agentId);
+    this.configuringAgents.add(pending.agentId);
+    try {
+      return await this.store.mutate((database) => {
+        const proposal = database.assuranceProposals.find(
+          (candidate) => candidate.id === proposalId,
+        );
+        if (!proposal) throw new HttpError(404, "Assurance Proposal not found");
+        if (proposal.state !== "ready") {
+          throw new HttpError(
+            409,
+            "Only a ready Assurance Proposal may be rejected",
+          );
+        }
+        const decidedAt = now();
+        proposal.state = "rejected";
+        proposal.decision = {
+          action: "rejected",
+          reason: decisionReason,
+          decidedAt,
+          resultingContractVersion: null,
+        };
+        proposal.updatedAt = decidedAt;
+        return structuredClone(proposal);
+      });
+    } finally {
+      this.configuringAgents.delete(pending.agentId);
+    }
+  }
+
+  async rollbackOutcomeContract(
+    agentId: string,
+    targetVersion: number,
+    expectedCurrentVersion: number,
+  ): Promise<OutcomeContract> {
+    this.assertAgentConfigurationAvailable(agentId);
+    this.configuringAgents.add(agentId);
+    try {
+      return await this.store.mutate((database) => {
+        const agent = database.agents.find((candidate) => candidate.id === agentId);
+        if (!agent) throw new HttpError(404, "Agent not found");
+        if (agent.outcomeContract.version !== expectedCurrentVersion) {
+          throw new HttpError(
+            409,
+            "Outcome Contract changed before rollback confirmation",
+          );
+        }
+        const target = database.outcomeContractVersions.find(
+          (record) =>
+            record.agentId === agentId && record.contract.version === targetVersion,
+        );
+        if (!target) {
+          throw new HttpError(404, "Outcome Contract version not found");
+        }
+        if (targetVersion === agent.outcomeContract.version) {
+          throw new HttpError(409, "Rollback target is already current");
+        }
+        const next = createNextOutcomeContract(agent.outcomeContract, {
+          requiredPaths: target.contract.requiredPaths,
+          protectedPaths: target.contract.protectedPaths,
+          maxChangedFiles: target.contract.maxChangedFiles,
+          maxAddedBytes: target.contract.maxAddedBytes,
+          secretPatterns: target.contract.secretPatterns,
+          validationCommands: target.contract.validationCommands,
+        });
+        agent.outcomeContract = next;
+        agent.updatedAt = now();
+        database.outcomeContractVersions.push({
+          schemaVersion: 1,
+          agentId,
+          contract: structuredClone(next),
+          provenance: "rollback",
+          sourceProposalId: null,
+          rollbackFromVersion: targetVersion,
+        });
+        for (const proposal of database.assuranceProposals) {
+          if (proposal.agentId === agentId && proposal.state === "ready") {
+            proposal.state = "stale";
+            proposal.updatedAt = now();
+          }
+        }
+        return structuredClone(next);
+      });
+    } finally {
+      this.configuringAgents.delete(agentId);
+    }
+  }
+
+  private assertAgentConfigurationAvailable(agentId: string): void {
+    const agent = this.getAgent(agentId);
+    if (agent.status === "busy" || this.isAgentLocked(agentId)) {
+      throw new HttpError(
+        409,
+        "Stop the active run before changing the Outcome Contract",
+      );
+    }
+  }
+
+  private isAgentLocked(agentId: string): boolean {
+    return (
+      this.configuringAgents.has(agentId) ||
+      this.deletingAgents.has(agentId) ||
+      this.hasUnresolvedCandidateDisposition(agentId)
+    );
+  }
+
+  private hasUnresolvedCandidateDisposition(agentId: string): boolean {
+    const snapshot = this.store.snapshot();
+    const runsById = new Map(snapshot.runs.map((run) => [run.id, run]));
+    return snapshot.candidateSets.some(
+      (candidateSet) =>
+        candidateSet.agentId === agentId &&
+        candidateSet.competitors.some((competitor) => {
+          const run = runsById.get(competitor.runId);
+          return (
+            competitor.loserDisposition === "pending" ||
+            run?.transaction?.disposition === null
+          );
+        }),
+    );
   }
 
   async startAgent(id: string): Promise<Agent> {
@@ -911,7 +1446,7 @@ export class AgentService {
       if (agent.status === "busy") {
         throw new HttpError(409, "This Agent already has an active operation");
       }
-      if (this.configuringAgents.has(agentId)) {
+      if (this.isAgentLocked(agentId)) {
         throw new HttpError(409, "Wait for the Agent configuration update to finish");
       }
       if (
@@ -1011,7 +1546,7 @@ export class AgentService {
       if (storedAgent.status === "busy") {
         throw new HttpError(409, "This Agent is already running");
       }
-      if (this.configuringAgents.has(agentId)) {
+      if (this.isAgentLocked(agentId)) {
         throw new HttpError(409, "Wait for the Agent configuration update to finish");
       }
       storedAgent.workspacePath = canonical.workspacePath;
@@ -1147,7 +1682,7 @@ export class AgentService {
         if (agent.status === "busy") {
           throw new HttpError(409, "This Agent is already running");
         }
-        if (this.configuringAgents.has(agent.id)) {
+        if (this.isAgentLocked(agent.id)) {
           throw new HttpError(409, "Wait for the Agent configuration update to finish");
         }
         if (
@@ -1540,9 +2075,24 @@ export class AgentService {
         }
       } catch (error) {
         if (error instanceof StaleCandidateSourceError) {
-          await this.failCandidateSetClosed(candidateSetId, "stale", error.message);
-          await this.cleanupCandidateSetLosers(candidateSetId, null, false).catch(
-            () => undefined,
+          const cleanupFailure = await this.cleanupCandidateSetLosers(
+            candidateSetId,
+            null,
+            false,
+          ).then(
+            () => null,
+            (failure: unknown) => failure,
+          );
+          await this.failCandidateSetClosed(
+            candidateSetId,
+            cleanupFailure ? "recovery-error" : "stale",
+            cleanupFailure
+              ? error.message +
+                  "; Candidate cleanup also failed closed: " +
+                  (cleanupFailure instanceof Error
+                    ? cleanupFailure.message
+                    : String(cleanupFailure))
+              : error.message,
           );
           continue;
         }
@@ -1718,12 +2268,27 @@ export class AgentService {
         canonical.stateId !== admitted.source.stateId ||
         canonical.contentHash !== admitted.source.contentHash
       ) {
+        const staleMessage =
+          "Canonical State changed before Candidate Selection";
+        const cleanupFailure = await this.cleanupCandidateSetLosers(
+          admitted.id,
+          null,
+          false,
+        ).then(
+          () => null,
+          (failure: unknown) => failure,
+        );
         await this.failCandidateSetClosed(
           admitted.id,
-          "stale",
-          "Canonical State changed before Candidate Selection",
+          cleanupFailure ? "recovery-error" : "stale",
+          cleanupFailure
+            ? staleMessage +
+                "; Candidate cleanup also failed closed: " +
+                (cleanupFailure instanceof Error
+                  ? cleanupFailure.message
+                  : String(cleanupFailure))
+            : staleMessage,
         );
-        await this.cleanupCandidateSetLosers(admitted.id, null, false);
         return;
       }
       await this.updateCandidateSetPhase(admitted.id, "evaluated");
@@ -1776,9 +2341,24 @@ export class AgentService {
       await this.completeCandidateSet(admitted.id, decision.winnerCompetitorId);
     } catch (error) {
       if (error instanceof StaleCandidateSourceError) {
-        await this.failCandidateSetClosed(admitted.id, "stale", error.message);
-        await this.cleanupCandidateSetLosers(admitted.id, null, false).catch(
-          () => undefined,
+        const cleanupError = await this.cleanupCandidateSetLosers(
+          admitted.id,
+          null,
+          false,
+        ).then(
+          () => null,
+          (failure: unknown) => failure,
+        );
+        await this.failCandidateSetClosed(
+          admitted.id,
+          cleanupError ? "recovery-error" : "stale",
+          cleanupError
+            ? error.message +
+                "; Candidate cleanup also failed closed: " +
+                (cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError))
+            : error.message,
         );
         return;
       }
@@ -1813,24 +2393,23 @@ export class AgentService {
         return;
       }
       const failureMessage = boundedCandidateSetError(error);
-      await this.failCandidateSetClosed(
-        admitted.id,
-        "recovery-error",
-        failureMessage,
-      );
+      let cleanupFailure: unknown = null;
       try {
         await this.cleanupCandidateSetLosers(admitted.id, null, false);
       } catch (cleanupError) {
-        await this.failCandidateSetClosed(
-          admitted.id,
-          "recovery-error",
-          failureMessage +
-            "; Candidate cleanup also failed closed: " +
-            (cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError)),
-        );
+        cleanupFailure = cleanupError;
       }
+      await this.failCandidateSetClosed(
+        admitted.id,
+        "recovery-error",
+        cleanupFailure
+          ? failureMessage +
+              "; Candidate cleanup also failed closed: " +
+              (cleanupFailure instanceof Error
+                ? cleanupFailure.message
+                : String(cleanupFailure))
+          : failureMessage,
+      );
     }
   }
 
@@ -2425,6 +3004,12 @@ export class AgentService {
   }
 
   private async setStatus(id: string, status: Agent["status"]): Promise<Agent> {
+    if (status === "ready" && this.isAgentLocked(id)) {
+      throw new HttpError(
+        409,
+        "This Agent has unresolved Candidate disposition evidence",
+      );
+    }
     return this.store.mutate((database) => {
       const agent = database.agents.find((item) => item.id === id);
       if (!agent) {
@@ -2479,6 +3064,20 @@ export class AgentService {
       this.cancellationRequests.delete(agentId);
     }
   }
+}
+
+function normalizeAssuranceDecisionReason(reason: string): string {
+  const normalized = reason.trim();
+  if (
+    Buffer.byteLength(normalized, "utf8") > 500 ||
+    redactSensitiveText(normalized) !== normalized
+  ) {
+    throw new HttpError(
+      400,
+      "Assurance decision reason must be credential-free and at most 500 bytes",
+    );
+  }
+  return normalized;
 }
 
 function boundedCandidateSetError(error: unknown): string {
@@ -2591,7 +3190,9 @@ function criterionValuesForRun(
 ): CandidateSetCompetitor["criterionValues"] {
   const values: CandidateSetCompetitor["criterionValues"] = {
     "quality-assertion": createQualityAssertion({
-      validations: transaction.validations,
+      validations: transaction.validations.filter(
+        (validation) => !validation.name.startsWith("assurance-"),
+      ),
     }),
   };
   const changedFiles = transaction.changes?.totalChangedFiles;

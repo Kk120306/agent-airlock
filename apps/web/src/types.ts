@@ -49,6 +49,80 @@ export interface OutcomeContract {
   createdAt: string;
 }
 
+export type AssuranceOperation =
+  | { kind: "add-required-path"; path: string }
+  | { kind: "add-protected-path"; path: string }
+  | { kind: "lower-max-changed-files"; maximum: number }
+  | { kind: "lower-max-added-bytes"; maximum: number }
+  | {
+      kind: "add-catalog-secret";
+      catalogId: string;
+      catalogVersion: number;
+      name: string;
+      pattern: string;
+    }
+  | {
+      kind: "make-command-required";
+      name: string;
+      commandHash: string;
+      timeoutMs: number;
+    };
+
+export interface AssuranceProposal {
+  schemaVersion: 1;
+  id: string;
+  agentId: string;
+  state: "draft" | "ready" | "accepted" | "rejected" | "superseded" | "stale";
+  baseContractVersion: number;
+  baseContractHash: string;
+  operations: AssuranceOperation[];
+  citations: Array<{
+    operationKey: string;
+    runId: string;
+    rootRunId: string;
+    evidenceSelector: string;
+    evidenceHash: string;
+    derivationRule: string;
+  }>;
+  simulation: {
+    engineId: string;
+    engineVersion: number;
+    results: Array<{
+      operationKey: string;
+      runId: string;
+      classification: "exact" | "conservative" | "unknown";
+      priorDisposition: "promoted" | "quarantined" | "discarded" | "cancelled" | null;
+      counterfactualDisposition:
+        | "promoted"
+        | "quarantined"
+        | "discarded"
+        | "cancelled"
+        | null;
+      missingInputs: string[];
+      resultHash: string;
+    }>;
+    digest: string;
+  };
+  proposalDigest: string;
+  decision: {
+    action: "accepted" | "rejected";
+    reason: string;
+    decidedAt: string;
+    resultingContractVersion: number | null;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutcomeContractVersionRecord {
+  schemaVersion: 1;
+  agentId: string;
+  contract: OutcomeContract;
+  provenance: "created" | "manual" | "assurance-proposal" | "rollback" | "migration";
+  sourceProposalId: string | null;
+  rollbackFromVersion: number | null;
+}
+
 export interface RunTransaction {
   id: string;
   status: RunTransactionStatus;

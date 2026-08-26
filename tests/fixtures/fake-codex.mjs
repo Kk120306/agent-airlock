@@ -21,7 +21,11 @@ const threadId = resumedThreadId ?? "baseline-thread";
 const repairRequest = /Agent Airlock Repair Run/i.test(prompt);
 const candidateSetRequest = /Agent Airlock Candidate Set/i.test(prompt);
 const competitorId = prompt.match(/Competitor ([A-Za-z0-9._:-]+)\./)?.[1] ?? null;
-const destructiveRequest = !repairRequest && /delete\s+AGENTS\.md/i.test(prompt);
+const adaptiveAssuranceRequest =
+  !repairRequest && /delete\s+README\.md/i.test(prompt);
+const destructiveRequest =
+  !repairRequest &&
+  (/delete\s+AGENTS\.md/i.test(prompt) || adaptiveAssuranceRequest);
 const multiResourceRequest = /multi-resource release/i.test(prompt);
 const codexHome = process.env.CODEX_HOME;
 const outboxPath = process.env.AIRLOCK_OUTBOX_PATH;
@@ -230,7 +234,9 @@ if (candidateSetRequest) {
     process.stderr.write("Baseline workspace did not persist before destructive turn\n");
     process.exit(3);
   }
-  await rm(path.join(process.cwd(), "AGENTS.md"));
+  await rm(
+    path.join(process.cwd(), adaptiveAssuranceRequest ? "README.md" : "AGENTS.md"),
+  );
   await writeFile(path.join(process.cwd(), "damage.txt"), "must remain quarantined\n");
   const database = new DatabaseSync(
     path.join(process.cwd(), ".airlock", "demo.sqlite"),

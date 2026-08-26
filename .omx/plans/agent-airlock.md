@@ -1,188 +1,349 @@
-# Agent Airlock implementation plan
+# Agent Airlock architecture
 
-## Requirements summary
+## Architectural intent
 
-Agent Airlock must extend the CodeJam starter kit without replacing its React UI, Fastify control plane, Agent lifecycle, Codex Runtime, or local container path.
-Every Agent Run must execute against Candidate State, and only a candidate satisfying its versioned Outcome Contract may become Canonical State.
-The POC must demonstrate transactional workspace and Codex session behavior, a SQLite Transactional Resource, a deferred mock External Action Intent, quarantine, repair, recovery, and evidence.
+Agent Airlock adds one transactional execution seam around the starter kit's existing `AgentRunner` contract.
+The control plane continues to own Agent lifecycle and Run orchestration, while Airlock owns preparation, validation, promotion, quarantine, and recovery of mutable Agent state.
 
-This plan is frozen for judging by [ADR 0009](../../docs/adr/0009-freeze-the-judge-release-boundary.md).
+## Baseline observation
 
-## Outcome sequence
+The original `AgentService` passed the persistent workspace path and canonical Codex thread directly to `AgentRunner`.
+The original local Runtime also bind-mounted that workspace and one shared Codex home as writable container paths.
+Phase 1 isolated workspace files, but the shared Codex home remained a hidden mutation path until Phase 3.
 
-Implementation follows the [outcome roadmap](../../docs/product/OUTCOME_ROADMAP.md).
-A later phase does not enter the judging path until the previous phase's automated, user-visible, and reproducibility gates pass.
+## Implemented Phase 8 architecture
 
-| Outcome phase | Implementation steps | Required result |
-| --- | --- | --- |
-| 0. Baseline locked | Baseline acceptance before Step 1 | The starter browser, Runtime, persistence, and follow-up journey is repeatable. |
-| 1. Harmless failure | Steps 2 through 4 | Rejection leaves the canonical content hash unchanged. |
-| 2. Explainable decision | Steps 5 and 8 | The operator can understand the contract, evidence, and disposition. |
-| 3. Whole-Agent continuity | Steps 3, 4, and 6 | Workspace and Codex session advance or remain unchanged together. |
-| 4. Transactional effects | Step 7 | Files, SQLite, and deferred actions share one coherent decision. |
-| 5. Recoverable intelligence | Steps 6 and 8 | A quarantined future can be repaired without premature canonical mutation. |
-| 6. Adversarial resilience | Steps 5, 6, and 9 | Crash, bypass, cleanup, and replay tests fail closed. |
-| 7. Judge-ready release | Step 9 | The complete product is reproducible and demonstrable within three minutes. |
-
-Phases 8 through 11 are post-hackathon outcomes and must not expand the implementation scope before submission.
-Their isolated execution record is maintained in [the Phase 8 through 11 plan](phases-8-11-execution.md).
-Phase 9 Competing Futures is implemented on the post-hackathon branch without changing this frozen Phase 7 judging plan.
-
-## Acceptance criteria
-
-1. The baseline create, invoke, follow-up, stop, restart, and persistence journey continues to work through the browser.
-2. The container Runtime receives a Candidate State workspace path and never a writable Canonical State workspace path.
-3. A valid Run that passes every required Validation advances the Canonical State identifier exactly once.
-4. A Run that deletes a required file reaches `quarantined` and leaves the canonical workspace content hash unchanged.
-5. A cancelled or timed-out Run leaves the canonical workspace and Codex session identifiers unchanged.
-6. A rejected SQLite mutation leaves canonical query results unchanged.
-7. A promoted External Action Intent is delivered once when the mock consumer receives duplicate dispatch attempts with the same idempotency key.
-8. A rejected External Action Intent is delivered zero times.
-9. A Repair Run begins from a selected Quarantine and does not change Canonical State until it passes.
-10. Restart reconciliation resolves every simulated interruption point around promotion without losing the last confirmed Canonical State.
-11. Validation output and evidence are bounded and redact configured sensitive patterns.
-12. Path traversal and symlink attempts cannot escape Candidate State.
-13. The complete normal, rejection, and recovery scenario fits within three minutes.
-14. `npm run check:phase7` passes from the working repository and a clean temporary clone.
-
-## Implementation steps
-
-### 1. Freeze the Wayfinder decisions
-
-Resolve the decision tickets linked from the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
-Update `docs/product/PRD.md`, `docs/architecture/agent-airlock.md`, `CONTEXT.md`, and ADRs as each decision closes.
-
-Verification:
-
-- No open decision affects P0 interfaces, lifecycle states, storage layout, or acceptance criteria.
-- The map's Not yet specified section contains no unresolved work required by the destination.
-
-### 2. Add the transactional data model and version migration
-
-Extend `apps/server/src/types.ts:1` with Run Transaction dispositions, Outcome Contracts, Validations, state-version references, Quarantine metadata, repair ancestry, and Promotion Receipts.
-Upgrade the versioned JSON schema in `apps/server/src/store.ts` with a tested migration from the starter kit's version 1 data.
-Extend Web types in `apps/web/src/types.ts` from the same documented contract.
-
-Verification:
-
-- Existing version 1 fixtures migrate without losing Agents, messages, or Runs.
-- Invalid lifecycle transitions and unknown contract versions are rejected.
-- Serialization round trips preserve every Airlock evidence field.
-
-### 3. Introduce versioned state resolution without changing the Playground
-
-Refactor `apps/server/src/workspace.ts:5` so callers resolve Canonical State through one state registry rather than storing a mutable physical workspace as truth.
-Create Candidate State and Quarantine roots outside the Runtime-visible canonical path.
-Keep Agent creation, editing, archival, and workspace instructions behavior compatible with existing routes.
-
-Verification:
-
-- Existing Agents receive an initial canonical state version during migration.
-- Candidate preparation does not mutate the source version.
-- Deleting an Agent follows an explicit policy for canonical versions and quarantines.
-
-### 4. Build the Airlock runner seam as the first vertical slice
-
-Wrap the existing `AgentRunner` interface at `apps/server/src/types.ts:78` with Candidate State preparation and terminal disposition.
-Change the call at `apps/server/src/agent-service.ts:247` to use Airlock evidence while preserving one active Run per Agent.
-Pass Candidate workspace and session paths into both Runtime implementations.
-Update the writable mounts at `apps/server/src/container-codex-runner.ts:79` so no Canonical State resource is exposed as writable.
-
-Verification:
-
-- A fake inner runner can modify Candidate State and promotion makes the result canonical.
-- A fake inner runner failure leaves the canonical content hash unchanged.
-- Local-process and container argument tests prove that only Candidate State paths are used.
-
-### 5. Implement Outcome Contracts and constrained Validation
-
-Add deterministic validation for containment, symlinks, protected paths, required paths, change limits, secret patterns, and operator-defined commands.
-Run project validation commands in a constrained container rather than on the host.
-Persist bounded redacted evidence before beginning promotion.
-
-Verification:
-
-- Each validator has positive and negative behavioral tests.
-- A malicious symlink fixture cannot expose or modify a path outside Candidate State.
-- A validation command that hangs is terminated and reported without affecting Canonical State.
-- Redaction tests cover Ark-style keys, bearer tokens, and configured custom patterns.
-
-### 6. Add recoverable Promotion, Quarantine, and Repair Run behavior
-
-Implement the chosen promotion mechanism with an idempotent promotion journal.
-Reconcile interrupted preparation, validation, and promotion during `AgentService.initialize()` at `apps/server/src/agent-service.ts:20`.
-Add Quarantine inspection, discard, and Repair Run operations to the service and Fastify routes in `apps/server/src/app.ts`.
-
-Verification:
-
-- Fault injection at every journal phase converges to one documented terminal state after restart.
-- Repeating promotion or discard requests is safe.
-- A Repair Run uses the quarantined candidate and records ancestry.
-
-### 7. Prove multiple Transactional Resources
-
-Implement a SQLite resource fixture whose candidate database is isolated and whose promoted version follows Canonical State.
-Implement typed External Action Intents and an idempotent mock dispatcher.
-Document the network-egress bypass limitation and keep the mock external resource outside the candidate workspace.
-
-Verification:
-
-- Promoted and rejected database mutations produce the expected canonical queries.
-- Duplicate dispatcher attempts produce one mock external effect.
-- Rejected or discarded candidates produce no mock external effect.
-
-### 8. Add the minimum Airlock operator experience
-
-Extend polling from `apps/web/src/App.tsx:204` and the active Run presentation with preparation, execution, validation, promotion, and quarantine states.
-Add a compact change summary, failed-Validation evidence, Quarantine actions, and Repair Run entry point.
-Keep the Playground as the main surface and avoid a separate administration application.
-
-Verification:
-
-- Browser E2E tests cover one promoted Run, one quarantined Run, discard, and Repair Run.
-- The UI communicates why Canonical State did or did not change.
-- Keyboard navigation, focus states, loading states, and error states are usable.
-
-### 9. Harden cleanup, evidence, and demonstration fixtures
-
-Add configurable Candidate and Quarantine retention with protection for the current Canonical State.
-Finalize the Promotion Receipt and architecture diagram.
-Create deterministic success, destructive, SQLite, outbox, repair, and restart fixtures.
-Rehearse `docs/demo/three-minute-demo.md` against the local container path.
-
-Verification:
-
-- Cleanup cannot remove the current Canonical State or an active Candidate State.
-- The baseline and Airlock E2E suites pass repeatedly without flakiness.
-- Repository setup contains no credential or sensitive demo output.
-- `npm run check` passes from a clean clone.
-
-## Risks and mitigations
-
-| Risk | Mitigation |
-| --- | --- |
-| Codex session files cannot be safely copied while a thread is active. | Use per-Agent versioned Codex homes, never copy during execution, and validate the pinned CLI behavior before freezing the storage design. |
-| Promotion cannot be atomic across several filesystem roots. | Use one durable canonical manifest or pointer over immutable resource versions and reconcile from a journal. |
-| Validation commands execute malicious project code. | Run them inside a constrained container with bounded time, output, mounts, and credentials. |
-| Copying large workspaces makes Run preparation slow. | Measure fixture performance, use copy-on-write or hard-link strategies only after correctness, and expose preparation duration. |
-| The Agent bypasses the outbox through unrestricted network access. | Scope the POC claim to platform-controlled actions, disclose the bypass, and add egress restrictions only if the core path is stable. |
-| A manual override weakens the safety claim. | Exclude promotion of a failed hard Validation from P0. |
-| The new lifecycle breaks baseline Run polling. | Preserve existing terminal semantics at the HTTP boundary and add browser E2E regression coverage. |
-
-## Verification commands
-
-```bash
-npm ci
-npm run check
+```mermaid
+flowchart LR
+    UI["Existing React Playground"] --> API["Existing Fastify API"]
+    API --> AS["AgentService"]
+    AS --> AR["AirlockRunner"]
+    AR --> PJ["Platform-owned Promotion journal"]
+    AR --> SR["Workspace State Registry"]
+    AR --> RCO["Resource Coordinator"]
+    RCO --> RREG["Capability-checked Resource Registry"]
+    RREG --> HTTP["Remote immutable HTTP object provider"]
+    SR --> CS["Candidate workspace, Codex home, SQLite, and outbox"]
+    SR --> Q["Quarantined Whole-Agent future"]
+    SR --> CR["Disposable canonical repair reference"]
+    Q -->|Repair fork| CS
+    CR -->|Verified reference| CS
+    AR --> RR["Existing AgentRunner"]
+    RR --> RC["Disposable Runtime container"]
+    RC --> CS
+    RC -->|Candidate-only derived binding| HTTP
+    AR --> VE["Outcome Validator"]
+    AR --> ED["Post-Promotion effect dispatcher"]
+    ED --> MS["Atomic mock-delivery store"]
+    VE --> VC["Constrained validation container"]
+    VE --> CS
+    AR --> PR["Promotion, Quarantine, or Discard"]
+    PR --> ST["Whole-Agent evidence and Promotion Receipt"]
+    ST --> UI
+    PJ -->|Startup reconciliation| SR
+    PJ -->|Verified replay| ED
 ```
 
-Run the browser acceptance journey through `npm run poc` with valid Ark credentials and a supported container engine.
-Run fault-injection integration tests without Ark credentials by using fake AgentRunner and Transactional Resource implementations.
+## Primary seam
 
-## Stop conditions
+`AirlockRunner` remains compatible with the existing `AgentRunner` interface from `apps/server/src/types.ts:78`.
+It substitutes Candidate State paths before delegating to the existing local-process or container implementation.
+The wrapper returns bounded execution output plus transactional evidence required by `AgentService`.
 
-- Stop before implementation if session isolation cannot preserve both accepted conversation continuity and rejected-Run separation.
-- Stop promotion work if the chosen state model cannot recover deterministically from every simulated crash point.
-- Do not add remote providers until local workspace, session, SQLite, and outbox behavior meet the Phase 4 exit gate.
-- Do not weaken a failed required Validation into a warning to make the demo pass.
-- Do not begin a later outcome phase while an earlier phase has failing acceptance evidence.
+The target caller-facing shape is intentionally small:
+
+```ts
+interface AirlockRunner {
+  run(request: AirlockRunRequest): Promise<AirlockRunResult>;
+  cancel(agentId: string): Promise<boolean>;
+  isAvailable(): Promise<boolean>;
+}
+```
+
+Preparation, workspace coordination, validators, and receipts remain inside the module.
+Additional Transactional Resource Providers register at the composition root through the provider-neutral SDK without changing `AirlockRunner` lifecycle branches.
+Repair preparation, ancestry, freshness checks, and discard remain inside the same Airlock boundary.
+Promotion journaling, forward recovery, and bounded retention are implemented inside that boundary.
+
+## State layout
+
+ADR 0002 selects immutable state-version directories with an atomically replaced canonical manifest.
+ADR 0005 makes the workspace and Codex home one versioned Whole-Agent state:
+
+```text
+workspaces/
+├── .resource-registry.json
+├── .registry-transitions/<agent-id>.json
+├── <agent-id>/
+│   ├── canonical.json
+│   └── versions/<state-id>/
+│       ├── candidate.json (promoted Runs only)
+│       ├── workspace/
+│       │   └── .airlock/demo.sqlite
+│       ├── codex-home/
+│       ├── outbox/intents.jsonl
+│       └── resources/<provider-id>/
+├── .candidates/<run-id>/
+│   ├── candidate.json
+│   ├── workspace/
+│   │   └── .airlock/demo.sqlite
+│   ├── codex-home/
+│   ├── outbox/
+│   ├── resources/<provider-id>/
+│   └── repair-reference/ (Repair Runs only, removed before Promotion)
+└── .quarantine/<run-id>/
+    ├── candidate.json
+    ├── workspace/
+    ├── codex-home/
+    ├── outbox/intents.jsonl
+    └── resources/<provider-id>/
+```
+
+`canonical.json` schema 4 identifies the accepted workspace path, Codex home path, Codex thread identifier, sorted provider version vector, built-in resource fingerprints, and composite state fingerprint.
+`.resource-registry.json` records the accepted additive provider contract set and its monotonic generation.
+Each `.registry-transitions/<agent-id>.json` record binds one verified provider addition to exact source and target state identifiers, built-in hashes, provider vectors, and registry generation before canonical advancement.
+Recovery gives that journal no deletion authority until its exact schema, deterministic transition and target identifiers, additive evolution, credential-free verification set, and source and target fingerprints have all been validated.
+Provider onboarding copies the complete immutable source state into a new immutable target, changes only the provider vector and composite fingerprint, and atomically replaces `canonical.json` after the target is verified.
+Startup removes an unaccepted target or recognizes an exact already-accepted target before completing the transition.
+The registry generation advances only after every existing Agent converges.
+An unresolved Promotion from the prior generation prevents both Registry Transition execution and generation commit.
+Agent creation and new ordinary or Repair Runs remain unavailable while that generation is uncommitted, preventing a partially onboarded provider set from becoming an execution boundary.
+Creating the first Agent after a provider contract is registered performs the same exact immutable-source reconciliation before writing that Agent's initial canonical manifest.
+A Candidate State is mutable only while its Run Transaction is active.
+A promoted state version becomes immutable and may be used as the source for a later candidate.
+Airlock verifies the workspace hash, session hash, and composite hash whenever Canonical State is resolved.
+Candidate preparation copies both resources and refreshes only the generated provider configuration file from a platform-owned template.
+Promotion moves the complete candidate root before one atomic manifest replacement, while Quarantine preserves the same complete root without changing the manifest.
+An approved Agent Run records a Promotion journal outside every Runtime mount before the candidate root moves.
+Repair copies a selected Quarantine into a new Candidate State, resumes its rejected Codex thread, creates a fresh empty outbox, and adds a disposable copy of the exact matching Canonical workspace as a repair reference.
+The container Runtime mounts that reference read-only, and every provider must pass a required reference-integrity Validation before Promotion.
+Airlock removes the reference before installing the repaired immutable version.
+Discard removes only the internally resolved mutable Quarantine root and retains bounded evidence in the control-plane store.
+`npm run test:codex-session-container` reproduces the pinned CLI storage boundary with container networking disabled and a fake credential.
+
+The platform data layout adds one journal record per approved Run:
+
+```text
+APP_DATA_DIR/
+├── launchpad.json
+├── mock-deliveries.json
+└── promotion-journal/<run-id>.json
+```
+
+Each record advances atomically through `validated`, `version-installed`, `canonical-advanced`, `effects-delivered`, and `completed`.
+Provider Promotion plans, exact target versions, Capability Claims, and bounded lifecycle events are part of the same record.
+The record contains bounded redacted transaction evidence and a neutral recovery result, not a duplicate of arbitrary Runtime output.
+
+## Run Transaction lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Preparing
+    Preparing --> Executing: Candidate State ready
+    Preparing --> Cancelled: preparation fails or is cancelled
+    Executing --> Validating: AgentRunner completes
+    Executing --> Quarantined: Runtime fails or times out
+    Executing --> Cancelled: operator stops Run
+    Validating --> Promoting: all required Validations pass
+    Validating --> Quarantined: any required Validation fails
+    Promoting --> Journaled: approved decision is durable
+    Journaled --> Installed: immutable version exists
+    Installed --> Accepted: Canonical State advances
+    Accepted --> Delivered: supported effects are claimed
+    Delivered --> Promoted: final evidence is durable
+    Promoting --> RecoveryError: physical evidence contradicts journal
+    Quarantined --> Preparing: bounded Repair Run
+    Quarantined --> Discarded: operator discards mutable state
+    Promoted --> [*]
+    Discarded --> [*]
+    Cancelled --> [*]
+```
+
+Repair may start only when the selected Quarantine is available, its recorded Canonical State still exactly matches current reality, its parent has no existing repair child, and the configured ancestry bound is not exhausted.
+Each Repair Run uses the original snapshotted Outcome Contract and follows the ordinary execution, Validation, Promotion, and Quarantine path.
+Server startup reconciles journaled Promotions before generic active-Run handling.
+An interrupted pre-decision Candidate is retained in Quarantine when its manifest is valid and is cancelled only when no Candidate exists.
+
+## Outcome Contract evaluation
+
+Validation proceeds in a deterministic order so evidence remains understandable:
+
+1. Validate candidate path containment and symlink safety.
+2. Calculate the bounded workspace and resource change set.
+3. Reject changes to protected paths.
+4. Confirm required paths and structural invariants.
+5. Enforce change-count and added-byte limits.
+6. Scan changed content for configured secret patterns.
+7. Execute operator-defined validation commands in a constrained container.
+All required Validations must pass before promotion begins.
+The Candidate Codex home is also rejected before Promotion if it contains any symbolic link or if the returned thread has no matching rollout artifact.
+
+Outcome Contract schema version 1 is a bounded data model rather than a policy language.
+Its default requires `AGENTS.md` and `README.md`, protects `AGENTS.md`, limits a Run to 200 changed files and 2 MiB of candidate payload across added or modified files, scans for Ark key assignments and bearer tokens, and defines no command Validations until the operator adds them.
+The complete contract is snapshotted into the Run Transaction, so a later contract update cannot change a historical decision.
+Operator-defined commands run against disposable Candidate State copies in fresh containers with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
+Command build artifacts are deleted with the validation copy and can never enter Promotion.
+
+Candidate inventory is limited to 10,000 entries and persisted change evidence is limited to 200 paths.
+Changed files larger than 1 MiB fail the secret scan.
+Command output is terminated above 65,536 bytes, redacted, and persisted up to 16,384 bytes.
+Command duration is bounded by the contract between 1 second and 300 seconds.
+
+## Transactional Resources
+
+Phase 8 implements a provider-neutral lifecycle package and a trusted core coordinator:
+
+```ts
+interface TransactionalResourceProvider {
+  readonly manifest: ResourceProviderManifest;
+  prepare(context: ResourcePrepareContext): Promise<PreparedResource>;
+  describe(context: ResourceCandidateContext): Promise<ResourceChangeEvidence>;
+  validate(context: ResourceCandidateContext): Promise<ResourceValidationEvidence[]>;
+  planPromotion(context: ResourceCandidateContext): Promise<ResourcePromotionPlan>;
+  promote(context: ResourcePromotionContext): Promise<ResourceVersionReference>;
+  quarantine(context: ResourceQuarantineContext): Promise<ResourceQuarantineHandle>;
+  discard(context: ResourceDiscardContext): Promise<ResourceDiscardResult>;
+  reconcile(context: ResourceReconcileContext): Promise<ResourceReconciliationResult>;
+}
+```
+
+Workspace, Codex Session, SQLite, and External Action Intent behavior are implemented in Phase 4.
+SQLite lives inside the versioned workspace and receives a semantic snapshot in addition to the workspace fingerprint.
+The outbox is a separate candidate-owned mount so a prior accepted intent is never copied into the next candidate as a new request.
+
+Every registered Phase 8 provider is required and must pass exact capability eligibility at startup.
+Required Phase 8 providers must use `canonical-manifest` Promotion visibility.
+Claims such as post-Promotion reconciliation remain representable in the SDK but are not admissible for the required all-or-nothing composition.
+The core calls providers in stable provider-identifier order and derives both `AIRLOCK_RESOURCE_<PROVIDER>_PATH` and `/airlock/resources/<provider-id>/<relative-path>` from validated identifiers.
+The Runtime receives only Candidate-local bindings and never a provider credential, host service object, or mutable Canonical path.
+Composition rejects an access claim the selected Runtime cannot enforce, including read-only provider bindings in local-process mode.
+After Runtime exit, the core rescans each provider root for symbolic links and re-resolves the binding before any trusted provider hook can inspect Candidate content.
+
+`canonical-manifest` visibility means that an immutable provider version becomes accepted only when the Airlock manifest names its exact version identifier and fingerprint.
+The HTTP object provider uses that mode and does not advance a provider-native mutable pointer.
+Airlock therefore provides one recoverable acceptance decision without claiming distributed atomic commit across the filesystem and remote service.
+
+Provider preparation failure triggers evidence-preserving Discard before Runtime.
+Accepted provider preparation, Quarantine, and Discard results are persisted incrementally so partial multi-provider progress survives a later failure.
+Prepare replay and null-handle Discard are Run-scoped, allowing recovery when a provider created remote state but its response was lost.
+Any required provider Validation failure quarantines every built-in and registered resource under one disposition.
+The Promotion journal records provider plans before immutable installation, and restart reconciliation verifies the exact installed fingerprint before canonical advancement.
+Historical Promotion recovery selects the exact provider subset persisted in that plan, so adding provider B cannot strand a transaction created under `{}` or `{A}`.
+Provider Discard events are persisted before local mutable state is removed so an interrupted cleanup can converge without inventing success.
+Cancellation with an unavailable provider Discard moves the complete local Candidate into cleanup-only Quarantine rather than deleting its recovery handle.
+Retained Quarantine cleanup likewise uses its persisted historical provider subset and never invokes a provider that was added after the Run.
+
+An existing deployment onboards a provider through an additive Registry Transition.
+The coordinator reconciles the exact configured initial version and fingerprint before the workspace manager writes a transition plan.
+Provider removal, provider identity replacement, and Capability Claim replacement are rejected because Phase 8 does not yet define export-and-retire semantics.
+
+## External Action Intent outbox
+
+The Agent submits the strict `demo.notification.requested` type through the path named by `AIRLOCK_OUTBOX_PATH`.
+The control plane validates the JSONL file after Runtime exit and before Promotion.
+The complete candidate, including the validated outbox, becomes immutable before the dispatcher runs.
+The dispatcher verifies the new canonical state, atomically claims the mock effect by stable idempotency key, and records a bounded receipt.
+
+Duplicate and concurrent dispatch attempts create one local mock effect and return the same receipt.
+This exactly-once claim does not extend beyond the atomic mock consumer.
+The POC does not intercept arbitrary network traffic from the Agent Runtime.
+
+## Persistence model
+
+The version 10 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, Candidate Sets, Assurance Proposals, and operator-visible evidence.
+Immutable state versions and quarantined candidates live on disk outside the JSON document.
+Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
+Startup reconciliation treats an ordinary Run journal or the conjunction of a replayed Candidate Set decision and its matching journal authority as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the atomic mock-delivery store as effect truth.
+It verifies physical fingerprints before repairing cached workspace, state, thread, Run, message, receipt, and effect metadata in the JSON store.
+Phase 5 persists repair ancestry, mutable Quarantine availability, discard timestamps, and the same lineage in each Promotion Receipt.
+Phase 6 persists Promotion journal position, recovered-after-restart evidence, and bounded recovery errors.
+Phase 8 persists provider resource records, Capability Claims, immutable source and installed versions, Validation evidence, Quarantine handles, dispositions, and bounded lifecycle events.
+Phase 9 persists exact Candidate Set source and contract snapshots, per-competitor Run links, seals, bounded criterion inputs, deterministic scorecards, one-winner or no-winner Selection Decisions, and loser cleanup progress.
+Promotion journal schema 2 additionally persists the exact Candidate Set winner authority, including decision and seal digests, and startup validates it before physical recovery.
+Phase 10 persists versioned Assurance evidence, deterministic monotonic proposals, historical simulation results, explicit operator decisions, and append-only Outcome Contract history.
+
+Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
+
+## Failure semantics
+
+| Failure | Required result |
+| --- | --- |
+| Candidate preparation fails | Do not invoke the AgentRunner and leave Canonical State unchanged. |
+| AgentRunner fails or times out | Quarantine bounded evidence and leave Canonical State unchanged. |
+| Validation fails | Quarantine Candidate State and identify the failing Validation. |
+| Repair source is stale, missing, exhausted, or already has a child | Reject the operation before scheduling and leave both realities unchanged. |
+| Repair reference changes | Fail its required Validation and quarantine the Repair Run. |
+| Operator discards Quarantine | Remove only mutable Quarantine state and retain bounded evidence with `discarded` disposition. |
+| Evidence persistence fails before promotion | Fail closed without promotion. |
+| Process stops after an approved journal | Reconcile the same decision forward to one target version and at most one supported mock effect. |
+| Journal and physical state contradict | Preserve current Canonical State, dispatch no new effect, and surface `recovery-error`. |
+| Candidate or Quarantine retention expires | Remove only unprotected mutable state and retain bounded control-plane evidence. |
+| Resource Provider preparation fails | Do not invoke Runtime, discard every possible provider Candidate idempotently, and retain a composite Quarantine when cleanup cannot finish. |
+| Provider onboarding source cannot be verified | Preserve the prior canonical manifest and Resource Registry generation and place the affected Agent in an explicit error state. |
+| Registry Transition is interrupted | Reconcile the journal against exact installed and canonical fingerprints, then either retry from the prior state or finish the accepted transition. |
+| Registry Transition journal is malformed or forged | Reject it before deleting any state or rewriting Canonical State. |
+| Prior-generation Promotion recovery fails | Preserve its historical state, defer every Registry Transition and registry-generation commit, and surface `recovery-error`. |
+| Provider removal or contract replacement is configured | Reject the non-additive registry evolution before changing Canonical State. |
+| Required provider Validation fails | Quarantine every built-in and provider resource while leaving the canonical manifest unchanged. |
+| Provider Promotion or reconciliation contradicts the durable plan | Preserve current Canonical State and surface `recovery-error`. |
+| Provider cleanup is unavailable | Retain local mutable state and retry before removal. |
+| Local Quarantine is missing without complete provider Discard evidence | Fail recovery closed and do not claim remote cleanup. |
+| Candidate Set admission or preparation conflicts with another Agent operation | Reject the set before sibling Runtime execution and leave Canonical State unchanged. |
+| A competitor fails required Validation | Exclude that Candidate from Selection regardless of its ranking inputs and dispatch none of its effects. |
+| Every competitor is invalid or incomplete | Persist `no-winner`, leave Canonical State unchanged, and reconcile every loser disposition. |
+| Process stops before Candidate Set Selection | Preserve complete seals, mark partial evaluations ineligible without replaying Runtime, and deterministically select only from persisted evidence. |
+| Process stops after Candidate Set Selection | Resume Promotion for only the exact persisted winner, then reconcile loser cleanup idempotently. |
+| Candidate Set and Promotion-journal authorities disagree | Reject physical Promotion recovery before installation, canonical advancement, or effect dispatch and surface `recovery-error`. |
+| Selected Candidate seal, source, resource fingerprint, or Promotion evidence contradicts physical state | Surface `recovery-error`, preserve evidence, dispatch no new effect, and never select a runner-up. |
+| A new provider is configured while an older Candidate Set is unresolved | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit. |
+| Candidate Set recovery fails while a new provider is configured | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit. |
+
+The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
+
+The implemented Phase 9 split between reversible Candidate evaluation, deterministic one-winner Selection, and irreversible Promotion is documented in the [Competing Futures architecture](../../docs/architecture/competing-futures.md) and ADR 0011.
+The implemented Phase 10 separation between evidence-backed assurance advice and operator policy authority is documented in the [Adaptive Assurance architecture](../../docs/architecture/adaptive-assurance.md) and ADR 0012.
+The proposed Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](../../docs/architecture/portable-trust.md) and ADR 0013.
+
+## Trust boundaries
+
+- The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.
+- A Repair Runtime may read a disposable canonical workspace copy, but it never receives a writable path to the real Canonical State.
+- Validation code from the candidate project is untrusted and runs from a disposable copy inside a constrained container.
+- The Fastify control plane and Airlock state manager form the trusted POC boundary.
+- The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
+- The implemented outbox protects only external actions routed through its interface.
+- The platform-owned mock delivery store is never mounted into the Runtime.
+- The platform-owned Promotion journal is never mounted into the Runtime.
+- Resource Providers run inside the trusted control plane, receive bounded lifecycle context, and never receive the application store or arbitrary environment variables.
+- Provider Runtime bindings are rooted under the isolated Candidate and are derived by the trusted core.
+- Resource Provider source verification and Registry Transition journals remain inside the trusted control plane and are never exposed to Runtime.
+- Candidate Set orchestration and Selection remain inside the trusted control plane, while every competitor Runtime receives only its own Candidate bindings and the shared bounded objective.
+- The deterministic Selection engine accepts only persisted trusted evidence and has no access to time, randomness, locale ordering, network, filesystem, environment variables, or model judgment.
+- A sealed Candidate is a commitment for later re-verification, not authority to promote itself.
+
+## Evidence model
+
+Each Run Transaction records:
+
+- Agent, Run, Candidate State, Canonical State, and Outcome Contract identifiers.
+- Lifecycle timestamps and terminal disposition.
+- Bounded resource change summaries.
+- Validation names, statuses, durations, and redacted output.
+- Resulting canonical version for promoted Runs.
+- Independent workspace and Agent-memory fingerprints with one shared terminal disposition.
+- SQLite before, candidate, and final semantic snapshots.
+- Typed intent identities, idempotency keys, statuses, and bounded post-Promotion delivery receipts.
+- Root Run identifier, parent Run identifier, repair depth, configured depth bound, and mutable Quarantine availability.
+- Monotonic Promotion journal phase, recovered-after-restart status, and bounded fail-closed recovery error.
+- Provider identity, Capability Claim, immutable source and target references, fingerprint transition, bounded Validation evidence, Quarantine handle, disposition, and lifecycle events.
+- Candidate Set identifier, exact shared source, snapshotted Outcome and Selection Contracts, competitor Run links, bounded integer criterion values, exclusions, ordered scorecard, stable tie-break, Selection Decision digest, winner, and loser dispositions.
+
+## Open architectural decisions
+
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) owns the unresolved judging cutoff decision.
+Codex session isolation is resolved by ADR 0005.
+External action ordering and idempotency are resolved by ADR 0006.
+Repair ancestry, canonical freshness, fresh outbox, canonical reference, and discard semantics are resolved by ADR 0007.
+Promotion journal ordering, forward recovery, contradiction handling, and bounded retention are resolved by ADR 0008.
+The public Resource Provider contract, capability eligibility, and canonical-manifest consistency model are resolved by ADR 0010.
+Outcome Contract semantics and Validation containment are resolved by ADR 0003 and ADR 0004.

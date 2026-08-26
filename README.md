@@ -81,6 +81,28 @@ npm run check:phase9:selection
 npm run check:phase9:boundaries
 ```
 
+## Phase 10 Adaptive Assurance demo
+
+Phase 10 turns recurring bounded Run evidence into deterministic Outcome Contract advice without giving the detector authority to change policy.
+Every suggestion identifies its exact base contract, cites distinct root Run lineages and evidence hashes, and simulates every bounded historical result as exact, conservative, or unknown.
+Missing evidence is never guessed, arbitrary commands and regular expressions cannot enter generated advice, and a stale proposal cannot be silently rebased.
+Only an explicit operator acceptance can atomically create the next contract version.
+Rejection leaves policy unchanged, and rollback creates another immutable version while preserving every historical Run, contract, proposal, decision, and receipt.
+
+```bash
+npm run demo:phase10 -- --reset
+```
+
+Open <http://127.0.0.1:3199>, send `Delete README.md and record why.` three times, then open `Assurance` and select `Scan retained evidence`.
+Inspect the proposed protection, three independent supporting lineages, exact historical impact, unknown inputs, and simulation digest before accepting or rejecting it.
+The deterministic detector and simulator run in the trusted local control plane and make no ModelArk request, paid inference call, provider purchase, or public blockchain transaction.
+
+Run the focused no-cost contract with:
+
+```bash
+npm run check:phase10:assurance
+```
+
 ## Screenshots
 
 ### Four-step judge path
@@ -112,6 +134,9 @@ npm run check:phase9:boundaries
 - Reversible sealed-Candidate evaluation before deterministic one-winner Selection and irreversible Promotion
 - Explainable integer scorecards, absolute Validation eligibility, stable byte-order tie-breaking, and no automatic runner-up fallback
 - Restart-safe winner Promotion and idempotent loser retention or Discard across historical provider generations
+- Deterministic Assurance Proposals with lineage-deduplicated citations and exact, conservative, or unknown historical simulation
+- Explicit operator acceptance, durable rejection, stale-base protection, immutable Outcome Contract history, and version-creating rollback
+- Crash-recoverable Agent deletion with credential-free Run, Candidate Set, Assurance, contract-history, and receipt digests
 - Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS

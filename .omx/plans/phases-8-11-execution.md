@@ -1,6 +1,6 @@
 # Phases 8 through 11 execution plan
 
-**Status:** Phase 9 committed in the writable release clone; unrestricted browser, clean-clone repetition, main-workspace Git synchronization, and Wayfinder synchronization remain pending
+**Status:** Phase 10 is committed on the post-hackathon branch and Phase 11 implementation is active; unrestricted browser execution, main-workspace Git synchronization, and Wayfinder synchronization remain pending
 
 **Scope:** Transactional Resource SDK, Competing Futures, Adaptive Assurance, and Portable Trust
 
@@ -277,7 +277,7 @@ The implementation remains isolated from the frozen Phase 7 judge release, and i
 
 ### Batch 9.4: Deliver the operator journey
 
-**Delivery status:** Implementation and production-bundle specification complete; unrestricted Chrome execution and clean-clone repetition remain environment gates.
+**Delivery status:** Implementation, exact clean-clone verification, and the production-bundle specification are complete; unrestricted Chrome execution remains an environment gate.
 
 1. Add one bounded `Explore competing futures` action to the existing Playground.
 2. Show competitor progress, Validation eligibility, deterministic score components, winner reason, and loser dispositions.
@@ -319,10 +319,12 @@ The implementation remains isolated from the frozen Phase 7 judge release, and i
 
 Airlock converts repeated failure evidence into explainable, simulated, operator-controlled Outcome Contract improvements without acquiring authority to change acceptance rules by itself.
 
-ADR 0012 now proposes the closed monotonic operation set, exact or conservative or unknown simulation semantics, trusted rule catalogs, optimistic acceptance boundary, explicit rejection, and version-preserving rollback.
-The implementation-ready derivation, simulation, authority, API, and adversarial design is recorded in `docs/architecture/adaptive-assurance.md`.
+ADR 0012 now accepts the closed monotonic operation set, exact or conservative or unknown simulation semantics, trusted rule catalogs, optimistic acceptance boundary, explicit rejection, and version-preserving rollback.
+The implemented derivation, simulation, authority, API, and adversarial design is recorded in `docs/architecture/adaptive-assurance.md`.
 
 ### Batch 10.1: Define evidence-backed proposals
+
+**Delivery status:** Complete.
 
 1. Add Assurance Proposal states `draft`, `ready`, `accepted`, `rejected`, and `superseded`.
 2. Permit only a closed set of monotonic-strengthening operations in generated proposals.
@@ -332,6 +334,8 @@ The implementation-ready derivation, simulation, authority, API, and adversarial
 
 ### Batch 10.2: Simulate historical impact honestly
 
+**Delivery status:** Complete.
+
 1. Evaluate each proposed change against every compatible retained Run Transaction.
 2. Mark each replay result `exact`, `conservative`, or `unknown` according to available evidence.
 3. Never infer file contents, secrets, command results, or untruncated paths that were not retained.
@@ -339,6 +343,8 @@ The implementation-ready derivation, simulation, authority, API, and adversarial
 5. Hash the proposal, source evidence set, simulator version, and complete impact report.
 
 ### Batch 10.3: Preserve operator authority and reversibility
+
+**Delivery status:** Complete.
 
 1. Require an explicit operator action to accept or reject every proposal.
 2. Revalidate monotonic strengthening at acceptance time against the current Outcome Contract.
@@ -348,6 +354,8 @@ The implementation-ready derivation, simulation, authority, API, and adversarial
 6. Prohibit an automated path from deleting required paths, removing protected paths or secret patterns, increasing resource limits, downgrading required commands, or mutating historical evidence.
 
 ### Batch 10.4: Make learning inspectable
+
+**Delivery status:** Implementation and production-bundle specification complete; unrestricted Chrome execution and clean-clone repetition remain environment gates.
 
 1. Add a compact Assurance inbox to the existing Agent surface.
 2. Show motivation, cited Runs, exact or uncertain replay impact, proposed diff, and authority boundary.
@@ -366,9 +374,22 @@ The implementation-ready derivation, simulation, authority, API, and adversarial
 - `npm run check:phase10` passes twice and includes every Phase 9 gate.
 - Git contains one Phase 10 commit and the Wayfinder decision is resolved.
 
+### Phase 10 implementation evidence
+
+- Database version 10 migration, restart-stable version 1 through 9 normalization, versioned assurance evidence, exact nested parsing, append-only Outcome Contract history, deterministic derivation, root-lineage support deduplication, honest simulation, acceptance-time rederivation, stale-base rejection, catalog confinement, and tamper rejection pass in the focused Phase 10 suite.
+- The operator-only acceptance transaction creates one future-only contract version, rejection persists without policy mutation, and rollback creates another immutable version with explicit provenance.
+- The Playground Assurance inbox and rollback history present the proposed diff, base version, citations, support lineages, historical impact, unknown inputs, authority boundary, decisions, and weakening warning.
+- The Agent deletion journal closes the archive-before-database crash window, preserves its mutation lock across later I/O failures, rejects symbolic-link workspace substitution, validates decision and contract provenance semantics, and retains bounded proposal, decision, contract-history, Run, Candidate Set, and receipt digests in the archived tombstone.
+- The deterministic local fixture produces a three-lineage failure corpus without a network model, and `npm run demo:phase10 -- --reset` exposes the complete operator journey.
+- `npm run check`, `npm run check:phase10:assurance`, server and web typechecks, and the production build pass in the restricted environment.
+- `npm run test:phase10:ui` builds the exact production bundle, but the current sandbox denies the Playwright web server its `127.0.0.1` bind with `EPERM` before browser assertions begin.
+- ADR 0012 is accepted locally, while the matching Wayfinder decision cannot be synchronized until GitHub connectivity returns.
+
 ### Phase 10 commit
 
 `feat: propose evidence-backed assurance changes`
+
+**Delivery status:** Committed on the isolated post-hackathon branch after code-review approval, architecture clearance, exact clean-clone verification, and the full free local gate.
 
 ## Phase 11: Portable Trust
 

@@ -140,6 +140,10 @@ function apiResponse(pathname: string, run: AgentRun): unknown {
   if (pathname.endsWith("/messages")) return { messages: [] };
   if (pathname.endsWith("/candidate-sets")) return { candidateSets: [] };
   if (pathname.endsWith("/runs")) return { runs: [run] };
+  if (pathname.endsWith("/assurance-proposals")) return { proposals: [] };
+  if (pathname.endsWith("/outcome-contract/versions")) {
+    return { versions: [] };
+  }
   return null;
 }
 

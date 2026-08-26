@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed for Phase 10 pending Wayfinder decision synchronization and all prior phase gates.
+Accepted locally for Phase 10.
+Wayfinder decision synchronization remains pending until GitHub connectivity returns.
 
 ## Context
 
@@ -26,9 +27,8 @@ Generated proposals may contain only these monotonic-strengthening operations:
 - Lower `maxAddedBytes` to a non-negative bound.
 - Add an exact secret pattern from a trusted control-plane rule catalog.
 - Change an existing Validation command from optional to required without changing its command or timeout.
-- Add an exact required Validation command from a trusted control-plane validation catalog.
 
-A generated proposal cannot remove a rule, raise a resource limit, change a command string, make a required command optional, introduce an arbitrary regular expression, mutate a historical contract, or apply itself.
+A generated proposal cannot add or change a command string, remove a rule, raise a resource limit, make a required command optional, introduce an arbitrary regular expression, mutate a historical contract, or apply itself.
 
 Proposal derivation is deterministic from a bounded ordered evidence set.
 Every cited fact names its Run Transaction, evidence location, evidence hash, and the derivation rule that used it.
@@ -40,7 +40,8 @@ Historical simulation classifies every compatible Run result as `exact`, `conser
 `Unknown` means required inputs were not retained, were truncated, or were produced under incompatible semantics.
 Unknown never counts as a rejection, pass, benefit, or avoided incident.
 
-Only an explicit authenticated operator action may accept or reject a proposal.
+Only an explicit operator action may accept or reject a proposal.
+Airlock binds an unauthenticated local control plane to loopback, and it requires bearer-token authentication before any environment may listen beyond loopback.
 Acceptance revalidates the proposal digest, exact base contract hash, trusted catalog entries, monotonic relation, and complete simulation digest before creating an ordinary next Outcome Contract version.
 A stale proposal must be regenerated and cannot be silently rebased.
 Rejection retains the proposal, decision timestamp, and bounded operator reason without changing the contract.
@@ -78,4 +79,3 @@ Either choice would invent historical facts and produce misleading impact claims
 ### Rewrite the current contract during rollback
 
 An immutable new version preserves which rules governed every historical Run.
-

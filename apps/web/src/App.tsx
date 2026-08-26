@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
-import type { Agent, AgentRun, CandidateSet, Message, SystemInfo } from "./types";
+import type {
+  Agent,
+  AgentRun,
+  AssuranceOperation,
+  AssuranceProposal,
+  CandidateSet,
+  Message,
+  OutcomeContractVersionRecord,
+  SystemInfo,
+} from "./types";
 
 const starterPrompts = [
   "Create a small TypeScript CLI that prints a weather summary from sample JSON.",
@@ -84,6 +93,154 @@ function StatusPill({ status }: { status: Agent["status"] }) {
 
 function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
+}
+
+function assuranceOperationLabel(operation: AssuranceOperation): string {
+  switch (operation.kind) {
+    case "add-required-path":
+      return "Require " + operation.path;
+    case "add-protected-path":
+      return "Protect " + operation.path;
+    case "lower-max-changed-files":
+      return "Lower changed-file limit to " + operation.maximum;
+    case "lower-max-added-bytes":
+      return "Lower added-byte limit to " + formatBytes(operation.maximum);
+    case "add-catalog-secret":
+      return "Add trusted secret detector " + operation.name;
+    case "make-command-required":
+      return "Make " + operation.name + " required";
+  }
+}
+
+function AssuranceInbox({
+  proposals,
+  busy,
+  onDerive,
+  onAccept,
+  onReject,
+}: {
+  proposals: AssuranceProposal[];
+  busy: boolean;
+  onDerive: () => void;
+  onAccept: (proposal: AssuranceProposal) => void;
+  onReject: (proposal: AssuranceProposal) => void;
+}) {
+  return (
+    <section className="assurance-inbox" aria-label="Adaptive Assurance inbox">
+      <header className="assurance-heading">
+        <div>
+          <span className="eyebrow">Adaptive Assurance</span>
+          <h3>Evidence can recommend. Only you can change policy.</h3>
+          <p>
+            Deterministic suggestions use bounded Run evidence and simulate history without reopening Candidate State.
+          </p>
+        </div>
+        <button className="button button-primary" onClick={onDerive} disabled={busy}>
+          {busy ? <Spinner /> : "Scan retained evidence"}
+        </button>
+      </header>
+      {proposals.length === 0 ? (
+        <div className="assurance-empty">
+          No proposal is ready. Three independent supporting lineages are required for the first rules.
+        </div>
+      ) : (
+        <div className="assurance-list">
+          {proposals.map((proposal) => {
+            const exactChanges = new Set(
+              proposal.simulation.results
+                .filter(
+                  (result) =>
+                    result.classification === "exact" &&
+                    result.counterfactualDisposition !== null &&
+                    result.counterfactualDisposition !== result.priorDisposition,
+                )
+                .map((result) => result.runId),
+            ).size;
+            const unknown = proposal.simulation.results.filter(
+              (result) => result.classification === "unknown",
+            ).length;
+            return (
+              <article className="assurance-card" key={proposal.id} data-state={proposal.state}>
+                <div className="assurance-card-title">
+                  <div>
+                    <span className={"assurance-state assurance-state-" + proposal.state}>
+                      {proposal.state}
+                    </span>
+                    <strong>Proposal against Outcome Contract v{proposal.baseContractVersion}</strong>
+                  </div>
+                  <code>{shortHash(proposal.proposalDigest)}</code>
+                </div>
+                <ul className="assurance-operations">
+                  {proposal.operations.map((operation) => (
+                    <li key={assuranceOperationLabel(operation)}>
+                      <span>+</span>
+                      <strong>{assuranceOperationLabel(operation)}</strong>
+                    </li>
+                  ))}
+                </ul>
+                <div className="assurance-impact">
+                  <div><strong>{new Set(proposal.citations.map((item) => item.rootRunId)).size}</strong><span>supporting lineages</span></div>
+                  <div><strong>{exactChanges}</strong><span>historical outcomes changed</span></div>
+                  <div><strong>{unknown}</strong><span>unknown, never guessed</span></div>
+                </div>
+                <details className="assurance-proof">
+                  <summary>Inspect citations and simulation proof</summary>
+                  <div>
+                    {proposal.citations.map((citation) => (
+                      <p key={citation.operationKey + citation.runId}>
+                        <code>{citation.runId}</code>
+                        <span>{citation.evidenceSelector}</span>
+                        <small>{shortHash(citation.evidenceHash)} · {citation.derivationRule}</small>
+                      </p>
+                    ))}
+                  </div>
+                  <div className="assurance-simulation-results">
+                    {proposal.simulation.results.map((result) => (
+                      <p key={result.operationKey + result.runId}>
+                        <code>{result.runId}</code>
+                        <span>
+                          <strong>{result.classification}</strong>
+                          {" · "}
+                          {result.priorDisposition ?? "no prior disposition"}
+                          {" to "}
+                          {result.counterfactualDisposition ?? "not determined"}
+                        </span>
+                        <small>
+                          {result.operationKey}
+                          {result.missingInputs.length > 0
+                            ? " · missing: " + result.missingInputs.join(", ")
+                            : " · complete retained inputs"}
+                        </small>
+                      </p>
+                    ))}
+                  </div>
+                  <footer>
+                    Simulation {proposal.simulation.engineVersion} · {proposal.simulation.results.length} bounded results · {shortHash(proposal.simulation.digest)}
+                  </footer>
+                </details>
+                {proposal.decision && (
+                  <p className="assurance-decision">
+                    {proposal.decision.action} {formatTime(proposal.decision.decidedAt)}
+                    {proposal.decision.reason ? " · " + proposal.decision.reason : ""}
+                  </p>
+                )}
+                {proposal.state === "ready" && (
+                  <footer className="assurance-actions">
+                    <button className="button button-ghost" onClick={() => onReject(proposal)} disabled={busy}>
+                      Reject
+                    </button>
+                    <button className="button button-primary" onClick={() => onAccept(proposal)} disabled={busy}>
+                      Review and accept
+                    </button>
+                  </footer>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function CandidateSetEvidence({
@@ -713,6 +870,11 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [activeCandidateSet, setActiveCandidateSet] = useState<CandidateSet | null>(null);
+  const [assuranceProposals, setAssuranceProposals] = useState<AssuranceProposal[]>([]);
+  const [contractVersions, setContractVersions] = useState<
+    OutcomeContractVersionRecord[]
+  >([]);
+  const [showAssurance, setShowAssurance] = useState(false);
   const [showExplore, setShowExplore] = useState(false);
   const [explorationObjective, setExplorationObjective] = useState(
     defaultExplorationObjective,
@@ -813,22 +975,29 @@ export default function App() {
     setActiveRun(null);
     setActiveCandidateSet(null);
     setShowExplore(false);
+    setShowAssurance(false);
     setShowSettings(false);
     if (!selectedId) {
       setMessages([]);
+      setAssuranceProposals([]);
+      setContractVersions([]);
       return;
     }
     void Promise.all([
       refreshMessages(selectedId),
       api.runs(selectedId),
       api.candidateSets(selectedId),
+      api.assuranceProposals(selectedId),
+      api.outcomeContractVersions(selectedId),
     ])
-      .then(([, result, candidateSetsResult]) => {
+      .then(([, result, candidateSetsResult, assuranceResult, versionsResult]) => {
         if (selectedIdRef.current !== selectedId) return;
         const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
         setActiveRun(latest);
         const latestCandidateSet = candidateSetsResult.candidateSets[0] ?? null;
         setActiveCandidateSet(latestCandidateSet);
+        setAssuranceProposals(assuranceResult.proposals);
+        setContractVersions(versionsResult.versions);
         if (latest && ["queued", "running"].includes(latest.status)) {
           void pollRun(latest.id, selectedId).catch((reason) =>
             setError(reason instanceof Error ? reason.message : String(reason)),
@@ -1028,6 +1197,151 @@ export default function App() {
     try {
       const result = await api.cancelCandidateSet(activeCandidateSet.id);
       setActiveCandidateSet(result.candidateSet);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAirlockActionBusy(false);
+    }
+  };
+
+  const refreshAssurance = async (agentId: string) => {
+    const [proposalResult, versionResult] = await Promise.all([
+      api.assuranceProposals(agentId),
+      api.outcomeContractVersions(agentId),
+    ]);
+    if (selectedIdRef.current === agentId) {
+      setAssuranceProposals(proposalResult.proposals);
+      setContractVersions(versionResult.versions);
+    }
+  };
+
+  const deriveAssurance = async () => {
+    if (!selected) return;
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      const result = await api.deriveAssuranceProposal(selected.id);
+      await refreshAssurance(selected.id);
+      if (!result.proposal) {
+        setError(
+          "No recurring pattern reached the deterministic support threshold yet.",
+        );
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAirlockActionBusy(false);
+    }
+  };
+
+  const acceptAssurance = async (proposal: AssuranceProposal) => {
+    if (!selected) return;
+    const changes = proposal.operations.map(assuranceOperationLabel).join("\n- ");
+    if (
+      !window.confirm(
+        "Accept this monotonic policy change for future Runs only?\n\n- " + changes,
+      )
+    ) {
+      return;
+    }
+    const reason = window.prompt("Record an operator reason for acceptance:", "Reviewed bounded evidence") ?? "";
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      await api.acceptAssuranceProposal(proposal.id, reason);
+      await Promise.all([refreshAgents(), refreshAssurance(selected.id)]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      await refreshAssurance(selected.id);
+    } finally {
+      setAirlockActionBusy(false);
+    }
+  };
+
+  const rejectAssurance = async (proposal: AssuranceProposal) => {
+    if (!selected) return;
+    const reason = window.prompt("Why reject this proposal?", "Needs more context");
+    if (reason === null) return;
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      await api.rejectAssuranceProposal(proposal.id, reason);
+      await refreshAssurance(selected.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setAirlockActionBusy(false);
+    }
+  };
+
+  const rollbackContract = async (target: OutcomeContractVersionRecord) => {
+    if (!selected) return;
+    const current = selected.outcomeContract;
+    const removedRequiredPaths = current.requiredPaths.filter(
+      (item) => !target.contract.requiredPaths.includes(item),
+    );
+    const removedProtections = current.protectedPaths.filter(
+      (item) => !target.contract.protectedPaths.includes(item),
+    );
+    const removedSecretRules = current.secretPatterns
+      .filter(
+        (rule) =>
+          !target.contract.secretPatterns.some(
+            (candidate) =>
+              candidate.name === rule.name && candidate.pattern === rule.pattern,
+          ),
+      )
+      .map((rule) => rule.name);
+    const removedRequiredCommands = current.validationCommands
+      .filter(
+        (command) =>
+          command.required &&
+          !target.contract.validationCommands.some(
+            (candidate) =>
+              candidate.name === command.name &&
+              candidate.command === command.command &&
+              candidate.timeoutMs === command.timeoutMs &&
+              candidate.required,
+          ),
+      )
+      .map((command) => command.name);
+    const raisedLimits = [
+      target.contract.maxChangedFiles > current.maxChangedFiles
+        ? "changed files " + current.maxChangedFiles + " to " + target.contract.maxChangedFiles
+        : null,
+      target.contract.maxAddedBytes > current.maxAddedBytes
+        ? "added bytes " + formatBytes(current.maxAddedBytes) + " to " + formatBytes(target.contract.maxAddedBytes)
+        : null,
+    ].filter(Boolean);
+    const warning = [
+      removedRequiredPaths.length
+        ? "Required paths removed: " + removedRequiredPaths.join(", ")
+        : "No required paths removed.",
+      removedProtections.length
+        ? "Protections removed: " + removedProtections.join(", ")
+        : "No protected paths removed.",
+      removedSecretRules.length
+        ? "Secret rules removed or changed: " + removedSecretRules.join(", ")
+        : "No secret rules removed or changed.",
+      removedRequiredCommands.length
+        ? "Required validations removed or changed: " +
+          removedRequiredCommands.join(", ")
+        : "No required validations removed or changed.",
+      raisedLimits.length ? "Limits raised: " + raisedLimits.join(", ") : "No limits raised.",
+      "A new version will be created. Historical contracts and receipts remain unchanged.",
+    ].join("\n");
+    if (!window.confirm("Roll back rule content from version " + target.contract.version + "?\n\n" + warning)) {
+      return;
+    }
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      await api.rollbackOutcomeContract(
+        selected.id,
+        target.contract.version,
+        current.version,
+      );
+      await Promise.all([refreshAgents(), refreshAssurance(selected.id)]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -1390,6 +1704,31 @@ export default function App() {
                     Every Run snapshots this version. Required failures enter Quarantine and
                     leave Canonical State unchanged.
                   </p>
+                  {contractVersions.length > 1 && (
+                    <details className="contract-history">
+                      <summary>Version history and rollback</summary>
+                      <div>
+                        {contractVersions.map((record) => (
+                          <div key={record.contract.version}>
+                            <span>
+                              <strong>v{record.contract.version}</strong>
+                              {" · "}{record.provenance}
+                            </span>
+                            {record.contract.version !== selected.outcomeContract.version && (
+                              <button
+                                type="button"
+                                className="button button-ghost"
+                                disabled={airlockActionBusy}
+                                onClick={() => void rollbackContract(record)}
+                              >
+                                Restore rule content
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </section>
                 <div className="panel-footer">
                   <code>{selected.workspacePath}</code>
@@ -1412,6 +1751,21 @@ export default function App() {
                     </h2>
                   </div>
                   <div className="playground-state">
+                    <button
+                      type="button"
+                      className="assurance-toggle"
+                      onClick={() => setShowAssurance((current) => !current)}
+                      aria-expanded={showAssurance}
+                      aria-controls="assurance-inbox"
+                    >
+                      <span aria-hidden="true">⌁</span>
+                      Assurance
+                      {assuranceProposals.filter((proposal) => proposal.state === "ready").length > 0 && (
+                        <strong>
+                          {assuranceProposals.filter((proposal) => proposal.state === "ready").length}
+                        </strong>
+                      )}
+                    </button>
                     <button
                       type="button"
                       className="explore-button"
@@ -1443,6 +1797,18 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {showAssurance && (
+                  <div id="assurance-inbox">
+                    <AssuranceInbox
+                      proposals={assuranceProposals}
+                      busy={airlockActionBusy}
+                      onDerive={() => void deriveAssurance()}
+                      onAccept={(proposal) => void acceptAssurance(proposal)}
+                      onReject={(proposal) => void rejectAssurance(proposal)}
+                    />
+                  </div>
+                )}
 
                 {showExplore && (
                   <form

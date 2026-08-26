@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 9", async () => {
+  it("migrates starter version 1 data to version 10", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -61,7 +61,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       agents: [
         {
           canonicalStateId: "",
@@ -70,7 +70,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 9 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 10 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -180,7 +180,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       agents: [
         {
           outcomeContract: {
@@ -239,7 +239,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -250,7 +250,39 @@ describe("JsonStore", () => {
         },
       ],
     });
+
+    const restarted = new JsonStore(filePath);
+    await restarted.initialize();
+    expect(restarted.snapshot()).toEqual(store.snapshot());
   });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])(
+    "persists a version %i migration that the same binary can reopen",
+    async (version) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), "launchpad-store-restartable-migration-"),
+      );
+      temporaryDirectories.push(root);
+      const filePath = path.join(root, "db.json");
+      await writeFile(
+        filePath,
+        JSON.stringify({
+          version,
+          agents: [],
+          messages: [],
+          runs: [],
+          ...(version === 9 ? { candidateSets: [] } : {}),
+        }) + "\n",
+      );
+
+      const first = new JsonStore(filePath);
+      await first.initialize();
+      const firstSnapshot = first.snapshot();
+      const second = new JsonStore(filePath);
+      await second.initialize();
+      expect(second.snapshot()).toEqual(firstSnapshot);
+    },
+  );
 
   it("migrates Phase 3 data without inventing data or effect evidence", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v4-migration-"));
@@ -278,7 +310,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -323,7 +355,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -377,7 +409,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -429,7 +461,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 9,
+      version: 10,
       runs: [
         {
           id: "phase-7-run",
@@ -479,7 +511,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toEqual({
-      version: 9,
+      version: 10,
       agents: [],
       messages: [],
       runs: [
@@ -500,6 +532,8 @@ describe("JsonStore", () => {
         },
       ],
       candidateSets: [],
+      assuranceProposals: [],
+      outcomeContractVersions: [],
     });
   });
 
@@ -514,6 +548,88 @@ describe("JsonStore", () => {
 
     const store = new JsonStore(filePath);
     await expect(store.initialize()).rejects.toThrow("Unsupported database format");
+  });
+
+  it("rejects malformed Agent contracts before persisting a version 9 migration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-agent-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    const createdAt = "2026-08-25T00:00:00.000Z";
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 9,
+        agents: [
+          {
+            id: "agent-one",
+            name: "Malformed Agent",
+            description: "",
+            instructions: "",
+            status: "ready",
+            workspacePath: "/tmp/agent-one",
+            canonicalStateId: "state-one",
+            outcomeContract: {
+              ...createDefaultOutcomeContract(2, createdAt),
+              maxChangedFiles: "unbounded",
+            },
+            codexThreadId: null,
+            lastError: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        messages: [],
+        runs: [],
+        candidateSets: [],
+      }) + "\n",
+    );
+
+    await expect(new JsonStore(filePath).initialize()).rejects.toThrow(
+      /Outcome Contract/,
+    );
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
+      version: 9,
+      agents: [{ outcomeContract: { maxChangedFiles: "unbounded" } }],
+    });
+  });
+
+  it("rejects duplicate Agent identities before persisting a version 9 migration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-duplicate-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    const createdAt = "2026-08-25T00:00:00.000Z";
+    const agent = {
+      id: "agent-one",
+      name: "Duplicate Agent",
+      description: "",
+      instructions: "",
+      status: "ready",
+      workspacePath: "/tmp/agent-one",
+      canonicalStateId: "state-one",
+      outcomeContract: createDefaultOutcomeContract(2, createdAt),
+      codexThreadId: null,
+      lastError: null,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 9,
+        agents: [agent, structuredClone(agent)],
+        messages: [],
+        runs: [],
+        candidateSets: [],
+      }) + "\n",
+    );
+
+    await expect(new JsonStore(filePath).initialize()).rejects.toThrow(
+      "Agent identity or Outcome Contract is invalid",
+    );
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
+      version: 9,
+      agents: [{ id: "agent-one" }, { id: "agent-one" }],
+    });
   });
 
   it("rejects malformed version 9 Candidate Set records before recovery", async () => {

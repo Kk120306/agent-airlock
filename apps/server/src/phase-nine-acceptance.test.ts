@@ -38,6 +38,17 @@ import { persistFixtureSession } from "../test/session-fixture.js";
 
 const temporaryDirectories: string[] = [];
 
+function deferredSignal(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) =>
@@ -147,6 +158,96 @@ class TamperingWorkspaceManager extends WorkspaceManager {
       );
     }
     return workspacePath;
+  }
+}
+
+class GatedCompetingFuturesRunner extends CompetingFuturesRunner {
+  private startedCount = 0;
+  private readonly allStartedSignal = deferredSignal();
+  private readonly releaseSignal = deferredSignal();
+
+  readonly allStarted = this.allStartedSignal.promise;
+
+  release(): void {
+    this.releaseSignal.resolve();
+  }
+
+  override async run(request: RunnerRequest): Promise<RunnerResult> {
+    this.startedCount += 1;
+    if (this.startedCount === 2) this.allStartedSignal.resolve();
+    await this.releaseSignal.promise;
+    return super.run(request);
+  }
+}
+
+class PostRuntimeGatedRunner extends CompetingFuturesRunner {
+  private completedCount = 0;
+  private readonly allCompletedSignal = deferredSignal();
+  private readonly releaseResultsSignal = deferredSignal();
+
+  readonly allCompleted = this.allCompletedSignal.promise;
+
+  releaseResults(): void {
+    this.releaseResultsSignal.resolve();
+  }
+
+  override async run(request: RunnerRequest): Promise<RunnerResult> {
+    const result = await super.run(request);
+    this.completedCount += 1;
+    if (this.completedCount === 2) this.allCompletedSignal.resolve();
+    await this.releaseResultsSignal.promise;
+    return result;
+  }
+}
+
+class DeferredQuarantineWorkspaceManager extends WorkspaceManager {
+  private readonly cleanupStartedSignal = deferredSignal();
+  private readonly releaseCleanupSignal = deferredSignal();
+  private announcedCleanup = false;
+
+  readonly cleanupStarted = this.cleanupStartedSignal.promise;
+
+  releaseCleanup(): void {
+    this.releaseCleanupSignal.resolve();
+  }
+
+  override async quarantineCandidate(
+    runId: string,
+    allowHistoricalProviderSubset = false,
+  ): Promise<string> {
+    if (!this.announcedCleanup) {
+      this.announcedCleanup = true;
+      this.cleanupStartedSignal.resolve();
+      await this.releaseCleanupSignal.promise;
+    }
+    return super.quarantineCandidate(runId, allowHistoricalProviderSubset);
+  }
+}
+
+class RejectingQuarantineWorkspaceManager extends WorkspaceManager {
+  private ordinaryReadsBeforeDrift: number | null = null;
+
+  injectDriftAfterReads(count: number): void {
+    this.ordinaryReadsBeforeDrift = count;
+  }
+
+  override async readCanonical(agentId: string) {
+    const canonical = await super.readCanonical(agentId);
+    if (this.ordinaryReadsBeforeDrift === null) return canonical;
+    if (this.ordinaryReadsBeforeDrift > 0) {
+      this.ordinaryReadsBeforeDrift -= 1;
+      return canonical;
+    }
+    this.ordinaryReadsBeforeDrift = null;
+    return {
+      ...canonical,
+      stateId: "fixture-canonical-drift",
+      contentHash: "sha256:" + "f".repeat(64),
+    };
+  }
+
+  override async quarantineCandidate(): Promise<string> {
+    throw new Error("fixture cleanup unavailable");
   }
 }
 
@@ -1052,6 +1153,178 @@ describe("Phase 9 Competing Futures acceptance", () => {
       access(path.join(canonical.workspacePath, "src", "broad-a.ts")),
     ).rejects.toThrow();
     expect(await service.listExternalEffects()).toEqual([]);
+  });
+
+  it("keeps the Agent busy until stale Candidate cleanup is durably complete", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-stale-"));
+    temporaryDirectories.push(root);
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "phase-nine-fixture-key",
+      ARK_MODEL: "phase-nine-fixture-model",
+    });
+    const workspaces = new DeferredQuarantineWorkspaceManager(
+      config.workspaceRoot,
+    );
+    const runner = new GatedCompetingFuturesRunner();
+    const service = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      workspaces,
+      runner,
+    );
+    await service.initialize();
+    const agent = await service.createAgent({ name: "Cleanup before terminal" });
+    const admitted = await service.createCandidateSet(agent.id, {
+      objective: "Do not publish a terminal phase before cleanup completes",
+      competitors: [
+        {
+          id: "broad-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement a broad valid solution.",
+        },
+        {
+          id: "focused-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement a focused valid solution.",
+        },
+      ],
+      selectionContract: createDefaultSelectionContractForTest(),
+      maxConcurrency: 2,
+      budget: {
+        maxDurationMsPerCompetitor: 600_000,
+        maxTotalTokens: 2_000_000,
+        maxTotalChangedBytes: 200_000_000,
+      },
+      loserPolicy: "retain",
+    });
+    await runner.allStarted;
+    await workspaces.updateInstructions({
+      ...agent,
+      instructions: "Canonical policy changed while futures were evaluating.",
+    });
+    runner.release();
+    await workspaces.cleanupStarted;
+
+    expect(service.getCandidateSet(admitted.candidateSet.id).phase).not.toBe(
+      "stale",
+    );
+    expect(service.getAgent(agent.id).status).toBe("busy");
+    await expect(
+      service.sendMessage(agent.id, "This must wait for cleanup."),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    workspaces.releaseCleanup();
+    await expect
+      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
+      .toBe("stale");
+    expect(service.getAgent(agent.id).status).toBe("ready");
+    expect(
+      service
+        .getCandidateSet(admitted.candidateSet.id)
+        .competitors.map((competitor) => competitor.loserDisposition),
+    ).toEqual(["retained", "retained"]);
+  });
+
+  it("keeps unresolved Candidate evidence locked when stale cleanup fails", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-cleanup-failure-"),
+    );
+    temporaryDirectories.push(root);
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "phase-nine-fixture-key",
+      ARK_MODEL: "phase-nine-fixture-model",
+    });
+    const workspaces = new RejectingQuarantineWorkspaceManager(
+      config.workspaceRoot,
+    );
+    const runner = new PostRuntimeGatedRunner();
+    const service = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      workspaces,
+      runner,
+    );
+    await service.initialize();
+    const agent = await service.createAgent({ name: "Failed cleanup lock" });
+    const admitted = await service.createCandidateSet(agent.id, {
+      objective: "Retain unresolved evidence when cleanup is unavailable",
+      competitors: [
+        {
+          id: "broad-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement a broad valid solution.",
+        },
+        {
+          id: "focused-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement a focused valid solution.",
+        },
+      ],
+      selectionContract: createDefaultSelectionContractForTest(),
+      maxConcurrency: 2,
+      budget: {
+        maxDurationMsPerCompetitor: 600_000,
+        maxTotalTokens: 2_000_000,
+        maxTotalChangedBytes: 200_000_000,
+      },
+      loserPolicy: "retain",
+    });
+    await runner.allCompleted;
+    workspaces.injectDriftAfterReads(2);
+    runner.releaseResults();
+    await expect
+      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
+      .toBe("recovery-error");
+
+    const failed = service.getCandidateSet(admitted.candidateSet.id);
+    expect(failed.recoveryError).toContain("fixture cleanup unavailable");
+    expect(failed.competitors.some((item) => item.loserDisposition === "pending"))
+      .toBe(true);
+    expect(service.getAgent(agent.id).status).toBe("error");
+    await expect(
+      service.sendMessage(agent.id, "Do not overlap unresolved cleanup."),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(service.startAgent(agent.id)).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    await expect(service.deleteAgent(agent.id)).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringContaining("Candidate cleanup"),
+    });
+
+    const restarted = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new RejectingQuarantineWorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await restarted.initialize();
+    const recovered = restarted.getCandidateSet(admitted.candidateSet.id);
+    expect(recovered.phase).toBe("recovery-error");
+    expect(
+      recovered.competitors.some(
+        (competitor) => competitor.loserDisposition === "pending",
+      ),
+    ).toBe(true);
+    expect(restarted.getAgent(agent.id).status).toBe("error");
+    await expect(restarted.startAgent(agent.id)).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    await expect(restarted.deleteAgent(agent.id)).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringContaining("Candidate cleanup"),
+    });
+    await expect(
+      restarted.sendMessage(agent.id, "Restart must preserve the lock."),
+    ).rejects.toMatchObject({ statusCode: 503 });
   });
 
   it("turns pre-decision cancellation into a durable no-winner result", async () => {

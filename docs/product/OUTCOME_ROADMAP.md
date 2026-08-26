@@ -431,6 +431,19 @@ Airlock uses patterns in rejected Runs and production incidents to recommend str
 
 Make safety improve from experience while keeping the acceptance boundary explicit, reviewable, and reversible.
 
+**Delivered evidence**
+
+- Database version 10 persists strict recursively parsed Assurance Proposals and append-only Outcome Contract version records with a tested version 9 migration.
+- The deterministic detector uses only bounded retained transaction fields, applies per-rule support thresholds, deduplicates Repair siblings by root lineage, and emits stable operation and citation order.
+- The historical simulator records exact, conservative, or unknown results for every bounded retained Run and never reopens Candidate State, reruns a command, recovers a secret, or invents missing evidence.
+- Proposal identifiers, evidence hashes, result hashes, simulation digests, and proposal digests reproduce from the same evidence independently of input order or creation time.
+- Acceptance rederives advice from retained evidence, verifies its exact base, catalogs, digests, and structural monotonic relation, then atomically creates the next ordinary Outcome Contract version.
+- Stale proposals cannot be rebased, rejection changes no contract field, and rollback creates a later immutable version while retaining the rule content and provenance of every prior version.
+- The Playground Assurance inbox explains the proposed diff, base version, supporting lineages, historical disposition changes, unknown inputs, citations, decision history, and explicit operator authority.
+- Agent deletion now uses a durable two-phase journal, converges after interruption between archive rename and database mutation, and archives credential-free Assurance and contract-history digests.
+- The deterministic local fixture can create the three-lineage README failure corpus and demonstrate derivation, simulation, acceptance, rejection, and rollback without ModelArk credentials, paid inference, or a public blockchain transaction.
+- `npm run check:phase10:assurance` locks deterministic derivation, lineage deduplication, unknown evidence, stale-base rejection, catalog confinement, tamper detection, strict HTTP input, restart persistence, rollback, strict database parsing, and deletion recovery.
+
 ### Phase 11: Portable trust
 
 **Outcome**

@@ -127,6 +127,10 @@ function apiResponse(pathname: string): unknown {
   if (pathname.endsWith("/messages")) return { messages: [] };
   if (pathname.endsWith("/runs")) return { runs: [] };
   if (pathname.endsWith("/candidate-sets")) return { candidateSets: [candidateSet] };
+  if (pathname.endsWith("/assurance-proposals")) return { proposals: [] };
+  if (pathname.endsWith("/outcome-contract/versions")) {
+    return { versions: [] };
+  }
   return null;
 }
 

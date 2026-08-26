@@ -21,6 +21,7 @@ import {
   type ResourceVersionReference,
 } from "@agent-airlock/transactional-resource-sdk";
 import { SqliteResource } from "./sqlite-resource.js";
+import type { AgentArchiveAudit } from "./agent-deletion-journal.js";
 import type { Agent, CanonicalStateReference } from "./types.js";
 
 interface CanonicalManifestV1 {
@@ -114,26 +115,6 @@ export interface PromotionPlan {
 export interface InterruptedCandidateResult {
   quarantinePath: string | null;
   error: string | null;
-}
-
-export interface AgentArchiveAudit {
-  schemaVersion: 1;
-  agentId: string;
-  archivedAt: string;
-  runs: Array<{
-    runId: string;
-    status: string;
-    candidateSetId: string | null;
-    disposition: string | null;
-    promotionReceiptDigest: string | null;
-  }>;
-  candidateSets: Array<{
-    candidateSetId: string;
-    phase: string;
-    winnerRunId: string | null;
-    selectionDecisionDigest: string | null;
-    winnerSealDigest: string | null;
-  }>;
 }
 
 export interface StateCleanupResult {
@@ -244,7 +225,9 @@ export class WorkspaceManager {
     this.initialProviderVersions = normalizeProviderVersions(initialProviderVersions);
   }
 
-  async initialize(): Promise<void> {
+  async initialize(
+    options: { recoverProviderRegistryTransitions?: boolean } = {},
+  ): Promise<void> {
     await mkdir(this.root, { recursive: true });
     await Promise.all([
       mkdir(path.join(this.root, ".candidates"), { recursive: true }),
@@ -253,7 +236,9 @@ export class WorkspaceManager {
       mkdir(path.join(this.root, ".quarantine"), { recursive: true }),
       mkdir(this.providerRegistryTransitionRoot(), { recursive: true }),
     ]);
-    await this.recoverProviderRegistryTransitions();
+    if (options.recoverProviderRegistryTransitions !== false) {
+      await this.recoverProviderRegistryTransitions();
+    }
   }
 
   async create(agent: Agent): Promise<CanonicalStateReference> {
@@ -1262,16 +1247,81 @@ export class WorkspaceManager {
   }
 
   async archive(agent: Agent, audit?: AgentArchiveAudit): Promise<string> {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const destination = path.join(this.root, ".deleted", agent.id + "-" + timestamp);
+    return this.archiveAgent(agent.id, audit);
+  }
+
+  async archiveAgent(
+    agentId: string,
+    audit?: AgentArchiveAudit,
+  ): Promise<string> {
+    const archivedAt = audit?.archivedAt ?? new Date().toISOString();
+    const timestamp = archivedAt.replace(/[:.]/g, "-");
+    const destination = path.join(this.root, ".deleted", agentId + "-" + timestamp);
+    const source = this.agentRoot(agentId);
+    let sourceStats: Awaited<ReturnType<typeof lstat>> | null = null;
+    try {
+      sourceStats = await lstat(source);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (!sourceStats) {
+      if (await fileExists(destination)) {
+        if (!audit) {
+          throw new Error("Archived Agent workspace requires expected audit evidence");
+        }
+        const destinationStats = await lstat(destination);
+        if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) {
+          throw new Error("Archived Agent workspace is not a regular directory");
+        }
+        const auditPath = path.join(destination, ".airlock-archive-audit.json");
+        const auditStats = await lstat(auditPath);
+        if (!auditStats.isFile() || auditStats.isSymbolicLink()) {
+          throw new Error("Archived Agent audit is not a regular file");
+        }
+        if (auditStats.size > 200_000) {
+          throw new Error("Archived Agent audit exceeds its evidence bound");
+        }
+        let persistedAudit: unknown;
+        try {
+          persistedAudit = JSON.parse(await readFile(auditPath, "utf8"));
+        } catch {
+          throw new Error("Archived Agent audit is malformed");
+        }
+        if (stableJson(persistedAudit) !== stableJson(audit)) {
+          throw new Error("Archived Agent audit contradicts deletion journal evidence");
+        }
+        return destination;
+      }
+      throw new Error("Agent workspace is missing from both active and archived state");
+    }
+    if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()) {
+      throw new Error("Active Agent workspace is not a regular directory");
+    }
+    const resolvedWorkspaceRoot = await realpath(this.root);
+    const resolvedSource = await realpath(source);
+    const sourceRelative = path.relative(resolvedWorkspaceRoot, resolvedSource);
+    if (
+      sourceRelative !== agentId ||
+      sourceRelative.startsWith(".." + path.sep) ||
+      path.isAbsolute(sourceRelative)
+    ) {
+      throw new Error("Active Agent workspace escapes the workspace root");
+    }
+    if (await fileExists(destination)) {
+      throw new Error("Agent workspace exists in both active and archived state");
+    }
     if (audit) {
+      const serializedAudit = JSON.stringify(audit, null, 2) + "\n";
+      if (Buffer.byteLength(serializedAudit, "utf8") > 200_000) {
+        throw new Error("Archived Agent audit exceeds its evidence bound");
+      }
       await writeFile(
-        path.join(this.agentRoot(agent.id), ".airlock-archive-audit.json"),
-        JSON.stringify(audit, null, 2) + "\n",
+        path.join(source, ".airlock-archive-audit.json"),
+        serializedAudit,
         { encoding: "utf8", mode: 0o600 },
       );
     }
-    await rename(this.agentRoot(agent.id), destination);
+    await rename(source, destination);
     return destination;
   }
 
@@ -1896,7 +1946,7 @@ export class WorkspaceManager {
     await writeFile(path.join(workspacePath, "AGENTS.md"), content, "utf8");
   }
 
-  private async recoverProviderRegistryTransitions(): Promise<void> {
+  async recoverProviderRegistryTransitions(): Promise<void> {
     const entries = await readdir(this.providerRegistryTransitionRoot(), {
       withFileTypes: true,
     });

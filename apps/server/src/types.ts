@@ -79,6 +79,100 @@ export type OutcomeContractInput = Omit<
   "schemaVersion" | "version" | "createdAt"
 >;
 
+export type AssuranceProposalState =
+  | "draft"
+  | "ready"
+  | "accepted"
+  | "rejected"
+  | "superseded"
+  | "stale";
+
+export type AssuranceDerivationRule =
+  | "deleted-path-recurrence-v1"
+  | "changed-file-limit-recurrence-v1"
+  | "added-byte-limit-recurrence-v1"
+  | "catalog-secret-recurrence-v1"
+  | "optional-command-failure-recurrence-v1";
+
+export type AssuranceOperation =
+  | { kind: "add-required-path"; path: string }
+  | { kind: "add-protected-path"; path: string }
+  | { kind: "lower-max-changed-files"; maximum: number }
+  | { kind: "lower-max-added-bytes"; maximum: number }
+  | {
+      kind: "add-catalog-secret";
+      catalogId: string;
+      catalogVersion: number;
+      name: string;
+      pattern: string;
+    }
+  | {
+      kind: "make-command-required";
+      name: string;
+      commandHash: string;
+      timeoutMs: number;
+    };
+
+export interface AssuranceCitation {
+  operationKey: string;
+  runId: string;
+  rootRunId: string;
+  evidenceSelector: string;
+  evidenceHash: string;
+  derivationRule: AssuranceDerivationRule;
+}
+
+export interface AssuranceSimulationResult {
+  operationKey: string;
+  runId: string;
+  classification: "exact" | "conservative" | "unknown";
+  priorDisposition: RunTransactionDisposition | null;
+  counterfactualDisposition: RunTransactionDisposition | null;
+  missingInputs: string[];
+  resultHash: string;
+}
+
+export interface AssuranceSimulation {
+  engineId: "agent-airlock-historical-simulator";
+  engineVersion: 1;
+  results: AssuranceSimulationResult[];
+  digest: string;
+}
+
+export interface AssuranceDecision {
+  action: "accepted" | "rejected";
+  reason: string;
+  decidedAt: string;
+  resultingContractVersion: number | null;
+}
+
+export interface AssuranceProposal {
+  schemaVersion: 1;
+  id: string;
+  agentId: string;
+  state: AssuranceProposalState;
+  baseContractVersion: number;
+  baseContractHash: string;
+  generatorId: "agent-airlock-deterministic-detector";
+  generatorVersion: 1;
+  operations: AssuranceOperation[];
+  citations: AssuranceCitation[];
+  simulation: AssuranceSimulation;
+  proposalDigest: string;
+  decision: AssuranceDecision | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutcomeContractVersionRecord {
+  schemaVersion: 1;
+  agentId: string;
+  contract: OutcomeContract;
+  provenance: "created" | "manual" | "assurance-proposal" | "rollback" | "migration";
+  sourceProposalId: string | null;
+  rollbackFromVersion: number | null;
+}
+
 export interface RunTransactionEvent {
   status: RunTransactionStatus;
   at: string;
@@ -221,6 +315,12 @@ export interface ExternalActionEvidence {
 
 export interface RunTransaction {
   id: string;
+  /**
+   * Present only when the complete Phase 10 evidence envelope was produced by
+   * a trusted Airlock Runtime or validated during the version 9 migration.
+   * Older unversioned evidence remains inspectable but cannot steer assurance.
+   */
+  assuranceEvidenceVersion?: 1;
   status: RunTransactionStatus;
   disposition: RunTransactionDisposition | null;
   candidateStateId: string | null;
@@ -461,11 +561,13 @@ export interface CreateCandidateSetInput {
 }
 
 export interface Database {
-  version: 9;
+  version: 10;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
   candidateSets: CandidateSet[];
+  assuranceProposals: AssuranceProposal[];
+  outcomeContractVersions: OutcomeContractVersionRecord[];
 }
 
 export interface CreateAgentInput {

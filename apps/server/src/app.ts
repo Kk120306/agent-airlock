@@ -13,6 +13,9 @@ import type { AgentService } from "./agent-service.js";
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
 const candidateSetIdParams = z.object({ id: z.string().uuid() });
+const assuranceProposalIdParams = z.object({
+  id: z.string().regex(/^[a-f0-9]{64}$/),
+});
 const createAgentBody = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().max(500).optional(),
@@ -109,6 +112,17 @@ const outcomeContractBody = z.object({
     )
     .max(20),
 });
+const assuranceDecisionBody = z
+  .object({
+    reason: z.string().trim().max(500).default(""),
+  })
+  .strict();
+const outcomeContractRollbackBody = z
+  .object({
+    targetVersion: z.number().int().min(1),
+    expectedCurrentVersion: z.number().int().min(1),
+  })
+  .strict();
 
 export async function createApp(
   config: AppConfig,
@@ -188,6 +202,45 @@ export async function createApp(
     return {
       outcomeContract: await service.updateOutcomeContract(id, body),
     };
+  });
+
+  app.get("/api/agents/:id/outcome-contract/versions", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { versions: service.listOutcomeContractVersions(id) };
+  });
+
+  app.post("/api/agents/:id/outcome-contract/rollback", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    const body = outcomeContractRollbackBody.parse(request.body);
+    return {
+      outcomeContract: await service.rollbackOutcomeContract(
+        id,
+        body.targetVersion,
+        body.expectedCurrentVersion,
+      ),
+    };
+  });
+
+  app.get("/api/agents/:id/assurance-proposals", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { proposals: service.listAssuranceProposals(id) };
+  });
+
+  app.post("/api/agents/:id/assurance-proposals/derive", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { proposal: await service.deriveAssuranceProposal(id) };
+  });
+
+  app.post("/api/assurance-proposals/:id/accept", async (request) => {
+    const { id } = assuranceProposalIdParams.parse(request.params);
+    const body = assuranceDecisionBody.parse(request.body ?? {});
+    return service.acceptAssuranceProposal(id, body.reason);
+  });
+
+  app.post("/api/assurance-proposals/:id/reject", async (request) => {
+    const { id } = assuranceProposalIdParams.parse(request.params);
+    const body = assuranceDecisionBody.parse(request.body ?? {});
+    return { proposal: await service.rejectAssuranceProposal(id, body.reason) };
   });
 
   app.delete("/api/agents/:id", async (request) => {

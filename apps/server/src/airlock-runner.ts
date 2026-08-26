@@ -134,6 +134,7 @@ export function createRunTransaction(
 ): RunTransaction {
   return {
     id: runId,
+    assuranceEvidenceVersion: 1,
     status: "preparing",
     disposition: null,
     candidateStateId: null,

@@ -1,9 +1,11 @@
 import type {
   Agent,
   AgentRun,
+  AssuranceProposal,
   CandidateSet,
   Message,
   OutcomeContract,
+  OutcomeContractVersionRecord,
   SystemInfo,
 } from "./types";
 
@@ -70,6 +72,41 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(body),
       },
+    ),
+  outcomeContractVersions: (id: string) =>
+    request<{ versions: OutcomeContractVersionRecord[] }>(
+      "/api/agents/" + id + "/outcome-contract/versions",
+    ),
+  rollbackOutcomeContract: (
+    id: string,
+    targetVersion: number,
+    expectedCurrentVersion: number,
+  ) =>
+    request<{ outcomeContract: OutcomeContract }>(
+      "/api/agents/" + id + "/outcome-contract/rollback",
+      {
+        method: "POST",
+        body: JSON.stringify({ targetVersion, expectedCurrentVersion }),
+      },
+    ),
+  assuranceProposals: (id: string) =>
+    request<{ proposals: AssuranceProposal[] }>(
+      "/api/agents/" + id + "/assurance-proposals",
+    ),
+  deriveAssuranceProposal: (id: string) =>
+    request<{ proposal: AssuranceProposal | null }>(
+      "/api/agents/" + id + "/assurance-proposals/derive",
+      { method: "POST" },
+    ),
+  acceptAssuranceProposal: (id: string, reason: string) =>
+    request<{ proposal: AssuranceProposal; outcomeContract: OutcomeContract }>(
+      "/api/assurance-proposals/" + id + "/accept",
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+  rejectAssuranceProposal: (id: string, reason: string) =>
+    request<{ proposal: AssuranceProposal }>(
+      "/api/assurance-proposals/" + id + "/reject",
+      { method: "POST", body: JSON.stringify({ reason }) },
     ),
   deleteAgent: (id: string) =>
     request<{ archivedWorkspace: string }>("/api/agents/" + id, {

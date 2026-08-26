@@ -21,6 +21,10 @@ _Avoid_: Shadow state, duplicate state, temporary state
 The versioned set of post-conditions that Candidate State must satisfy before promotion.
 _Avoid_: Policy file, command allowlist, safety rules
 
+**Outcome Contract Version Record**:
+The immutable historical record of one Agent's exact Outcome Contract rules, provenance, and version identity.
+_Avoid_: Mutable policy history, backup policy, settings snapshot
+
 **Validation**:
 One named evaluation of Candidate State against part of an Outcome Contract.
 _Avoid_: Check, gate, test
@@ -84,6 +88,18 @@ _Avoid_: Model choice, vote, race result
 **Promotion Authority**:
 The versioned journal evidence that names either an ordinary Run or the exact Candidate Set decision, competitor, winner Run, seal, and source allowed to recover Promotion.
 _Avoid_: Winner hint, selected flag, recovery guess
+
+**Assurance Proposal**:
+Durable evidence-backed advice that proposes a closed set of monotonic Outcome Contract strengthenings against one exact base version but has no policy authority until an operator accepts it.
+_Avoid_: Automatic policy, learned rule, self-editing contract
+
+**Historical Simulation**:
+The deterministic counterfactual evaluation of an Assurance Proposal against bounded retained Run evidence, with every result classified as exact, conservative, or unknown.
+_Avoid_: Replay, prediction, synthetic test run
+
+**Trusted Rule Catalog**:
+A versioned control-plane set of exact secret detectors or Validation commands that an Assurance Proposal may reference without accepting generated executable text or regular expressions.
+_Avoid_: Model-generated rule, dynamic allowlist, prompt policy
 
 **External Action Intent**:
 A validated description of an irreversible external operation that remains deferred until promotion.

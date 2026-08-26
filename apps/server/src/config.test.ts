@@ -64,3 +64,35 @@ describe("HTTP object Resource Provider configuration", () => {
     );
   });
 });
+
+describe("operator authority exposure", () => {
+  it("defaults unauthenticated development to loopback", () => {
+    expect(loadConfig({ NODE_ENV: "development" }).host).toBe("127.0.0.1");
+  });
+
+  it("requires a strong bearer token before listening beyond loopback", () => {
+    expect(() =>
+      loadConfig({ NODE_ENV: "development", HOST: "0.0.0.0" }),
+    ).toThrow(/APP_AUTH_TOKEN/);
+    expect(
+      loadConfig({
+        NODE_ENV: "development",
+        HOST: "0.0.0.0",
+        APP_AUTH_TOKEN: "local-network-operator-token-123",
+      }).authToken,
+    ).toBe("local-network-operator-token-123");
+  });
+
+  it("does not weaken non-loopback authentication in test mode", () => {
+    expect(() =>
+      loadConfig({ NODE_ENV: "test", HOST: "0.0.0.0" }),
+    ).toThrow(/APP_AUTH_TOKEN/);
+    expect(
+      loadConfig({
+        NODE_ENV: "test",
+        HOST: "0.0.0.0",
+        APP_AUTH_TOKEN: "test-network-operator-token-123",
+      }).authToken,
+    ).toBe("test-network-operator-token-123");
+  });
+});

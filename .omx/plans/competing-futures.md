@@ -164,8 +164,6 @@ Startup deterministically replays the persisted Selection Decision and compares 
 | `stale` or `recovery-error` | Preserve Canonical State and all unresolved evidence for operator diagnosis. |
 
 The Candidate Set journal protects every unresolved sibling from retention cleanup.
-Any pending competitor disposition or Run Transaction disposition keeps the Agent admission lease closed, including after restart.
-Cleanup failure publishes `recovery-error` and cannot reopen the Agent as `ready` until every disposition is durably resolved.
 If the winner Promotion journal exists, its plan and the Candidate Set selection digest must name the same set, competitor, source, and seal.
 Any contradiction fails recovery closed.
 Resource Registry onboarding and generation commit remain unavailable while either Promotion recovery or Candidate Set recovery has any unresolved failure.
