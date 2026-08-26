@@ -1478,8 +1478,12 @@ export class AirlockRunner {
   ): Promise<ReconciledPromotion> {
     let record = structuredClone(initial);
     let transaction = structuredClone(record.transaction);
-    const wasAlreadyRecovered =
-      record.transaction.recovery.recoveredAfterRestart;
+    const priorCompletedRecovery =
+      record.phase === "completed" &&
+      record.transaction.recovery.recoveredAfterRestart
+        ? inspectCompletedPromotionRecovery(record.transaction)
+        : { complete: false, partialEventCount: 0 };
+    const wasAlreadyRecovered = priorCompletedRecovery.complete;
     transaction.recovery = {
       ...transaction.recovery,
       recoveredAfterRestart: true,
@@ -1648,9 +1652,24 @@ export class AirlockRunner {
         appendBoundedResourceEvent(verificationEvents, event);
       });
       await this.verifyDeliveredEffects(record, canonical);
+      transaction.status = "promoted";
       if (wasAlreadyRecovered) {
+        if (
+          record.transaction.status === "recovery-error" ||
+          record.transaction.recovery.recoveryError !== null
+        ) {
+          record = await this.promotionJournal.updateTransaction(
+            record.runId,
+            transaction,
+          );
+        }
         transaction = record.transaction;
       } else {
+        if (priorCompletedRecovery.partialEventCount > 0) {
+          transaction.providerResourceEvents.splice(
+            -priorCompletedRecovery.partialEventCount,
+          );
+        }
         for (const event of verificationEvents) {
           appendBoundedResourceEvent(transaction.providerResourceEvents, event);
         }
@@ -1810,6 +1829,68 @@ export class AirlockRunner {
     next.events.push({ status, at: now(), summary });
     return next;
   }
+}
+
+function inspectCompletedPromotionRecovery(transaction: RunTransaction): {
+  complete: boolean;
+  partialEventCount: number;
+} {
+  const visibilityRank = {
+    "canonical-manifest": 0,
+    "post-promotion-reconciled": 1,
+    "best-effort": 2,
+  } as const;
+  const expectedProviders = transaction.providerResources
+    .map((resource) => ({
+      providerId: resource.providerId,
+      resourceKind: resource.resourceKind,
+      visibility: resource.capabilities.promotionVisibility,
+    }))
+    .sort((left, right) => {
+      const visibilityDifference =
+        visibilityRank[left.visibility] - visibilityRank[right.visibility];
+      return (
+        visibilityDifference ||
+        (left.resourceKind + "\u0000" + left.providerId).localeCompare(
+          right.resourceKind + "\u0000" + right.providerId,
+        )
+      );
+    });
+  if (expectedProviders.length === 0) {
+    return { complete: true, partialEventCount: 0 };
+  }
+  const events = transaction.providerResourceEvents;
+  const suffixMatchesExpectedPrefix = (count: number): boolean => {
+    if (events.length < count) return false;
+    return events.slice(-count).every((event, index) => {
+      const expected = expectedProviders[index];
+      return Boolean(
+        expected &&
+        event.schemaVersion === 1 &&
+        event.providerId === expected.providerId &&
+        event.resourceKind === expected.resourceKind &&
+        event.stage === "reconcile" &&
+        event.status === "passed" &&
+        typeof event.summary === "string" &&
+        event.summary.length > 0 &&
+        event.summary.length <= 512 &&
+        Number.isFinite(Date.parse(event.at)),
+      );
+    });
+  };
+  if (suffixMatchesExpectedPrefix(expectedProviders.length)) {
+    return { complete: true, partialEventCount: 0 };
+  }
+  for (
+    let count = Math.min(expectedProviders.length - 1, events.length);
+    count > 0;
+    count -= 1
+  ) {
+    if (suffixMatchesExpectedPrefix(count)) {
+      return { complete: false, partialEventCount: count };
+    }
+  }
+  return { complete: false, partialEventCount: 0 };
 }
 
 function assertRecoveryAuthority(

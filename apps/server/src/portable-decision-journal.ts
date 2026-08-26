@@ -886,6 +886,7 @@ export class PortableDecisionJournal {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+    await this.syncDirectory(this.root);
     await this.assertDirectory(directory, "Run");
     await this.assertPinnedRoot();
   }
@@ -900,6 +901,7 @@ export class PortableDecisionJournal {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+    await this.syncDirectory(this.candidateSetRoot());
     await this.assertDirectory(directory, "Candidate Set");
     await this.assertCandidateSetRoot();
   }
@@ -916,6 +918,7 @@ export class PortableDecisionJournal {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+    await this.syncDirectory(this.discardCleanupRoot());
     await this.assertDirectory(directory, "Discard cleanup Run");
     await this.assertDiscardCleanupRoot();
   }
@@ -1325,10 +1328,14 @@ export function hasCompleteProviderDiscardEvidence(
     (event) => event.stage === "discard" && event.status === "passed",
   );
   if (
-    successfulDiscardEvents.length !== knownProviderKinds.size ||
-    successfulDiscardEvents.some(
-      (event) =>
-        knownProviderKinds.get(event.providerId) !== event.resourceKind,
+    successfulDiscardEvents.length < knownProviderKinds.size ||
+    [...knownProviderKinds].some(
+      ([providerId, resourceKind]) =>
+        !successfulDiscardEvents.some(
+          (event) =>
+            event.providerId === providerId &&
+            event.resourceKind === resourceKind,
+        ),
     )
   ) {
     return false;

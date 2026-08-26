@@ -634,7 +634,13 @@ export class AgentService {
         run.status = "failed";
         run.error = failure.message;
         run.completedAt = now();
-        if (failure.transaction) {
+        const existingAuthority = terminalAuthorities.get(runId);
+        if (
+          existingAuthority?.disposition === "promoted" &&
+          failure.transaction?.disposition === "promoted"
+        ) {
+          run.transaction = structuredClone(existingAuthority.transaction);
+        } else if (failure.transaction) {
           run.transaction = failure.transaction;
         } else if (run.transaction) {
           run.transaction.status = "recovery-error";

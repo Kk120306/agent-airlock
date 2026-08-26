@@ -174,8 +174,10 @@ export class ResourcePreparationError extends Error {
         : "Resource Provider preparation failed";
     super(
       options.cleanupCompleted
-        ? causeMessage + "; prepared provider state was discarded before Runtime"
-        : causeMessage + "; provider cleanup failed and Candidate State was retained",
+        ? causeMessage +
+            "; prepared provider state was discarded before Runtime"
+        : causeMessage +
+            "; provider cleanup failed and Candidate State was retained",
       { cause: options.cause },
     );
     this.name = "ResourcePreparationError";
@@ -187,8 +189,13 @@ export class ResourcePreparationError extends Error {
 export class ResourceQuarantineError extends Error {
   readonly quarantines: ResourceQuarantineHandle[];
 
-  constructor(cause: unknown, quarantines: readonly ResourceQuarantineHandle[]) {
-    super("One or more Resource Providers failed to retain Quarantine", { cause });
+  constructor(
+    cause: unknown,
+    quarantines: readonly ResourceQuarantineHandle[],
+  ) {
+    super("One or more Resource Providers failed to retain Quarantine", {
+      cause,
+    });
     this.name = "ResourceQuarantineError";
     this.quarantines = structuredClone([...quarantines]);
   }
@@ -321,7 +328,9 @@ export class ResourceCoordinator {
     const indexed = new Map<string, RestorablePreparedResource>();
     for (const value of values) {
       if (indexed.has(value.providerId)) {
-        throw new Error("Duplicate persisted Resource Provider " + value.providerId);
+        throw new Error(
+          "Duplicate persisted Resource Provider " + value.providerId,
+        );
       }
       indexed.set(value.providerId, value);
     }
@@ -334,9 +343,14 @@ export class ResourceCoordinator {
       const value = indexed.get(entry.manifest.providerId);
       if (!value && options.allowPartial) continue;
       if (!value || value.resourceKind !== entry.manifest.resourceKind) {
-        throw new Error("Persisted Resource identity does not match the registry");
+        throw new Error(
+          "Persisted Resource identity does not match the registry",
+        );
       }
-      const source = parseResourceVersionReference(value.source, entry.manifest);
+      const source = parseResourceVersionReference(
+        value.source,
+        entry.manifest,
+      );
       const prepared = parsePreparedResource(
         {
           schemaVersion: 1,
@@ -384,7 +398,9 @@ export class ResourceCoordinator {
           (quarantine) => quarantine.runId !== input.repairSourceRunId,
         )
       ) {
-        throw new Error("Repair Resource Quarantine belongs to a different source Run");
+        throw new Error(
+          "Repair Resource Quarantine belongs to a different source Run",
+        );
       }
     } else if (repairQuarantines.size > 0) {
       throw new Error("Ordinary Run cannot consume a Resource Quarantine");
@@ -392,10 +408,15 @@ export class ResourceCoordinator {
     this.assertExactProviders(sources, "source version");
     await mkdir(input.candidateResourcesRoot, { recursive: true });
     const prepared: CoordinatedPreparedResource[] = [];
+    const attemptedProviderIds: string[] = [];
     try {
       for (const entry of this.registry.list()) {
+        attemptedProviderIds.push(entry.manifest.providerId);
         const source = sources.get(entry.manifest.providerId);
-        if (!source) throw new Error("Missing source version for " + entry.manifest.providerId);
+        if (!source)
+          throw new Error(
+            "Missing source version for " + entry.manifest.providerId,
+          );
         const candidateResourcePath = this.providerCandidatePath(
           input.candidateResourcesRoot,
           entry.manifest.providerId,
@@ -413,7 +434,8 @@ export class ResourceCoordinator {
               candidateStateId: input.candidateStateId,
               candidateResourcePath,
               source,
-              repairSource: repairQuarantines.get(entry.manifest.providerId) ?? null,
+              repairSource:
+                repairQuarantines.get(entry.manifest.providerId) ?? null,
             }),
           (raw) => {
             const accepted = parsePreparedResource(raw, entry.manifest);
@@ -446,6 +468,7 @@ export class ResourceCoordinator {
       const cleanupCompleted = await this.discardPreparedAfterPrepareFailure(
         input,
         prepared,
+        attemptedProviderIds,
       );
       throw new ResourcePreparationError({
         cause: error,
@@ -497,14 +520,20 @@ export class ResourceCoordinator {
           const accepted = raw.map((validation) =>
             parseResourceValidationEvidence(validation, entry.manifest),
           );
-          if (accepted.length === 0 || accepted.length > maximumValidationCount) {
+          if (
+            accepted.length === 0 ||
+            accepted.length > maximumValidationCount
+          ) {
             throw this.contractError(
               entry,
               "validate",
               "Resource Provider must return between 1 and 64 Validations",
             );
           }
-          if (Buffer.byteLength(JSON.stringify(accepted), "utf8") > maximumValidationBytes) {
+          if (
+            Buffer.byteLength(JSON.stringify(accepted), "utf8") >
+            maximumValidationBytes
+          ) {
             throw this.contractError(
               entry,
               "validate",
@@ -549,15 +578,19 @@ export class ResourceCoordinator {
           candidateRoot = path.dirname(candidateRoot);
         }
         await this.assertTreeHasNoSymlinks(candidateRoot, entry);
-        const refreshed = await this.resolveRuntimeBinding(candidateRoot, entry.manifest, {
-          schemaVersion: 1,
-          candidate: resource.candidate,
-          runtimeBinding: {
+        const refreshed = await this.resolveRuntimeBinding(
+          candidateRoot,
+          entry.manifest,
+          {
             schemaVersion: 1,
-            relativePath: resource.runtimeBinding.relativePath,
-            access: resource.runtimeBinding.access,
+            candidate: resource.candidate,
+            runtimeBinding: {
+              schemaVersion: 1,
+              relativePath: resource.runtimeBinding.relativePath,
+              access: resource.runtimeBinding.access,
+            },
           },
-        });
+        );
         if (
           !refreshed ||
           refreshed.hostPath !== resource.runtimeBinding.hostPath ||
@@ -575,7 +608,9 @@ export class ResourceCoordinator {
     }
   }
 
-  async planAll(input: ValidatedResourceSetInput): Promise<ResourcePromotionPlan[]> {
+  async planAll(
+    input: ValidatedResourceSetInput,
+  ): Promise<ResourcePromotionPlan[]> {
     const entries = this.entriesForScope(input.providerIds);
     const prepared = this.indexPrepared(input.prepared, false, entries);
     const evidence = this.indexEvidence(input.evidence, entries);
@@ -584,13 +619,17 @@ export class ResourceCoordinator {
       const resource = this.requirePrepared(prepared, entry);
       const acceptedEvidence = evidence.get(entry.manifest.providerId);
       if (!acceptedEvidence) {
-        throw new Error("Missing validated Resource evidence for " + entry.manifest.providerId);
+        throw new Error(
+          "Missing validated Resource evidence for " +
+            entry.manifest.providerId,
+        );
       }
       const plan = await this.invoke(
         entry,
         "plan-promotion",
         input.onEvent,
-        () => entry.provider.planPromotion(this.candidateContext(input, resource)),
+        () =>
+          entry.provider.planPromotion(this.candidateContext(input, resource)),
         (raw) => {
           const accepted = parseResourcePromotionPlan(raw, entry.manifest);
           assertResourcePromotionPlanMatchesCandidate({
@@ -619,7 +658,9 @@ export class ResourceCoordinator {
     return this.promoteVisible(input, "post-promotion-reconciled");
   }
 
-  async reconcile(input: ReconcileResourceSetInput): Promise<ResourceReconciliationResult[]> {
+  async reconcile(
+    input: ReconcileResourceSetInput,
+  ): Promise<ResourceReconciliationResult[]> {
     const entries = this.entriesForScope(input.providerIds);
     const visibleEntries = entries.filter(
       (entry) =>
@@ -644,13 +685,18 @@ export class ResourceCoordinator {
       visibleEntries.map((entry) => entry.manifest.providerId),
     );
     const visibleExpected = new Map(
-      [...expected].filter(([providerId]) => visibleProviderIds.has(providerId)),
+      [...expected].filter(([providerId]) =>
+        visibleProviderIds.has(providerId),
+      ),
     );
     this.assertProviders(visibleExpected, visibleEntries, "Expected version");
     const results: ResourceReconciliationResult[] = [];
     for (const entry of visibleEntries) {
       const plan = plans.get(entry.manifest.providerId);
-      if (!plan) throw new Error("Missing Promotion plan for " + entry.manifest.providerId);
+      if (!plan)
+        throw new Error(
+          "Missing Promotion plan for " + entry.manifest.providerId,
+        );
       const result = await this.invoke(
         entry,
         "reconcile",
@@ -661,11 +707,17 @@ export class ResourceCoordinator {
             agentId: input.agentId,
             runId: input.runId,
             plan,
-            expectedVersion: visibleExpected.get(entry.manifest.providerId) ?? null,
+            expectedVersion:
+              visibleExpected.get(entry.manifest.providerId) ?? null,
           }),
         (raw) => {
-          const accepted = parseResourceReconciliationResult(raw, entry.manifest);
-          const expectedVersion = visibleExpected.get(entry.manifest.providerId);
+          const accepted = parseResourceReconciliationResult(
+            raw,
+            entry.manifest,
+          );
+          const expectedVersion = visibleExpected.get(
+            entry.manifest.providerId,
+          );
           if (accepted.status === "contradiction") {
             throw this.contractError(
               entry,
@@ -674,7 +726,10 @@ export class ResourceCoordinator {
               "recovery-contradiction",
             );
           }
-          if (expectedVersion && !sameVersion(accepted.version, expectedVersion)) {
+          if (
+            expectedVersion &&
+            !sameVersion(accepted.version, expectedVersion)
+          ) {
             throw this.contractError(
               entry,
               "reconcile",
@@ -736,11 +791,14 @@ export class ResourceCoordinator {
         firstFailure ??= error;
       }
     }
-    if (firstFailure) throw new ResourceQuarantineError(firstFailure, quarantines);
+    if (firstFailure)
+      throw new ResourceQuarantineError(firstFailure, quarantines);
     return quarantines;
   }
 
-  async discardAll(input: DiscardResourceSetInput): Promise<ResourceDiscardResult[]> {
+  async discardAll(
+    input: DiscardResourceSetInput,
+  ): Promise<ResourceDiscardResult[]> {
     const entries = this.entriesForScope(input.providerIds);
     const prepared = this.indexPrepared(
       input.prepared,
@@ -802,10 +860,14 @@ export class ResourceCoordinator {
     this.assertProviders(plans, entries, "Promotion plan");
     const installed: ResourceVersionReference[] = [];
     for (const entry of entries) {
-      if (entry.manifest.capabilities.promotionVisibility !== visibility) continue;
+      if (entry.manifest.capabilities.promotionVisibility !== visibility)
+        continue;
       const resource = this.requirePrepared(prepared, entry);
       const plan = plans.get(entry.manifest.providerId);
-      if (!plan) throw new Error("Missing Promotion plan for " + entry.manifest.providerId);
+      if (!plan)
+        throw new Error(
+          "Missing Promotion plan for " + entry.manifest.providerId,
+        );
       const version = await this.invoke(
         entry,
         "promote",
@@ -857,7 +919,10 @@ export class ResourceCoordinator {
   ): Promise<CoordinatedRuntimeBinding | null> {
     if (!prepared.runtimeBinding) return null;
     await this.assertTreeHasNoSymlinks(providerRoot, { manifest });
-    const unresolved = path.resolve(providerRoot, prepared.runtimeBinding.relativePath);
+    const unresolved = path.resolve(
+      providerRoot,
+      prepared.runtimeBinding.relativePath,
+    );
     const relative = path.relative(providerRoot, unresolved);
     if (relative.startsWith("..") || path.isAbsolute(relative)) {
       throw this.contractError(
@@ -879,7 +944,10 @@ export class ResourceCoordinator {
       realpath(unresolved),
     ]);
     const resolvedRelative = path.relative(resolvedRoot, resolvedBinding);
-    if (resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)) {
+    if (
+      resolvedRelative.startsWith("..") ||
+      path.isAbsolute(resolvedRelative)
+    ) {
       throw this.contractError(
         { manifest } as RegisteredResourceProvider,
         "prepare",
@@ -922,6 +990,7 @@ export class ResourceCoordinator {
   private async discardPreparedAfterPrepareFailure(
     input: PrepareResourceSetInput,
     prepared: CoordinatedPreparedResource[],
+    attemptedProviderIds: readonly string[],
   ): Promise<boolean> {
     try {
       await this.discardAll({
@@ -932,6 +1001,7 @@ export class ResourceCoordinator {
         prepared,
         quarantines: [],
         allowPartialPrepared: true,
+        providerIds: attemptedProviderIds,
         ...(input.onEvent ? { onEvent: input.onEvent } : {}),
       });
       await rm(input.candidateResourcesRoot, { recursive: true, force: true });
@@ -949,7 +1019,9 @@ export class ResourceCoordinator {
       prepared.candidate.sourceVersionId !== source.versionId ||
       prepared.candidate.sourceFingerprint !== source.fingerprint
     ) {
-      throw new Error("Prepared Resource Candidate contradicts its source version");
+      throw new Error(
+        "Prepared Resource Candidate contradicts its source version",
+      );
     }
   }
 
@@ -972,7 +1044,9 @@ export class ResourceCoordinator {
       actual.length !== expectedSorted.length ||
       actual.some((value, index) => value !== expectedSorted[index])
     ) {
-      throw new Error(label + " provider set does not match the Resource Registry");
+      throw new Error(
+        label + " provider set does not match the Resource Registry",
+      );
     }
   }
 
@@ -984,11 +1058,14 @@ export class ResourceCoordinator {
     const result = new Map<string, CoordinatedPreparedResource>();
     for (const value of values) {
       if (result.has(value.providerId)) {
-        throw new Error("Duplicate prepared Resource Provider " + value.providerId);
+        throw new Error(
+          "Duplicate prepared Resource Provider " + value.providerId,
+        );
       }
       result.set(value.providerId, value);
     }
-    if (!allowPartial) this.assertProviders(result, entries, "Prepared resource");
+    if (!allowPartial)
+      this.assertProviders(result, entries, "Prepared resource");
     for (const providerId of result.keys()) {
       if (!entries.some((entry) => entry.manifest.providerId === providerId)) {
         throw new Error(
@@ -1007,9 +1084,15 @@ export class ResourceCoordinator {
     if (unique.size !== providerIds.length) {
       throw new Error("Historical Resource Provider scope contains duplicates");
     }
-    const entries = providerIds.map((providerId) => this.registry.get(providerId));
+    const entries = providerIds.map((providerId) =>
+      this.registry.get(providerId),
+    );
     entries.sort((left, right) =>
-      (left.manifest.resourceKind + "\u0000" + left.manifest.providerId).localeCompare(
+      (
+        left.manifest.resourceKind +
+        "\u0000" +
+        left.manifest.providerId
+      ).localeCompare(
         right.manifest.resourceKind + "\u0000" + right.manifest.providerId,
       ),
     );
@@ -1037,7 +1120,9 @@ export class ResourceCoordinator {
   ): CoordinatedPreparedResource {
     const resource = indexed.get(entry.manifest.providerId);
     if (!resource || resource.resourceKind !== entry.manifest.resourceKind) {
-      throw new Error("Prepared Resource does not match " + entry.manifest.providerId);
+      throw new Error(
+        "Prepared Resource does not match " + entry.manifest.providerId,
+      );
     }
     return resource;
   }
@@ -1046,7 +1131,10 @@ export class ResourceCoordinator {
     return path.join(root, providerId);
   }
 
-  private idempotencyKey(runId: string, manifest: ResourceProviderManifest): string {
+  private idempotencyKey(
+    runId: string,
+    manifest: ResourceProviderManifest,
+  ): string {
     return createResourcePromotionIdempotencyKey({
       runId,
       providerId: manifest.providerId,
@@ -1059,22 +1147,25 @@ export class ResourceCoordinator {
     stage: ResourceLifecycleStage,
     recorder: ResourceEventRecorder | undefined,
     operation: () => Promise<T>,
-    accept: (value: T) => R = ((value: T) => value as unknown as R),
+    accept: (value: T) => R = (value: T) => value as unknown as R,
   ): Promise<R> {
     let raw: T;
     try {
       raw = await operation();
     } catch (error) {
       const wrapped = this.providerError(entry, stage, error);
-      await recorder?.(
-        this.event(entry, stage, "failed", wrapped.safeSummary),
-      );
+      await recorder?.(this.event(entry, stage, "failed", wrapped.safeSummary));
       throw wrapped;
     }
     try {
       const result = accept(raw);
       await recorder?.(
-        this.event(entry, stage, "passed", entry.manifest.label + " completed " + stage),
+        this.event(
+          entry,
+          stage,
+          "passed",
+          entry.manifest.label + " completed " + stage,
+        ),
       );
       return result;
     } catch (error) {
@@ -1088,9 +1179,7 @@ export class ResourceCoordinator {
               "capability-mismatch",
               error,
             );
-      await recorder?.(
-        this.event(entry, stage, "failed", wrapped.safeSummary),
-      );
+      await recorder?.(this.event(entry, stage, "failed", wrapped.safeSummary));
       throw wrapped;
     }
   }
@@ -1137,8 +1226,9 @@ export class ResourceCoordinator {
     entry: Pick<RegisteredResourceProvider, "manifest">,
     stage: ResourceLifecycleStage,
     summary: string,
-    code: ConstructorParameters<typeof ResourceLifecycleError>[0]["code"] =
-      "capability-mismatch",
+    code: ConstructorParameters<
+      typeof ResourceLifecycleError
+    >[0]["code"] = "capability-mismatch",
     cause?: unknown,
   ): ResourceLifecycleError {
     return new ResourceLifecycleError({
@@ -1146,7 +1236,8 @@ export class ResourceCoordinator {
       code,
       retryable: code === "provider-unavailable" || code === "timeout",
       safeSummary:
-        entry.manifest.label + ": " +
+        entry.manifest.label +
+        ": " +
         (summary.length <= 400 ? summary : summary.slice(0, 397) + "..."),
       cause,
     });
@@ -1161,7 +1252,9 @@ function indexedVersions(
   for (const raw of versions) {
     const version = parseResourceVersionReference(raw);
     if (result.has(version.providerId)) {
-      throw new Error("Duplicate " + label + " version for " + version.providerId);
+      throw new Error(
+        "Duplicate " + label + " version for " + version.providerId,
+      );
     }
     result.set(version.providerId, version);
   }
@@ -1193,7 +1286,9 @@ function indexedQuarantines(
       throw new Error("Resource Quarantine belongs to a different Run");
     }
     if (result.has(quarantine.providerId)) {
-      throw new Error("Duplicate Resource Quarantine for " + quarantine.providerId);
+      throw new Error(
+        "Duplicate Resource Quarantine for " + quarantine.providerId,
+      );
     }
     result.set(quarantine.providerId, quarantine);
   }
@@ -1213,7 +1308,9 @@ function sameVersion(
   );
 }
 
-function versionFromPlan(plan: ResourcePromotionPlan): ResourceVersionReference {
+function versionFromPlan(
+  plan: ResourcePromotionPlan,
+): ResourceVersionReference {
   return {
     schemaVersion: 1,
     providerId: plan.providerId,

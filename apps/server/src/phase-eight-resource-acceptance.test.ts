@@ -30,6 +30,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentService } from "./agent-service.js";
 import { loadConfig } from "./config.js";
 import { RunCancelledError } from "./errors.js";
+import { hasCompleteProviderDiscardEvidence } from "./portable-decision-journal.js";
 import { ResourceCoordinator } from "./resource-coordinator.js";
 import { ResourceRegistry } from "./resource-registry.js";
 import { JsonStore } from "./store.js";
@@ -1362,6 +1363,147 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     });
   });
 
+  it("limits multi-provider prepare-abort cleanup to attempted providers", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-multi-prepare-"),
+    );
+    temporaryDirectories.push(root);
+    const providers = [
+      new AcceptanceObjectProvider("provider-a", "kind-a", "Provider A"),
+      new AcceptanceObjectProvider("provider-b", "kind-b", "Provider B"),
+      new AcceptanceObjectProvider("provider-c", "kind-c", "Provider C"),
+    ];
+    const entries = providers.map((provider, index) => {
+      const value = { release: "canonical-" + provider.manifest.providerId };
+      const versionId = "version-" + String(index + 1);
+      provider.versions.set(versionId, value);
+      return {
+        provider,
+        initialVersion: reference(
+          versionId,
+          fingerprint(value),
+          provider.manifest.providerId,
+          provider.manifest.resourceKind,
+        ),
+      };
+    });
+    providers[1]!.failPrepare = true;
+    const coordinator = new ResourceCoordinator(new ResourceRegistry(entries));
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+    let runtimeCalls = 0;
+    const runtime: AgentRunner = {
+      run: async () => {
+        runtimeCalls += 1;
+        throw new Error("Prepare-abort must not execute Runtime");
+      },
+      cancel: async () => false,
+      isAvailable: async () => true,
+    };
+    const service = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        config.workspaceRoot,
+        undefined,
+        undefined,
+        coordinator.initialVersions(),
+      ),
+      runtime,
+      undefined,
+      undefined,
+      coordinator,
+    );
+    await service.initialize();
+    const agent = await service.createAgent({
+      name: "Bounded multi-provider prepare-abort",
+    });
+    const started = await service.sendMessage(
+      agent.id,
+      "abort after the second provider",
+    );
+    const failed = await waitForRun(service, started.run.id);
+    expect(runtimeCalls).toBe(0);
+    expect(failed.transaction).toMatchObject({
+      status: "discarded",
+      disposition: "discarded",
+      providerResources: [{ providerId: "provider-a" }],
+      providerResourceEvents: [
+        { providerId: "provider-a", stage: "prepare", status: "passed" },
+        { providerId: "provider-b", stage: "prepare", status: "failed" },
+        { providerId: "provider-a", stage: "discard", status: "passed" },
+        { providerId: "provider-b", stage: "discard", status: "passed" },
+      ],
+    });
+    expect(providers[0]!.discarded.has(started.run.id)).toBe(true);
+    expect(providers[1]!.discarded.has(started.run.id)).toBe(true);
+    expect(providers[2]!.discarded.has(started.run.id)).toBe(false);
+    if (!failed.transaction) {
+      throw new Error("Prepare-abort has no terminal transaction");
+    }
+    expect(hasCompleteProviderDiscardEvidence(failed.transaction)).toBe(true);
+
+    const legacyAllProviderCleanup = structuredClone(failed.transaction);
+    legacyAllProviderCleanup.providerResourceEvents.push({
+      schemaVersion: 1,
+      providerId: "provider-c",
+      resourceKind: "kind-c",
+      stage: "discard",
+      status: "passed",
+      summary: "Legacy cleanup visited an unattempted provider",
+      at: new Date().toISOString(),
+    });
+    expect(hasCompleteProviderDiscardEvidence(legacyAllProviderCleanup)).toBe(
+      true,
+    );
+    const selfAuthorizedCleanup = structuredClone(legacyAllProviderCleanup);
+    selfAuthorizedCleanup.providerResources = [];
+    selfAuthorizedCleanup.providerResourceEvents =
+      selfAuthorizedCleanup.providerResourceEvents.filter(
+        (event) => event.providerId === "provider-c",
+      );
+    expect(hasCompleteProviderDiscardEvidence(selfAuthorizedCleanup)).toBe(
+      false,
+    );
+
+    const cleanupFactPath = path.join(
+      config.dataDirectory,
+      "portable-decision-journal",
+      ".discard-cleanup",
+      started.run.id,
+    );
+    await expect(access(cleanupFactPath)).rejects.toThrow();
+    const restarted = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        config.workspaceRoot,
+        undefined,
+        undefined,
+        coordinator.initialVersions(),
+      ),
+      runtime,
+      undefined,
+      undefined,
+      coordinator,
+    );
+    await restarted.initialize();
+    expect(restarted.getRun(started.run.id)).toMatchObject({
+      status: "failed",
+      transaction: {
+        status: "discarded",
+        disposition: "discarded",
+      },
+    });
+    expect(runtimeCalls).toBe(0);
+  });
+
   it("promotes, rejects, repairs, and discards one provider without core-specific code", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-"));
     temporaryDirectories.push(root);
@@ -2506,9 +2648,281 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
           },
         });
         expect(provider.versions.size).toBe(2);
+
+        const targetVersion = canonical.providerVersions[0];
+        if (!targetVersion) {
+          throw new Error("Recovered Promotion has no provider target version");
+        }
+        const installedValue = provider.versions.get(targetVersion.versionId);
+        if (installedValue === undefined) {
+          throw new Error("Recovered provider target is unavailable");
+        }
+        provider.versions.delete(targetVersion.versionId);
+        await writeFile(
+          path.join(config.dataDirectory, "db.json"),
+          databaseBeforeRecovery,
+          "utf8",
+        );
+        const failedVerificationRestart = new AgentService(
+          config,
+          new JsonStore(path.join(config.dataDirectory, "db.json")),
+          new WorkspaceManager(
+            config.workspaceRoot,
+            undefined,
+            undefined,
+            restartedCoordinator.initialVersions(),
+          ),
+          restartedRunner,
+          undefined,
+          undefined,
+          restartedCoordinator,
+        );
+        await failedVerificationRestart.initialize();
+        expect(failedVerificationRestart.getRun(started.run.id)).toMatchObject({
+          status: "failed",
+          error: expect.stringContaining(
+            "Resource reconciliation result contradicts",
+          ),
+          transaction: {
+            status: "promoted",
+            recovery: {
+              journalPhase: "completed",
+              recoveredAfterRestart: true,
+              recoveryError: null,
+            },
+          },
+        });
+        const failedJournal = JSON.parse(
+          await readFile(promotionJournalPath, "utf8"),
+        ) as { transaction: RunTransaction };
+        expect(failedJournal.transaction.providerResourceEvents).toHaveLength(
+          accumulatedJournal.transaction.providerResourceEvents.length,
+        );
+        expect(failedJournal.transaction).toMatchObject({
+          status: "recovery-error",
+          recovery: {
+            journalPhase: "completed",
+            recoveredAfterRestart: true,
+            recoveryError: expect.stringContaining(
+              "Resource reconciliation result contradicts",
+            ),
+          },
+        });
+
+        provider.versions.set(targetVersion.versionId, installedValue);
+        const recoveredVerificationRestart = new AgentService(
+          config,
+          new JsonStore(path.join(config.dataDirectory, "db.json")),
+          new WorkspaceManager(
+            config.workspaceRoot,
+            undefined,
+            undefined,
+            restartedCoordinator.initialVersions(),
+          ),
+          restartedRunner,
+          undefined,
+          undefined,
+          restartedCoordinator,
+        );
+        await recoveredVerificationRestart.initialize();
+        expect(
+          recoveredVerificationRestart.getRun(started.run.id),
+        ).toMatchObject({
+          status: "completed",
+          error: null,
+          transaction: {
+            status: "promoted",
+            disposition: "promoted",
+            recovery: {
+              journalPhase: "completed",
+              recoveredAfterRestart: true,
+              recoveryError: null,
+            },
+          },
+        });
+        const normalizedJournal = JSON.parse(
+          await readFile(promotionJournalPath, "utf8"),
+        ) as { transaction: RunTransaction };
+        expect(normalizedJournal.transaction).toMatchObject({
+          status: "promoted",
+          recovery: {
+            journalPhase: "completed",
+            recoveredAfterRestart: true,
+            recoveryError: null,
+          },
+        });
+        expect(
+          normalizedJournal.transaction.providerResourceEvents,
+        ).toHaveLength(
+          accumulatedJournal.transaction.providerResourceEvents.length,
+        );
       }
     },
   );
+
+  it("replaces a predecessor partial provider recovery batch", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-partial-recovery-"),
+    );
+    temporaryDirectories.push(root);
+    const providers = [
+      new AcceptanceObjectProvider("provider-a", "kind-a", "Provider A"),
+      new AcceptanceObjectProvider("provider-b", "kind-b", "Provider B"),
+    ];
+    const entries = providers.map((provider, index) => {
+      const value = { release: "canonical-" + provider.manifest.providerId };
+      const versionId = "version-" + String(index + 1);
+      provider.versions.set(versionId, value);
+      return {
+        provider,
+        initialVersion: reference(
+          versionId,
+          fingerprint(value),
+          provider.manifest.providerId,
+          provider.manifest.resourceKind,
+        ),
+      };
+    });
+    const coordinator = new ResourceCoordinator(new ResourceRegistry(entries));
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+    let runtimeCalls = 0;
+    const runtime: AgentRunner = {
+      run: async (request) => {
+        runtimeCalls += 1;
+        for (const binding of request.resourceBindings ?? []) {
+          await writeFile(
+            binding.hostPath,
+            JSON.stringify({ release: "candidate-" + binding.providerId }) +
+              "\n",
+            "utf8",
+          );
+        }
+        await persistFixtureSession(
+          request,
+          "thread-partial-recovery",
+          "partial-recovery",
+        );
+        return {
+          output: "prepared",
+          threadId: "thread-partial-recovery",
+          usage: null,
+        };
+      },
+      cancel: async () => false,
+      isAvailable: async () => true,
+    };
+    let injected = false;
+    const first = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        config.workspaceRoot,
+        undefined,
+        undefined,
+        coordinator.initialVersions(),
+      ),
+      runtime,
+      undefined,
+      (point) => {
+        if (!injected && point === "after-completed") {
+          injected = true;
+          throw new Error("simulated predecessor recovery interruption");
+        }
+      },
+      coordinator,
+    );
+    await first.initialize();
+    const agent = await first.createAgent({
+      name: "Partial provider recovery compatibility",
+    });
+    const started = await first.sendMessage(
+      agent.id,
+      "promote before a partial recovery replay",
+    );
+    await expect.poll(() => first.getRun(started.run.id).status).toBe("failed");
+    expect(runtimeCalls).toBe(1);
+
+    const journalPath = path.join(
+      config.dataDirectory,
+      "promotion-journal",
+      started.run.id + ".json",
+    );
+    const predecessorJournal = JSON.parse(
+      await readFile(journalPath, "utf8"),
+    ) as { transaction: RunTransaction };
+    const baselineEventCount =
+      predecessorJournal.transaction.providerResourceEvents.length;
+    predecessorJournal.transaction.recovery.recoveredAfterRestart = true;
+    predecessorJournal.transaction.providerResourceEvents.push({
+      schemaVersion: 1,
+      providerId: "provider-a",
+      resourceKind: "kind-a",
+      stage: "reconcile",
+      status: "passed",
+      summary: "Predecessor persisted only the first provider verification",
+      at: new Date().toISOString(),
+    });
+    await writeFile(
+      journalPath,
+      JSON.stringify(predecessorJournal, null, 2) + "\n",
+      "utf8",
+    );
+
+    const restarted = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        config.workspaceRoot,
+        undefined,
+        undefined,
+        coordinator.initialVersions(),
+      ),
+      {
+        run: async () => {
+          runtimeCalls += 1;
+          throw new Error("Recovery must not execute Runtime twice");
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      },
+      undefined,
+      undefined,
+      coordinator,
+    );
+    await restarted.initialize();
+    expect(restarted.getRun(started.run.id)).toMatchObject({
+      status: "completed",
+      error: null,
+      transaction: {
+        status: "promoted",
+        disposition: "promoted",
+        recovery: {
+          journalPhase: "completed",
+          recoveredAfterRestart: true,
+          recoveryError: null,
+        },
+      },
+    });
+    const repairedJournal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      transaction: RunTransaction;
+    };
+    expect(repairedJournal.transaction.providerResourceEvents).toHaveLength(
+      baselineEventCount + providers.length,
+    );
+    expect(
+      repairedJournal.transaction.providerResourceEvents
+        .slice(-providers.length)
+        .map((event) => event.providerId),
+    ).toEqual(["provider-a", "provider-b"]);
+    expect(runtimeCalls).toBe(1);
+  });
 });
 
 async function createRejectedProviderFixture(label: string) {

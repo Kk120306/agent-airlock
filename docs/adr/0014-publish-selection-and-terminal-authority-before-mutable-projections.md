@@ -30,6 +30,8 @@ Authorities for the same Run must retain one exact parent authority digest and a
 An available Quarantine may later gain one authoritative Discard transaction before any provider or local physical removal begins.
 An interrupted completed Promotion may later gain one recovery authority after the completed Promotion journal is verified.
 The recovery authority changes `recoveredAfterRestart` from `false` to `true` and may append exactly one successful `reconcile` event for each provider already committed in the promoted transaction.
+Repeated verification reuses that complete immutable batch without growing evidence, and a predecessor partial batch is replaced by one complete batch after live verification succeeds.
+If later verification fails transiently, the mutable Run retains the last exact terminal authority while the Promotion journal records the bounded error, and a healthy retry clears the journal error without adding another batch.
 The earlier provider-event prefix and every other transaction field remain exact.
 These are the only accepted transitions between different terminal transaction hashes for one Run.
 The Discard transaction must preserve the immutable Run core and exact event prefixes, append one Discard event, and retain provider recovery handles.
@@ -39,6 +41,8 @@ Any other conflicting history is ambiguous and fails closed.
 
 Provider cleanup begins only after immutable Discard authority exists.
 The bounded exception is cleanup of partial provider preparation before a terminal Run can be assembled, and the resulting authority is accepted only when it embeds exact successful Discard coverage for every known provider.
+Prepare-abort cleanup invokes only providers whose preparation was attempted, while legacy successful no-op Discard events for later providers are tolerated but never count toward known-provider coverage.
+Each authority namespace directory is synchronized in its parent before a published record can authorize destructive local cleanup.
 Startup retries provider and local cleanup from that exact Discard authority and never synthesizes Discard after local state disappears.
 If the local recovery root is missing, startup accepts provider cleanup only when either the authority embeds complete provider Discard evidence or the exact authority-bound cleanup completion fact exists and passes complete provider coverage validation.
 If Discard authority exists while local Candidate or Quarantine state remains, startup completes that authorized cleanup and atomically replays the Run plus Candidate competitor lifecycle.

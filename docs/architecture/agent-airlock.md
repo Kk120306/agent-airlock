@@ -232,6 +232,7 @@ The HTTP object provider uses that mode and does not advance a provider-native m
 Airlock therefore provides one recoverable acceptance decision without claiming distributed atomic commit across the filesystem and remote service.
 
 Provider preparation failure triggers evidence-preserving Discard before Runtime.
+That compensation is scoped to providers whose preparation was attempted, including the provider that failed, and never invokes later providers that could not have created Candidate state.
 Accepted provider preparation, Quarantine, and Discard results are persisted incrementally so partial multi-provider progress survives a later failure.
 Prepare replay and null-handle Discard are Run-scoped, allowing recovery when a provider created remote state but its response was lost.
 Any required provider Validation failure quarantines every built-in and registered resource under one disposition.
@@ -239,6 +240,7 @@ The Promotion journal records provider plans before immutable installation, and 
 Historical Promotion recovery selects the exact provider subset persisted in that plan, so adding provider B cannot strand a transaction created under `{}` or `{A}`.
 Provider Discard events are persisted in an immutable authority-bound cleanup completion fact before local mutable state is removed so an interrupted terminal cleanup can converge without inventing success.
 Prepare-abort cleanup that must remove partial provider preparation before a terminal Run exists instead embeds exact successful provider coverage in the later Discard authority.
+Legacy prepare-abort evidence may contain successful no-op Discard events for unattempted providers, but those events are tolerated only as inert extras and cannot establish the known-provider set.
 Cancellation with an unavailable provider Discard moves the complete local Candidate into cleanup-only Quarantine rather than deleting its recovery handle.
 Retained Quarantine cleanup likewise uses its persisted historical provider subset and never invokes a provider that was added after the Run.
 
