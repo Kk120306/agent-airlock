@@ -6,6 +6,9 @@ import type {
   RunTransactionStatus,
 } from "../src/types.js";
 
+// The server test command reserves 150 seconds for four sequential terminal
+// workflows, each with one semantic poll and one execution-quiescence poll,
+// plus setup, assertions, and teardown headroom.
 export const agentWorkflowTimeoutMs = 15_000;
 
 type TerminalRunStatus = Extract<
