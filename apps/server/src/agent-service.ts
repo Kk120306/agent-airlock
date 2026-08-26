@@ -62,6 +62,7 @@ import {
 import {
   PortableDecisionJournal,
   portableCandidateSetAuthorityHash,
+  type CandidateSetDecisionAuthorityRecord,
   type PortableDecisionAuthorityRecord,
 } from "./portable-decision-journal.js";
 import {
@@ -168,7 +169,7 @@ export class AgentService {
       registryDescriptors,
     );
     const snapshot = this.store.snapshot();
-    const promotionAuthority = this.buildPromotionRecoveryAuthorityContext(
+    const promotionAuthority = await this.buildPromotionRecoveryAuthorityContext(
       snapshot.candidateSets,
       snapshot.runs,
     );
@@ -213,8 +214,45 @@ export class AgentService {
     const activeRunIds = snapshot.runs
       .filter((run) => run.status === "queued" || run.status === "running")
       .map((run) => run.id);
+    const terminalAuthorityRecoveries = new Map<
+      string,
+      PortableDecisionAuthorityRecord
+    >();
+    const terminalAuthorityFailures = new Map<string, string>();
+    for (const runId of activeRunIds) {
+      const run = snapshot.runs.find((item) => item.id === runId)!;
+      try {
+        const authority =
+          await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
+            run.id,
+            run.agentId,
+          );
+        if (!authority) continue;
+        this.assertTerminalAuthorityExtendsRun(run, authority.transaction);
+        if (
+          authority.disposition === "quarantined" &&
+          !(await this.workspaces.quarantineExists(run.id))
+        ) {
+          throw new Error(
+            "Authoritative Quarantine is missing from physical Candidate State",
+          );
+        }
+        terminalAuthorityRecoveries.set(run.id, authority);
+      } catch (error) {
+        terminalAuthorityFailures.set(
+          run.id,
+          boundedCandidateSetError(error),
+        );
+      }
+    }
     for (const runId of activeRunIds) {
       if (recoveredRunIds.has(runId) || recovery.protectedRunIds.has(runId)) {
+        continue;
+      }
+      if (
+        terminalAuthorityRecoveries.has(runId) ||
+        terminalAuthorityFailures.has(runId)
+      ) {
         continue;
       }
       interrupted.set(
@@ -366,6 +404,42 @@ export class AgentService {
           recoveredRunIds.has(run.id) ||
           recoveryFailures.has(run.id)
         ) {
+          continue;
+        }
+        const terminalAuthority = terminalAuthorityRecoveries.get(run.id);
+        const terminalAuthorityFailure = terminalAuthorityFailures.get(run.id);
+        if (terminalAuthorityFailure) {
+          run.status = "failed";
+          run.error =
+            "Immutable terminal decision recovery failed: " +
+            terminalAuthorityFailure;
+          run.completedAt = now();
+          if (run.transaction) {
+            run.transaction.status = "recovery-error";
+            run.transaction.recovery = {
+              ...run.transaction.recovery,
+              recoveredAfterRestart: true,
+              recoveryError: terminalAuthorityFailure.slice(0, 500),
+            };
+          }
+          continue;
+        }
+        if (terminalAuthority) {
+          const transaction = structuredClone(terminalAuthority.transaction);
+          run.transaction = transaction;
+          run.status =
+            transaction.disposition === "cancelled"
+              ? "cancelled"
+              : transaction.disposition === "promoted"
+                ? "completed"
+                : "failed";
+          run.error =
+            transaction.disposition === "quarantined"
+              ? "Server restarted after the authoritative Quarantine decision"
+              : transaction.disposition === "cancelled"
+                ? "Server restarted after the authoritative cancellation decision"
+                : null;
+          run.completedAt = transaction.promotionReceipt!.createdAt;
           continue;
         }
         const retained = interrupted.get(run.id);
@@ -1736,6 +1810,32 @@ export class AgentService {
     });
   }
 
+  private assertTerminalAuthorityExtendsRun(
+    run: AgentRun,
+    terminal: RunTransaction,
+  ): void {
+    const current = run.transaction;
+    if (
+      !current ||
+      terminal.id !== run.id ||
+      current.id !== terminal.id ||
+      current.candidateStateId !== terminal.candidateStateId ||
+      current.canonicalStateIdBefore !== terminal.canonicalStateIdBefore ||
+      current.canonicalContentHashBefore !==
+        terminal.canonicalContentHashBefore ||
+      current.outcomeContractVersion !== terminal.outcomeContractVersion ||
+      stableJson(current.outcomeContract) !== stableJson(terminal.outcomeContract) ||
+      stableJson(current.lineage) !== stableJson(terminal.lineage) ||
+      !terminal.disposition ||
+      terminal.status !== terminal.disposition ||
+      !terminal.promotionReceipt
+    ) {
+      throw new Error(
+        "Immutable terminal decision contradicts the active Run projection",
+      );
+    }
+  }
+
   private async recordPortableDecisionAuthority(
     runId: string,
     transaction: RunTransaction,
@@ -2392,14 +2492,14 @@ export class AgentService {
     return operation;
   }
 
-  private buildPromotionRecoveryAuthorityContext(
+  private async buildPromotionRecoveryAuthorityContext(
     candidateSets: readonly CandidateSet[],
     runs: readonly AgentRun[],
-  ): {
+  ): Promise<{
     candidateSetRunIds: Set<string>;
     expectedCandidateSetAuthorities: Map<string, PromotionAuthority>;
     invalidCandidateSets: Map<string, string>;
-  } {
+  }> {
     const candidateSetRunIds = new Set(
       runs.filter((run) => run.candidateSetId !== null).map((run) => run.id),
     );
@@ -2411,7 +2511,7 @@ export class AgentService {
         candidateSetRunIds.add(competitor.runId);
       }
       try {
-        const authority = this.candidateSetPromotionAuthority(
+        const authority = await this.candidateSetPromotionAuthority(
           candidateSet,
           runsById,
         );
@@ -2432,12 +2532,12 @@ export class AgentService {
     };
   }
 
-  private candidateSetPromotionAuthority(
+  private async candidateSetPromotionAuthority(
     candidateSet: CandidateSet,
     runsById = new Map(
       this.store.snapshot().runs.map((run) => [run.id, run]),
     ),
-  ): PromotionAuthority | null {
+  ): Promise<PromotionAuthority | null> {
     if (candidateSet.schemaVersion !== 1) {
       throw new Error("Candidate Set schema is unsupported");
     }
@@ -2487,6 +2587,7 @@ export class AgentService {
       }
       return null;
     }
+    await this.portableDecisionJournal.readCandidateSetDecision(candidateSet);
     const replayed = this.computeCandidateSetDecision(candidateSet);
     if (stableJson(replayed) !== stableJson(candidateSet.selectionDecision)) {
       throw new Error("Candidate Set Selection Decision failed deterministic replay");
@@ -2552,7 +2653,13 @@ export class AgentService {
           candidateSet.phase === "evaluating" ||
           candidateSet.phase === "evaluated"
         ) {
-          await this.normalizeInterruptedCandidateSetEvaluations(candidateSetId);
+          if (
+            candidateSet.phase === "admitted" ||
+            candidateSet.phase === "evaluating"
+          ) {
+            await this.normalizeInterruptedCandidateSetEvaluations(candidateSetId);
+          }
+          candidateSet = this.getCandidateSet(candidateSetId);
           const canonical =
             await this.workspaces.readCanonicalForProviderTransition(
               candidateSet.agentId,
@@ -2718,32 +2825,110 @@ export class AgentService {
     candidateSetId: string,
   ): Promise<void> {
     const candidateSet = this.getCandidateSet(candidateSetId);
-    if (candidateSet.selectionDecision) return;
-    const decision = this.computeCandidateSetDecision(candidateSet);
-    const decidedAt = now();
+    if (candidateSet.selectionDecision) {
+      await this.portableDecisionJournal.readCandidateSetDecision(candidateSet);
+      return;
+    }
+    const existingAuthority =
+      await this.portableDecisionJournal.readCandidateSetDecisionById(
+        candidateSetId,
+      );
+    const authorizedCandidateSet = existingAuthority
+      ? this.restoreCandidateSetDecision(candidateSet, existingAuthority)
+      : this.createAuthorizedCandidateSetDecision(candidateSet);
+    if (!existingAuthority) {
+      await this.portableDecisionJournal.recordCandidateSetDecision(
+        authorizedCandidateSet,
+      );
+    }
+    await this.recordTerminalCandidateSetAuthorities(authorizedCandidateSet);
     await this.store.mutate((database) => {
       const storedSet = database.candidateSets.find(
         (item) => item.id === candidateSetId,
       );
       if (!storedSet || storedSet.selectionDecision) return;
-      storedSet.selectionDecision = decision;
-      storedSet.selectedCompetitorId = decision.winnerCompetitorId;
-      storedSet.winnerRunId = decision.winnerCompetitorId
-        ? storedSet.competitors.find(
-            (competitor) => competitor.id === decision.winnerCompetitorId,
-          )?.runId ?? null
-        : null;
-      storedSet.phase = decision.winnerCompetitorId ? "selected" : "no-winner";
-      storedSet.decidedAt = decidedAt;
-      storedSet.updatedAt = decidedAt;
+      storedSet.selectionDecision = structuredClone(
+        authorizedCandidateSet.selectionDecision,
+      );
+      storedSet.selectedCompetitorId =
+        authorizedCandidateSet.selectedCompetitorId;
+      storedSet.winnerRunId = authorizedCandidateSet.winnerRunId;
+      storedSet.phase = authorizedCandidateSet.winnerRunId
+        ? "selected"
+        : "no-winner";
+      storedSet.decidedAt = authorizedCandidateSet.decidedAt;
+      storedSet.updatedAt = authorizedCandidateSet.decidedAt!;
       const winner = storedSet.competitors.find(
-        (competitor) => competitor.id === decision.winnerCompetitorId,
+        (competitor) =>
+          competitor.id === authorizedCandidateSet.selectedCompetitorId,
       );
       if (winner) {
         winner.status = "selected";
         winner.loserDisposition = "winner";
       }
     });
+  }
+
+  private createAuthorizedCandidateSetDecision(
+    candidateSet: CandidateSet,
+  ): CandidateSet {
+    const decision = this.computeCandidateSetDecision(candidateSet);
+    const authorized = structuredClone(candidateSet);
+    authorized.selectionDecision = structuredClone(decision);
+    authorized.selectedCompetitorId = decision.winnerCompetitorId;
+    authorized.winnerRunId = decision.winnerCompetitorId
+      ? authorized.competitors.find(
+          (competitor) => competitor.id === decision.winnerCompetitorId,
+        )?.runId ?? null
+      : null;
+    authorized.decidedAt = candidateSet.updatedAt;
+    return authorized;
+  }
+
+  private restoreCandidateSetDecision(
+    candidateSet: CandidateSet,
+    authority: CandidateSetDecisionAuthorityRecord,
+  ): CandidateSet {
+    const recorded = authority.candidateSetAuthority;
+    const restored = structuredClone(candidateSet);
+    restored.selectionDecision = structuredClone(recorded.selectionDecision);
+    restored.selectedCompetitorId = recorded.selectedCompetitorId;
+    restored.winnerRunId = recorded.winnerRunId;
+    restored.decidedAt = recorded.decidedAt;
+    if (
+      portableCandidateSetAuthorityHash(restored) !==
+      authority.candidateSetAuthorityDigest
+    ) {
+      throw new Error(
+        "Mutable Candidate Set contradicts its immutable Selection authority",
+      );
+    }
+    return restored;
+  }
+
+  private async recordTerminalCandidateSetAuthorities(
+    candidateSet: CandidateSet,
+  ): Promise<void> {
+    const database = this.store.snapshot();
+    for (const competitor of candidateSet.competitors) {
+      const run = database.runs.find((item) => item.id === competitor.runId);
+      const transaction = run?.transaction;
+      if (
+        !run ||
+        !transaction?.disposition ||
+        transaction.status !== transaction.disposition ||
+        !transaction.promotionReceipt ||
+        transaction.recovery.recoveryError !== null
+      ) {
+        continue;
+      }
+      await this.recordPortableDecisionAuthorityFromDatabase(
+        database,
+        run.id,
+        transaction,
+        candidateSet,
+      );
+    }
   }
 
   private computeCandidateSetDecision(candidateSet: CandidateSet) {
@@ -2812,38 +2997,12 @@ export class AgentService {
         return;
       }
       await this.updateCandidateSetPhase(admitted.id, "evaluated");
-      const evaluated = this.getCandidateSet(admitted.id);
-      const decision = this.computeCandidateSetDecision(evaluated);
-      const decidedAt = now();
-      await this.store.mutate((database) => {
-        const candidateSet = database.candidateSets.find(
-          (item) => item.id === admitted.id,
-        );
-        if (!candidateSet || candidateSet.phase !== "evaluated") {
-          throw new Error("Candidate Set changed before its decision was persisted");
-        }
-        candidateSet.selectionDecision = decision;
-        candidateSet.selectedCompetitorId = decision.winnerCompetitorId;
-        candidateSet.winnerRunId = decision.winnerCompetitorId
-          ? candidateSet.competitors.find(
-              (competitor) => competitor.id === decision.winnerCompetitorId,
-            )?.runId ?? null
-          : null;
-        candidateSet.phase = decision.winnerCompetitorId
-          ? "selected"
-          : "no-winner";
-        candidateSet.decidedAt = decidedAt;
-        candidateSet.updatedAt = decidedAt;
-        if (decision.winnerCompetitorId) {
-          const winner = candidateSet.competitors.find(
-            (competitor) => competitor.id === decision.winnerCompetitorId,
-          );
-          if (winner) {
-            winner.status = "selected";
-            winner.loserDisposition = "winner";
-          }
-        }
-      });
+      await this.persistRecoveredCandidateSetDecision(admitted.id);
+      const decidedCandidateSet = this.getCandidateSet(admitted.id);
+      const decision = decidedCandidateSet.selectionDecision;
+      if (!decision) {
+        throw new Error("Candidate Set Selection authority was not persisted");
+      }
 
       if (!decision.winnerCompetitorId) {
         await this.updateCandidateSetPhase(admitted.id, "cleaning-losers");
@@ -3131,7 +3290,7 @@ export class AgentService {
 
   private async promoteCandidateSetWinner(candidateSetId: string): Promise<void> {
     const candidateSet = this.getCandidateSet(candidateSetId);
-    const authority = this.candidateSetPromotionAuthority(candidateSet);
+    const authority = await this.candidateSetPromotionAuthority(candidateSet);
     const winner = candidateSet.competitors.find(
       (competitor) => competitor.id === candidateSet.selectedCompetitorId,
     );
@@ -3261,12 +3420,14 @@ export class AgentService {
       }
       const disposition =
         transaction.disposition === "quarantined" ? "retained" : "discarded";
-      if (stableJson(transaction) !== stableJson(run.transaction)) {
+      if (candidateSet.selectionDecision) {
         await this.recordPortableDecisionAuthority(
           run.id,
           transaction,
-          candidateSet.selectionDecision ? candidateSet : null,
+          candidateSet,
         );
+      }
+      if (stableJson(transaction) !== stableJson(run.transaction)) {
         await this.store.mutate((database) => {
           const storedRun = database.runs.find((item) => item.id === run.id);
           if (storedRun) storedRun.transaction = structuredClone(transaction);

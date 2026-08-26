@@ -199,7 +199,9 @@ This journey describes the complete product direction, including later roadmap p
 
 - Portable Promotion Receipt export must derive only from complete, versioned, contradiction-free durable Run evidence and must never reinterpret incomplete or legacy evidence as authority.
 - A strict schema-versioned receipt must commit to the Run disposition, exact resource before-and-after versions, Outcome Contract, required Validation evidence, repair ancestry, and prior receipt when present.
-- A selected Candidate Set winner must commit to the exact persisted Selection Decision and may not export if the Run, winner, decision, seal, source, or contract evidence disagrees.
+- Every terminal Candidate Set Run must commit to the exact persisted Selection Decision and its own promoted, retained, discarded, or cancelled disposition.
+- One immutable Candidate Set Decision Authority must be published before mutable Selection, and every final Candidate Set-bound terminal Run authority must exist before that Selection becomes visible.
+- Restart must restore an authorized missing Selection and replay an authorized terminal Run exactly, while any contradiction fails closed.
 - A Run admitted under an operator-accepted Assurance Proposal must commit to the exact source proposal and resulting Outcome Contract version.
 - The signer must use Ed25519 with domain separation, strict canonical JSON, SHA-256 commitments, an included public JWK, and a stable public-key fingerprint.
 - A private key must remain outside Git, the JSON store, browser responses, logs, receipts, anchors, and test vectors.
@@ -208,7 +210,7 @@ This journey describes the complete product direction, including later roadmap p
 - Selective disclosure must use deterministic bounded Merkle leaves and reject duplicate identities, ambiguous encodings, path-like private fields, wrong proof order, unknown algorithms, and malformed proofs.
 - Offline verification must distinguish mathematical integrity from Runtime isolation, Validation correctness, policy sufficiency, signer-clock accuracy, and organizational trust in the signing key.
 - Portable organizational trust policy must use a separate signature domain and authority key, and the verifier must require an evaluator-pinned authority fingerprint rather than trusting public material included by the policy itself.
-- Optional local transparency must append only receipt digests, produce signed checkpoints and inclusion proofs, detect tested split views, and remain unnecessary for signature verification.
+- Optional local transparency must append only receipt digests, produce signed checkpoints and inclusion proofs, detect tested split views, serialize writers through immutable numbered turns without unlinking successor ownership, and remain unnecessary for signature verification.
 - Optional EVM calldata generation must be an offline reference encoding over the receipt digest, make zero network calls, spend zero funds, and claim neither publication nor Promotion correctness.
 - A Portable Evidence Packet must combine one envelope with selected optional proofs, reject any cross-receipt or altered component, and exclude producer-supplied trust policy and Authority Trust Root material.
 - A Portable Decision Chain must bundle the complete signed root-to-leaf Repair lineage, reject omitted or reordered receipts, and verify exact parent digest and Canonical State continuity at every link.
@@ -354,5 +356,6 @@ Deterministic Candidate Selection and exact-winner recovery are resolved in [ADR
 Monotonic evidence-backed assurance and explicit operator authority are resolved in [ADR 0012](../adr/0012-keep-adaptive-assurance-monotonic-and-operator-controlled.md).
 Canonical portable receipts, key identity, selective disclosure, and optional anchoring are resolved in [ADR 0013](../adr/0013-sign-canonical-portable-receipts-and-keep-anchoring-optional.md).
 The closed [post-hackathon Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/10) and [trust-boundary ratification](https://github.com/Kk120306/agent-airlock/issues/11) bind the evidence to published release commit `cb9b63f9caa4ad9ade6d9d76d99d604edcba0d84`.
+Authority-first Selection, exact terminal replay, and append-only transparency lock turns are resolved locally in [ADR 0014](../adr/0014-publish-selection-and-terminal-authority-before-mutable-projections.md).
 
 The [implementation Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) and [post-hackathon trust-protocol map](https://github.com/Kk120306/agent-airlock/issues/10) are the canonical indexes for these decisions.

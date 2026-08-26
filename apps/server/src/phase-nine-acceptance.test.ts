@@ -31,6 +31,7 @@ import { JsonStore } from "./store.js";
 import type {
   AgentRunner,
   CandidateSelectionDecision,
+  Database,
   RunnerRequest,
   RunnerResult,
 } from "./types.js";
@@ -739,6 +740,210 @@ describe("Phase 9 Competing Futures acceptance", () => {
     ).resolves.toContain("focused-valid");
   });
 
+  it("restores Selection from immutable Candidate Set authority after its mutable projection is lost", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-selection-authority-"),
+    );
+    temporaryDirectories.push(root);
+    const databasePath = path.join(root, "data", "db.json");
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "phase-nine-fixture-key",
+      ARK_MODEL: "phase-nine-fixture-model",
+    });
+    const first = new AgentService(
+      config,
+      new JsonStore(databasePath),
+      new WorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await first.initialize();
+    const agent = await first.createAgent({ name: "Recover immutable Selection" });
+    const admitted = await first.createCandidateSet(agent.id, {
+      objective: "Reject every unsafe future",
+      competitors: [
+        {
+          id: "unsafe-first",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Produce an invalid first future.",
+        },
+        {
+          id: "unsafe-second",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Produce an invalid second future.",
+        },
+      ],
+      selectionContract: createDefaultSelectionContractForTest(),
+      maxConcurrency: 2,
+      budget: {
+        maxDurationMsPerCompetitor: 600_000,
+        maxTotalTokens: 2_000_000,
+        maxTotalChangedBytes: 200_000_000,
+      },
+      loserPolicy: "retain",
+    });
+    await expect
+      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
+      .toBe("completed");
+    const completed = first.getCandidateSet(admitted.candidateSet.id);
+    const authoritativeDecision = structuredClone(completed.selectionDecision);
+    const authoritativeDecidedAt = completed.decidedAt;
+    expect(authoritativeDecision?.winnerCompetitorId).toBeNull();
+
+    const persisted = JSON.parse(
+      await readFile(databasePath, "utf8"),
+    ) as Database;
+    const mutableProjection = persisted.candidateSets.find(
+      (candidateSet) => candidateSet.id === admitted.candidateSet.id,
+    );
+    if (!mutableProjection) throw new Error("Fixture Candidate Set is missing");
+    mutableProjection.phase = "evaluated";
+    mutableProjection.selectionDecision = null;
+    mutableProjection.selectedCompetitorId = null;
+    mutableProjection.winnerRunId = null;
+    mutableProjection.decidedAt = null;
+    mutableProjection.completedAt = null;
+    await writeFile(
+      databasePath,
+      JSON.stringify(persisted, null, 2) + "\n",
+      "utf8",
+    );
+
+    const restarted = new AgentService(
+      config,
+      new JsonStore(databasePath),
+      new WorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await restarted.initialize();
+
+    const restored = restarted.getCandidateSet(admitted.candidateSet.id);
+    expect(restored.phase).toBe("completed");
+    expect(restored.selectionDecision).toEqual(authoritativeDecision);
+    expect(restored.decidedAt).toBe(authoritativeDecidedAt);
+    expect(restored.selectedCompetitorId).toBeNull();
+    expect(restored.winnerRunId).toBeNull();
+  });
+
+  it("replays an authoritative Quarantine instead of synthesizing cancellation after restart", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-terminal-authority-"),
+    );
+    temporaryDirectories.push(root);
+    const databasePath = path.join(root, "data", "db.json");
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "phase-nine-fixture-key",
+      ARK_MODEL: "phase-nine-fixture-model",
+    });
+    const firstWorkspaces = new WorkspaceManager(config.workspaceRoot);
+    const first = new AgentService(
+      config,
+      new JsonStore(databasePath),
+      firstWorkspaces,
+      new CompetingFuturesRunner(),
+    );
+    await first.initialize();
+    const agent = await first.createAgent({ name: "Replay terminal authority" });
+    const source = await firstWorkspaces.readCanonical(agent.id);
+    const admitted = await first.createCandidateSet(agent.id, {
+      objective: "Retain the unselected valid future",
+      competitors: [
+        {
+          id: "broad-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement a broad valid solution.",
+        },
+        {
+          id: "focused-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement the narrowest complete valid solution.",
+        },
+      ],
+      selectionContract: createDefaultSelectionContractForTest(),
+      maxConcurrency: 2,
+      budget: {
+        maxDurationMsPerCompetitor: 600_000,
+        maxTotalTokens: 2_000_000,
+        maxTotalChangedBytes: 200_000_000,
+      },
+      loserPolicy: "retain",
+    });
+    await expect
+      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
+      .toBe("completed");
+    const loser = first
+      .getCandidateSet(admitted.candidateSet.id)
+      .competitors.find((competitor) => competitor.id === "broad-valid");
+    if (!loser) throw new Error("Fixture loser is missing");
+    const terminal = structuredClone(first.getRun(loser.runId).transaction);
+    if (!terminal) throw new Error("Fixture terminal transaction is missing");
+    expect(terminal.disposition).toBe("quarantined");
+    expect(await firstWorkspaces.quarantineExists(loser.runId)).toBe(true);
+    const promotedCanonical = await firstWorkspaces.readCanonical(agent.id);
+
+    const persisted = JSON.parse(
+      await readFile(databasePath, "utf8"),
+    ) as Database;
+    const interruptedRun = persisted.runs.find((run) => run.id === loser.runId);
+    if (!interruptedRun?.transaction) {
+      throw new Error("Fixture interrupted Run is missing");
+    }
+    interruptedRun.status = "running";
+    interruptedRun.error = null;
+    interruptedRun.completedAt = null;
+    interruptedRun.transaction.status = "validating";
+    interruptedRun.transaction.disposition = null;
+    interruptedRun.transaction.canonicalStateIdAfter = null;
+    interruptedRun.transaction.canonicalContentHashAfter = null;
+    interruptedRun.transaction.quarantinePath = null;
+    interruptedRun.transaction.quarantineAvailable = false;
+    interruptedRun.transaction.discardedAt = null;
+    interruptedRun.transaction.promotionReceipt = null;
+    await writeFile(
+      databasePath,
+      JSON.stringify(persisted, null, 2) + "\n",
+      "utf8",
+    );
+
+    const restartedWorkspaces = new WorkspaceManager(config.workspaceRoot);
+    const restarted = new AgentService(
+      config,
+      new JsonStore(databasePath),
+      restartedWorkspaces,
+      new CompetingFuturesRunner(),
+    );
+    await restarted.initialize();
+
+    const recovered = restarted.getRun(loser.runId);
+    expect(stableJson(recovered.transaction)).toBe(stableJson(terminal));
+    expect(recovered.status).toBe("failed");
+    expect(recovered.transaction?.disposition).toBe("quarantined");
+    expect(await restartedWorkspaces.quarantineExists(loser.runId)).toBe(true);
+    const canonical = await restartedWorkspaces.readCanonical(agent.id);
+    expect(canonical.stateId).not.toBe(source.stateId);
+    expect(canonical.contentHash).not.toBe(source.contentHash);
+    expect(canonical.stateId).toBe(promotedCanonical.stateId);
+    expect(canonical.contentHash).toBe(promotedCanonical.contentHash);
+    const portable = await restarted.exportPortableReceipt(loser.runId, {
+      disclosureIdentities: [],
+      includeAncestry: false,
+      localAnchor: false,
+      evmPayload: false,
+    });
+    expect(portable.verification.valid).toBe(true);
+    expect(portable.envelope.receipt.decision.disposition).toBe("quarantined");
+    expect(portable.envelope.receipt.selection?.candidateSetId).toBe(
+      admitted.candidateSet.id,
+    );
+  });
+
   it("refuses Promotion recovery when the durable Selection Decision contradicts its journal authority", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-authority-"));
     temporaryDirectories.push(root);
@@ -878,7 +1083,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
 
     expect(restarted.getCandidateSet(admitted.candidateSet.id)).toMatchObject({
       phase: "recovery-error",
-      recoveryError: expect.stringContaining("deterministic replay"),
+      recoveryError: expect.stringMatching(
+        /Candidate Set decision authority|deterministic replay/,
+      ),
     });
     const canonical = await restartedWorkspaces.readCanonicalForProviderTransition(
       agent.id,
@@ -1415,17 +1622,52 @@ describe("Phase 9 Competing Futures acceptance", () => {
         "quarantined",
       ]).toContain(transaction?.disposition);
       expect(transaction?.promotionReceipt).not.toBeNull();
-      expect(
-        (
-          await readdir(
-            path.join(
-              config.dataDirectory,
-              "portable-decision-journal",
-              competitor.runId,
+      const authorityFiles = (
+        await readdir(
+          path.join(
+            config.dataDirectory,
+            "portable-decision-journal",
+            competitor.runId,
+          ),
+        )
+      ).filter((name) => name.endsWith(".json"));
+      expect(authorityFiles.length).toBeGreaterThanOrEqual(1);
+      const authorities = await Promise.all(
+        authorityFiles.map(async (name) =>
+          JSON.parse(
+            await readFile(
+              path.join(
+                config.dataDirectory,
+                "portable-decision-journal",
+                competitor.runId,
+                name,
+              ),
+              "utf8",
             ),
-          )
-        ).filter((name) => name.endsWith(".json")),
-      ).toHaveLength(1);
+          ) as { candidateSetAuthorityDigest: string | null },
+        ),
+      );
+      expect(
+        authorities.some((authority) =>
+          /^sha256:[a-f0-9]{64}$/.test(
+            authority.candidateSetAuthorityDigest ?? "",
+          ),
+        ),
+      ).toBe(true);
+      const portable = await service.exportPortableReceipt(competitor.runId, {
+        disclosureIdentities: [],
+        includeAncestry: false,
+        localAnchor: false,
+        evmPayload: false,
+      });
+      expect(portable.verification.valid).toBe(true);
+      expect(["cancelled", "discarded"]).toContain(
+        portable.envelope.receipt.decision.disposition,
+      );
+      expect(portable.envelope.receipt.selection).toMatchObject({
+        candidateSetId: cancelled.id,
+        decisionDigest: expect.stringMatching(/^sha256:/),
+      });
     }
     const canonical = await workspaces.readCanonical(agent.id);
     expect(canonical.stateId).toBe(source.stateId);

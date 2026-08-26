@@ -482,7 +482,10 @@ Establish Outcome Contracts and Promotion Receipts as a portable trust protocol 
 - Private signing keys remain in owner-only regular files outside application metadata, and adjacent non-secret identity markers make missing or substituted keys fail closed instead of silently rotating identity.
 - Historical envelopes continue to verify under their included public JWK after an explicit key rotation.
 - The server exports only complete versioned durable evidence and binds exact provider versions, Outcome Contract, required Validations, Repair ancestry, prior receipts, Candidate Selection, and accepted Assurance provenance when applicable.
-- Every terminal path publishes immutable Decision Authority before its mutable Run projection, terminal progress becomes visible with the enclosing Agent lifecycle update, and Candidate Set completion never synthesizes missing authority.
+- Promoted, retained, discarded, and cancelled Candidate Runs can each export an independently verifiable receipt after the Candidate Set completes.
+- Every terminal path publishes immutable Run authority before its mutable child projection, and one immutable Candidate Set Decision Authority is published before mutable Selection.
+- Startup restores missing Selection from that exact authority and replays an already-authorized terminal Run instead of synthesizing a contradictory cancellation.
+- Child Run and competitor status become visible together, while the Agent deliberately remains busy until the Candidate Set completes Selection, winner Promotion, and loser cleanup.
 - Promotion and provider-onboarding history reuse timestamps from their durable source evidence, which makes recovery after history publication byte-identical and lets installed Registry Transitions roll forward safely.
 - Incomplete or contradictory evidence returns a retryable conflict without changing Canonical State or durable Run evidence.
 - The Playground starts with no evidence disclosed, previews safe evidence identities, requires regeneration after privacy settings change, and offers one evidence-packet download plus separate expert downloads for each component.
@@ -491,7 +494,7 @@ Establish Outcome Contracts and Promotion Receipts as a portable trust protocol 
 - The verifier can extend that pinned root through one bounded cross-signed Policy Authority Rotation without allowing the next key or policy to self-authorize.
 - The verification report separates mathematical integrity from Runtime isolation, policy sufficiency, Validation correctness, signer-clock accuracy, and organizational trust.
 - The optional local transparency log signs chained checkpoints and proves inclusion and consistency, while tested split views fail verification and signature-only export remains complete.
-- Concurrent stale-lock recovery elects one nonce-bound reclaimer, retries benign lock-release identity races, and preserves strict rejection of malformed surviving lock evidence.
+- Concurrent transparency writers use immutable numbered lock turns, recover dead predecessors through one validated completion marker, never unlink a successor's pathname, and reject malformed or discontinuous queue evidence.
 - The optional EVM encoder produces a frozen `anchor(bytes32)` payload with zero network calls and zero funds spent and does not claim publication or Promotion correctness.
 - The production Docker image builds every workspace, resolves all three runtime packages through the pruned workspace installation, starts as the non-root runtime user, and passes its live health boundary.
 - `npm run check:phase11:protocol` and the Phase 11 server acceptance matrix require no ModelArk credential, paid inference, provider purchase, wallet, or public blockchain transaction.

@@ -262,7 +262,9 @@ Phase 9 persists exact Candidate Set source and contract snapshots, per-competit
 Promotion journal schema 2 additionally persists the exact Candidate Set winner authority, including decision and seal digests, and startup validates it before physical recovery.
 Phase 10 persists versioned Assurance evidence, deterministic monotonic proposals, historical simulation results, explicit operator decisions, and append-only Outcome Contract history.
 Phase 11 derives Portable Promotion Envelopes from complete versioned durable evidence and requires a separate append-only Decision Authority record captured before terminal control-plane metadata.
+One immutable Candidate Set Decision Authority is captured before mutable Selection, and final Candidate Set-bound Run authorities are published before that Selection becomes visible.
 Immutable historical Canonical manifests let export recompute the complete physical Whole-Agent state for every referenced accepted state identifier.
+Terminal progress is withheld until the child Run and corresponding lifecycle projection are ready, while the Agent remains busy until its aggregate Candidate Set finishes Selection, winner Promotion, and loser cleanup.
 Receipt and transparency private keys remain separate operator-owned files, and the optional transparency log persists only portable receipt digests and signed checkpoint evidence.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
@@ -295,12 +297,14 @@ Schema evolution must increment the database version and include a tested migrat
 | A competitor fails required Validation | Exclude that Candidate from Selection regardless of its ranking inputs and dispatch none of its effects. |
 | Every competitor is invalid or incomplete | Persist `no-winner`, leave Canonical State unchanged, and reconcile every loser disposition. |
 | Process stops before Candidate Set Selection | Preserve complete seals, mark partial evaluations ineligible without replaying Runtime, and deterministically select only from persisted evidence. |
+| Process stops after immutable Candidate Set Decision Authority but before mutable Selection | Restore the exact authorized Selection and never recompute a different winner. |
 | Process stops after Candidate Set Selection | Resume Promotion for only the exact persisted winner, then reconcile loser cleanup idempotently. |
 | Candidate Set and Promotion-journal authorities disagree | Reject physical Promotion recovery before installation, canonical advancement, or effect dispatch and surface `recovery-error`. |
 | Selected Candidate seal, source, resource fingerprint, or Promotion evidence contradicts physical state | Surface `recovery-error`, preserve evidence, dispatch no new effect, and never select a runner-up. |
 | A new provider is configured while an older Candidate Set is unresolved | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit. |
 | Candidate Set recovery fails while a new provider is configured | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit. |
 | Portable receipt evidence is incomplete, legacy, or contradictory | Return a retryable conflict without signing an interpretation or changing Canonical State. |
+| Terminal Run authority exists while its mutable Run projection still appears active | Verify stable identity and required physical Quarantine, then replay the exact terminal transaction or enter `recovery-error`. |
 | Portable Decision Authority or a historical Canonical manifest is missing or contradictory | Fail export closed without reconstructing authority from mutable database content. |
 | Portable signing identity is missing, substituted, malformed, or weakly permissioned | Fail export closed without revealing a local path or silently rotating the identity. |
 | Optional transparency state is malformed | Fail anchored export closed while leaving signature-only export available. |
@@ -310,6 +314,7 @@ The exact recovery sequence and fault matrix are documented in the [recovery gui
 The implemented Phase 9 split between reversible Candidate evaluation, deterministic one-winner Selection, and irreversible Promotion is documented in the [Competing Futures architecture](competing-futures.md) and ADR 0011.
 The implemented Phase 10 separation between evidence-backed assurance advice and operator policy authority is documented in the [Adaptive Assurance architecture](adaptive-assurance.md) and ADR 0012.
 The implemented Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](portable-trust.md) and ADR 0013.
+The authority-first Selection, terminal replay, and append-only transparency lock-turn decisions are documented in [ADR 0014](../adr/0014-publish-selection-and-terminal-authority-before-mutable-projections.md).
 
 ## Trust boundaries
 

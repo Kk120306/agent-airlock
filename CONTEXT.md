@@ -85,6 +85,14 @@ _Avoid_: Judge prompt, scorer, preference
 The durable scorecard and exact one-winner or no-winner result produced by applying a Selection Contract to one Candidate Set.
 _Avoid_: Model choice, vote, race result
 
+**Candidate Set Decision Authority**:
+The single immutable record of one exact Selection Decision, its Candidate Set source, contracts, bounded competitor evidence, winner links, and decision timestamp published before mutable Selection metadata.
+_Avoid_: Selection cache, winner hint, Promotion journal
+
+**Decision Authority**:
+An append-only immutable record of one exact terminal Run Transaction, its frozen Repair parent, and its final Candidate Set context when applicable, used to authorize portable receipt interpretation but never physical Promotion.
+_Avoid_: Promotion Authority, mutable receipt row, reconstructed audit
+
 **Promotion Authority**:
 The versioned journal evidence that names either an ordinary Run or the exact Candidate Set decision, competitor, winner Run, seal, and source allowed to recover Promotion.
 _Avoid_: Winner hint, selected flag, recovery guess

@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, utimes, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -134,7 +141,7 @@ describe("durable local transparency log", () => {
     expect(log.snapshot().entries).toHaveLength(1);
   });
 
-  it("elects one stale-lock reclaimer while concurrent contenders keep retrying", async () => {
+  it("serializes legacy stale-lock recovery before concurrent appenders", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "airlock-log-election-"));
     const filePath = path.join(directory, "transparency.json");
     const lockPath = `${filePath}.lock`;
@@ -172,6 +179,58 @@ describe("durable local transparency log", () => {
     const reopened = new LocalTransparencyLog(filePath, key.privateKeyPem);
     await reopened.initialize();
     expect(reopened.snapshot().entries).toHaveLength(logs.length);
+  });
+
+  it("abandons a dead predecessor without deleting any later lock turn", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "airlock-log-turn-recovery-"),
+    );
+    const filePath = path.join(directory, "transparency.json");
+    const queuePath = `${filePath}.lock-queue`;
+    const firstTurnPath = path.join(queuePath, "turn-000000000001");
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore",
+    });
+    const exitedPid = child.pid!;
+    await once(child, "exit");
+    await mkdir(firstTurnPath, { recursive: true, mode: 0o700 });
+    const ownerPath = path.join(firstTurnPath, "owner.json");
+    await writeFile(
+      ownerPath,
+      JSON.stringify({
+        createdAt: "2026-08-26T00:00:00.000Z",
+        nonce: "00000000-0000-4000-8000-000000000000",
+        pid: exitedPid,
+      }),
+      { mode: 0o600 },
+    );
+    await utimes(ownerPath, new Date(0), new Date(0));
+
+    const key = generatePortableSigningKey();
+    const log = new LocalTransparencyLog(filePath, key.privateKeyPem);
+    await log.initialize();
+    await log.append(digest("after-dead-turn"));
+
+    expect(await readdir(queuePath)).toEqual([
+      "turn-000000000001",
+      "turn-000000000002",
+      "turn-000000000003",
+    ]);
+    await expect(
+      readFile(path.join(firstTurnPath, "completion.json"), "utf8").then(
+        (source) => JSON.parse(source),
+      ),
+    ).resolves.toMatchObject({
+      disposition: "abandoned",
+      ownerNonce: "00000000-0000-4000-8000-000000000000",
+    });
+    for (const turn of ["turn-000000000002", "turn-000000000003"]) {
+      await expect(
+        readFile(path.join(queuePath, turn, "completion.json"), "utf8").then(
+          (source) => JSON.parse(source),
+        ),
+      ).resolves.toMatchObject({ disposition: "released" });
+    }
   });
 
   it("recovers when an earlier reclaimer was interrupted", async () => {

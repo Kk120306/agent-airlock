@@ -386,40 +386,50 @@ function selectionCommitment(
   if (!candidateSet || candidateSet.id !== run.candidateSetId) {
     throw new Error("Portable receipt export is missing its Candidate Set evidence");
   }
-  if (candidateSet.winnerRunId !== run.id) {
-    throw new Error("Portable receipt Candidate Run is not the persisted winner");
-  }
-  const winner = candidateSet.competitors.find(
+  const competitor = candidateSet.competitors.find(
     (competitor) => competitor.runId === run.id,
+  );
+  const runsById = new Map(
+    candidateSetRuns.map((candidateRun) => [candidateRun.id, candidateRun]),
   );
   const replayed = replayCandidateSelection(
     candidateSet,
-    new Map(candidateSetRuns.map((candidateRun) => [candidateRun.id, candidateRun])),
+    runsById,
   );
+  const selectedCompetitorId =
+    candidateSet.selectionDecision?.winnerCompetitorId ?? null;
+  const selected = selectedCompetitorId
+    ? candidateSet.competitors.find(
+        (candidate) => candidate.id === selectedCompetitorId,
+      ) ?? null
+    : null;
+  const selectedRun = selected ? runsById.get(selected.runId) ?? null : null;
+  const winnerLinksAgree = selected
+    ? candidateSet.selectedCompetitorId === selected.id &&
+      candidateSet.winnerRunId === selected.runId &&
+      candidateSealAgrees(candidateSet, selected, selectedRun)
+    : candidateSet.selectedCompetitorId === null &&
+      candidateSet.winnerRunId === null;
+  const targetDispositionAgrees = competitor
+    ? competitor.id === selectedCompetitorId
+      ? transaction.disposition === "promoted" &&
+        competitor.status === "promoted" &&
+        competitor.loserDisposition === "winner" &&
+        candidateSealAgrees(candidateSet, competitor, run)
+      : competitor.loserDisposition === "retained"
+        ? competitor.status === "retained" &&
+          transaction.disposition === "quarantined"
+        : competitor.loserDisposition === "discarded" &&
+          competitor.status === "discarded" &&
+          (transaction.disposition === "discarded" ||
+            transaction.disposition === "cancelled")
+    : false;
   if (
     candidateSet.phase !== "completed" ||
     !candidateSet.selectionDecision ||
     stableJson(replayed) !== stableJson(candidateSet.selectionDecision) ||
-    candidateSet.selectedCompetitorId !==
-      candidateSet.selectionDecision.winnerCompetitorId ||
-    !winner?.seal ||
-    winner.id !== candidateSet.selectedCompetitorId ||
-    winner.seal.schemaVersion !== 1 ||
-    winner.seal.candidateSetId !== candidateSet.id ||
-    winner.seal.competitorId !== winner.id ||
-    winner.seal.runId !== run.id ||
-    winner.seal.candidateStateId !== transaction.candidateStateId ||
-    winner.seal.sourceStateId !== candidateSet.source.stateId ||
-    winner.seal.sourceContentHash !== candidateSet.source.contentHash ||
-    winner.seal.outcomeContractVersion !== transaction.outcomeContractVersion ||
-    winner.seal.sealDigest !== sealDigest(winner.seal) ||
-    run.output === null ||
-    winner.seal.runtimeResultHash !==
-      evidenceDigest({
-        output: run.output,
-        threadId: winner.resultThreadId,
-        usage: run.usage,
-      }) ||
+    !winnerLinksAgree ||
+    !targetDispositionAgrees ||
     candidateSet.source.stateId !== transaction.canonicalStateIdBefore ||
     candidateSet.source.contentHash !== transaction.canonicalContentHashBefore ||
     candidateSet.outcomeContract.version !== transaction.outcomeContractVersion
@@ -435,6 +445,34 @@ function selectionCommitment(
       "Selection Decision",
     ),
   };
+}
+
+function candidateSealAgrees(
+  candidateSet: CandidateSet,
+  competitor: CandidateSet["competitors"][number],
+  run: AgentRun | null,
+): boolean {
+  const seal = competitor.seal;
+  return Boolean(
+    seal &&
+      run?.transaction &&
+      run.output !== null &&
+      seal.schemaVersion === 1 &&
+      seal.candidateSetId === candidateSet.id &&
+      seal.competitorId === competitor.id &&
+      seal.runId === run.id &&
+      seal.candidateStateId === run.transaction.candidateStateId &&
+      seal.sourceStateId === candidateSet.source.stateId &&
+      seal.sourceContentHash === candidateSet.source.contentHash &&
+      seal.outcomeContractVersion === run.transaction.outcomeContractVersion &&
+      seal.sealDigest === sealDigest(seal) &&
+      seal.runtimeResultHash ===
+        evidenceDigest({
+          output: run.output,
+          threadId: competitor.resultThreadId,
+          usage: run.usage,
+        }),
+  );
 }
 
 function sealDigest(
