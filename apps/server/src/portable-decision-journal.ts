@@ -1,13 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import {
-  link,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  unlink,
-} from "node:fs/promises";
+import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { redactSensitiveText } from "@agent-airlock/transactional-resource-sdk";
 import { stableJson } from "./candidate-selection.js";
@@ -176,11 +169,15 @@ export class PortableDecisionJournal {
       transaction.status !== transaction.disposition ||
       transaction.recovery.recoveryError !== null
     ) {
-      throw new Error("Portable decision authority requires a terminal Run decision");
+      throw new Error(
+        "Portable decision authority requires a terminal Run decision",
+      );
     }
     const parentRunId = transaction.lineage.parentRunId;
     if ((parentRunId === null) !== (parentRun === null)) {
-      throw new Error("Portable decision authority has incomplete parent evidence");
+      throw new Error(
+        "Portable decision authority has incomplete parent evidence",
+      );
     }
     if (
       parentRun &&
@@ -188,7 +185,9 @@ export class PortableDecisionJournal {
         parentRun.agentId !== run.agentId ||
         !parentRun.transaction)
     ) {
-      throw new Error("Portable decision authority parent identity is contradictory");
+      throw new Error(
+        "Portable decision authority parent identity is contradictory",
+      );
     }
     if (
       candidateSet &&
@@ -196,10 +195,30 @@ export class PortableDecisionJournal {
         candidateSet.agentId !== run.agentId ||
         !candidateSet.selectionDecision)
     ) {
-      throw new Error("Portable decision authority Candidate Set is contradictory");
+      throw new Error(
+        "Portable decision authority Candidate Set is contradictory",
+      );
     }
     if (candidateSet) {
       await this.readCandidateSetDecision(candidateSet);
+    }
+    const directory = this.runDirectory(run.id);
+    await this.ensureRunDirectory(directory);
+    await this.cleanupTemporaryRecords(directory);
+    const latestAuthority = await this.readUnambiguousTerminalAuthority(
+      run.id,
+      run.agentId,
+    );
+    const transactionEvidenceHash =
+      portableDecisionTransactionHash(transaction);
+    if (
+      latestAuthority &&
+      latestAuthority.transactionEvidenceHash !== transactionEvidenceHash
+    ) {
+      assertTerminalAuthorityTransition(
+        latestAuthority.transaction,
+        transaction,
+      );
     }
     const parentAuthority = parentRun?.transaction
       ? await this.readForTransaction(
@@ -208,7 +227,6 @@ export class PortableDecisionJournal {
           parentRun.transaction,
         )
       : null;
-    const transactionEvidenceHash = portableDecisionTransactionHash(transaction);
     const unsigned = {
       schemaVersion: 1 as const,
       transactionEvidenceHash,
@@ -227,18 +245,28 @@ export class PortableDecisionJournal {
       transaction: structuredClone(transaction),
     };
     this.validateRecord(record);
-    const directory = this.runDirectory(run.id);
-    await this.ensureRunDirectory(directory);
-    await this.cleanupTemporaryRecords(directory);
     const target = this.recordPath(run.id, record.authorityDigest);
     const serialized = JSON.stringify(record) + "\n";
     if (
       Buffer.byteLength(serialized, "utf8") > maximumRecordBytes ||
       redactSensitiveText(serialized) !== serialized
     ) {
-      throw new Error("Portable decision authority crossed its evidence boundary");
+      throw new Error(
+        "Portable decision authority crossed its evidence boundary",
+      );
     }
     await this.publishRecord(directory, target, record);
+    const publishedAuthority = await this.readUnambiguousTerminalAuthority(
+      run.id,
+      run.agentId,
+    );
+    if (
+      publishedAuthority?.transactionEvidenceHash !== transactionEvidenceHash
+    ) {
+      throw new Error(
+        "Portable terminal decision authority did not converge on the published decision",
+      );
+    }
     await this.assertPinnedRoot();
     await this.assertDirectory(directory, "Run");
     return structuredClone(record);
@@ -252,7 +280,8 @@ export class PortableDecisionJournal {
   ): Promise<PortableDecisionAuthorityRecord> {
     this.assertIdentifier(runId, "Run");
     this.assertIdentifier(agentId, "Agent");
-    const transactionEvidenceHash = portableDecisionTransactionHash(transaction);
+    const transactionEvidenceHash =
+      portableDecisionTransactionHash(transaction);
     const candidateSetAuthorityDigest = candidateSet
       ? portableCandidateSetAuthorityHash(candidateSet)
       : null;
@@ -260,9 +289,23 @@ export class PortableDecisionJournal {
     await this.assertPinnedRoot();
     await this.assertDirectory(directory, "Run");
     await this.cleanupTemporaryRecords(directory);
+    const latestAuthority = await this.readUnambiguousTerminalAuthority(
+      runId,
+      agentId,
+    );
+    if (
+      !latestAuthority ||
+      latestAuthority.transactionEvidenceHash !== transactionEvidenceHash
+    ) {
+      throw new Error(
+        "Portable decision authority is not the latest terminal decision",
+      );
+    }
     const entries = await readdir(directory, { withFileTypes: true });
     if (entries.length > maximumDecisionRecordsPerRun) {
-      throw new Error("Portable decision authority exceeds its history boundary");
+      throw new Error(
+        "Portable decision authority exceeds its history boundary",
+      );
     }
     for (const entry of entries) {
       if (!entry.isFile() || !/^sha256-[a-f0-9]{64}\.json$/.test(entry.name)) {
@@ -278,7 +321,9 @@ export class PortableDecisionJournal {
         record.candidateSetAuthorityDigest === candidateSetAuthorityDigest
       ) {
         if (stableJson(record.transaction) !== stableJson(transaction)) {
-          throw new Error("Portable decision authority hash has contradictory content");
+          throw new Error(
+            "Portable decision authority hash has contradictory content",
+          );
         }
         return record;
       }
@@ -321,7 +366,9 @@ export class PortableDecisionJournal {
     await this.cleanupTemporaryRecords(directory);
     const entries = await readdir(directory, { withFileTypes: true });
     if (entries.length > maximumDecisionRecordsPerRun) {
-      throw new Error("Portable decision authority exceeds its history boundary");
+      throw new Error(
+        "Portable decision authority exceeds its history boundary",
+      );
     }
     const records: PortableDecisionAuthorityRecord[] = [];
     for (const entry of entries) {
@@ -333,17 +380,65 @@ export class PortableDecisionJournal {
         entry.name.slice(0, -".json".length).replace("sha256-", "sha256:"),
       );
       if (record.agentId !== agentId) {
-        throw new Error("Portable decision authority Agent identity is contradictory");
+        throw new Error(
+          "Portable decision authority Agent identity is contradictory",
+        );
       }
       records.push(record);
     }
-    const transactionHashes = new Set(
-      records.map((record) => record.transactionEvidenceHash),
-    );
-    if (transactionHashes.size > 1) {
+    const recordsByTransaction = new Map<
+      string,
+      PortableDecisionAuthorityRecord[]
+    >();
+    for (const record of records) {
+      const group =
+        recordsByTransaction.get(record.transactionEvidenceHash) ?? [];
+      group.push(record);
+      recordsByTransaction.set(record.transactionEvidenceHash, group);
+    }
+    if (recordsByTransaction.size === 0) return null;
+    if (recordsByTransaction.size === 1) {
+      return structuredClone(selectContextRichAuthority(records));
+    }
+    if (recordsByTransaction.size !== 2) {
       throw new Error("Portable terminal decision authority is ambiguous");
     }
-    return records[0] ? structuredClone(records[0]) : null;
+    const groups = [...recordsByTransaction.values()];
+    const quarantined = groups.find((group) =>
+      group.every((record) => record.disposition === "quarantined"),
+    );
+    const discarded = groups.find((group) =>
+      group.every((record) => record.disposition === "discarded"),
+    );
+    if (quarantined && discarded) {
+      assertQuarantineDiscardTransition(
+        quarantined[0]!.transaction,
+        discarded[0]!.transaction,
+      );
+      return structuredClone(selectContextRichAuthority(discarded));
+    }
+    const unrecoveredPromotion = groups.find((group) =>
+      group.every(
+        (record) =>
+          record.disposition === "promoted" &&
+          !record.transaction.recovery.recoveredAfterRestart,
+      ),
+    );
+    const recoveredPromotion = groups.find((group) =>
+      group.every(
+        (record) =>
+          record.disposition === "promoted" &&
+          record.transaction.recovery.recoveredAfterRestart,
+      ),
+    );
+    if (unrecoveredPromotion && recoveredPromotion) {
+      assertPromotedRecoveryTransition(
+        unrecoveredPromotion[0]!.transaction,
+        recoveredPromotion[0]!.transaction,
+      );
+      return structuredClone(selectContextRichAuthority(recoveredPromotion));
+    }
+    throw new Error("Portable terminal decision authority is ambiguous");
   }
 
   private validateRecord(
@@ -469,7 +564,9 @@ export class PortableDecisionJournal {
       digest(candidateSetAuthority) !== record.candidateSetAuthorityDigest ||
       digest(unsigned) !== record.authorityDigest
     ) {
-      throw new Error("Candidate Set decision authority content is contradictory");
+      throw new Error(
+        "Candidate Set decision authority content is contradictory",
+      );
     }
   }
 
@@ -483,7 +580,9 @@ export class PortableDecisionJournal {
     await this.cleanupTemporaryRecords(directory);
     const entries = await readdir(directory, { withFileTypes: true });
     if (entries.length > maximumCandidateSetDecisionRecords) {
-      throw new Error("Candidate Set decision authority exceeds its history boundary");
+      throw new Error(
+        "Candidate Set decision authority exceeds its history boundary",
+      );
     }
     const records: CandidateSetDecisionAuthorityRecord[] = [];
     for (const entry of entries) {
@@ -502,14 +601,17 @@ export class PortableDecisionJournal {
   private async publishRecord(
     directory: string,
     target: string,
-    record: PortableDecisionAuthorityRecord | CandidateSetDecisionAuthorityRecord,
+    record:
+      PortableDecisionAuthorityRecord | CandidateSetDecisionAuthorityRecord,
   ): Promise<void> {
     const serialized = JSON.stringify(record) + "\n";
     if (
       Buffer.byteLength(serialized, "utf8") > maximumRecordBytes ||
       redactSensitiveText(serialized) !== serialized
     ) {
-      throw new Error("Portable decision authority crossed its evidence boundary");
+      throw new Error(
+        "Portable decision authority crossed its evidence boundary",
+      );
     }
     const temporary = path.join(directory, `.authority-${randomUUID()}.tmp`);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -523,7 +625,9 @@ export class PortableDecisionJournal {
         await link(temporary, target);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const existing = JSON.parse(await this.readRecordFile(target)) as unknown;
+        const existing = JSON.parse(
+          await this.readRecordFile(target),
+        ) as unknown;
         if (stableJson(existing) !== stableJson(record)) {
           throw new Error("Immutable portable decision authority changed");
         }
@@ -633,7 +737,10 @@ export class PortableDecisionJournal {
     }
   }
 
-  private async assertDirectory(directory: string, label: string): Promise<Stats> {
+  private async assertDirectory(
+    directory: string,
+    label: string,
+  ): Promise<Stats> {
     const stats = await lstat(directory);
     if (!stats.isDirectory() || stats.isSymbolicLink()) {
       throw new Error(
@@ -675,7 +782,9 @@ export class PortableDecisionJournal {
         throw new Error("Portable decision authority must be a regular file");
       }
       if (before.size < 1 || before.size > maximumRecordBytes) {
-        throw new Error("Portable decision authority exceeds its byte boundary");
+        throw new Error(
+          "Portable decision authority exceeds its byte boundary",
+        );
       }
       const buffer = Buffer.alloc(before.size + 1);
       let offset = 0;
@@ -738,6 +847,7 @@ export function portableCandidateSetAuthorityProjection(
     source: candidateSet.source,
     outcomeContract: candidateSet.outcomeContract,
     selectionContract: candidateSet.selectionContract,
+    loserPolicy: candidateSet.loserPolicy,
     competitors: candidateSet.competitors.map((competitor) => ({
       id: competitor.id,
       runId: competitor.runId,
@@ -755,6 +865,230 @@ export function portableCandidateSetAuthorityProjection(
   };
 }
 
+function selectContextRichAuthority(
+  records: PortableDecisionAuthorityRecord[],
+): PortableDecisionAuthorityRecord {
+  const selected = [...records].sort((left, right) => {
+    const leftContext = left.candidateSetAuthorityDigest ? 1 : 0;
+    const rightContext = right.candidateSetAuthorityDigest ? 1 : 0;
+    return (
+      rightContext - leftContext ||
+      left.authorityDigest.localeCompare(right.authorityDigest)
+    );
+  })[0];
+  if (!selected) {
+    throw new Error("Portable terminal decision authority is missing");
+  }
+  return selected;
+}
+
+function assertTerminalAuthorityTransition(
+  previous: RunTransaction,
+  next: RunTransaction,
+): void {
+  if (
+    previous.disposition === "quarantined" &&
+    next.disposition === "discarded"
+  ) {
+    assertQuarantineDiscardTransition(previous, next);
+    return;
+  }
+  if (previous.disposition === "promoted" && next.disposition === "promoted") {
+    assertPromotedRecoveryTransition(previous, next);
+    return;
+  }
+  throwInvalidTerminalTransition("unsupported disposition sequence");
+}
+
+function assertPromotedRecoveryTransition(
+  promoted: RunTransaction,
+  recovered: RunTransaction,
+): void {
+  if (
+    promoted.status !== "promoted" ||
+    promoted.disposition !== "promoted" ||
+    promoted.recovery.journalPhase !== "completed" ||
+    promoted.recovery.recoveredAfterRestart ||
+    promoted.recovery.recoveryError !== null ||
+    recovered.status !== "promoted" ||
+    recovered.disposition !== "promoted" ||
+    recovered.recovery.journalPhase !== "completed" ||
+    !recovered.recovery.recoveredAfterRestart ||
+    recovered.recovery.recoveryError !== null
+  ) {
+    throwInvalidTerminalTransition("Promotion recovery state");
+  }
+  const expected = structuredClone(promoted);
+  expected.recovery.recoveredAfterRestart = true;
+  if (stableJson(expected) !== stableJson(recovered)) {
+    throwInvalidTerminalTransition("Promotion recovery evidence");
+  }
+}
+
+export function assertQuarantineCleanupProgress(
+  authoritative: RunTransaction,
+  progress: RunTransaction,
+): void {
+  if (
+    authoritative.status !== "quarantined" ||
+    authoritative.disposition !== "quarantined" ||
+    !authoritative.quarantineAvailable ||
+    !authoritative.quarantinePath ||
+    authoritative.discardedAt !== null ||
+    progress.status !== "quarantined" ||
+    progress.disposition !== "quarantined" ||
+    !progress.quarantineAvailable ||
+    progress.quarantinePath !== authoritative.quarantinePath ||
+    progress.discardedAt !== null ||
+    stableJson(progress.events) !== stableJson(authoritative.events) ||
+    stableJson(progress.promotionReceipt) !==
+      stableJson(authoritative.promotionReceipt)
+  ) {
+    throwInvalidTerminalTransition("Quarantine cleanup state");
+  }
+  if (
+    progress.providerResourceEvents.length <
+      authoritative.providerResourceEvents.length ||
+    stableJson(
+      progress.providerResourceEvents.slice(
+        0,
+        authoritative.providerResourceEvents.length,
+      ),
+    ) !== stableJson(authoritative.providerResourceEvents)
+  ) {
+    throwInvalidTerminalTransition("Quarantine cleanup event history");
+  }
+  if (
+    stableJson(terminalTransitionCore(authoritative)) !==
+    stableJson(terminalTransitionCore(progress))
+  ) {
+    throwInvalidTerminalTransition("Quarantine cleanup immutable core");
+  }
+  if (
+    stableJson(normalizeResourceEvidence(authoritative.resources)) !==
+    stableJson(normalizeResourceEvidence(progress.resources))
+  ) {
+    throwInvalidTerminalTransition("Quarantine cleanup resource evidence");
+  }
+  if (
+    stableJson(normalizeResourceEvidence(authoritative.providerResources)) !==
+    stableJson(normalizeResourceEvidence(progress.providerResources))
+  ) {
+    throwInvalidTerminalTransition("Quarantine cleanup provider evidence");
+  }
+}
+
+function assertQuarantineDiscardTransition(
+  quarantined: RunTransaction,
+  discarded: RunTransaction,
+): void {
+  const quarantineEvents = quarantined.events;
+  const discardEvent = discarded.events.at(-1);
+  const providerEventPrefix = discarded.providerResourceEvents.slice(
+    0,
+    quarantined.providerResourceEvents.length,
+  );
+  if (
+    quarantined.status !== "quarantined" ||
+    quarantined.disposition !== "quarantined" ||
+    !quarantined.quarantineAvailable ||
+    !quarantined.quarantinePath ||
+    discarded.status !== "discarded" ||
+    discarded.disposition !== "discarded" ||
+    discarded.quarantineAvailable ||
+    discarded.quarantinePath !== null ||
+    !discarded.discardedAt ||
+    !Number.isFinite(Date.parse(discarded.discardedAt))
+  ) {
+    throwInvalidTerminalTransition(
+      "state " +
+        [
+          quarantined.status,
+          quarantined.disposition,
+          quarantined.quarantineAvailable,
+          Boolean(quarantined.quarantinePath),
+          discarded.status,
+          discarded.disposition,
+          discarded.quarantineAvailable,
+          discarded.quarantinePath === null,
+          Boolean(discarded.discardedAt),
+        ].join("/"),
+    );
+  }
+  if (
+    discarded.events.length !== quarantineEvents.length + 1 ||
+    stableJson(discarded.events.slice(0, quarantineEvents.length)) !==
+      stableJson(quarantineEvents) ||
+    discardEvent?.status !== "discarded" ||
+    discardEvent.at !== discarded.discardedAt
+  ) {
+    throwInvalidTerminalTransition("event history");
+  }
+  if (
+    discarded.providerResourceEvents.length <
+      quarantined.providerResourceEvents.length ||
+    stableJson(providerEventPrefix) !==
+      stableJson(quarantined.providerResourceEvents)
+  ) {
+    throwInvalidTerminalTransition("provider event history");
+  }
+  if (
+    stableJson(terminalTransitionCore(quarantined)) !==
+    stableJson(terminalTransitionCore(discarded))
+  ) {
+    throwInvalidTerminalTransition("immutable transaction core");
+  }
+  if (
+    stableJson(normalizeResourceEvidence(quarantined.resources)) !==
+    stableJson(normalizeResourceEvidence(discarded.resources))
+  ) {
+    throwInvalidTerminalTransition("resource evidence");
+  }
+  if (
+    stableJson(normalizeResourceEvidence(quarantined.providerResources)) !==
+    stableJson(normalizeResourceEvidence(discarded.providerResources))
+  ) {
+    throwInvalidTerminalTransition("provider evidence");
+  }
+}
+
+function normalizeResourceEvidence<
+  Resource extends { disposition: unknown; summary: unknown },
+>(resources: Resource[]) {
+  return resources.map(
+    ({ disposition: _disposition, summary: _summary, ...resource }) => resource,
+  );
+}
+
+function throwInvalidTerminalTransition(reason: string): never {
+  throw new Error(
+    "Portable terminal decision authority has an invalid lifecycle transition: " +
+      reason,
+  );
+}
+
+function terminalTransitionCore(transaction: RunTransaction) {
+  return {
+    id: transaction.id,
+    assuranceEvidenceVersion: transaction.assuranceEvidenceVersion,
+    candidateStateId: transaction.candidateStateId,
+    canonicalStateIdBefore: transaction.canonicalStateIdBefore,
+    canonicalStateIdAfter: transaction.canonicalStateIdAfter,
+    canonicalContentHashBefore: transaction.canonicalContentHashBefore,
+    canonicalContentHashAfter: transaction.canonicalContentHashAfter,
+    outcomeContractVersion: transaction.outcomeContractVersion,
+    outcomeContract: transaction.outcomeContract,
+    sqlite: transaction.sqlite,
+    externalActions: transaction.externalActions,
+    changes: transaction.changes,
+    validations: transaction.validations,
+    lineage: transaction.lineage,
+    recovery: transaction.recovery,
+  };
+}
+
 function digest(value: unknown): string {
-  return "sha256:" + createHash("sha256").update(stableJson(value)).digest("hex");
+  return (
+    "sha256:" + createHash("sha256").update(stableJson(value)).digest("hex")
+  );
 }

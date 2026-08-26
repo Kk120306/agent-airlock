@@ -53,9 +53,9 @@ function deferredSignal(): {
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -71,8 +71,11 @@ class CompetingFuturesRunner implements AgentRunner {
     this.active += 1;
     this.maximumActive = Math.max(this.maximumActive, this.active);
     try {
-      const competitor = request.prompt.match(/Competitor ([A-Za-z0-9._:-]+)\./)?.[1];
-      if (!competitor) throw new Error("fixture did not receive competitor identity");
+      const competitor = request.prompt.match(
+        /Competitor ([A-Za-z0-9._:-]+)\./,
+      )?.[1];
+      if (!competitor)
+        throw new Error("fixture did not receive competitor identity");
       if (competitor === "credential-error") {
         throw new Error("password=phase-nine-secret-value");
       }
@@ -85,22 +88,42 @@ class CompetingFuturesRunner implements AgentRunner {
         request.tokenBudget &&
         totalTokens > request.tokenBudget.maximumTotalTokens
       ) {
-        throw new Error("fixture refused a call above its trusted token allowance");
+        throw new Error(
+          "fixture refused a call above its trusted token allowance",
+        );
       }
       this.consumedTokens += totalTokens;
-      await new Promise((resolve) => setTimeout(resolve, competitor === "broad-valid" ? 8 : 4));
+      await new Promise((resolve) =>
+        setTimeout(resolve, competitor === "broad-valid" ? 8 : 4),
+      );
       if (competitor.startsWith("unsafe-")) {
         await unlink(path.join(request.workspacePath, "AGENTS.md"));
-        await writeFile(path.join(request.workspacePath, "unsafe.txt"), "unsafe\n");
+        await writeFile(
+          path.join(request.workspacePath, "unsafe.txt"),
+          "unsafe\n",
+        );
       } else if (competitor === "broad-valid") {
-        await mkdir(path.join(request.workspacePath, "src"), { recursive: true });
+        await mkdir(path.join(request.workspacePath, "src"), {
+          recursive: true,
+        });
         await Promise.all([
-          writeFile(path.join(request.workspacePath, "src", "broad-a.ts"), "export const a = 1;\n"),
-          writeFile(path.join(request.workspacePath, "src", "broad-b.ts"), "export const b = 2;\n"),
-          writeFile(path.join(request.workspacePath, "broad-notes.md"), "broad future\n"),
+          writeFile(
+            path.join(request.workspacePath, "src", "broad-a.ts"),
+            "export const a = 1;\n",
+          ),
+          writeFile(
+            path.join(request.workspacePath, "src", "broad-b.ts"),
+            "export const b = 2;\n",
+          ),
+          writeFile(
+            path.join(request.workspacePath, "broad-notes.md"),
+            "broad future\n",
+          ),
         ]);
       } else {
-        await mkdir(path.join(request.workspacePath, "src"), { recursive: true });
+        await mkdir(path.join(request.workspacePath, "src"), {
+          recursive: true,
+        });
         await writeFile(
           path.join(request.workspacePath, "src", "winner.ts"),
           "export const selected = 'focused-valid';\n",
@@ -255,7 +278,9 @@ class RejectingQuarantineWorkspaceManager extends WorkspaceManager {
 
 describe("Phase 9 Competing Futures acceptance", () => {
   it("rejects an unsupported production Runner before any competitor can spend tokens", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-token-cap-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-token-cap-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -279,7 +304,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       runner,
     );
     await service.initialize();
-    const agent = await service.createAgent({ name: "No unbounded competitors" });
+    const agent = await service.createAgent({
+      name: "No unbounded competitors",
+    });
 
     await expect(
       service.createCandidateSet(agent.id, {
@@ -330,7 +357,10 @@ describe("Phase 9 Competing Futures acceptance", () => {
       RUNTIME_PROVIDER: "local-process",
       HOST: "127.0.0.1",
     });
-    const workspaces = new WorkspaceManager(config.workspaceRoot, config.codexHome);
+    const workspaces = new WorkspaceManager(
+      config.workspaceRoot,
+      config.codexHome,
+    );
     const service = new AgentService(
       config,
       new JsonStore(path.join(config.dataDirectory, "db.json")),
@@ -349,12 +379,14 @@ describe("Phase 9 Competing Futures acceptance", () => {
       method: "POST",
       url: "/api/agents/" + agentId + "/candidate-sets",
       payload: {
-        objective: "Build the smallest complete solution without paid inference",
+        objective:
+          "Build the smallest complete solution without paid inference",
         competitors: [
           {
             id: "unsafe-fast",
             executorProfileId: "standard-v1",
-            strategyInstruction: "Finish quickly, subject to required Validation.",
+            strategyInstruction:
+              "Finish quickly, subject to required Validation.",
           },
           {
             id: "broad-valid",
@@ -375,24 +407,33 @@ describe("Phase 9 Competing Futures acceptance", () => {
     const candidateSetId = admitted.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
     await expect
-      .poll(() => service.getCandidateSet(candidateSetId).phase, { timeout: 15_000 })
+      .poll(() => service.getCandidateSet(candidateSetId).phase, {
+        timeout: 15_000,
+      })
       .toBe("completed");
 
     const candidateSet = service.getCandidateSet(candidateSetId);
     expect(candidateSet.selectedCompetitorId).toBe("focused-valid");
-    expect(candidateSet.competitors.find((item) => item.id === "unsafe-fast"))
-      .toMatchObject({ status: "discarded", loserDisposition: "discarded" });
+    expect(
+      candidateSet.competitors.find((item) => item.id === "unsafe-fast"),
+    ).toMatchObject({ status: "discarded", loserDisposition: "discarded" });
     const canonical = await workspaces.readCanonical(agentId);
     await expect(
-      readFile(path.join(canonical.workspacePath, "src", "selected-future.ts"), "utf8"),
+      readFile(
+        path.join(canonical.workspacePath, "src", "selected-future.ts"),
+        "utf8",
+      ),
     ).resolves.toContain("focused-valid");
-    expect((await service.listExternalEffects()).map((effect) => effect.intentId))
-      .toEqual(["focused-valid-effect"]);
+    expect(
+      (await service.listExternalEffects()).map((effect) => effect.intentId),
+    ).toEqual(["focused-valid-effect"]);
     await app.close();
   });
 
   it("cancels one over-budget Runtime without stopping a valid sibling", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-budget-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-budget-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -409,7 +450,10 @@ describe("Phase 9 Competing Futures acceptance", () => {
       RUNTIME_PROVIDER: "local-process",
       HOST: "127.0.0.1",
     });
-    const workspaces = new WorkspaceManager(config.workspaceRoot, config.codexHome);
+    const workspaces = new WorkspaceManager(
+      config.workspaceRoot,
+      config.codexHome,
+    );
     const service = new AgentService(
       config,
       new JsonStore(path.join(config.dataDirectory, "db.json")),
@@ -434,7 +478,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
           {
             id: "slow-valid",
             executorProfileId: "standard-v1",
-            strategyInstruction: "Explore carefully but respect the duration budget.",
+            strategyInstruction:
+              "Explore carefully but respect the duration budget.",
           },
           {
             id: "focused-valid",
@@ -455,24 +500,30 @@ describe("Phase 9 Competing Futures acceptance", () => {
     const candidateSetId = admitted.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
     await expect
-      .poll(() => service.getCandidateSet(candidateSetId).phase, { timeout: 8_000 })
+      .poll(() => service.getCandidateSet(candidateSetId).phase, {
+        timeout: 8_000,
+      })
       .toBe("completed");
 
     const candidateSet = service.getCandidateSet(candidateSetId);
     expect(Date.now() - startedAt).toBeLessThan(4_000);
     expect(candidateSet.selectedCompetitorId).toBe("focused-valid");
-    expect(candidateSet.competitors.find((item) => item.id === "slow-valid"))
-      .toMatchObject({
-        exclusions: ["competitor-budget:duration-ms"],
-        loserDisposition: "discarded",
-      });
-    expect((await service.listExternalEffects()).map((effect) => effect.intentId))
-      .toEqual(["focused-valid-effect"]);
+    expect(
+      candidateSet.competitors.find((item) => item.id === "slow-valid"),
+    ).toMatchObject({
+      exclusions: ["competitor-budget:duration-ms"],
+      loserDisposition: "discarded",
+    });
+    expect(
+      (await service.listExternalEffects()).map((effect) => effect.intentId),
+    ).toEqual(["focused-valid-effect"]);
     await app.close();
   });
 
   it("rejects an aggregate token budget that cannot reserve every Runtime before any paid call", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-token-reserve-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-token-reserve-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -490,7 +541,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       runner,
     );
     await service.initialize();
-    const agent = await service.createAgent({ name: "Preflight token reserve" });
+    const agent = await service.createAgent({
+      name: "Preflight token reserve",
+    });
 
     await expect(
       service.createCandidateSet(agent.id, {
@@ -557,7 +610,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
           {
             id: "unsafe-fast",
             executorProfileId: "standard-v1",
-            strategyInstruction: "Finish quickly even if the approach is risky.",
+            strategyInstruction:
+              "Finish quickly even if the approach is risky.",
           },
           {
             id: "broad-valid",
@@ -567,7 +621,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
           {
             id: "focused-valid",
             executorProfileId: "standard-v1",
-            strategyInstruction: "Implement the narrowest complete valid solution.",
+            strategyInstruction:
+              "Implement the narrowest complete valid solution.",
           },
         ],
         maxConcurrency: 3,
@@ -584,7 +639,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       candidateSet: { id: string };
     }>().candidateSet.id;
     await expect
-      .poll(() => service.getCandidateSet(candidateSetId).phase, { timeout: 10_000 })
+      .poll(() => service.getCandidateSet(candidateSetId).phase, {
+        timeout: 10_000,
+      })
       .toBe("completed");
 
     const candidateSet = service.getCandidateSet(candidateSetId);
@@ -625,9 +682,15 @@ describe("Phase 9 Competing Futures acceptance", () => {
       )?.rank,
     ).toBe(1);
     expect(runner.maximumActive).toBeGreaterThan(1);
-    expect(new Set(runner.requests.map((request) => request.workspacePath)).size).toBe(3);
-    expect(new Set(runner.requests.map((request) => request.codexHomePath)).size).toBe(3);
-    expect(new Set(runner.requests.map((request) => request.outboxPath)).size).toBe(3);
+    expect(
+      new Set(runner.requests.map((request) => request.workspacePath)).size,
+    ).toBe(3);
+    expect(
+      new Set(runner.requests.map((request) => request.codexHomePath)).size,
+    ).toBe(3);
+    expect(
+      new Set(runner.requests.map((request) => request.outboxPath)).size,
+    ).toBe(3);
 
     const canonical = await workspaces.readCanonical(agentId);
     await expect(
@@ -644,7 +707,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
     const losers = candidateSet.competitors.filter(
       (competitor) => competitor.id !== "focused-valid",
     );
-    expect(losers.every((competitor) => competitor.status === "retained")).toBe(true);
+    expect(losers.every((competitor) => competitor.status === "retained")).toBe(
+      true,
+    );
     for (const loser of losers) {
       const run = service.getRun(loser.runId);
       expect(run.transaction).toMatchObject({
@@ -656,12 +721,16 @@ describe("Phase 9 Competing Futures acceptance", () => {
       });
     }
     const replay = service.getCandidateSet(candidateSetId).selectionDecision;
-    expect(replay?.decisionDigest).toBe(candidateSet.selectionDecision?.decisionDigest);
+    expect(replay?.decisionDigest).toBe(
+      candidateSet.selectionDecision?.decisionDigest,
+    );
     await app.close();
   });
 
   it("recovers the persisted winner through the existing Promotion journal and dispatches only its effect", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-restart-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-restart-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -703,7 +772,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "focused-valid",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Implement the narrowest complete valid solution.",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -721,20 +791,23 @@ describe("Phase 9 Competing Futures acceptance", () => {
     await expect
       .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
       .not.toBeNull();
-    expect(first.getCandidateSet(admitted.candidateSet.id).selectedCompetitorId)
-      .toBe("focused-valid");
+    expect(
+      first.getCandidateSet(admitted.candidateSet.id).selectedCompetitorId,
+    ).toBe("focused-valid");
 
     const restarted = await createService(false);
     const recovered = restarted.getCandidateSet(admitted.candidateSet.id);
     expect(recovered.phase).toBe("completed");
     expect(recovered.selectedCompetitorId).toBe("focused-valid");
-    expect(recovered.competitors.find((item) => item.id === "broad-valid"))
-      .toMatchObject({ status: "discarded", loserDisposition: "discarded" });
-    expect((await restarted.listExternalEffects()).map((effect) => effect.intentId))
-      .toEqual(["focused-valid-effect"]);
-    const canonical = await new WorkspaceManager(config.workspaceRoot).readCanonical(
-      agent.id,
-    );
+    expect(
+      recovered.competitors.find((item) => item.id === "broad-valid"),
+    ).toMatchObject({ status: "discarded", loserDisposition: "discarded" });
+    expect(
+      (await restarted.listExternalEffects()).map((effect) => effect.intentId),
+    ).toEqual(["focused-valid-effect"]);
+    const canonical = await new WorkspaceManager(
+      config.workspaceRoot,
+    ).readCanonical(agent.id);
     await expect(
       readFile(path.join(canonical.workspacePath, "src", "winner.ts"), "utf8"),
     ).resolves.toContain("focused-valid");
@@ -761,7 +834,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       new CompetingFuturesRunner(),
     );
     await first.initialize();
-    const agent = await first.createAgent({ name: "Recover immutable Selection" });
+    const agent = await first.createAgent({
+      name: "Recover immutable Selection",
+    });
     const admitted = await first.createCandidateSet(agent.id, {
       objective: "Reject every unsafe future",
       competitors: [
@@ -850,7 +925,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       new CompetingFuturesRunner(),
     );
     await first.initialize();
-    const agent = await first.createAgent({ name: "Replay terminal authority" });
+    const agent = await first.createAgent({
+      name: "Replay terminal authority",
+    });
     const source = await firstWorkspaces.readCanonical(agent.id);
     const admitted = await first.createCandidateSet(agent.id, {
       objective: "Retain the unselected valid future",
@@ -863,7 +940,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "focused-valid",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Implement the narrowest complete valid solution.",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -945,7 +1023,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
   });
 
   it("refuses Promotion recovery when the durable Selection Decision contradicts its journal authority", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-authority-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-authority-"),
+    );
     temporaryDirectories.push(root);
     const databasePath = path.join(root, "data", "db.json");
     const config = loadConfig({
@@ -984,7 +1064,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "focused-valid",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Implement the narrowest complete valid solution.",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -1019,22 +1100,27 @@ describe("Phase 9 Competing Futures acceptance", () => {
     const corrupted = persisted.candidateSets.find(
       (candidateSet) => candidateSet.id === admitted.candidateSet.id,
     );
-    if (!corrupted?.selectionDecision) throw new Error("fixture decision missing");
+    if (!corrupted?.selectionDecision)
+      throw new Error("fixture decision missing");
     corrupted.selectionDecision.winnerCompetitorId = "broad-valid";
     corrupted.selectionDecision.orderedCompetitorIds = [
       "broad-valid",
       "focused-valid",
     ];
     corrupted.selectedCompetitorId = "broad-valid";
-    corrupted.winnerRunId = admitted.runs.find(
-      (run) => run.competitorId === "broad-valid",
-    )?.id ?? null;
+    corrupted.winnerRunId =
+      admitted.runs.find((run) => run.competitorId === "broad-valid")?.id ??
+      null;
     const { decisionDigest: _discardedDigest, ...unsignedDecision } =
       corrupted.selectionDecision;
     corrupted.selectionDecision.decisionDigest = createHash("sha256")
       .update(stableJson(unsignedDecision))
       .digest("hex");
-    await writeFile(databasePath, JSON.stringify(persisted, null, 2) + "\n", "utf8");
+    await writeFile(
+      databasePath,
+      JSON.stringify(persisted, null, 2) + "\n",
+      "utf8",
+    );
 
     const initialValue = { release: "must-not-onboard" };
     const initialVersion = versionReference(
@@ -1057,7 +1143,10 @@ describe("Phase 9 Competing Futures acceptance", () => {
                     value: initialValue,
                   },
                 }),
-                { status: 200, headers: { "content-type": "application/json" } },
+                {
+                  status: 200,
+                  headers: { "content-type": "application/json" },
+                },
               ),
           }),
           initialVersion,
@@ -1087,19 +1176,21 @@ describe("Phase 9 Competing Futures acceptance", () => {
         /Candidate Set decision authority|deterministic replay/,
       ),
     });
-    const canonical = await restartedWorkspaces.readCanonicalForProviderTransition(
-      agent.id,
-    );
+    const canonical =
+      await restartedWorkspaces.readCanonicalForProviderTransition(agent.id);
     expect(canonical.stateId).toBe(source.stateId);
     expect(canonical.contentHash).toBe(source.contentHash);
     expect(canonical.providerVersions).toEqual([]);
     expect(await restarted.listExternalEffects()).toEqual([]);
-    await expect(restarted.createAgent({ name: "Must remain blocked" })).rejects
-      .toMatchObject({ statusCode: 503 });
+    await expect(
+      restarted.createAgent({ name: "Must remain blocked" }),
+    ).rejects.toMatchObject({ statusCode: 503 });
   });
 
   it("finishes an older-generation Candidate Set before onboarding a new provider", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-upgrade-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-upgrade-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -1135,7 +1226,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "focused-valid",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Implement the narrowest complete valid solution.",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -1206,16 +1298,20 @@ describe("Phase 9 Competing Futures acceptance", () => {
       phase: "completed",
       selectedCompetitorId: "focused-valid",
     });
-    expect(recovered.competitors.find((item) => item.id === "broad-valid"))
-      .toMatchObject({ status: "discarded", loserDisposition: "discarded" });
+    expect(
+      recovered.competitors.find((item) => item.id === "broad-valid"),
+    ).toMatchObject({ status: "discarded", loserDisposition: "discarded" });
     const canonical = await restartedWorkspaces.readCanonical(agent.id);
     expect(canonical.providerVersions).toEqual([initialVersion]);
-    expect((await restarted.listExternalEffects()).map((effect) => effect.intentId))
-      .toEqual(["focused-valid-effect"]);
+    expect(
+      (await restarted.listExternalEffects()).map((effect) => effect.intentId),
+    ).toEqual(["focused-valid-effect"]);
   });
 
   it("reconciles the physical loser disposition after a terminal-update crash", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-loser-crash-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-loser-crash-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -1232,10 +1328,13 @@ describe("Phase 9 Competing Futures acceptance", () => {
       new CompetingFuturesRunner(),
     );
     await service.initialize();
-    const airlockRunner = (service as unknown as { runner: AirlockRunner }).runner;
+    const airlockRunner = (service as unknown as { runner: AirlockRunner })
+      .runner;
 
     for (const policy of ["retain", "discard"] as const) {
-      const agent = await service.createAgent({ name: "Loser crash " + policy });
+      const agent = await service.createAgent({
+        name: "Loser crash " + policy,
+      });
       const admitted = await service.createCandidateSet(agent.id, {
         objective: "Recover a physically completed " + policy + " disposition",
         competitors: [
@@ -1247,7 +1346,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
           {
             id: "focused-valid",
             executorProfileId: "standard-v1",
-            strategyInstruction: "Implement the narrowest complete valid solution.",
+            strategyInstruction:
+              "Implement the narrowest complete valid solution.",
           },
         ],
         selectionContract: createDefaultSelectionContractForTest(),
@@ -1263,9 +1363,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
         .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
         .toBe("completed");
 
-      const loser = service.getCandidateSet(admitted.candidateSet.id).competitors.find(
-        (competitor) => competitor.id === "broad-valid",
-      );
+      const loser = service
+        .getCandidateSet(admitted.candidateSet.id)
+        .competitors.find((competitor) => competitor.id === "broad-valid");
       const loserRun = loser ? service.getRun(loser.runId) : null;
       expect(loserRun?.transaction?.disposition).toBe(
         policy === "retain" ? "quarantined" : "discarded",
@@ -1303,8 +1403,149 @@ describe("Phase 9 Competing Futures acceptance", () => {
     }
   });
 
+  it("recovers one Candidate Set loser lifecycle atomically from immutable authority", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-atomic-loser-recovery-"),
+    );
+    temporaryDirectories.push(root);
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "phase-nine-fixture-key",
+      ARK_MODEL: "phase-nine-fixture-model",
+    });
+    const store = new JsonStore(path.join(config.dataDirectory, "db.json"));
+    const service = new AgentService(
+      config,
+      store,
+      new WorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await service.initialize();
+    const agent = await service.createAgent({ name: "Atomic loser recovery" });
+
+    const originalMutate = store.mutate.bind(store);
+    let writesBlocked = false;
+    store.mutate = (async (mutation: Parameters<JsonStore["mutate"]>[0]) => {
+      if (writesBlocked) {
+        throw new Error("simulated process loss after loser authority");
+      }
+      const snapshot = store.snapshot();
+      const cleaningSet = snapshot.candidateSets.find(
+        (candidateSet) => candidateSet.phase === "cleaning-losers",
+      );
+      const pendingLoser = cleaningSet?.competitors.find(
+        (competitor) =>
+          competitor.id !== cleaningSet.selectedCompetitorId &&
+          competitor.loserDisposition === "pending",
+      );
+      if (pendingLoser) {
+        const authorityDirectory = path.join(
+          config.dataDirectory,
+          "portable-decision-journal",
+          pendingLoser.runId,
+        );
+        const entries = await readdir(authorityDirectory).catch(() => []);
+        const records = await Promise.all(
+          entries
+            .filter((entry) => entry.endsWith(".json"))
+            .map(async (entry) =>
+              JSON.parse(
+                await readFile(path.join(authorityDirectory, entry), "utf8"),
+              ),
+            ),
+        );
+        if (
+          records.some(
+            (record) =>
+              record.candidateSetAuthorityDigest &&
+              record.disposition === "discarded",
+          )
+        ) {
+          writesBlocked = true;
+          throw new Error("simulated process loss after loser authority");
+        }
+      }
+      return originalMutate(mutation);
+    }) as JsonStore["mutate"];
+
+    const admitted = await service.createCandidateSet(agent.id, {
+      objective: "Crash after the losing child authority is durable.",
+      competitors: [
+        {
+          id: "broad-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Implement a broad valid solution.",
+        },
+        {
+          id: "focused-valid",
+          executorProfileId: "standard-v1",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
+        },
+      ],
+      selectionContract: createDefaultSelectionContractForTest(),
+      maxConcurrency: 2,
+      budget: {
+        maxDurationMsPerCompetitor: 600_000,
+        maxTotalTokens: 2_000_000,
+        maxTotalChangedBytes: 200_000_000,
+      },
+      loserPolicy: "discard",
+    });
+    await expect.poll(() => writesBlocked).toBe(true);
+    await expect
+      .poll(() =>
+        (
+          service as unknown as {
+            activeExecutions: Map<string, Promise<void>>;
+          }
+        ).activeExecutions.has(agent.id),
+      )
+      .toBe(false);
+    store.mutate = originalMutate as JsonStore["mutate"];
+
+    const interrupted = service.getCandidateSet(admitted.candidateSet.id);
+    const pendingLoser = interrupted.competitors.find(
+      (competitor) =>
+        competitor.id !== interrupted.selectedCompetitorId &&
+        competitor.loserDisposition === "pending",
+    );
+    expect(interrupted.phase).toBe("cleaning-losers");
+    expect(pendingLoser).toBeDefined();
+
+    const restarted = new AgentService(
+      config,
+      new JsonStore(path.join(config.dataDirectory, "db.json")),
+      new WorkspaceManager(config.workspaceRoot),
+      new CompetingFuturesRunner(),
+    );
+    await restarted.initialize();
+    const recovered = restarted.getCandidateSet(admitted.candidateSet.id);
+    const recoveredLoser = recovered.competitors.find(
+      (competitor) => competitor.id === pendingLoser!.id,
+    );
+    expect(recovered).toMatchObject({
+      phase: "completed",
+      recoveryError: null,
+    });
+    expect(recoveredLoser).toMatchObject({
+      status: "discarded",
+      loserDisposition: "discarded",
+    });
+    expect(restarted.getRun(pendingLoser!.runId).transaction).toMatchObject({
+      status: "discarded",
+      disposition: "discarded",
+      quarantineAvailable: false,
+    });
+  });
+
   it("fails closed on selected-winner seal tampering without promoting a runner-up", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-tamper-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-tamper-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -1322,7 +1563,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       new CompetingFuturesRunner(),
     );
     await service.initialize();
-    const agent = await service.createAgent({ name: "No fallback after tamper" });
+    const agent = await service.createAgent({
+      name: "No fallback after tamper",
+    });
     const source = await workspaces.readCanonical(agent.id);
     const admitted = await service.createCandidateSet(agent.id, {
       objective: "Never substitute a runner-up after the decision is persisted",
@@ -1335,7 +1578,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "focused-valid",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Implement the narrowest complete valid solution.",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -1383,7 +1627,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
   });
 
   it("keeps the Agent busy until stale Candidate cleanup is durably complete", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-stale-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-stale-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -1404,7 +1650,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       runner,
     );
     await service.initialize();
-    const agent = await service.createAgent({ name: "Cleanup before terminal" });
+    const agent = await service.createAgent({
+      name: "Cleanup before terminal",
+    });
     const admitted = await service.createCandidateSet(agent.id, {
       objective: "Do not publish a terminal phase before cleanup completes",
       competitors: [
@@ -1513,8 +1761,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
 
     const failed = service.getCandidateSet(admitted.candidateSet.id);
     expect(failed.recoveryError).toContain("fixture cleanup unavailable");
-    expect(failed.competitors.some((item) => item.loserDisposition === "pending"))
-      .toBe(true);
+    expect(
+      failed.competitors.some((item) => item.loserDisposition === "pending"),
+    ).toBe(true);
     expect(service.getAgent(agent.id).status).toBe("error");
     await expect(
       service.sendMessage(agent.id, "Do not overlap unresolved cleanup."),
@@ -1555,7 +1804,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
   });
 
   it("turns pre-decision cancellation into a durable no-winner result", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-cancel-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-cancel-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -1586,7 +1837,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "focused-valid",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Implement the narrowest complete valid solution.",
+          strategyInstruction:
+            "Implement the narrowest complete valid solution.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -1616,11 +1868,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
     for (const competitor of cancelled.competitors) {
       const transaction = service.getRun(competitor.runId).transaction;
       expect(transaction?.disposition).not.toBeNull();
-      expect([
-        "cancelled",
-        "discarded",
-        "quarantined",
-      ]).toContain(transaction?.disposition);
+      expect(["cancelled", "discarded", "quarantined"]).toContain(
+        transaction?.disposition,
+      );
       expect(transaction?.promotionReceipt).not.toBeNull();
       const authorityFiles = (
         await readdir(
@@ -1633,18 +1883,19 @@ describe("Phase 9 Competing Futures acceptance", () => {
       ).filter((name) => name.endsWith(".json"));
       expect(authorityFiles.length).toBeGreaterThanOrEqual(1);
       const authorities = await Promise.all(
-        authorityFiles.map(async (name) =>
-          JSON.parse(
-            await readFile(
-              path.join(
-                config.dataDirectory,
-                "portable-decision-journal",
-                competitor.runId,
-                name,
+        authorityFiles.map(
+          async (name) =>
+            JSON.parse(
+              await readFile(
+                path.join(
+                  config.dataDirectory,
+                  "portable-decision-journal",
+                  competitor.runId,
+                  name,
+                ),
+                "utf8",
               ),
-              "utf8",
-            ),
-          ) as { candidateSetAuthorityDigest: string | null },
+            ) as { candidateSetAuthorityDigest: string | null },
         ),
       );
       expect(
@@ -1676,7 +1927,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
   });
 
   it("records no winner when every sibling fails required Validation", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-nine-invalid-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-nine-invalid-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -1712,7 +1965,8 @@ describe("Phase 9 Competing Futures acceptance", () => {
         {
           id: "credential-error",
           executorProfileId: "standard-v1",
-          strategyInstruction: "Fail without retaining sensitive Runtime evidence.",
+          strategyInstruction:
+            "Fail without retaining sensitive Runtime evidence.",
         },
       ],
       selectionContract: createDefaultSelectionContractForTest(),
@@ -1750,7 +2004,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
         }),
       ]),
     );
-    expect(JSON.stringify(candidateSet)).not.toContain("phase-nine-secret-value");
+    expect(JSON.stringify(candidateSet)).not.toContain(
+      "phase-nine-secret-value",
+    );
     expect(JSON.stringify(service.getRuns(agent.id))).not.toContain(
       "phase-nine-secret-value",
     );
@@ -1786,8 +2042,16 @@ describe("Phase 9 Competing Futures acceptance", () => {
       payload: {
         objective: "Strictly reject unknown authority",
         competitors: [
-          { id: "one", executorProfileId: "standard-v1", strategyInstruction: "one" },
-          { id: "two", executorProfileId: "standard-v1", strategyInstruction: "two" },
+          {
+            id: "one",
+            executorProfileId: "standard-v1",
+            strategyInstruction: "one",
+          },
+          {
+            id: "two",
+            executorProfileId: "standard-v1",
+            strategyInstruction: "two",
+          },
         ],
         hiddenJudgePrompt: "choose one",
       },
