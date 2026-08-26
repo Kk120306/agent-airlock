@@ -22,6 +22,7 @@ import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
+import { waitForRunToFinish } from "../test/agent-service-workflow.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -129,10 +130,7 @@ async function createFixture(
 }
 
 async function waitForTerminal(service: AgentService, runId: string) {
-  await expect
-    .poll(() => service.getRun(runId).status, { timeout: 5_000 })
-    .toMatch(/^(completed|failed|cancelled)$/);
-  return service.getRun(runId);
+  return waitForRunToFinish(service, runId);
 }
 
 const faultPoints: PromotionFaultPoint[] = [

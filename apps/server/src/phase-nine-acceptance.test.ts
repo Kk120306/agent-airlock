@@ -19,6 +19,13 @@ import {
   versionReference,
 } from "@agent-airlock/http-object-resource";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  agentWorkflowTimeoutMs,
+  waitForAgentExecutionToStop,
+  waitForCandidateSetPhase,
+  waitForCandidateSetRecoveryError,
+  waitForCandidateSetTerminalPhase,
+} from "../test/agent-service-workflow.js";
 import { AgentService } from "./agent-service.js";
 import { AirlockRunner } from "./airlock-runner.js";
 import { stableJson } from "./candidate-selection.js";
@@ -30,7 +37,6 @@ import { ResourceRegistry } from "./resource-registry.js";
 import { JsonStore } from "./store.js";
 import type {
   AgentRunner,
-  CandidateSetPhase,
   CandidateSelectionDecision,
   Database,
   RunnerRequest,
@@ -40,68 +46,6 @@ import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
 
 const temporaryDirectories: string[] = [];
-const candidateSetWorkflowTimeoutMs = 15_000;
-
-type TerminalCandidateSetPhase = Extract<
-  CandidateSetPhase,
-  "completed" | "stale" | "recovery-error"
->;
-
-type AgentServiceExecutionState = {
-  activeExecutions: Map<string, Promise<void>>;
-};
-
-function hasActiveExecution(service: AgentService, agentId: string): boolean {
-  return (service as unknown as AgentServiceExecutionState).activeExecutions.has(
-    agentId,
-  );
-}
-
-async function waitForAgentExecutionToStop(
-  service: AgentService,
-  agentId: string,
-): Promise<void> {
-  await expect
-    .poll(() => !hasActiveExecution(service, agentId), {
-      timeout: candidateSetWorkflowTimeoutMs,
-    })
-    .toBe(true);
-}
-
-async function waitForCandidateSetPhase(
-  service: AgentService,
-  candidateSetId: string,
-  expectedPhase: CandidateSetPhase,
-): Promise<void> {
-  await expect
-    .poll(() => service.getCandidateSet(candidateSetId).phase, {
-      timeout: candidateSetWorkflowTimeoutMs,
-    })
-    .toBe(expectedPhase);
-}
-
-async function waitForCandidateSetTerminalPhase(
-  service: AgentService,
-  candidateSetId: string,
-  expectedPhase: TerminalCandidateSetPhase,
-  agentId: string,
-): Promise<void> {
-  await waitForCandidateSetPhase(service, candidateSetId, expectedPhase);
-  await waitForAgentExecutionToStop(service, agentId);
-}
-
-async function waitForCandidateSetRecoveryError(
-  service: AgentService,
-  candidateSetId: string,
-  agentId: string,
-): Promise<void> {
-  await expect
-    .poll(() => service.getCandidateSet(candidateSetId).recoveryError, {
-      timeout: candidateSetWorkflowTimeoutMs,
-    })
-    .not.toBeNull();
-  await waitForAgentExecutionToStop(service, agentId);
-}
 
 function deferredSignal(): {
   promise: Promise<void>;
@@ -1592,7 +1536,7 @@ describe("Phase 9 Competing Futures acceptance", () => {
       loserPolicy: "discard",
     });
     await expect
-      .poll(() => writesBlocked, { timeout: candidateSetWorkflowTimeoutMs })
+      .poll(() => writesBlocked, { timeout: agentWorkflowTimeoutMs })
       .toBe(true);
     await waitForAgentExecutionToStop(service, agent.id);
     store.mutate = originalMutate as JsonStore["mutate"];

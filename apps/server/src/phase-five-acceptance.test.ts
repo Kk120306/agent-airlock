@@ -11,6 +11,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { persistFixtureSession } from "../test/session-fixture.js";
+import { waitForRunStatus } from "../test/agent-service-workflow.js";
 import { AgentService } from "./agent-service.js";
 import { loadConfig } from "./config.js";
 import { JsonStore } from "./store.js";
@@ -154,7 +155,7 @@ describe("Phase 5 recoverable intelligence", () => {
     const canonicalBefore = await workspaces.readCanonical(agent.id);
 
     const rejected = await service.sendMessage(agent.id, "create an unsafe future");
-    await expect.poll(() => service.getRun(rejected.run.id).status).toBe("completed");
+    await waitForRunStatus(service, rejected.run.id, "completed");
     const rejectedRun = service.getRun(rejected.run.id);
     const canonicalAfterRejection = await workspaces.readCanonical(agent.id);
 
@@ -176,7 +177,7 @@ describe("Phase 5 recoverable intelligence", () => {
     expect(await service.listExternalEffects()).toEqual([]);
 
     const repair = await service.repairRun(rejected.run.id);
-    await expect.poll(() => service.getRun(repair.run.id).status).toBe("completed");
+    await waitForRunStatus(service, repair.run.id, "completed");
     const repairedRun = service.getRun(repair.run.id);
     const repairedCanonical = await workspaces.readCanonical(agent.id);
 
@@ -224,7 +225,7 @@ describe("Phase 5 recoverable intelligence", () => {
     const { service } = await createFixture();
     const agent = await service.createAgent({ name: "Discard Agent" });
     const rejected = await service.sendMessage(agent.id, "create an unsafe future");
-    await expect.poll(() => service.getRun(rejected.run.id).status).toBe("completed");
+    await waitForRunStatus(service, rejected.run.id, "completed");
     const before = service.getRun(rejected.run.id);
     const quarantinePath = before.transaction?.quarantinePath;
     const evidenceHash = before.transaction?.promotionReceipt?.validationEvidenceHash;
@@ -257,14 +258,14 @@ describe("Phase 5 recoverable intelligence", () => {
       boundedAgent.id,
       "create an unsafe future",
     );
-    await expect.poll(() => bounded.service.getRun(rejected.run.id).status).toBe(
-      "completed",
-    );
+    await waitForRunStatus(bounded.service, rejected.run.id, "completed");
     const failedRepair = await bounded.service.repairRun(
       rejected.run.id,
       "remain failing",
     );
-    await expect.poll(() => bounded.service.getRun(failedRepair.run.id).status).toBe(
+    await waitForRunStatus(
+      bounded.service,
+      failedRepair.run.id,
       "completed",
     );
     expect(bounded.service.getRun(failedRepair.run.id).transaction).toMatchObject({
@@ -284,11 +285,13 @@ describe("Phase 5 recoverable intelligence", () => {
       staleAgent.id,
       "create an unsafe future",
     );
-    await expect.poll(() => stale.service.getRun(staleRejected.run.id).status).toBe(
+    await waitForRunStatus(
+      stale.service,
+      staleRejected.run.id,
       "completed",
     );
     const advance = await stale.service.sendMessage(staleAgent.id, "advance safely");
-    await expect.poll(() => stale.service.getRun(advance.run.id).status).toBe("completed");
+    await waitForRunStatus(stale.service, advance.run.id, "completed");
     await expect(stale.service.repairRun(staleRejected.run.id)).rejects.toMatchObject({
       statusCode: 409,
     });

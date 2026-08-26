@@ -16,6 +16,7 @@ import { JsonStore } from "./store.js";
 import type { AgentRunner } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
+import { waitForRunToFinish } from "../test/agent-service-workflow.js";
 
 const temporaryDirectories: string[] = [];
 const fetchRestorations: Array<() => void> = [];
@@ -289,8 +290,5 @@ function json(value: unknown, status = 200): Response {
 }
 
 async function waitForRun(service: AgentService, runId: string) {
-  await expect
-    .poll(() => service.getRun(runId).status, { timeout: 3_000 })
-    .toMatch(/^(completed|failed|cancelled)$/);
-  return service.getRun(runId);
+  return waitForRunToFinish(service, runId);
 }

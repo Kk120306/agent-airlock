@@ -17,6 +17,7 @@ import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import type { ValidationCommandExecutor } from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
+import { waitForRunStatus } from "../test/agent-service-workflow.js";
 
 class FakeRunner implements AgentRunner {
   async run(request: RunnerRequest): Promise<RunnerResult> {
@@ -306,7 +307,7 @@ describe("Agent lifecycle", () => {
     const service = await makeService();
     const agent = await service.createAgent({ name: "Coder" });
     const { run } = await service.sendMessage(agent.id, "write hello world");
-    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+    await waitForRunStatus(service, run.id, "completed");
     const messages = service.getMessages(agent.id);
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(messages[1]?.content).toContain("write hello world");
@@ -396,7 +397,7 @@ describe("Agent lifecycle", () => {
     finish({ output: "done", threadId: "thread", usage: null });
     const accepted = attempts.find((attempt) => attempt.status === "fulfilled");
     if (accepted?.status === "fulfilled") {
-      await expect.poll(() => service.getRun(accepted.value.run.id).status).toBe("completed");
+      await waitForRunStatus(service, accepted.value.run.id, "completed");
     }
   });
 
@@ -423,14 +424,14 @@ describe("Agent lifecycle", () => {
     });
 
     finish({ output: "done", threadId: "thread", usage: null });
-    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+    await waitForRunStatus(service, run.id, "completed");
   });
 
   it("versions Outcome Contracts for future Runs without rewriting history", async () => {
     const service = await makeService();
     const agent = await service.createAgent({ name: "Versioned" });
     const first = await service.sendMessage(agent.id, "first contract");
-    await expect.poll(() => service.getRun(first.run.id).status).toBe("completed");
+    await waitForRunStatus(service, first.run.id, "completed");
 
     const current = service.getAgent(agent.id).outcomeContract;
     const updated = await service.updateOutcomeContract(agent.id, {
@@ -442,7 +443,7 @@ describe("Agent lifecycle", () => {
       validationCommands: current.validationCommands,
     });
     const second = await service.sendMessage(agent.id, "second contract");
-    await expect.poll(() => service.getRun(second.run.id).status).toBe("completed");
+    await waitForRunStatus(service, second.run.id, "completed");
 
     expect(updated.version).toBe(2);
     expect(service.getRun(first.run.id).transaction).toMatchObject({
@@ -489,7 +490,7 @@ describe("Agent lifecycle", () => {
     ).rejects.toMatchObject({ statusCode: 409 });
 
     finish({ output: "done", threadId: "thread", usage: null });
-    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+    await waitForRunStatus(service, run.id, "completed");
   });
 
   it.each([
@@ -524,7 +525,7 @@ describe("Agent lifecycle", () => {
       });
 
       const { run } = await service.sendMessage(agent.id, "validate command severity");
-      await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+      await waitForRunStatus(service, run.id, "completed");
       const completed = service.getRun(run.id);
 
       expect(completed.transaction?.disposition).toBe(expectedDisposition);
@@ -623,7 +624,7 @@ describe("Agent lifecycle", () => {
       }
 
       const { run } = await service.sendMessage(agent.id, "exercise structural gate");
-      await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+      await waitForRunStatus(service, run.id, "completed");
       const transaction = service.getRun(run.id).transaction;
 
       expect(transaction).toMatchObject({

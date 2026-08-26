@@ -10,6 +10,7 @@ import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
+import { waitForRunStatus } from "../test/agent-service-workflow.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -98,7 +99,7 @@ describe("Phase 4 multi-resource acceptance", () => {
       agent.id,
       "prepare the safe multi-resource release",
     );
-    await expect.poll(() => service.getRun(accepted.run.id).status).toBe("completed");
+    await waitForRunStatus(service, accepted.run.id, "completed");
     const acceptedRun = service.getRun(accepted.run.id);
     const acceptedState = await workspaces.readCanonical(agent.id);
     const acceptedDatabase = await new SqliteResource().inspect(
@@ -129,7 +130,7 @@ describe("Phase 4 multi-resource acceptance", () => {
       agent.id,
       "make an unsafe multi-resource change",
     );
-    await expect.poll(() => service.getRun(rejected.run.id).status).toBe("completed");
+    await waitForRunStatus(service, rejected.run.id, "completed");
     const rejectedRun = service.getRun(rejected.run.id);
     const canonicalAfterRejection = await workspaces.readCanonical(agent.id);
     const databaseAfterRejection = await new SqliteResource().inspect(
