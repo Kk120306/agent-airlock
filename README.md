@@ -107,7 +107,8 @@ npm run check:phase10:assurance
 
 Phase 11 turns complete durable Run evidence into a strict Portable Promotion Envelope that can be verified without the Airlock server or database.
 The envelope signs canonical receipt content with an operator-held Ed25519 key and can disclose selected redacted evidence through Merkle proofs without including unselected leaves.
-Promoted Runs, retained or discarded Quarantines, Repair ancestry, exact Candidate Selection, and accepted Assurance provenance use the same bounded protocol.
+Promoted, retained, discarded, and cancelled Runs, Repair ancestry, exact Candidate Selection, and accepted Assurance provenance use the same bounded protocol.
+Candidate Set Selection and terminal Run decisions are published to independent immutable authority before their mutable projections, so restart restores the exact decision instead of inventing a new one.
 The verification report separates mathematical integrity from unsupported claims about Runtime isolation, Validation correctness, signer trust, or policy sufficiency.
 A valid signature proves that the included public key matches the signature over the exact receipt content.
 It proves key possession, not the human or organization behind the key, and it does not make an incorrect statement true.
@@ -187,9 +188,10 @@ These commands require no ModelArk key, paid inference, provider purchase, walle
 - Explicit operator acceptance, durable rejection, stale-base protection, immutable Outcome Contract history, and version-creating rollback
 - Crash-recoverable Agent deletion with credential-free Run, Candidate Set, Assurance, contract-history, and receipt digests
 - Strict canonical Portable Promotion Envelopes with Ed25519 signatures and independent offline verification
+- Immutable Candidate Set Selection authority and exact terminal Run replay across authority-to-store crash windows
 - Private-by-default Merkle evidence disclosure with exact Candidate Selection, accepted Assurance, and Repair ancestry commitments
 - Fail-closed signing-key identity markers, historical rotation verification, and an operator rotation and compromise runbook
-- Optional signed local transparency proofs and zero-network EVM calldata over receipt digests only
+- Optional signed local transparency proofs with append-only writer turns and zero-network EVM calldata over receipt digests only
 - Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS

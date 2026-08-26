@@ -7,7 +7,7 @@ Phase 11 lets a fresh offline verifier validate the integrity, included signer k
 Offline verification proves that the included Ed25519 public key signed the exact canonical content and that disclosed evidence belongs to its committed Merkle root.
 It does not prove who controls the key, that the committed physical state still exists, that the statements were honest, or that the underlying policy and Validations were sufficient.
 
-ADR 0013 is accepted locally and this document describes the implemented Phase 11 trust boundary.
+ADR 0013 defines the portable receipt protocol, and ADR 0014 defines its independent Selection and terminal authority publication boundary.
 
 ## Package boundary
 
@@ -162,10 +162,12 @@ The local reference anchor stores only ordered receipt digests and produces:
 Two signed checkpoints with the same tree size and different roots constitute direct split-view evidence.
 A later larger checkpoint without a valid consistency proof is not accepted as an append-only continuation.
 Consistency verification authenticates both signed checkpoints and requires one checkpoint key identity before evaluating the Merkle continuation.
-The local implementation serializes writers across processes, revalidates the current log under the lock, uses an incremental Merkle accumulator for prefix verification, and persists with an atomic replace plus file and directory synchronization.
-Lock ownership is nonce-bound, and an old lock is recoverable only after its recorded process is no longer alive.
-Stale-lock recovery uses unique nonce-bound claims and deterministic election, so an interrupted reclaimer cannot strand a second global mutex.
-If a lock or claim is released while a contender is reading its pinned file handle, that identity change is treated as contention and retried, while malformed or unsafe surviving lock content still fails closed.
+The local implementation serializes writers across processes through an append-only queue of immutable numbered lock turns, revalidates the current log while holding its turn, uses an incremental Merkle accumulator for prefix verification, and persists with an atomic replace plus file and directory synchronization.
+Every turn contains one nonce-bound owner and at most one strictly validated completion marker.
+Each completion marker is synchronized before atomic non-overwriting publication, so a follower cannot observe a partially written completion.
+A contender may mark a stale predecessor abandoned only after its recorded process is no longer alive, and it never unlinks or reuses another turn's pathname.
+Malformed turns, missing sequence numbers, conflicting completion evidence, unsafe entries, and exhausted queue bounds fail closed.
+The older singleton lock format is drained only as a compatibility barrier inside the acquired queue turn and before the log operation begins.
 A log history accepts exactly one checkpoint key identity, so transparency-key rotation starts a new log and explicit trust epoch.
 
 The optional EVM reference is limited to a contract interface and offline payload encoder for one receipt digest.
@@ -175,9 +177,12 @@ The demo prints payload bytes and the exact privacy and consistency claim, perfo
 
 The server builds a portable receipt only from strictly parsed durable Run Transaction evidence.
 Before mutable control-plane metadata is persisted, Airlock writes an immutable Decision Authority record for each terminal Run decision.
-That record commits the exact terminal Run Transaction, the frozen parent authority for Repair ancestry, and the final Candidate Set source, contract, competitor seals, Selection Decision, and winner when applicable.
+Before mutable Candidate Set Selection is persisted, Airlock separately writes one immutable Candidate Set Decision Authority that commits the final source, contracts, bounded competitor evidence, Selection Decision, selected competitor, winner Run, and decision timestamp.
+Airlock then publishes a final Candidate Set-bound authority for every already-terminal competitor before exposing the mutable Selection projection.
+A terminal Run may retain both its earlier context-free authority and its final Candidate Set-bound authority, but every record for that Run must commit the same terminal transaction hash.
 Export requires an exact match against this authority and never synthesizes a missing record from mutable database content.
-Terminal progress callbacks may publish authority, but they do not expose the terminal transaction through the mutable store before the enclosing Run and Agent lifecycle update is complete.
+Terminal progress callbacks may publish authority, but they do not expose the terminal transaction through the mutable store before the enclosing child Run and competitor lifecycle update is complete.
+The Agent remains busy until the complete Candidate Set finishes Selection, winner Promotion, and loser cleanup.
 Candidate Set cancellation and cleanup record authority at the branch that makes the terminal decision, while aggregate completion performs no authority reconstruction.
 Decision Authority records and historical Canonical manifests are first written and synchronized under unique same-directory temporary names, then installed through non-replacing hard-link publication and directory synchronization.
 Recognizable temporary remnants from interruption are removed before retry, while an existing deterministic authority target is verified rather than replaced.
@@ -203,7 +208,8 @@ Receipt creation is idempotent for the same Run Transaction evidence, schema, an
 Changing signing key creates a different envelope signature and key identifier but not a different receipt digest.
 Disclosure selection changes only the envelope's proof list and never changes the signed receipt or receipt digest.
 
-The Playground exposes this boundary only for terminal contradiction-free Run evidence and completed selected winners.
+The Playground exposes this boundary only for terminal contradiction-free Run evidence and completed Candidate Sets.
+Promoted, retained, discarded, and cancelled competitors can each export a receipt that commits the same final Selection Decision and their own exact disposition.
 Export is private by default, lets the operator opt into individual redacted evidence proofs, and labels local transparency and EVM calldata as optional additions rather than correctness dependencies.
 The disclosure panel names the stable identifiers, timestamps, state and resource fingerprints, and evidence hashes that every receipt necessarily contains before the operator generates an artifact.
 The server self-verifies every envelope before returning it and converts incomplete evidence into a retryable conflict without creating a key or receipt.
@@ -222,11 +228,13 @@ The server self-verifies every envelope before returning it and converts incompl
 - Signature-only verification passes offline with anchoring disabled.
 - Inclusion and consistency proofs pass, while conflicting same-size checkpoints trigger split-view evidence.
 - Consistency proofs signed by different checkpoint keys fail even when their Merkle roots are mathematically compatible.
-- An interrupted stale-lock reclaimer cannot prevent later appenders from recovering the dead main lock.
+- A dead predecessor receives one immutable abandoned marker, every later lock turn remains present, and no contender can delete a successor's pathname.
 - Symbolic-link and oversized CLI inputs fail through one no-follow, bounded file handle.
 - EVM payload encoding is deterministic, contains only the receipt digest, makes no network call, and spends no funds.
 - A fresh clone verifies all fixtures without the Airlock server, database, ModelArk, a provider process, or blockchain access.
 - Coordinated rewrites of mutable Run, embedded Promotion Receipt, Candidate winner seal, Selection, and physical resource evidence fail against independent Decision Authority and historical-state records.
+- Loss of mutable Selection after immutable authority publication restores the exact authorized decision, while terminal Quarantine authority replays the exact transaction after restart.
+- Promoted, retained, discarded, and cancelled Candidate Runs each verify with the final Candidate Set Selection commitment.
 - Registered Resource Provider source and installed versions export successfully, while provider-version, fingerprint, required-Validation, and historical-vector corruption fail before key creation.
 - Authority and historical-manifest interruption remnants at create, partial-write, synchronized, and published stages are recovered without publishing a partial deterministic target.
 - A Repair child preserves the exact parent authority it referenced even if the parent later receives a new discarded disposition.

@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import {
   link,
+  lstat,
   mkdir,
   open,
   readdir,
   rename,
+  rmdir,
   unlink,
 } from "node:fs/promises";
 import path from "node:path";
@@ -36,13 +38,24 @@ const MAXIMUM_LOG_ENTRIES = 100_000;
 const MAXIMUM_LOCK_BYTES = 1_024;
 const LOCK_WAIT_MS = 10_000;
 const LOCK_STALE_MS = 30_000;
-const RECLAIM_ELECTION_SETTLE_MS = 25;
-const MAXIMUM_RECLAIM_CLAIMS = 256;
+const MAXIMUM_LOCK_TURNS = 200_000;
+const LOCK_TURN_PATTERN = /^turn-([0-9]{12})$/u;
+const LOCK_TURN_TEMPORARY_PATTERN =
+  /^\.turn-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/u;
+const LOCK_TURN_COMPLETION_TEMPORARY_PATTERN =
+  /^\.completion-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/u;
+const LOCK_TURN_COMPLETION_NAME = "completion.json";
 
 interface TransparencyLockOwner {
   pid: number;
   nonce: string;
   createdAt: string;
+}
+
+interface TransparencyLockTurn {
+  sequence: number;
+  path: string;
+  owner: TransparencyLockOwner;
 }
 
 class ConcurrentLockReadError extends Error {}
@@ -200,180 +213,306 @@ export class LocalTransparencyLog {
   }
 
   private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
-    const lockPath = `${path.resolve(this.filePath)}.lock`;
-    await mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+    const legacyLockPath = `${path.resolve(this.filePath)}.lock`;
+    const queuePath = `${legacyLockPath}-queue`;
+    await mkdir(path.dirname(queuePath), { recursive: true, mode: 0o700 });
+    await mkdir(queuePath, { recursive: true, mode: 0o700 });
+    await assertRegularDirectory(queuePath, "Local transparency lock queue");
     const deadline = Date.now() + LOCK_WAIT_MS;
     const owner: TransparencyLockOwner = {
       pid: process.pid,
       nonce: randomUUID(),
       createdAt: new Date().toISOString(),
     };
-    const ownerPath = `${lockPath}.${owner.nonce}.owner`;
-    const ownerHandle = await open(ownerPath, "wx", 0o600);
+    const turn = await allocateLockTurn(queuePath, owner);
     try {
-      await ownerHandle.writeFile(canonicalize(owner), "utf8");
-      await ownerHandle.sync();
-    } finally {
-      await ownerHandle.close();
-    }
-    let acquired = false;
-    while (!acquired) {
-      try {
-        await link(ownerPath, lockPath);
-        acquired = true;
-      } catch (error) {
-        if (!hasCode(error, "EEXIST")) {
-          await unlink(ownerPath).catch(() => undefined);
-          throw error;
-        }
-        try {
-          if (await clearDeadStaleLock(lockPath)) continue;
-        } catch (lockError) {
-          if (isMissing(lockError)) continue;
-          await unlink(ownerPath).catch(() => undefined);
-          throw lockError;
-        }
-        if (Date.now() >= deadline) {
-          await unlink(ownerPath).catch(() => undefined);
-          throw new Error("Local transparency log lock timed out");
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 20));
-      }
-    }
-    try {
+      await waitForLockTurn(queuePath, turn, deadline);
+      await waitForLegacyLock(legacyLockPath, deadline);
       return await operation();
     } finally {
+      await finishLockTurn(turn, "released");
+    }
+  }
+}
+
+async function allocateLockTurn(
+  queuePath: string,
+  owner: TransparencyLockOwner,
+): Promise<TransparencyLockTurn> {
+  while (true) {
+    const turns = await listLockTurns(queuePath);
+    const sequence = (turns.at(-1)?.sequence ?? 0) + 1;
+    if (sequence > MAXIMUM_LOCK_TURNS) {
+      throw new Error("Local transparency lock queue reached its turn boundary");
+    }
+    const name = `turn-${String(sequence).padStart(12, "0")}`;
+    const target = path.join(queuePath, name);
+    const temporary = path.join(queuePath, `.turn-${owner.nonce}.tmp`);
+    await mkdir(temporary, { mode: 0o700 });
+    try {
+      const handle = await open(path.join(temporary, "owner.json"), "wx", 0o600);
       try {
-        await unlinkOwnedLock(lockPath, owner.nonce);
+        await handle.writeFile(canonicalize(owner), "utf8");
+        await handle.sync();
       } finally {
-        await unlink(ownerPath).catch(() => undefined);
+        await handle.close();
       }
+      await syncDirectory(temporary);
+      try {
+        await rename(temporary, target);
+      } catch (error) {
+        if (!hasCode(error, "EEXIST") && !hasCode(error, "ENOTEMPTY")) {
+          throw error;
+        }
+        await removeTemporaryTurn(temporary);
+        continue;
+      }
+      await syncDirectory(queuePath);
+      return { sequence, path: target, owner };
+    } catch (error) {
+      await removeTemporaryTurn(temporary);
+      throw error;
     }
   }
 }
 
-async function clearDeadStaleLock(
-  lockPath: string,
-): Promise<boolean> {
-  const before = await readStableLockOwnerSnapshot(lockPath);
-  if (!before) return false;
-  if (
-    Date.now() - before.stats.mtimeMs <= LOCK_STALE_MS ||
-    isProcessAlive(before.owner.pid)
-  ) {
-    return false;
-  }
-  const claimOwner: TransparencyLockOwner = {
-    pid: process.pid,
-    nonce: randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
-  const claimPath = `${lockPath}.reclaim.${claimOwner.nonce}.claim`;
-  const temporaryPath = `${lockPath}.reclaim.${claimOwner.nonce}.tmp`;
-  let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    temporaryHandle = await open(temporaryPath, "wx", 0o600);
-    await temporaryHandle.writeFile(canonicalize(claimOwner), "utf8");
-    await temporaryHandle.sync();
-    await temporaryHandle.close();
-    temporaryHandle = undefined;
-    await rename(temporaryPath, claimPath);
-  } catch (error) {
-    await temporaryHandle?.close().catch(() => undefined);
-    await unlink(temporaryPath).catch(() => undefined);
-    throw error;
-  }
-  try {
-    await delay(RECLAIM_ELECTION_SETTLE_MS);
-    const elected = await electedReclaimClaim(lockPath);
-    if (elected?.owner.nonce !== claimOwner.nonce) return false;
-    const after = await readStableLockOwnerSnapshot(lockPath);
-    if (!after) return false;
-    if (
-      before.stats.dev !== after.stats.dev ||
-      before.stats.ino !== after.stats.ino ||
-      before.stats.size !== after.stats.size ||
-      before.stats.mtimeMs !== after.stats.mtimeMs ||
-      before.owner.nonce !== after.owner.nonce ||
-      Date.now() - after.stats.mtimeMs <= LOCK_STALE_MS ||
-      isProcessAlive(after.owner.pid)
-    ) {
-      return false;
+async function waitForLockTurn(
+  queuePath: string,
+  turn: TransparencyLockTurn,
+  deadline: number,
+): Promise<void> {
+  while (true) {
+    let blocked = false;
+    for (const predecessor of await listLockTurns(queuePath)) {
+      if (predecessor.sequence >= turn.sequence) break;
+      try {
+        if (await lockTurnFinished(predecessor.path)) continue;
+      } catch (error) {
+        if (!(error instanceof ConcurrentLockReadError)) throw error;
+        blocked = true;
+        break;
+      }
+      const snapshot = await readLockOwnerSnapshot(
+        path.join(predecessor.path, "owner.json"),
+      );
+      if (
+        Date.now() - snapshot.stats.mtimeMs > LOCK_STALE_MS &&
+        !isProcessAlive(snapshot.owner.pid)
+      ) {
+        await finishLockTurn(
+          {
+            ...predecessor,
+            owner: snapshot.owner,
+          },
+          "abandoned",
+        );
+        continue;
+      }
+      blocked = true;
+      break;
     }
-    const finalElection = await electedReclaimClaim(lockPath);
-    if (finalElection?.owner.nonce !== claimOwner.nonce) return false;
-    return unlinkOwnedLock(lockPath, before.owner.nonce);
-  } finally {
-    await unlinkOwnedClaim(claimPath, claimOwner.nonce);
-    await unlink(temporaryPath).catch(() => undefined);
+    if (!blocked) return;
+    if (Date.now() >= deadline) {
+      throw new Error("Local transparency log lock timed out");
+    }
+    await delay(20);
   }
 }
 
-async function electedReclaimClaim(
-  lockPath: string,
-): Promise<{ path: string; owner: TransparencyLockOwner } | null> {
-  const directory = path.dirname(lockPath);
-  const prefix = `${path.basename(lockPath)}.reclaim.`;
-  const names = (await readdir(directory)).filter(
-    (name) => name.startsWith(prefix) && name.endsWith(".claim"),
-  );
-  if (names.length > MAXIMUM_RECLAIM_CLAIMS) {
-    throw new Error("Local transparency lock has too many reclaim claims");
-  }
-  const active: Array<{ path: string; owner: TransparencyLockOwner }> = [];
-  for (const name of names) {
-    const claimPath = path.join(directory, name);
-    const snapshot = await readStableLockOwnerSnapshot(claimPath);
-    if (!snapshot) continue;
-    const nameNonce = name.slice(prefix.length, -".claim".length);
-    if (snapshot.owner.nonce !== nameNonce) {
-      throw new Error("Local transparency reclaim claim identity is invalid");
-    }
+async function listLockTurns(
+  queuePath: string,
+): Promise<Array<{ sequence: number; path: string }>> {
+  const entries = await readdir(queuePath, { withFileTypes: true });
+  const turns: Array<{ sequence: number; path: string }> = [];
+  for (const entry of entries) {
     if (
-      Date.now() - snapshot.stats.mtimeMs > LOCK_STALE_MS ||
-      !isProcessAlive(snapshot.owner.pid)
+      LOCK_TURN_TEMPORARY_PATTERN.test(entry.name) &&
+      entry.isDirectory() &&
+      !entry.isSymbolicLink()
     ) {
-      await unlinkOwnedClaim(claimPath, snapshot.owner.nonce);
       continue;
     }
-    active.push({ path: claimPath, owner: snapshot.owner });
+    const match = entry.name.match(LOCK_TURN_PATTERN);
+    if (!match || !entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error("Local transparency lock queue contains an unsafe entry");
+    }
+    turns.push({
+      sequence: Number(match[1]),
+      path: path.join(queuePath, entry.name),
+    });
   }
-  active.sort(
-    (left, right) =>
-      Date.parse(left.owner.createdAt) - Date.parse(right.owner.createdAt) ||
-      left.owner.nonce.localeCompare(right.owner.nonce),
-  );
-  return active[0] ?? null;
+  if (turns.length > MAXIMUM_LOCK_TURNS) {
+    throw new Error("Local transparency lock queue exceeds its turn boundary");
+  }
+  turns.sort((left, right) => left.sequence - right.sequence);
+  for (let index = 0; index < turns.length; index += 1) {
+    if (turns[index]!.sequence !== index + 1) {
+      throw new Error("Local transparency lock queue has a missing turn");
+    }
+  }
+  return turns;
 }
 
-async function unlinkOwnedClaim(claimPath: string, nonce: string): Promise<void> {
-  const snapshot = await readStableLockOwnerSnapshot(claimPath);
-  if (snapshot?.owner.nonce === nonce) await unlink(claimPath).catch((error) => {
+async function lockTurnFinished(turnPath: string): Promise<boolean> {
+  const entries = await readdir(turnPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (
+      entry.name !== "owner.json" &&
+      entry.name !== LOCK_TURN_COMPLETION_NAME &&
+      !LOCK_TURN_COMPLETION_TEMPORARY_PATTERN.test(entry.name)
+    ) {
+      throw new Error("Local transparency lock turn contains an unsafe entry");
+    }
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error("Local transparency lock turn entry is unsafe");
+    }
+  }
+  if (!entries.some((entry) => entry.name === "owner.json")) {
+    throw new Error("Local transparency lock turn owner is missing");
+  }
+  const completion = entries.find(
+    (entry) => entry.name === LOCK_TURN_COMPLETION_NAME,
+  );
+  if (!completion) return false;
+  const owner = await readLockOwnerSnapshot(path.join(turnPath, "owner.json"));
+  await readLockTurnCompletion(
+    path.join(turnPath, LOCK_TURN_COMPLETION_NAME),
+    owner.owner.nonce,
+  );
+  return true;
+}
+
+async function finishLockTurn(
+  turn: TransparencyLockTurn,
+  disposition: "released" | "abandoned",
+): Promise<void> {
+  const target = path.join(turn.path, LOCK_TURN_COMPLETION_NAME);
+  const temporary = path.join(
+    turn.path,
+    `.completion-${randomUUID()}.tmp`,
+  );
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(
+      canonicalize({
+        schemaVersion: 1,
+        disposition,
+        ownerNonce: turn.owner.nonce,
+        completedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await link(temporary, target);
+    await syncDirectory(turn.path);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    if (hasCode(error, "EEXIST")) {
+      const completed = await readLockTurnCompletion(
+        target,
+        turn.owner.nonce,
+      );
+      if (completed.disposition !== disposition) {
+        throw new Error(
+          "Local transparency lock turn completion is contradictory",
+        );
+      }
+      return;
+    }
+    throw error;
+  } finally {
+    await unlink(temporary).catch((error) => {
+      if (!isMissing(error)) throw error;
+    });
+  }
+}
+
+async function readLockTurnCompletion(
+  completionPath: string,
+  expectedOwnerNonce: string,
+): Promise<{ disposition: "released" | "abandoned" }> {
+  const { source } = await readBoundedRegularFile(
+    completionPath,
+    MAXIMUM_LOCK_BYTES,
+    "Local transparency lock turn completion",
+  );
+  const parsed = asRecord(
+    parseCanonicalJson(source, MAXIMUM_LOCK_BYTES),
+    "Local transparency lock turn completion",
+  );
+  assertExactKeys(
+    parsed,
+    ["schemaVersion", "disposition", "ownerNonce", "completedAt"],
+    "Local transparency lock turn completion",
+  );
+  if (
+    parsed.schemaVersion !== 1 ||
+    (parsed.disposition !== "released" && parsed.disposition !== "abandoned") ||
+    parsed.ownerNonce !== expectedOwnerNonce ||
+    typeof parsed.completedAt !== "string" ||
+    !Number.isFinite(Date.parse(parsed.completedAt))
+  ) {
+    throw new Error("Local transparency lock turn completion is invalid");
+  }
+  return { disposition: parsed.disposition };
+}
+
+async function waitForLegacyLock(
+  lockPath: string,
+  deadline: number,
+): Promise<void> {
+  while (true) {
+    let snapshot: Awaited<ReturnType<typeof readLockOwnerSnapshot>>;
+    try {
+      snapshot = await readLockOwnerSnapshot(lockPath);
+    } catch (error) {
+      if (isMissing(error)) return;
+      if (error instanceof ConcurrentLockReadError) {
+        if (Date.now() >= deadline) {
+          throw new Error("Local transparency log lock timed out");
+        }
+        await delay(20);
+        continue;
+      }
+      throw error;
+    }
+    if (
+      Date.now() - snapshot.stats.mtimeMs > LOCK_STALE_MS &&
+      !isProcessAlive(snapshot.owner.pid)
+    ) {
+      try {
+        await unlink(lockPath);
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("Local transparency log lock timed out");
+    }
+    await delay(20);
+  }
+}
+
+async function removeTemporaryTurn(temporary: string): Promise<void> {
+  await unlink(path.join(temporary, "owner.json")).catch((error) => {
+    if (!isMissing(error)) throw error;
+  });
+  await rmdir(temporary).catch((error) => {
     if (!isMissing(error)) throw error;
   });
 }
 
-async function unlinkOwnedLock(lockPath: string, nonce: string): Promise<boolean> {
-  const snapshot = await readStableLockOwnerSnapshot(lockPath);
-  if (snapshot?.owner.nonce !== nonce) return false;
-  try {
-    await unlink(lockPath);
-    return true;
-  } catch (error) {
-    if (isMissing(error)) return false;
-    throw error;
-  }
-}
-
-async function readStableLockOwnerSnapshot(lockPath: string): Promise<{
-  owner: TransparencyLockOwner;
-  stats: Stats;
-} | null> {
-  try {
-    return await readLockOwnerSnapshot(lockPath);
-  } catch (error) {
-    if (isMissing(error) || error instanceof ConcurrentLockReadError) return null;
-    throw error;
+async function assertRegularDirectory(
+  directory: string,
+  label: string,
+): Promise<void> {
+  const stats = await lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular directory`);
   }
 }
 
@@ -463,6 +602,15 @@ async function readBoundedRegularFile(
       source: buffer.subarray(0, offset).toString("utf8"),
       stats: before,
     };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  const handle = await open(directory, "r");
+  try {
+    await handle.sync();
   } finally {
     await handle.close();
   }
