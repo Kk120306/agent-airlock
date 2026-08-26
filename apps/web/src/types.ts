@@ -4,6 +4,7 @@ export type RunTransactionStatus =
   | "preparing"
   | "executing"
   | "validating"
+  | "sealed"
   | "promoting"
   | "promoted"
   | "quarantined"
@@ -242,6 +243,8 @@ export interface Message {
 export interface AgentRun {
   id: string;
   agentId: string;
+  candidateSetId: string | null;
+  competitorId: string | null;
   status: RunStatus;
   prompt: string;
   output: string | null;
@@ -255,6 +258,98 @@ export interface AgentRun {
   createdAt: string;
 }
 
+export type SelectionCriterionKind =
+  | "quality-assertion"
+  | "changed-files"
+  | "added-bytes"
+  | "latency-ms"
+  | "total-tokens";
+
+export interface CandidateScoreComponent {
+  kind: SelectionCriterionKind;
+  source:
+    | "trusted-validation-evaluator"
+    | "workspace-change-evidence"
+    | "monotonic-execution-measurement"
+    | "runtime-usage-response";
+  evaluatorVersion: string;
+  direction: "maximize" | "minimize";
+  maximum: number;
+  rawValue: number;
+  normalizedValue: number;
+}
+
+export interface CandidateScorecardEntry {
+  competitorId: string;
+  eligible: boolean;
+  exclusions: string[];
+  components: CandidateScoreComponent[];
+  rank: number | null;
+}
+
+export interface CandidateSet {
+  schemaVersion: 1;
+  id: string;
+  agentId: string;
+  objective: string;
+  source: {
+    stateId: string;
+    contentHash: string;
+    codexThreadId: string | null;
+  };
+  outcomeContract: OutcomeContract;
+  competitors: Array<{
+    id: string;
+    runId: string;
+    executorProfileId: string;
+    strategyInstruction: string;
+    status:
+      | "pending"
+      | "running"
+      | "eligible"
+      | "ineligible"
+      | "failed"
+      | "selected"
+      | "promoted"
+      | "retained"
+      | "discarded"
+      | "cancelled";
+    criterionValues: Partial<Record<SelectionCriterionKind, number>>;
+    exclusions: string[];
+    evaluationDurationMs: number | null;
+    loserDisposition: "pending" | "retained" | "discarded" | "winner";
+    error: string | null;
+  }>;
+  maxConcurrency: number;
+  loserPolicy: "retain" | "discard";
+  phase:
+    | "admitted"
+    | "evaluating"
+    | "evaluated"
+    | "selected"
+    | "promoting"
+    | "promoted"
+    | "cleaning-losers"
+    | "completed"
+    | "no-winner"
+    | "stale"
+    | "recovery-error";
+  selectionDecision: {
+    winnerCompetitorId: string | null;
+    orderedCompetitorIds: string[];
+    scorecard: CandidateScorecardEntry[];
+    tieBreak: "competitor-id-ascending-byte-order";
+    decisionDigest: string;
+  } | null;
+  selectedCompetitorId: string | null;
+  winnerRunId: string | null;
+  cancellationRequested: boolean;
+  recoveryError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
 export interface SystemInfo {
   demoMode: boolean;
   inferenceMode: "deterministic-local-fixture" | "modelark";
@@ -263,6 +358,11 @@ export interface SystemInfo {
   arkModel: string | null;
   codexAvailable: boolean;
   codexSandboxMode: string;
+  competingFutures: {
+    available: boolean;
+    tokenBudgetEnforcement: "provider-boundary" | "unsupported";
+    reason: string | null;
+  };
   runtimeProvider: "local-process" | "container";
   containerEngine: string | null;
   runtime: string;

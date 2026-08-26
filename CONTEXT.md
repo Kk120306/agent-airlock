@@ -65,6 +65,26 @@ _Avoid_: Auto-migration, provider toggle, manifest patch
 The exact Resource Provider vector persisted by an earlier Promotion or Quarantine and used to recover that work after the configured registry expands additively.
 _Avoid_: Current providers, best-effort providers, inferred generation
 
+**Candidate Set**:
+A bounded group of sibling Candidate States created from one exact Canonical State and one snapshotted Outcome Contract for the same objective.
+_Avoid_: Agent race, batch, tournament
+
+**Sealed Candidate**:
+A validated Candidate State whose exact built-in resources, provider resources, deferred intents, and Runtime result are committed for deterministic Selection and later re-verification.
+_Avoid_: Winner, approved state, frozen sandbox
+
+**Selection Contract**:
+A versioned deterministic ranking definition that can compare only Candidates whose required Validations passed.
+_Avoid_: Judge prompt, scorer, preference
+
+**Selection Decision**:
+The durable scorecard and exact one-winner or no-winner result produced by applying a Selection Contract to one Candidate Set.
+_Avoid_: Model choice, vote, race result
+
+**Promotion Authority**:
+The versioned journal evidence that names either an ordinary Run or the exact Candidate Set decision, competitor, winner Run, seal, and source allowed to recover Promotion.
+_Avoid_: Winner hint, selected flag, recovery guess
+
 **External Action Intent**:
 A validated description of an irreversible external operation that remains deferred until promotion.
 _Avoid_: Tool call, queued action, side effect

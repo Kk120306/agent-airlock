@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed for Phase 9 pending Wayfinder decision synchronization and the committed Phase 8 gate.
+Accepted for Phase 9 implementation on 2026-08-26.
+Wayfinder decision synchronization remains pending until GitHub connectivity is available and does not change the accepted local semantics.
 
 ## Context
 
@@ -20,6 +21,7 @@ Treating competing siblings as Repair children would silently weaken that lineag
 
 Airlock introduces a `Candidate Set` as a durable aggregate owned by one Agent and one exact Canonical State snapshot.
 The aggregate snapshots one objective, one Outcome Contract, one Selection Contract, one sorted provider-version vector, one bounded competitor list, and one loser-disposition policy before any competitor starts.
+Admission deterministically reserves a positive trusted Runtime total-token allowance for every competitor, and the reservations cannot exceed the snapshotted aggregate token budget.
 
 Every competitor receives a unique Run identifier, Candidate State, Codex home, outbox, provider Candidate set, and Runtime binding set.
 All siblings are prepared from the same immutable source version through a set-scoped preparation operation.
@@ -41,7 +43,8 @@ Airlock persists the complete ordered scorecard and one winner decision before s
 After that decision is durable, recovery may only promote or reconcile that exact winner.
 Airlock never falls through to a runner-up automatically after a selected winner encounters a Promotion contradiction.
 
-The selected competitor enters the existing Promotion journal and forward-recovery protocol.
+The selected competitor enters Promotion journal schema 2 with a versioned authority that binds the Candidate Set, competitor, winner Run, Selection Decision digest, seal digest, and exact source.
+Startup replays the Selection Decision and requires exact agreement with this authority before forward recovery may install state, advance Canonical State, or dispatch effects.
 Only its immutable state may become Canonical State, and only its External Action Intents may be dispatched.
 Losing candidates are retained as Quarantine or discarded according to the snapshotted policy after the winner becomes recoverably selected.
 Interrupted loser cleanup is idempotent and cannot change the selected winner.
@@ -80,8 +83,15 @@ This keeps existing Agent CRUD, lifecycle controls, Playground chat, persistent 
 Candidate Set orchestration owns the Agent-level execution lease while bounded sibling evaluations may run concurrently underneath it.
 The existing one-active-Run guard cannot be reused as the sibling scheduler because it would serialize or reject the competitors.
 
-Sealed Candidate storage, Candidate Set journals, scorecards, and loser cleanup add durable state that requires schema migration, retention protection, restart reconciliation, and bounded operator evidence.
+Sealed Candidate storage, Candidate Set aggregates, scorecards, and loser cleanup add durable state that requires schema migration, retention protection, restart reconciliation, and bounded operator evidence.
 The system gains optimization through safe exploration without treating isolation or Validation as optional ranking preferences.
+
+Database version 9 persists Candidate Sets and links each competitor to an ordinary Run Transaction while migrating version 8 history without inventing competition.
+The implementation retains ordinary `AirlockRunner.run` compatibility and adds a deferred sealed branch, exact winner Promotion, and sealed loser disposal.
+Startup reconciles unresolved Candidate Sets before additive Resource Registry Transition so historical provider vectors remain sufficient for winner Promotion and loser cleanup.
+Any unresolved Candidate Set recovery failure defers provider onboarding and Resource Registry generation commit.
+The strict no-cost acceptance suite proves one real HTTP-to-CodexRunner three-process selection, aggregate token reservation, all-invalid completion, terminal cancellation, seal tamper failure, journal-authority contradiction, winner restart recovery, historical-provider onboarding, Registry Transition blocking, and exactly one supported winner effect.
+The unrestricted production Chrome and clean-clone repetitions remain release-environment gates because the current sandbox cannot bind loopback listeners or keep Chrome alive.
 
 ## Alternatives rejected
 
@@ -104,4 +114,3 @@ Once selection is durable, silently changing winners would create two possible a
 ### Model siblings as Repair children
 
 This would conflict with ADR 0007's single-child lineage and would not describe ordinary exploration from current Canonical State.
-

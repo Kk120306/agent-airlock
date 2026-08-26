@@ -19,12 +19,32 @@ const prompt =
     : (args.at(-1) ?? "");
 const threadId = resumedThreadId ?? "baseline-thread";
 const repairRequest = /Agent Airlock Repair Run/i.test(prompt);
+const candidateSetRequest = /Agent Airlock Candidate Set/i.test(prompt);
+const competitorId = prompt.match(/Competitor ([A-Za-z0-9._:-]+)\./)?.[1] ?? null;
 const destructiveRequest = !repairRequest && /delete\s+AGENTS\.md/i.test(prompt);
 const multiResourceRequest = /multi-resource release/i.test(prompt);
 const codexHome = process.env.CODEX_HOME;
 const outboxPath = process.env.AIRLOCK_OUTBOX_PATH;
 const repairReferencePath = process.env.AIRLOCK_REPAIR_REFERENCE_PATH;
 const httpObjectPath = process.env.AIRLOCK_RESOURCE_HTTP_OBJECT_PATH;
+const maximumTotalTokens = process.env.AIRLOCK_MAXIMUM_TOTAL_TOKENS;
+
+const fixtureUsage = {
+  inputTokens:
+    competitorId === "focused-valid" ? 10 : competitorId === "broad-valid" ? 18 : 12,
+  outputTokens: competitorId === "focused-valid" ? 6 : 8,
+};
+
+if (candidateSetRequest) {
+  const parsedMaximum = Number(maximumTotalTokens);
+  if (
+    !Number.isSafeInteger(parsedMaximum) ||
+    parsedMaximum < fixtureUsage.inputTokens + fixtureUsage.outputTokens
+  ) {
+    process.stderr.write("Fixture rejected the token allowance before execution\n");
+    process.exit(11);
+  }
+}
 
 if (!codexHome) {
   process.stderr.write("CODEX_HOME is required\n");
@@ -49,7 +69,10 @@ if (resumedThreadId) {
     process.stderr.write("Accepted session artifact did not persist\n");
     process.exit(4);
   }
-  if (!acceptedMemory.includes("accepted-memory")) {
+  if (
+    !acceptedMemory.includes("accepted-memory") &&
+    !acceptedMemory.includes("candidate-memory-focused-valid")
+  ) {
     process.stderr.write("Accepted reasoning did not persist\n");
     process.exit(5);
   }
@@ -85,7 +108,72 @@ if (!resumedThreadId) {
   );
 }
 
-if (repairRequest) {
+if (candidateSetRequest) {
+  if (!competitorId) {
+    process.stderr.write("Candidate Set competitor identity is required\n");
+    process.exit(9);
+  }
+  if (competitorId === "unsafe-fast") {
+    await rm(path.join(process.cwd(), "AGENTS.md"));
+    await writeFile(
+      path.join(process.cwd(), "unsafe-fast.txt"),
+      "fast result that must fail required Validation\n",
+      "utf8",
+    );
+  } else if (competitorId === "broad-valid") {
+    await mkdir(path.join(process.cwd(), "src", "broad"), { recursive: true });
+    await Promise.all([
+      writeFile(
+        path.join(process.cwd(), "src", "broad", "implementation.ts"),
+        "export const implementation = 'broad-valid';\n",
+        "utf8",
+      ),
+      writeFile(
+        path.join(process.cwd(), "src", "broad", "verification.ts"),
+        "export const verified = true;\n",
+        "utf8",
+      ),
+      writeFile(
+        path.join(process.cwd(), "broad-notes.md"),
+        "A comprehensive valid future with a wider change surface.\n",
+        "utf8",
+      ),
+    ]);
+  } else if (competitorId === "focused-valid") {
+    await mkdir(path.join(process.cwd(), "src"), { recursive: true });
+    await writeFile(
+      path.join(process.cwd(), "src", "selected-future.ts"),
+      "export const selectedFuture = 'focused-valid';\n",
+      "utf8",
+    );
+  } else if (competitorId === "slow-valid") {
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    await mkdir(path.join(process.cwd(), "src"), { recursive: true });
+    await writeFile(
+      path.join(process.cwd(), "src", "slow-future.ts"),
+      "export const slowFuture = 'must-be-cancelled';\n",
+      "utf8",
+    );
+  } else {
+    process.stderr.write("Unknown deterministic Candidate Set competitor\n");
+    process.exit(10);
+  }
+  if (!outboxPath) throw new Error("AIRLOCK_OUTBOX_PATH is required");
+  await writeFile(
+    outboxPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: competitorId + "-effect",
+      type: "demo.notification.requested",
+      payload: {
+        destination: "demo-console",
+        subject: "Candidate " + competitorId,
+        body: "Only the selected Candidate may deliver this effect.",
+      },
+    }) + "\n",
+    "utf8",
+  );
+} else if (repairRequest) {
   if (!repairReferencePath) {
     process.stderr.write("AIRLOCK_REPAIR_REFERENCE_PATH is required\n");
     process.exit(7);
@@ -224,13 +312,17 @@ await appendFile(
       ? "rejected-memory"
       : repairRequest
         ? "repaired-memory"
+        : candidateSetRequest
+          ? "candidate-memory-" + competitorId
         : "accepted-memory",
     prompt,
   }) + "\n",
   "utf8",
 );
 
-const output = destructiveRequest
+const output = candidateSetRequest
+  ? "Evaluated isolated Candidate " + competitorId + " against the shared source and required Outcome Contract."
+  : destructiveRequest
   ? "Attempted the destructive workspace change for: " + prompt
   : repairRequest
     ? "Repaired the quarantined future using bounded Validation evidence and preserved its useful workspace and data changes."
@@ -247,7 +339,11 @@ for (const event of [
   { type: "item.completed", item: { type: "agent_message", text: output } },
   {
     type: "turn.completed",
-    usage: { input_tokens: 12, cached_input_tokens: 2, output_tokens: 8 },
+    usage: {
+      input_tokens: fixtureUsage.inputTokens,
+      cached_input_tokens: 2,
+      output_tokens: fixtureUsage.outputTokens,
+    },
   },
 ]) {
   process.stdout.write(JSON.stringify(event) + "\n");

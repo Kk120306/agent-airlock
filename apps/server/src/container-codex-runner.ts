@@ -2,7 +2,11 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
-import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
+import {
+  assertTrustedTokenBudget,
+  buildCodexArgs,
+  parseCodexEventLine,
+} from "./codex-runner.js";
 import { RunCancelledError } from "./errors.js";
 import { resourceEnvironmentName } from "./resource-registry.js";
 import type {
@@ -15,6 +19,7 @@ import type {
 const execFileAsync = promisify(execFile);
 
 interface ActiveContainer {
+  agentId: string;
   child: ChildProcess;
   containerName: string;
   cancelled: boolean;
@@ -41,7 +46,10 @@ export function buildContainerRunArgs(
   request: RunnerRequest,
   config: AppConfig,
 ): string[] {
-  const name = containerName(request.agentId, config.runtimeInstanceId);
+  const name = containerName(
+    request.executionId ?? request.agentId,
+    config.runtimeInstanceId,
+  );
   const engineName = config.containerEngine.split(/[\\/]/).at(-1)?.toLowerCase();
   return [
     "run",
@@ -146,13 +154,21 @@ export class ContainerCodexRunner implements AgentRunner {
     }
   }
 
-  async cancel(agentId: string): Promise<boolean> {
-    const active = this.active.get(agentId);
-    if (!active) return false;
-
-    active.cancelled = true;
-    await this.removeContainer(active);
-    await active.settled;
+  async cancel(agentId: string, executionId?: string): Promise<boolean> {
+    const scoped = executionId ? this.active.get(executionId) : null;
+    const active = scoped
+      ? scoped.agentId === agentId
+        ? [scoped]
+        : []
+      : executionId
+        ? []
+        : [...this.active.values()].filter(
+            (execution) => execution.agentId === agentId,
+          );
+    if (active.length === 0) return false;
+    for (const execution of active) execution.cancelled = true;
+    await Promise.all(active.map((execution) => this.removeContainer(execution)));
+    await Promise.all(active.map((execution) => execution.settled));
     return true;
   }
 
@@ -174,8 +190,9 @@ export class ContainerCodexRunner implements AgentRunner {
   }
 
   async run(request: RunnerRequest): Promise<RunnerResult> {
-    if (this.active.has(request.agentId)) {
-      throw new Error("Agent already has an active Runtime container");
+    const executionId = request.executionId ?? request.agentId;
+    if (this.active.has(executionId)) {
+      throw new Error("Execution already has an active Runtime container");
     }
 
     const child = spawn(
@@ -192,15 +209,16 @@ export class ContainerCodexRunner implements AgentRunner {
       child.once("error", () => resolve());
     });
     const active: ActiveContainer = {
+      agentId: request.agentId,
       child,
-      containerName: containerName(request.agentId, this.config.runtimeInstanceId),
+      containerName: containerName(executionId, this.config.runtimeInstanceId),
       cancelled: false,
       timedOut: false,
       outputExceeded: false,
       settled,
       termination: null,
     };
-    this.active.set(request.agentId, active);
+    this.active.set(executionId, active);
 
     const parsed: ParsedEvents = {
       messages: [],
@@ -264,10 +282,11 @@ export class ContainerCodexRunner implements AgentRunner {
       }
       const output = parsed.messages.at(-1)?.trim();
       if (!output) throw new Error("Codex completed without an agent message");
+      assertTrustedTokenBudget(request, parsed.usage);
       return { output, threadId: parsed.threadId, usage: parsed.usage };
     } finally {
       clearTimeout(timeout);
-      this.active.delete(request.agentId);
+      this.active.delete(executionId);
     }
   }
 

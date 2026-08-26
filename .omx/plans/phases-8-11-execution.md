@@ -1,6 +1,6 @@
 # Phases 8 through 11 execution plan
 
-**Status:** Phase 8 release candidate implemented and independently approved on `post-hackathon/phases-8-11`; unrestricted browser and clean-clone execution remain pending
+**Status:** Phase 9 committed in the writable release clone; unrestricted browser, clean-clone repetition, main-workspace Git synchronization, and Wayfinder synchronization remain pending
 
 **Scope:** Transactional Resource SDK, Competing Futures, Adaptive Assurance, and Portable Trust
 
@@ -238,11 +238,13 @@ An operator can ask Airlock to explore several isolated approaches to one object
 
 Phase 9 must resolve the tension between ADR 0007's single-child Repair lineage, the service's one-active-Run rule, and the roadmap's sibling Candidate States.
 The selected design must preserve one operator-visible Agent lifecycle while allowing bounded internal competitors from one exact source.
-ADR 0011 now proposes a durable Candidate Set, a reversible evaluation boundary, a deterministic lexicographic Selection Contract, one persisted winner decision, and existing Promotion-journal reuse.
-The implementation-ready design and adversarial acceptance matrix are recorded in `docs/architecture/competing-futures.md`.
-Phase 9 implementation remains held until the Phase 8 work can be committed and its unrestricted browser and clean-clone gates can execute outside the current sandbox.
+ADR 0011 accepts a durable Candidate Set, a reversible evaluation boundary, a deterministic lexicographic Selection Contract, one persisted winner decision, and existing Promotion-journal reuse.
+The implemented architecture and adversarial acceptance matrix are recorded in `docs/architecture/competing-futures.md`.
+The implementation remains isolated from the frozen Phase 7 judge release, and its unrestricted browser and clean-clone gates remain pending outside the current sandbox.
 
 ### Batch 9.1: Model Candidate Sets and Selection Contracts
+
+**Delivery status:** Complete.
 
 1. Add canonical domain terms only after the Wayfinder decision resolves.
 2. Define Candidate Set, competitor, selection criterion, selection evidence, winner decision, and loser disposition types.
@@ -253,6 +255,8 @@ Phase 9 implementation remains held until the Phase 8 work can be committed and 
 
 ### Batch 9.2: Separate evaluation from Promotion
 
+**Delivery status:** Complete.
+
 1. Split candidate execution and Validation from the irreversible Promotion decision inside the Airlock engine.
 2. Prepare every sibling from one exact canonical identifier, composite fingerprint, Outcome Contract, and provider-version vector.
 3. Run siblings with isolated workspaces, Codex homes, outboxes, provider candidates, and Runtime bindings.
@@ -262,6 +266,8 @@ Phase 9 implementation remains held until the Phase 8 work can be committed and 
 
 ### Batch 9.3: Rank, retain, and explain
 
+**Delivery status:** Complete.
+
 1. Support deterministic criteria for required-Validation eligibility, operator-supplied quality assertions, changed-file count, added bytes, latency, and token usage.
 2. Normalize criteria into bounded integer scores to avoid floating-point drift.
 3. Persist every input, normalized score, tie-break, exclusion, and final decision.
@@ -270,6 +276,8 @@ Phase 9 implementation remains held until the Phase 8 work can be committed and 
 6. Add stale-source and concurrent-Candidate-Set conflict handling.
 
 ### Batch 9.4: Deliver the operator journey
+
+**Delivery status:** Implementation and production-bundle specification complete; unrestricted Chrome execution and clean-clone repetition remain environment gates.
 
 1. Add one bounded `Explore competing futures` action to the existing Playground.
 2. Show competitor progress, Validation eligibility, deterministic score components, winner reason, and loser dispositions.
@@ -289,6 +297,17 @@ Phase 9 implementation remains held until the Phase 8 work can be committed and 
 - The complete competing-futures browser journey is understandable without inspecting server logs.
 - `npm run check:phase9` passes twice and includes every Phase 8 gate.
 - Git contains one Phase 9 commit and the Wayfinder decision is resolved.
+
+### Phase 9 implementation evidence
+
+- Database version 9 migration and recursive strict parsing, Candidate Set admission, provider-boundary token capability gating, deterministic Selection, aggregate token reservation, scoped duration cancellation, authority-bound Promotion recovery, deletion safety, Registry Transition blocking, and real zero-cost HTTP-to-CodexRunner acceptance pass in 31 focused tests.
+- The Runner seals validated Candidates before Promotion planning and re-verifies the exact selected seal before reusing the existing Promotion journal.
+- Selected-winner tamper, all-invalid, cancellation, restart, historical-provider onboarding, loser cleanup, and exactly-one-effect paths pass without network or paid inference.
+- The `Explore futures` production UI, responsive layout, and Playwright contract are implemented.
+- `npm run check:phase9:selection`, `npm run check:phase9:boundaries`, server and web typechecks, and the production web build pass in the restricted environment.
+- `npm run demo:phase9 -- --reset`, `npm run test:phase9:ui`, and two clean-clone gate repetitions are ready but cannot bind loopback or keep Chrome alive in the current sandbox.
+- ADR 0011 is accepted locally, while the matching Wayfinder decision cannot be synchronized until GitHub connectivity returns.
+- The reviewed source diff is synchronized between the main workspace and the temporary writable Git clone, where the Phase 9 release commit is recorded because the main workspace Git metadata is sandbox-read-only.
 
 ### Phase 9 commit
 

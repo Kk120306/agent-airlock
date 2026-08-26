@@ -25,6 +25,8 @@ A later phase does not enter the judging path until the previous phase's automat
 | 7. Judge-ready release | Step 9 | The complete product is reproducible and demonstrable within three minutes. |
 
 Phases 8 through 11 are post-hackathon outcomes and must not expand the implementation scope before submission.
+Their isolated execution record is maintained in [the Phase 8 through 11 plan](phases-8-11-execution.md).
+Phase 9 Competing Futures is implemented on the post-hackathon branch without changing this frozen Phase 7 judging plan.
 
 ## Acceptance criteria
 

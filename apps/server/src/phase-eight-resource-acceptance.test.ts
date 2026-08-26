@@ -1711,6 +1711,12 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       },
     });
     expect(fixture.provider.quarantines.has(quarantineId)).toBe(true);
+    await expect(restarted.deleteAgent(fixture.agentId)).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringContaining("retained Quarantine"),
+    });
+    expect(restarted.getAgent(fixture.agentId).id).toBe(fixture.agentId);
+    expect(fixture.provider.quarantines.has(quarantineId)).toBe(true);
   });
 
   it.each([

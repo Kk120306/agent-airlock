@@ -1,6 +1,7 @@
 import type {
   Agent,
   AgentRun,
+  CandidateSet,
   Message,
   OutcomeContract,
   SystemInfo,
@@ -86,6 +87,34 @@ export const api = {
     request<{ messages: Message[] }>("/api/agents/" + id + "/messages"),
   runs: (id: string) =>
     request<{ runs: AgentRun[] }>("/api/agents/" + id + "/runs"),
+  candidateSets: (id: string) =>
+    request<{ candidateSets: CandidateSet[] }>(
+      "/api/agents/" + id + "/candidate-sets",
+    ),
+  createCandidateSet: (
+    id: string,
+    body: {
+      objective: string;
+      competitors: Array<{
+        id: string;
+        executorProfileId: "standard-v1";
+        strategyInstruction: string;
+      }>;
+      maxConcurrency: number;
+      loserPolicy: "retain" | "discard";
+    },
+  ) =>
+    request<{ candidateSet: CandidateSet; runs: AgentRun[] }>(
+      "/api/agents/" + id + "/candidate-sets",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  candidateSet: (id: string) =>
+    request<{ candidateSet: CandidateSet }>("/api/candidate-sets/" + id),
+  cancelCandidateSet: (id: string) =>
+    request<{ candidateSet: CandidateSet }>(
+      "/api/candidate-sets/" + id + "/cancel",
+      { method: "POST" },
+    ),
   sendMessage: (id: string, content: string) =>
     request<{ run: AgentRun; message: Message }>(
       "/api/agents/" + id + "/messages",

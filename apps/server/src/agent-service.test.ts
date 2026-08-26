@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,8 +73,15 @@ describe("Agent lifecycle", () => {
       .toBe("Builds apps");
     expect((await service.stopAgent(agent.id)).status).toBe("stopped");
     expect((await service.startAgent(agent.id)).status).toBe("ready");
-    await service.deleteAgent(agent.id);
+    const deleted = await service.deleteAgent(agent.id);
     expect(service.listAgents()).toHaveLength(0);
+    const audit = JSON.parse(
+      await readFile(
+        path.join(deleted.archivedWorkspace, ".airlock-archive-audit.json"),
+        "utf8",
+      ),
+    ) as { schemaVersion: number; agentId: string };
+    expect(audit).toMatchObject({ schemaVersion: 1, agentId: agent.id });
   });
 
   it("persists a playground conversation", async () => {

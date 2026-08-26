@@ -4,6 +4,7 @@ import {
   buildCodexArgs,
   buildCodexEnvironment,
   CodexRunner,
+  assertTrustedTokenBudget,
   parseCodexEventLine,
 } from "./codex-runner.js";
 
@@ -127,6 +128,50 @@ describe("Codex runner protocol", () => {
     );
   });
 
+  it("transports a Candidate Set token allowance only to the zero-cost demo fixture", () => {
+    const demoConfig = loadConfig({
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      CODEX_BIN: "/tmp/fake-codex.mjs",
+      ARK_API_KEY: "deterministic-local-fixture",
+      ARK_MODEL: "local-airlock-demo",
+      ARK_BASE_URL: "http://127.0.0.1:1/api/v3",
+      AIRLOCK_DEMO_MODE: "true",
+      RUNTIME_PROVIDER: "local-process",
+    });
+    const productionConfig = loadConfig({
+      NODE_ENV: "test",
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+    const budget = { schemaVersion: 1 as const, maximumTotalTokens: 37 };
+
+    expect(
+      buildCodexEnvironment(
+        demoConfig,
+        "/tmp/candidate-session",
+        undefined,
+        undefined,
+        [],
+        budget,
+      ).AIRLOCK_MAXIMUM_TOTAL_TOKENS,
+    ).toBe("37");
+    expect(
+      buildCodexEnvironment(
+        productionConfig,
+        "/tmp/candidate-session",
+        undefined,
+        undefined,
+        [],
+        budget,
+      ).AIRLOCK_MAXIMUM_TOTAL_TOKENS,
+    ).toBeUndefined();
+    expect(new CodexRunner(demoConfig).tokenBudgetEnforcement).toBe(
+      "provider-boundary",
+    );
+    expect(new CodexRunner(productionConfig).tokenBudgetEnforcement).toBeUndefined();
+  });
+
   it("exposes provider resources through derived local bindings", () => {
     const config = loadConfig({
       NODE_ENV: "test",
@@ -203,5 +248,25 @@ describe("Codex runner protocol", () => {
     expect(parsed.threadId).toBe("thread-123");
     expect(parsed.messages).toEqual(["Done."]);
     expect(parsed.usage).toEqual({ inputTokens: 10, outputTokens: 4 });
+  });
+
+  it("fails closed when trusted usage exceeds or omits a reserved token allowance", () => {
+    const request = {
+      agentId: "agent",
+      workspacePath: "/tmp/workspace",
+      codexHomePath: "/tmp/candidate-codex-home",
+      outboxPath: "/tmp/candidate-outbox/intents.jsonl",
+      prompt: "bounded future",
+      threadId: null,
+      tokenBudget: { schemaVersion: 1 as const, maximumTotalTokens: 12 },
+    };
+
+    expect(() =>
+      assertTrustedTokenBudget(request, { inputTokens: 8, outputTokens: 4 }),
+    ).not.toThrow();
+    expect(() =>
+      assertTrustedTokenBudget(request, { inputTokens: 8, outputTokens: 5 }),
+    ).toThrow(/exceeded/);
+    expect(() => assertTrustedTokenBudget(request, null)).toThrow(/omitted/);
   });
 });

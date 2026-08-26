@@ -36,9 +36,10 @@ const recoveryOutput =
   "Agent Airlock recovered this approved Promotion after a server restart. The original Runtime response was not duplicated into the Promotion journal.";
 
 export interface PromotionJournalRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   runId: string;
   agentId: string;
+  authority: PromotionAuthority;
   phase: PromotionJournalPhase;
   plan: PromotionPlan;
   targetCanonical: CanonicalStateReference | null;
@@ -47,6 +48,23 @@ export interface PromotionJournalRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export type PromotionAuthority =
+  | {
+      schemaVersion: 1;
+      kind: "ordinary-run";
+    }
+  | {
+      schemaVersion: 1;
+      kind: "candidate-set";
+      candidateSetId: string;
+      competitorId: string;
+      winnerRunId: string;
+      selectionDecisionDigest: string;
+      sealDigest: string;
+      sourceStateId: string;
+      sourceContentHash: string;
+    };
 
 export interface PromotionJournalScanError {
   runId: string | null;
@@ -71,6 +89,7 @@ export class PromotionJournal {
     plan: PromotionPlan;
     transaction: RunTransaction;
     result: RunnerResult;
+    authority?: PromotionAuthority;
   }): Promise<PromotionJournalRecord> {
     this.assertIdentifier(input.plan.runId, "Run");
     let result!: PromotionJournalRecord;
@@ -92,9 +111,12 @@ export class PromotionJournal {
         recoveryError: null,
       };
       const record: PromotionJournalRecord = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         runId: input.plan.runId,
         agentId: input.plan.agentId,
+        authority: structuredClone(
+          input.authority ?? { schemaVersion: 1, kind: "ordinary-run" },
+        ),
         phase: "validated",
         plan: structuredClone(input.plan),
         targetCanonical: null,
@@ -264,8 +286,21 @@ export class PromotionJournal {
       throw new Error("Promotion journal must be an object");
     }
     const record = value as PromotionJournalRecord;
+    assertExactKeys(record, [
+      "schemaVersion",
+      "runId",
+      "agentId",
+      "authority",
+      "phase",
+      "plan",
+      "targetCanonical",
+      "transaction",
+      "recoveryResult",
+      "createdAt",
+      "updatedAt",
+    ], "Promotion journal");
     if (
-      record.schemaVersion !== 1 ||
+      record.schemaVersion !== 2 ||
       !safeIdentifierPattern.test(record.runId) ||
       !safeIdentifierPattern.test(record.agentId) ||
       !phaseOrder.includes(record.phase) ||
@@ -283,6 +318,7 @@ export class PromotionJournal {
     ) {
       throw new Error("Promotion journal identity or schema is invalid");
     }
+    validatePromotionAuthority(record);
     const phaseIndex = phaseOrder.indexOf(record.phase);
     if (phaseIndex >= 1 && !record.targetCanonical) {
       throw new Error("Installed Promotion journal phase requires target fingerprints");
@@ -315,6 +351,75 @@ export class PromotionJournal {
     if (!safeIdentifierPattern.test(value)) {
       throw new Error(label + " identifier is not safe");
     }
+  }
+}
+
+function validatePromotionAuthority(record: PromotionJournalRecord): void {
+  const authority = record.authority;
+  if (!authority || typeof authority !== "object") {
+    throw new Error("Promotion journal authority is missing");
+  }
+  if (authority.kind === "ordinary-run") {
+    assertExactKeys(
+      authority,
+      ["schemaVersion", "kind"],
+      "ordinary Run Promotion authority",
+    );
+    if (authority.schemaVersion !== 1) {
+      throw new Error("Promotion journal authority schema is invalid");
+    }
+    return;
+  }
+  if (authority.kind !== "candidate-set") {
+    throw new Error("Promotion journal authority kind is invalid");
+  }
+  assertExactKeys(
+    authority,
+    [
+      "schemaVersion",
+      "kind",
+      "candidateSetId",
+      "competitorId",
+      "winnerRunId",
+      "selectionDecisionDigest",
+      "sealDigest",
+      "sourceStateId",
+      "sourceContentHash",
+    ],
+    "Candidate Set Promotion authority",
+  );
+  const authorityIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+  if (
+    authority.schemaVersion !== 1 ||
+    !authorityIdentifierPattern.test(authority.candidateSetId) ||
+    !authorityIdentifierPattern.test(authority.competitorId) ||
+    !safeIdentifierPattern.test(authority.winnerRunId) ||
+    !/^[a-f0-9]{64}$/.test(authority.selectionDecisionDigest) ||
+    !/^sha256:[a-f0-9]{64}$/.test(authority.sealDigest) ||
+    !authorityIdentifierPattern.test(authority.sourceStateId) ||
+    !/^sha256:[a-f0-9]{64}$/.test(authority.sourceContentHash) ||
+    authority.winnerRunId !== record.runId ||
+    authority.sourceStateId !== record.plan.sourceStateId ||
+    authority.sourceContentHash !== record.plan.sourceContentHash ||
+    authority.sourceStateId !== record.transaction.canonicalStateIdBefore ||
+    authority.sourceContentHash !== record.transaction.canonicalContentHashBefore
+  ) {
+    throw new Error("Candidate Set Promotion authority contradicts its journal");
+  }
+}
+
+function assertExactKeys(
+  value: object,
+  expected: readonly string[],
+  label: string,
+): void {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  if (
+    actual.length !== sortedExpected.length ||
+    actual.some((key, index) => key !== sortedExpected[index])
+  ) {
+    throw new Error(label + " contains unknown or missing fields");
   }
 }
 
@@ -560,6 +665,11 @@ function upgradeLegacyResourcePlan(value: unknown): unknown {
       : null;
   return {
     ...record,
+    schemaVersion: record.schemaVersion === 1 ? 2 : record.schemaVersion,
+    authority:
+      record.schemaVersion === 1 && record.authority === undefined
+        ? { schemaVersion: 1, kind: "ordinary-run" }
+        : record.authority,
     targetCanonical:
       record.targetCanonical && typeof record.targetCanonical === "object"
         ? {

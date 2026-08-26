@@ -55,6 +55,32 @@ npm run check:phase8:conformance
 
 The command emits readable case results and a schema-versioned JSON conformance report.
 
+## Phase 9 Competing Futures demo
+
+Phase 9 lets one operator objective explore three isolated Candidate States from the same exact Canonical State and Outcome Contract.
+Required Validation is an absolute eligibility boundary, so a fast unsafe future cannot win regardless of its score.
+Airlock persists a deterministic integer scorecard and exact winner before the existing Promotion journal begins, then promotes only that sealed winner and retains or discards every loser according to the operator's snapshotted policy.
+Admission reserves the aggregate token budget across every trusted Runtime before execution, requires a Runner capability that enforces each allowance before or at inference, and rejects unsupported production Runners before any competitor starts.
+The bundled zero-cost demo fixture enforces the transported allowance before simulated execution, while the ordinary Codex and container Runners remain unavailable for Competing Futures until their provider path supplies an equivalent hard total-token control.
+The Playground reads that capability from `/api/system`, disables Explore futures when unavailable, and explains the provider-boundary requirement inline instead of offering an action that can only fail.
+The versioned Promotion journal binds the Candidate Set, decision digest, winner Run, seal digest, and source, so restart recovery cannot reinterpret the selected future.
+If the selected winner changes after sealing, Airlock fails recovery closed and never falls through to a runner-up.
+
+```bash
+npm run demo:phase9 -- --reset
+```
+
+Open <http://127.0.0.1:3199>, select an Agent, and choose `Explore futures`.
+The deterministic local fixture compares `unsafe-fast`, `broad-valid`, and `focused-valid`, explains every exclusion and normalized score, and promotes `focused-valid` with exactly one supported effect.
+The launcher includes the Phase 8 remote-object fixture and makes no ModelArk request, paid inference call, provider purchase, or public blockchain transaction.
+
+Run the focused no-cost contract with:
+
+```bash
+npm run check:phase9:selection
+npm run check:phase9:boundaries
+```
+
 ## Screenshots
 
 ### Four-step judge path
@@ -82,6 +108,10 @@ The command emits readable case results and a schema-versioned JSON conformance 
 - Credential-free remote versioned-object provider with bounded HTTP, immutable versions, and forward reconciliation
 - Compact provider registry evidence with explicit unsupported distributed-atomicity claims
 - Additive provider onboarding with immutable-source verification, crash journaling, and generation-wide convergence
+- Durable Candidate Sets with bounded sibling isolation, shared-source enforcement, and snapshotted Outcome Contracts
+- Reversible sealed-Candidate evaluation before deterministic one-winner Selection and irreversible Promotion
+- Explainable integer scorecards, absolute Validation eligibility, stable byte-order tie-breaking, and no automatic runner-up fallback
+- Restart-safe winner Promotion and idempotent loser retention or Discard across historical provider generations
 - Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
@@ -313,7 +343,8 @@ flowchart LR
 ```
 
 The first turn uses `codex exec`; later turns resume the stored Codex thread.
-Deleting an Agent archives its workspace under `workspaces/.deleted/`.
+Deleting an Agent archives its workspace under `workspaces/.deleted/` with a credential-free lifecycle evidence tombstone.
+Deletion is refused while Promotion recovery or retained Quarantine remains unresolved.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
 boundaries.

@@ -6,12 +6,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const phase = process.env.AIRLOCK_CLEAN_CLONE_PHASE ?? "phase8";
+if (phase !== "phase8" && phase !== "phase9") {
+  process.stderr.write("Unsupported clean-clone phase: " + phase + "\n");
+  process.exit(1);
+}
+const phaseLabel = phase === "phase8" ? "Phase 8" : "Phase 9";
 const status = await capture("git", ["status", "--porcelain", "--untracked-files=all"], {
   cwd: projectRoot,
 });
 if (status.trim()) {
   process.stderr.write(
-    "Phase 8 clean-clone verification requires a clean committed worktree.\n",
+    phaseLabel + " clean-clone verification requires a clean committed worktree.\n",
   );
   process.exit(1);
 }
@@ -33,12 +39,12 @@ try {
   await run("npm", ["ci", "--ignore-scripts"], { cwd: cloneRoot });
   for (let pass = 1; pass <= 2; pass += 1) {
     await assertPortsAvailable([3199, 3200, 3208]);
-    await run("npm", ["run", "check:phase8:core"], { cwd: cloneRoot });
+    await run("npm", ["run", "check:" + phase + ":core"], { cwd: cloneRoot });
     await assertPortsAvailable([3199, 3200, 3208]);
     const leaked = await processesContaining(cloneRoot);
     if (leaked.length > 0) {
       throw new Error(
-        "Phase 8 gate left child processes after pass " +
+        phaseLabel + " gate left child processes after pass " +
           pass +
           ": " +
           leaked.join(" | "),
@@ -46,7 +52,7 @@ try {
     }
   }
   process.stdout.write(
-    "Phase 8 clean clone passed twice at " + sourceRevision.slice(0, 12) + ".\n",
+    phaseLabel + " clean clone passed twice at " + sourceRevision.slice(0, 12) + ".\n",
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

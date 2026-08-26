@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 7
+**Delivered:** Phases 0 through 8, with the Phase 9 implementation at release-candidate verification
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -391,6 +391,21 @@ Airlock can ask several Agents, models, or strategies to solve the same objectiv
 
 Turn transactional safety into an optimization primitive: safe parallel exploration of possible Agent futures.
 This is Agent Airlock's category-defining expansion because ordinary sandboxes isolate one attempt, while Airlock can compare and choose among many accepted possibilities.
+
+**Delivered evidence**
+
+- Database version 9 persists the Candidate Set aggregate, exact shared source, snapshotted contracts, per-competitor Run links, scorecard, Selection Decision, and loser cleanup progress with a tested version 8 migration.
+- The Runner now seals a validated Candidate before any Promotion plan or journal exists, then exposes separate seal-verifying winner Promotion and loser-disposition operations.
+- Two through eight competitors receive unique workspace, Codex-home, outbox, provider Candidate, and Runtime execution identities while one Agent-level lease prevents lifecycle conflicts.
+- A real per-competitor duration timer cancels only the over-budget execution identity, preserves healthy siblings, and records explicit exclusion evidence.
+- Required Validation failure is an absolute exclusion, and the deterministic Selection engine uses only closed bounded integer criteria plus ascending UTF-8 competitor identifiers.
+- The complete ordered scorecard, one-winner or no-winner result, tie-break rule, and SHA-256 decision digest are persisted before the existing Promotion journal begins.
+- A changed or contradictory selected winner enters `recovery-error`; Airlock never falls through to a runner-up and never dispatches a losing External Action Intent.
+- Restart recovery finishes the exact persisted winner, reconciles loser retention or Discard idempotently, and completes older-generation Candidate Sets before onboarding a newly configured provider.
+- A crash after physical loser Quarantine or removal but before its terminal metadata update is reconciled from exact local state and durable provider cleanup evidence.
+- The real no-cost HTTP-to-CodexRunner fixture launches three isolated processes, excludes `unsafe-fast`, selects `focused-valid`, advances Canonical State once, and delivers exactly one supported effect.
+- The Playground `Explore futures` journey shows shared-source evidence, competitor eligibility, normalized scores, winner rationale, decision digest, and loser disposition at desktop and 390-pixel layouts.
+- `npm run check:phase9:selection` and `npm run check:phase9:boundaries` lock the schema migration, admission bounds, deterministic replay, scoped duration cancellation, operator cancellation, tamper, recovery, provider-generation, and irreversible-boundary guarantees without credentials or paid inference.
 
 ### Phase 10: Adaptive assurance
 

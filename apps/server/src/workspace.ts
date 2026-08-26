@@ -116,6 +116,26 @@ export interface InterruptedCandidateResult {
   error: string | null;
 }
 
+export interface AgentArchiveAudit {
+  schemaVersion: 1;
+  agentId: string;
+  archivedAt: string;
+  runs: Array<{
+    runId: string;
+    status: string;
+    candidateSetId: string | null;
+    disposition: string | null;
+    promotionReceiptDigest: string | null;
+  }>;
+  candidateSets: Array<{
+    candidateSetId: string;
+    phase: string;
+    winnerRunId: string | null;
+    selectionDecisionDigest: string | null;
+    winnerSealDigest: string | null;
+  }>;
+}
+
 export interface StateCleanupResult {
   candidateRunIds: string[];
   quarantineRunIds: string[];
@@ -762,12 +782,19 @@ export class WorkspaceManager {
     runId: string,
     targetProviderVersions?: readonly ResourceVersionReference[],
     resourcePlans: readonly ResourcePromotionPlan[] = [],
+    allowHistoricalProviderSubset = false,
   ): Promise<PromotionPlan> {
-    const candidate = await this.readCandidate(runId);
+    const candidate = await this.readCandidateAt(
+      this.candidateRoot(runId),
+      runId,
+      allowHistoricalProviderSubset ? null : undefined,
+    );
     if (candidate.agentId !== agentId) {
       throw new Error("Candidate State belongs to a different Agent");
     }
-    const current = await this.readCanonical(agentId);
+    const current = allowHistoricalProviderSubset
+      ? await this.readCanonicalForProviderTransition(agentId)
+      : await this.readCanonical(agentId);
     if (
       current.stateId !== candidate.canonicalStateIdBefore ||
       current.contentHash !== candidate.canonicalContentHashBefore ||
@@ -797,7 +824,11 @@ export class WorkspaceManager {
     const normalizedTargets = normalizeProviderVersions(
       targetProviderVersions ?? current.providerVersions,
     );
-    this.assertConfiguredProviderSet(normalizedTargets);
+    if (allowHistoricalProviderSubset) {
+      this.assertHistoricalProviderSubset(normalizedTargets);
+    } else {
+      this.assertConfiguredProviderSet(normalizedTargets);
+    }
     return {
       runId,
       agentId,
@@ -944,10 +975,28 @@ export class WorkspaceManager {
     return destination;
   }
 
-  async cancelCandidate(runId: string): Promise<void> {
+  async cancelCandidate(
+    runId: string,
+    allowHistoricalProviderSubset = false,
+  ): Promise<void> {
     if (!(await fileExists(this.candidateRoot(runId)))) return;
-    const root = await this.resolveCandidateRoot(runId);
+    const root = await this.resolveCandidateRoot(
+      runId,
+      allowHistoricalProviderSubset ? null : undefined,
+    );
     await rm(root, { recursive: true, force: false });
+  }
+
+  async candidateExists(
+    runId: string,
+    allowHistoricalProviderSubset = false,
+  ): Promise<boolean> {
+    if (!(await fileExists(this.candidateRoot(runId)))) return false;
+    await this.resolveCandidateRoot(
+      runId,
+      allowHistoricalProviderSubset ? null : undefined,
+    );
+    return true;
   }
 
   async quarantineInterruptedCandidate(
@@ -985,6 +1034,11 @@ export class WorkspaceManager {
     if (!(await fileExists(root))) return false;
     await this.resolveQuarantineRoot(runId, null);
     return true;
+  }
+
+  async retainedQuarantinePath(runId: string): Promise<string | null> {
+    if (!(await this.quarantineExists(runId))) return null;
+    return this.resolveQuarantineRoot(runId, null);
   }
 
   async retainedProviderIds(
@@ -1116,9 +1170,20 @@ export class WorkspaceManager {
     return fileExists(target);
   }
 
-  async candidateWorkspacePath(runId: string): Promise<string> {
-    await this.readCandidate(runId);
-    return this.resolveCandidatePath(runId, "workspace");
+  async candidateWorkspacePath(
+    runId: string,
+    allowHistoricalProviderSubset = false,
+  ): Promise<string> {
+    await this.readCandidateAt(
+      this.candidateRoot(runId),
+      runId,
+      allowHistoricalProviderSubset ? null : undefined,
+    );
+    return this.resolveCandidatePath(
+      runId,
+      "workspace",
+      allowHistoricalProviderSubset ? null : undefined,
+    );
   }
 
   async candidateCodexHomePath(runId: string): Promise<string> {
@@ -1126,15 +1191,37 @@ export class WorkspaceManager {
     return this.resolveCandidatePath(runId, "codex-home");
   }
 
-  async candidateOutboxPath(runId: string): Promise<string> {
-    await this.readCandidate(runId);
-    const outboxDirectory = await this.resolveCandidatePath(runId, "outbox");
+  async candidateOutboxPath(
+    runId: string,
+    allowHistoricalProviderSubset = false,
+  ): Promise<string> {
+    await this.readCandidateAt(
+      this.candidateRoot(runId),
+      runId,
+      allowHistoricalProviderSubset ? null : undefined,
+    );
+    const outboxDirectory = await this.resolveCandidatePath(
+      runId,
+      "outbox",
+      allowHistoricalProviderSubset ? null : undefined,
+    );
     return path.join(outboxDirectory, "intents.jsonl");
   }
 
-  async candidateResourcesPath(runId: string): Promise<string> {
-    await this.readCandidate(runId);
-    return this.resolveCandidatePath(runId, "resources");
+  async candidateResourcesPath(
+    runId: string,
+    allowHistoricalProviderSubset = false,
+  ): Promise<string> {
+    await this.readCandidateAt(
+      this.candidateRoot(runId),
+      runId,
+      allowHistoricalProviderSubset ? null : undefined,
+    );
+    return this.resolveCandidatePath(
+      runId,
+      "resources",
+      allowHistoricalProviderSubset ? null : undefined,
+    );
   }
 
   async installedResourcesPath(agentId: string, stateId: string): Promise<string> {
@@ -1174,9 +1261,16 @@ export class WorkspaceManager {
     }
   }
 
-  async archive(agent: Agent): Promise<string> {
+  async archive(agent: Agent, audit?: AgentArchiveAudit): Promise<string> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const destination = path.join(this.root, ".deleted", agent.id + "-" + timestamp);
+    if (audit) {
+      await writeFile(
+        path.join(this.agentRoot(agent.id), ".airlock-archive-audit.json"),
+        JSON.stringify(audit, null, 2) + "\n",
+        { encoding: "utf8", mode: 0o600 },
+      );
+    }
     await rename(this.agentRoot(agent.id), destination);
     return destination;
   }
@@ -1594,8 +1688,13 @@ export class WorkspaceManager {
       | "outbox"
       | "resources"
       | "repair-reference",
+    expectedProviderVersions: readonly ResourceVersionReference[] | null | undefined =
+      undefined,
   ): Promise<string> {
-    const candidateRoot = await this.resolveCandidateRoot(runId);
+    const candidateRoot = await this.resolveCandidateRoot(
+      runId,
+      expectedProviderVersions,
+    );
     const resourcePath = await realpath(path.join(this.candidateRoot(runId), resource));
     const relative = path.relative(candidateRoot, resourcePath);
     if (

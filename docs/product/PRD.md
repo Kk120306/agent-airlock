@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 7 regression-locked; Phase 8 release candidate implemented
+**Status:** Phases 0 through 8 regression-locked; Phase 9 release candidate implemented
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -18,7 +18,7 @@ The product promise is simple:
 
 ## Current release
 
-Phases 0 through 7 are implemented.
+Phases 0 through 8 are regression-locked, and Phase 9 is implemented at release-candidate verification.
 The release makes workspace, Codex-session, and SQLite changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
 Typed notification intents use a candidate-owned outbox and an idempotent mock consumer that can claim an effect only after the canonical manifest advances.
 An operator can now repair or discard a Quarantine, while bounded ancestry, canonical freshness checks, a fresh outbox, and the original Outcome Contract keep recovery fail-closed.
@@ -30,6 +30,10 @@ The Phase 8 release candidate adds a provider-neutral SDK, strict Capability Cla
 Registered provider state now participates in the same Candidate preparation, required Validation, Promotion journal, Quarantine, Discard, Repair, canonical fingerprint, and restart-reconciliation decision as built-in resources.
 Existing deployments add providers through a verified, additive, crash-recoverable Registry Transition, and Airlock commits a registry generation only after every Agent converges.
 The existing Playground shows provider guarantees and bounded lifecycle evidence while explicitly refusing to claim distributed atomic commit.
+Phase 9 adds durable Candidate Sets that evaluate two through eight isolated approaches from one exact Canonical State and snapshotted Outcome Contract.
+Only Candidates that pass every required Validation enter a deterministic bounded-integer Selection Contract, and Airlock persists the complete scorecard and exact winner before Promotion begins.
+The selected winner is re-verified and promoted through a decision-and-seal-bound journal authority, while losers are retained or discarded without dispatching their effects and can never become an automatic fallback.
+Strict Candidate Set parsing, deterministic aggregate token reservations, terminal evidence for never-started siblings, authority-bound restart recovery, and provider-generation deferral keep the release fail-closed under corrupted or interrupted state.
 
 ## Problem
 
@@ -54,6 +58,7 @@ Operators currently cannot answer these questions before accepting a Run:
 5. Provide evidence that rejected Runs leave protected state unchanged.
 6. Demonstrate that the transactional model can extend beyond files through a SQLite Transactional Resource and an External Action Intent outbox.
 7. Let a developer add a capability-checked Transactional Resource Provider without editing core Run Transaction lifecycle branches.
+8. Let an operator compare bounded isolated futures and promote exactly one reproducible valid winner.
 
 ## Non-goals
 
@@ -79,6 +84,8 @@ This journey describes the complete product direction, including later roadmap p
 7. Airlock promotes the Candidate State automatically when the Outcome Contract passes.
 8. Airlock quarantines the Candidate State when any required Validation fails.
 9. The operator can inspect evidence, discard the Quarantine, or start a Repair Run from it.
+10. The operator can instead ask Airlock to explore several bounded strategies from the current Canonical State.
+11. Airlock excludes every future that fails required Validation, explains a deterministic scorecard, persists one Selection Decision, and promotes only that sealed winner.
 
 ## Product target requirements
 
@@ -141,6 +148,27 @@ This journey describes the complete product direction, including later roadmap p
 - Discard must remove quarantined mutable state while retaining the bounded Promotion Receipt and Validation evidence.
 - A Repair Run must start from Quarantine and must not alter Canonical State unless the repaired candidate passes.
 
+### Competing Futures
+
+- A Candidate Set must snapshot one exact Canonical State identifier, content hash, Codex thread, provider-version vector, Outcome Contract, Selection Contract, and loser policy before evaluation starts.
+- A Candidate Set must contain two through eight unique competitors and a bounded concurrency and aggregate execution budget.
+- Admission must reserve a positive trusted Runtime total-token allowance for every competitor before any Runtime starts, and the sum of those allowances must not exceed the aggregate token budget.
+- Admission must reject a Runner that cannot enforce its reserved allowance before or at the model-provider boundary, before creating a Candidate Set or starting any competitor.
+- Missing or over-budget trusted Runtime usage evidence must exclude that competitor and fail closed before Selection.
+- Every competitor must receive its own Run Transaction, workspace, Codex home, outbox, provider Candidate State, and Runtime execution identity.
+- No competitor may observe a sibling path, handle, thread artifact, outbox, provider Candidate, or Runtime result.
+- Reversible evaluation may execute Runtime and required Validations but must not plan Promotion, create a Promotion journal, advance Canonical State, or dispatch an External Action Intent.
+- Required Validation failure must exclude a Candidate from Selection regardless of every ranking value.
+- Selection must use a snapshotted ordered list of closed, bounded integer criteria and ascending byte-order competitor identifier as the final tie-break.
+- Every criterion input, normalized score, exclusion, rank, tie-break, and decision digest must be persisted before Promotion begins.
+- The selected sealed Candidate must be re-verified against its source and exact resource fingerprints immediately before Promotion.
+- A selected-winner contradiction must fail recovery closed and must never authorize a runner-up.
+- Only the selected winner may advance Canonical State or dispatch an External Action Intent.
+- Every losing Candidate must be retained or discarded according to the snapshotted policy, and a retained loser must not become a Repair source.
+- Restart recovery must preserve a durable Selection Decision, finish only its exact winner, and reconcile loser cleanup idempotently across historical provider generations.
+- A Candidate Set Promotion journal must bind the Candidate Set, competitor, winner Run, Selection Decision digest, seal digest, and exact source before recovery may install state, advance Canonical State, or dispatch effects.
+- Any unresolved Candidate Set recovery failure must defer Resource Registry onboarding and generation commit.
+
 ### Operator experience
 
 - The existing Playground must remain the primary task-entry surface.
@@ -151,6 +179,7 @@ This journey describes the complete product direction, including later roadmap p
 - The operator must be able to discard Quarantine or request a Repair Run.
 - The interface must not display credentials, environment values, or unredacted sensitive content.
 - The interface must show registered provider identity, source and target fingerprints, disposition, conformance profile, Promotion visibility, and bounded lifecycle evidence.
+- The Playground must provide one bounded `Explore futures` action and show the shared source, Validation eligibility, normalized score components, stable tie-break, winner decision digest, and loser dispositions.
 
 ### Judge-ready release experience
 
@@ -172,6 +201,7 @@ This journey describes the complete product direction, including later roadmap p
 - Cleanup must never delete the current Canonical State version.
 - A corrupted Candidate State must fail closed and preserve Canonical State.
 - Failure to establish the state of an interrupted promotion must place the Agent in an understandable recoverable error state.
+- Failure after a Candidate Set winner is selected must preserve that decision, dispatch no losing effect, and never silently select another competitor.
 
 ## Security requirements
 
@@ -197,6 +227,7 @@ This journey describes the complete product direction, including later roadmap p
 - Interruption at each Promotion seam converges after restart to one canonical version, one assistant message, and at most one supported mock effect.
 - A contradictory journal, installed version, or canonical manifest produces an explicit `recovery-error` without rewriting Canonical State.
 - A malformed or forged Registry Transition journal must be rejected before it can authorize deletion or Canonical State rewriting.
+- Agent deletion must refuse unresolved Promotion recovery or retained Quarantine and must preserve a credential-free lifecycle evidence tombstone in the archived workspace.
 - Candidate and Quarantine cleanup is root-confined, symlink-safe, active-Run-aware, and evidence preserving.
 - A third-party-style provider package imports only the SDK and passes the same eight-case conformance suite used by built-in fixtures.
 - Provider prepare failure prevents Runtime invocation and either completes idempotent cleanup or retains a retryable composite Quarantine.
@@ -233,7 +264,8 @@ Later-phase work cannot enter the judging path before submission.
 ### Post-hackathon expansion
 
 Phase 8 delivers the Transactional Resource SDK on the isolated post-hackathon branch.
-Phases 9 through 11 continue with competing Agent futures, adaptive assurance, and portable Promotion Receipts.
+Phase 9 delivers competing Agent futures with deterministic one-winner Selection on the same branch.
+Phases 10 and 11 continue with adaptive assurance and portable Promotion Receipts.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations

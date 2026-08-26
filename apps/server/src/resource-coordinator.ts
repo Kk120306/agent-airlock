@@ -458,9 +458,10 @@ export class ResourceCoordinator {
   async describeAndValidate(
     input: CandidateResourceSetInput,
   ): Promise<CoordinatedResourceEvidence[]> {
-    const prepared = this.indexPrepared(input.prepared);
+    const entries = this.entriesForScope(input.providerIds);
+    const prepared = this.indexPrepared(input.prepared, false, entries);
     const evidence: CoordinatedResourceEvidence[] = [];
-    for (const entry of this.registry.list()) {
+    for (const entry of entries) {
       const resource = this.requirePrepared(prepared, entry);
       const context = this.candidateContext(input, resource);
       const change = await this.invoke(
@@ -534,10 +535,12 @@ export class ResourceCoordinator {
 
   async assertRuntimeBindingsSafe(
     preparedResources: readonly CoordinatedPreparedResource[],
+    providerIds?: readonly string[],
   ): Promise<void> {
     try {
-      const prepared = this.indexPrepared(preparedResources);
-      for (const entry of this.registry.list()) {
+      const entries = this.entriesForScope(providerIds);
+      const prepared = this.indexPrepared(preparedResources, false, entries);
+      for (const entry of entries) {
         const resource = this.requirePrepared(prepared, entry);
         if (!resource.runtimeBinding) continue;
         const relativeParts = resource.runtimeBinding.relativePath.split("/");
@@ -573,10 +576,11 @@ export class ResourceCoordinator {
   }
 
   async planAll(input: ValidatedResourceSetInput): Promise<ResourcePromotionPlan[]> {
-    const prepared = this.indexPrepared(input.prepared);
-    const evidence = this.indexEvidence(input.evidence);
+    const entries = this.entriesForScope(input.providerIds);
+    const prepared = this.indexPrepared(input.prepared, false, entries);
+    const evidence = this.indexEvidence(input.evidence, entries);
     const plans: ResourcePromotionPlan[] = [];
-    for (const entry of this.registry.list()) {
+    for (const entry of entries) {
       const resource = this.requirePrepared(prepared, entry);
       const acceptedEvidence = evidence.get(entry.manifest.providerId);
       if (!acceptedEvidence) {
@@ -689,11 +693,14 @@ export class ResourceCoordinator {
   async quarantineAll(
     input: QuarantineResourceSetInput,
   ): Promise<ResourceQuarantineHandle[]> {
-    const prepared = this.indexPrepared(input.prepared);
-    const evidence = input.evidence ? this.indexEvidence(input.evidence) : null;
+    const entries = this.entriesForScope(input.providerIds);
+    const prepared = this.indexPrepared(input.prepared, false, entries);
+    const evidence = input.evidence
+      ? this.indexEvidence(input.evidence, entries)
+      : null;
     const quarantines: ResourceQuarantineHandle[] = [];
     let firstFailure: unknown = null;
-    for (const entry of this.registry.list()) {
+    for (const entry of entries) {
       const resource = this.requirePrepared(prepared, entry);
       const acceptedEvidence = evidence?.get(entry.manifest.providerId) ?? null;
       try {
@@ -1011,6 +1018,7 @@ export class ResourceCoordinator {
 
   private indexEvidence(
     values: readonly CoordinatedResourceEvidence[],
+    entries: readonly RegisteredResourceProvider[] = this.registry.list(),
   ): Map<string, CoordinatedResourceEvidence> {
     const result = new Map<string, CoordinatedResourceEvidence>();
     for (const value of values) {
@@ -1019,7 +1027,7 @@ export class ResourceCoordinator {
       }
       result.set(value.providerId, value);
     }
-    this.assertExactProviders(result, "Validated resource evidence");
+    this.assertProviders(result, entries, "Validated resource evidence");
     return result;
   }
 

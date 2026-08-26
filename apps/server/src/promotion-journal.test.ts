@@ -85,6 +85,8 @@ describe("PromotionJournal", () => {
     });
 
     expect(validated).toMatchObject({
+      schemaVersion: 2,
+      authority: { schemaVersion: 1, kind: "ordinary-run" },
       phase: "validated",
       recoveryResult: {
         threadId: "thread-one",
@@ -112,6 +114,32 @@ describe("PromotionJournal", () => {
         targetCanonical: target,
       }),
     ).resolves.toEqual(installed);
+  });
+
+  it("rejects unknown Promotion authority fields before recovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-journal-authority-"));
+    temporaryDirectories.push(root);
+    const journal = new PromotionJournal(root);
+    await journal.initialize();
+    await journal.begin({
+      plan,
+      transaction: createRunTransaction(
+        plan.runId,
+        source,
+        createDefaultOutcomeContract(),
+      ),
+      result: { output: "done", threadId: null, usage: null },
+    });
+    const filePath = path.join(root, plan.runId + ".json");
+    const record = JSON.parse(await readFile(filePath, "utf8")) as {
+      authority: Record<string, unknown>;
+    };
+    record.authority.hiddenWinnerOverride = "other-run";
+    await writeFile(filePath, JSON.stringify(record, null, 2) + "\n", "utf8");
+
+    await expect(journal.read(plan.runId)).rejects.toThrow(
+      /unknown or missing fields/,
+    );
   });
 
   it("reports a corrupt record without trusting its contents", async () => {

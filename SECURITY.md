@@ -24,6 +24,11 @@ Do not publish credentials, personal data, or exploit details in an issue.
 - A remote Resource Provider can be unavailable, malicious, or inconsistent despite passing the bounded conformance fixture
 - Provider installation and local canonical-manifest advancement are recoverable but are not one distributed atomic commit
 - The local-process Runtime cannot enforce a provider-declared read-only filesystem binding and rejects that provider configuration
+- Candidate Set sibling isolation in local-process mode relies on root-confined paths and trusted process configuration rather than a hardened multi-tenant kernel boundary
+- Candidate ranking quality in Phase 9 is limited to trusted persisted Validation, change, latency, and token evidence rather than a semantic proof that the winning solution is best
+- Competing Futures admission requires the trusted Runner to declare provider-boundary total-token enforcement; the bundled ordinary Codex and container Runners do not declare it and are rejected before competitor execution
+- The zero-cost demo Codex fixture receives the reserved allowance through a fixture-only environment contract and refuses over-budget work before simulated execution; Airlock still audits returned usage after completion
+- Airlock cannot refund provider usage consumed by a falsely declared third-party Runner, so Runner capability composition remains part of the trusted control plane
 
 ## Safe use
 
@@ -32,6 +37,7 @@ Do not publish credentials, personal data, or exploit details in an issue.
 - Startup rejects demo mode unless every no-cost fixture marker matches the launcher's loopback profile.
 - Treat the deterministic Codex protocol fixture as untrusted Runtime behavior even though its outputs are reproducible.
 - Do not enable `AIRLOCK_DEMO_MODE` manually for a credentialed POC or interpret fixture output as model-quality evidence.
+- Do not run Competing Futures with local-process `danger-full-access` outside deterministic demo mode; admission rejects that unsafe combination.
 - Use a dedicated development machine or disposable ECS instance.
 - Use a scoped, revocable Ark key and a unique `APP_AUTH_TOKEN`.
 - Keep local use on loopback and restrict ECS Web and SSH CIDRs.
@@ -51,6 +57,12 @@ Do not publish credentials, personal data, or exploit details in an issue.
 - Treat a provider Capability Claim as admissible only after the executable conformance suite and integration fault matrix pass for that exact provider version.
 - Reject redirects, oversized source objects, non-regular files, and post-Runtime symbolic-link substitutions before a trusted provider hook reads Candidate content.
 - Preserve provider state and the Promotion journal when provider reconciliation reports a contradiction.
+- Treat every Candidate Set strategy instruction and Runtime result as untrusted content, even when supplied by the deterministic fixture.
+- Keep Selection criteria closed, versioned, integer-bounded, and sourced only from trusted persisted evidence.
+- Never grant a Candidate Runtime access to a sibling workspace, Codex home, outbox, provider Candidate handle, result, or seal.
+- Treat a sealed Candidate as untrusted mutable state that must be re-described, revalidated, and fingerprint-matched before Promotion.
+- Preserve the durable Selection Decision after winner failure and never authorize a runner-up without a new operator-created Candidate Set.
+- Recover unresolved historical Candidate Sets before adding a provider to the accepted Resource Registry generation.
 - Treat every Registry Transition journal as untrusted recovery input and require its exact schema, deterministic identifiers, additive provider vectors, and exact verification set before it can authorize cleanup.
 - Stop the POC, destroy test resources, and revoke keys after the event.
 

@@ -17,6 +17,7 @@ export type RunTransactionStatus =
   | "preparing"
   | "executing"
   | "validating"
+  | "sealed"
   | "promoting"
   | "promoted"
   | "quarantined"
@@ -278,6 +279,8 @@ export interface RunUsage {
 export interface AgentRun {
   id: string;
   agentId: string;
+  candidateSetId: string | null;
+  competitorId: string | null;
   status: RunStatus;
   prompt: string;
   output: string | null;
@@ -289,11 +292,180 @@ export interface AgentRun {
   createdAt: string;
 }
 
+export type CandidateSetPhase =
+  | "admitted"
+  | "evaluating"
+  | "evaluated"
+  | "selected"
+  | "promoting"
+  | "promoted"
+  | "cleaning-losers"
+  | "completed"
+  | "no-winner"
+  | "stale"
+  | "recovery-error";
+
+export type CandidateCompetitorStatus =
+  | "pending"
+  | "running"
+  | "eligible"
+  | "ineligible"
+  | "failed"
+  | "selected"
+  | "promoted"
+  | "retained"
+  | "discarded"
+  | "cancelled";
+
+export type SelectionCriterionKind =
+  | "quality-assertion"
+  | "changed-files"
+  | "added-bytes"
+  | "latency-ms"
+  | "total-tokens";
+
+export type SelectionCriterionSource =
+  | "trusted-validation-evaluator"
+  | "workspace-change-evidence"
+  | "monotonic-execution-measurement"
+  | "runtime-usage-response";
+
+export interface SelectionCriterion {
+  kind: SelectionCriterionKind;
+  source: SelectionCriterionSource;
+  direction: "maximize" | "minimize";
+  maximum: number;
+  evaluatorVersion: string;
+}
+
+export interface SelectionContract {
+  schemaVersion: 1;
+  criteria: SelectionCriterion[];
+}
+
+export interface CandidateSetBudget {
+  maxDurationMsPerCompetitor: number;
+  maxTotalTokens: number;
+  maxTotalChangedBytes: number;
+}
+
+export interface CandidateSetSource {
+  stateId: string;
+  contentHash: string;
+  workspaceContentHash: string;
+  sessionContentHash: string;
+  sqliteContentHash: string;
+  outboxContentHash: string;
+  codexThreadId: string | null;
+  providerVersions: ResourceVersionReference[];
+}
+
+export interface SealedCandidateReference {
+  schemaVersion: 1;
+  candidateSetId: string;
+  competitorId: string;
+  runId: string;
+  candidateStateId: string;
+  sourceStateId: string;
+  sourceContentHash: string;
+  outcomeContractVersion: number;
+  transactionEvidenceHash: string;
+  runtimeResultHash: string;
+  sealDigest: string;
+  sealedAt: string;
+}
+
+export interface CandidateScoreComponent {
+  kind: SelectionCriterionKind;
+  source: SelectionCriterionSource;
+  evaluatorVersion: string;
+  direction: "maximize" | "minimize";
+  maximum: number;
+  rawValue: number;
+  normalizedValue: number;
+}
+
+export interface CandidateScorecardEntry {
+  competitorId: string;
+  eligible: boolean;
+  exclusions: string[];
+  components: CandidateScoreComponent[];
+  rank: number | null;
+}
+
+export interface CandidateSelectionDecision {
+  schemaVersion: 1;
+  candidateSetId: string;
+  sourceStateId: string;
+  orderedCompetitorIds: string[];
+  winnerCompetitorId: string | null;
+  scorecard: CandidateScorecardEntry[];
+  tieBreak: "competitor-id-ascending-byte-order";
+  decisionDigest: string;
+}
+
+export interface CandidateSetCompetitor {
+  id: string;
+  runId: string;
+  executorProfileId: string;
+  strategyInstruction: string;
+  status: CandidateCompetitorStatus;
+  criterionValues: Partial<Record<SelectionCriterionKind, number>>;
+  exclusions: string[];
+  evaluationDurationMs: number | null;
+  resultThreadId: string | null;
+  seal: SealedCandidateReference | null;
+  loserDisposition: "pending" | "retained" | "discarded" | "winner";
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface CandidateSet {
+  schemaVersion: 1;
+  id: string;
+  agentId: string;
+  objective: string;
+  source: CandidateSetSource;
+  outcomeContract: OutcomeContract;
+  selectionContract: SelectionContract;
+  competitors: CandidateSetCompetitor[];
+  maxConcurrency: number;
+  budget: CandidateSetBudget;
+  loserPolicy: "retain" | "discard";
+  phase: CandidateSetPhase;
+  selectionDecision: CandidateSelectionDecision | null;
+  selectedCompetitorId: string | null;
+  winnerRunId: string | null;
+  cancellationRequested: boolean;
+  recoveryError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  decidedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface CandidateSetCompetitorInput {
+  id: string;
+  executorProfileId: string;
+  strategyInstruction: string;
+}
+
+export interface CreateCandidateSetInput {
+  objective: string;
+  competitors: CandidateSetCompetitorInput[];
+  selectionContract: SelectionContract;
+  maxConcurrency: number;
+  budget: CandidateSetBudget;
+  loserPolicy: "retain" | "discard";
+}
+
 export interface Database {
-  version: 8;
+  version: 9;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
+  candidateSets: CandidateSet[];
 }
 
 export interface CreateAgentInput {
@@ -316,13 +488,25 @@ export interface RunnerResult {
 
 export interface RunnerRequest {
   agentId: string;
+  executionId?: string;
   workspacePath: string;
   codexHomePath: string;
   outboxPath: string;
   repairReferencePath?: string | null;
   resourceBindings?: RunnerResourceBinding[];
+  tokenBudget?: RunnerTokenBudget;
   prompt: string;
   threadId: string | null;
+}
+
+export interface RunnerTokenBudget {
+  schemaVersion: 1;
+  /**
+   * Hard upper bound owned by the trusted Runner.
+   * The Runner must enforce this at its model-provider boundary rather than
+   * relying only on Airlock's post-execution usage audit.
+   */
+  maximumTotalTokens: number;
 }
 
 export interface RunnerResourceBinding {
@@ -333,7 +517,13 @@ export interface RunnerResourceBinding {
 }
 
 export interface AgentRunner {
+  /**
+   * Declares whether token allowances are rejected before or at the model
+   * provider boundary. Omission means the Runner cannot safely execute a
+   * Candidate Set with an aggregate token budget.
+   */
+  readonly tokenBudgetEnforcement?: "provider-boundary" | undefined;
   run(request: RunnerRequest): Promise<RunnerResult>;
-  cancel(agentId: string): Promise<boolean>;
+  cancel(agentId: string, executionId?: string): Promise<boolean>;
   isAvailable(): Promise<boolean>;
 }

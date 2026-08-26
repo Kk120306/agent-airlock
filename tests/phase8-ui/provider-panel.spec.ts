@@ -45,6 +45,11 @@ const system: SystemInfo = {
   arkModel: "local-ui-contract",
   codexAvailable: true,
   codexSandboxMode: "workspace-write",
+  competingFutures: {
+    available: false,
+    tokenBudgetEnforcement: "unsupported",
+    reason: "The configured Runner cannot enforce total-token allowances before or at inference",
+  },
   runtimeProvider: "local-process",
   containerEngine: null,
   runtime: "Production bundle UI contract",
@@ -133,6 +138,7 @@ function apiResponse(pathname: string, run: AgentRun): unknown {
   if (pathname === "/api/system") return system;
   if (pathname === "/api/agents") return { agents: [agent] };
   if (pathname.endsWith("/messages")) return { messages: [] };
+  if (pathname.endsWith("/candidate-sets")) return { candidateSets: [] };
   if (pathname.endsWith("/runs")) return { runs: [run] };
   return null;
 }
@@ -143,6 +149,8 @@ function runWithProvider(mode: "promoted" | "cleanup-only"): AgentRun {
   return {
     id: "run-phase-eight-ui",
     agentId: agent.id,
+    candidateSetId: null,
+    competitorId: null,
     status: "completed",
     prompt: "Exercise registered provider evidence.",
     output: "Provider lifecycle completed through the real Airlock evidence shape.",

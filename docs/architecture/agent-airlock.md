@@ -250,14 +250,16 @@ The POC does not intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
 
-The version 8 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, and operator-visible evidence.
+The version 9 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, Candidate Sets, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
 Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
-Startup reconciliation treats the journal as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the atomic mock-delivery store as effect truth.
+Startup reconciliation treats an ordinary Run journal or the conjunction of a replayed Candidate Set decision and its matching journal authority as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the atomic mock-delivery store as effect truth.
 It verifies physical fingerprints before repairing cached workspace, state, thread, Run, message, receipt, and effect metadata in the JSON store.
 Phase 5 persists repair ancestry, mutable Quarantine availability, discard timestamps, and the same lineage in each Promotion Receipt.
 Phase 6 persists Promotion journal position, recovered-after-restart evidence, and bounded recovery errors.
 Phase 8 persists provider resource records, Capability Claims, immutable source and installed versions, Validation evidence, Quarantine handles, dispositions, and bounded lifecycle events.
+Phase 9 persists exact Candidate Set source and contract snapshots, per-competitor Run links, seals, bounded criterion inputs, deterministic scorecards, one-winner or no-winner Selection Decisions, and loser cleanup progress.
+Promotion journal schema 2 additionally persists the exact Candidate Set winner authority, including decision and seal digests, and startup validates it before physical recovery.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -285,10 +287,19 @@ Schema evolution must increment the database version and include a tested migrat
 | Provider Promotion or reconciliation contradicts the durable plan | Preserve current Canonical State and surface `recovery-error`. |
 | Provider cleanup is unavailable | Retain local mutable state and retry before removal. |
 | Local Quarantine is missing without complete provider Discard evidence | Fail recovery closed and do not claim remote cleanup. |
+| Candidate Set admission or preparation conflicts with another Agent operation | Reject the set before sibling Runtime execution and leave Canonical State unchanged. |
+| A competitor fails required Validation | Exclude that Candidate from Selection regardless of its ranking inputs and dispatch none of its effects. |
+| Every competitor is invalid or incomplete | Persist `no-winner`, leave Canonical State unchanged, and reconcile every loser disposition. |
+| Process stops before Candidate Set Selection | Preserve complete seals, mark partial evaluations ineligible without replaying Runtime, and deterministically select only from persisted evidence. |
+| Process stops after Candidate Set Selection | Resume Promotion for only the exact persisted winner, then reconcile loser cleanup idempotently. |
+| Candidate Set and Promotion-journal authorities disagree | Reject physical Promotion recovery before installation, canonical advancement, or effect dispatch and surface `recovery-error`. |
+| Selected Candidate seal, source, resource fingerprint, or Promotion evidence contradicts physical state | Surface `recovery-error`, preserve evidence, dispatch no new effect, and never select a runner-up. |
+| A new provider is configured while an older Candidate Set is unresolved | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit. |
+| Candidate Set recovery fails while a new provider is configured | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit. |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 
-The proposed Phase 9 split between reversible Candidate evaluation, deterministic one-winner Selection, and irreversible Promotion is documented in the [Competing Futures architecture](competing-futures.md) and ADR 0011.
+The implemented Phase 9 split between reversible Candidate evaluation, deterministic one-winner Selection, and irreversible Promotion is documented in the [Competing Futures architecture](competing-futures.md) and ADR 0011.
 The proposed Phase 10 separation between evidence-backed assurance advice and operator policy authority is documented in the [Adaptive Assurance architecture](adaptive-assurance.md) and ADR 0012.
 The proposed Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](portable-trust.md) and ADR 0013.
 
@@ -305,6 +316,9 @@ The proposed Phase 11 signed receipt and optional anchoring protocol is document
 - Resource Providers run inside the trusted control plane, receive bounded lifecycle context, and never receive the application store or arbitrary environment variables.
 - Provider Runtime bindings are rooted under the isolated Candidate and are derived by the trusted core.
 - Resource Provider source verification and Registry Transition journals remain inside the trusted control plane and are never exposed to Runtime.
+- Candidate Set orchestration and Selection remain inside the trusted control plane, while every competitor Runtime receives only its own Candidate bindings and the shared bounded objective.
+- The deterministic Selection engine accepts only persisted trusted evidence and has no access to time, randomness, locale ordering, network, filesystem, environment variables, or model judgment.
+- A sealed Candidate is a commitment for later re-verification, not authority to promote itself.
 
 ## Evidence model
 
@@ -321,6 +335,7 @@ Each Run Transaction records:
 - Root Run identifier, parent Run identifier, repair depth, configured depth bound, and mutable Quarantine availability.
 - Monotonic Promotion journal phase, recovered-after-restart status, and bounded fail-closed recovery error.
 - Provider identity, Capability Claim, immutable source and target references, fingerprint transition, bounded Validation evidence, Quarantine handle, disposition, and lifecycle events.
+- Candidate Set identifier, exact shared source, snapshotted Outcome and Selection Contracts, competitor Run links, bounded integer criterion values, exclusions, ordered scorecard, stable tie-break, Selection Decision digest, winner, and loser dispositions.
 
 ## Open architectural decisions
 

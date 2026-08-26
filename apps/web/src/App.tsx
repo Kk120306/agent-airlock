@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
-import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import type { Agent, AgentRun, CandidateSet, Message, SystemInfo } from "./types";
 
 const starterPrompts = [
   "Create a small TypeScript CLI that prints a weather summary from sample JSON.",
@@ -52,6 +52,9 @@ const emptyForm = {
     "Help me build and test software in this workspace. Keep changes small and explain the result.",
 };
 
+const defaultExplorationObjective =
+  "Build the smallest complete solution, preserve every required file, and explain the validation result.";
+
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
@@ -81,6 +84,160 @@ function StatusPill({ status }: { status: Agent["status"] }) {
 
 function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
+}
+
+function CandidateSetEvidence({
+  candidateSet,
+  actionBusy,
+  onCancel,
+}: {
+  candidateSet: CandidateSet;
+  actionBusy: boolean;
+  onCancel: () => void;
+}) {
+  const terminal = ["completed", "stale", "recovery-error"].includes(
+    candidateSet.phase,
+  );
+  const scoreByCompetitor = new Map(
+    candidateSet.selectionDecision?.scorecard.map((score) => [
+      score.competitorId,
+      score,
+    ]) ?? [],
+  );
+  const winner = candidateSet.selectedCompetitorId;
+  return (
+    <article
+      className={
+        "candidate-set-card" +
+        (candidateSet.phase === "recovery-error" || candidateSet.phase === "stale"
+          ? " candidate-set-attention"
+          : "")
+      }
+      aria-label="Competing Futures evidence"
+      data-phase={candidateSet.phase}
+    >
+      <header className="candidate-set-heading">
+        <div>
+          <span className="eyebrow">Competing Futures</span>
+          <h3>
+            {winner
+              ? "One reproducible winner"
+              : terminal
+                ? "No future was promoted"
+                : "Exploring isolated futures"}
+          </h3>
+          <p>{candidateSet.objective}</p>
+        </div>
+        <div className="candidate-set-phase">
+          {!terminal && <Spinner />}
+          <strong>{candidateSet.phase.replaceAll("-", " ")}</strong>
+          <span>{candidateSet.competitors.length} siblings · {candidateSet.maxConcurrency} concurrent</span>
+        </div>
+      </header>
+
+      <div className="candidate-source-proof">
+        <div>
+          <span>Shared immutable source</span>
+          <code>{shortHash(candidateSet.source.contentHash)}</code>
+        </div>
+        <div>
+          <span>Snapshotted policy</span>
+          <strong>Outcome Contract v{candidateSet.outcomeContract.version}</strong>
+        </div>
+        <div>
+          <span>Loser policy</span>
+          <strong>{candidateSet.loserPolicy}</strong>
+        </div>
+      </div>
+
+      <div className="candidate-grid">
+        {candidateSet.competitors.map((competitor) => {
+          const score = scoreByCompetitor.get(competitor.id);
+          const isWinner = competitor.id === winner;
+          return (
+            <article
+              key={competitor.id}
+              className={
+                "candidate-card" +
+                (isWinner ? " candidate-winner" : "") +
+                (score && !score.eligible ? " candidate-ineligible" : "")
+              }
+            >
+              <header>
+                <div>
+                  <span>{score?.rank ? "Rank " + score.rank : "Candidate"}</span>
+                  <strong>{competitor.id}</strong>
+                </div>
+                <span className={"candidate-status candidate-status-" + competitor.status}>
+                  {isWinner ? "winner" : competitor.status}
+                </span>
+              </header>
+              <p>{competitor.strategyInstruction}</p>
+              {score?.eligible ? (
+                <div className="candidate-score-list">
+                  {score.components.map((component) => (
+                    <div key={component.kind}>
+                      <span>
+                        {component.kind.replaceAll("-", " ")} · {component.direction}
+                      </span>
+                      <strong>
+                        raw {component.rawValue.toLocaleString()} · normalized{" "}
+                        {component.normalizedValue.toLocaleString()}
+                      </strong>
+                      <small>{component.evaluatorVersion}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : score ? (
+                <div className="candidate-exclusion" role="status">
+                  <strong>Not eligible for Selection</strong>
+                  <span>{score.exclusions.join(" · ")}</span>
+                </div>
+              ) : (
+                <div className="candidate-pending">
+                  <span className="pulse" /> Required Validations and scores are pending
+                </div>
+              )}
+              {competitor.loserDisposition !== "pending" &&
+                competitor.loserDisposition !== "winner" && (
+                  <footer>Loser state {competitor.loserDisposition}</footer>
+                )}
+            </article>
+          );
+        })}
+      </div>
+
+      {candidateSet.selectionDecision && (
+        <footer className="selection-proof">
+          <div>
+            <span className="eyebrow">Deterministic decision</span>
+            <strong>
+              {candidateSet.selectionDecision.winnerCompetitorId
+                ? candidateSet.selectionDecision.winnerCompetitorId + " selected"
+                : "No eligible Candidate"}
+            </strong>
+            <p>Lexicographic normalized scores, then ascending competitor ID.</p>
+          </div>
+          <code className="selection-digest">
+            {candidateSet.selectionDecision.decisionDigest}
+          </code>
+        </footer>
+      )}
+      {candidateSet.recoveryError && (
+        <p className="candidate-set-error" role="alert">{candidateSet.recoveryError}</p>
+      )}
+      {!candidateSet.selectionDecision && !terminal && (
+        <button
+          type="button"
+          className="button button-ghost candidate-cancel"
+          onClick={onCancel}
+          disabled={actionBusy || candidateSet.cancellationRequested}
+        >
+          {candidateSet.cancellationRequested ? "Cancellation requested" : "Cancel exploration"}
+        </button>
+      )}
+    </article>
+  );
 }
 
 function AirlockEvidence({
@@ -555,6 +712,12 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [activeCandidateSet, setActiveCandidateSet] = useState<CandidateSet | null>(null);
+  const [showExplore, setShowExplore] = useState(false);
+  const [explorationObjective, setExplorationObjective] = useState(
+    defaultExplorationObjective,
+  );
+  const [loserPolicy, setLoserPolicy] = useState<"retain" | "discard">("retain");
   const [airlockActionBusy, setAirlockActionBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -564,6 +727,7 @@ export default function App() {
   const selectedIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const pollingRunIds = useRef(new Set<string>());
+  const pollingCandidateSetIds = useRef(new Set<string>());
   selectedIdRef.current = selectedId;
 
   const selected = useMemo(
@@ -595,8 +759,15 @@ export default function App() {
 
   const runInProgress =
     activeRun != null && ["queued", "running"].includes(activeRun.status);
+  const candidateSetInProgress =
+    activeCandidateSet != null &&
+    !["completed", "stale", "recovery-error"].includes(activeCandidateSet.phase);
   const demoActionBusy =
-    busy || airlockActionBusy || selected?.status === "busy" || runInProgress;
+    busy ||
+    airlockActionBusy ||
+    selected?.status === "busy" ||
+    runInProgress ||
+    candidateSetInProgress;
   const canRepairActiveFuture =
     activeRun?.status === "completed" &&
     activeRun.transaction?.disposition === "quarantined" &&
@@ -640,18 +811,36 @@ export default function App() {
 
   useEffect(() => {
     setActiveRun(null);
+    setActiveCandidateSet(null);
+    setShowExplore(false);
     setShowSettings(false);
     if (!selectedId) {
       setMessages([]);
       return;
     }
-    void Promise.all([refreshMessages(selectedId), api.runs(selectedId)])
-      .then(([, result]) => {
+    void Promise.all([
+      refreshMessages(selectedId),
+      api.runs(selectedId),
+      api.candidateSets(selectedId),
+    ])
+      .then(([, result, candidateSetsResult]) => {
         if (selectedIdRef.current !== selectedId) return;
-        const latest = result.runs[0] ?? null;
+        const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
         setActiveRun(latest);
+        const latestCandidateSet = candidateSetsResult.candidateSets[0] ?? null;
+        setActiveCandidateSet(latestCandidateSet);
         if (latest && ["queued", "running"].includes(latest.status)) {
           void pollRun(latest.id, selectedId).catch((reason) =>
+            setError(reason instanceof Error ? reason.message : String(reason)),
+          );
+        }
+        if (
+          latestCandidateSet &&
+          !["completed", "stale", "recovery-error"].includes(
+            latestCandidateSet.phase,
+          )
+        ) {
+          void pollCandidateSet(latestCandidateSet.id, selectedId).catch((reason) =>
             setError(reason instanceof Error ? reason.message : String(reason)),
           );
         }
@@ -672,10 +861,10 @@ export default function App() {
   }, [selected]);
 
   useEffect(() => {
-    if (messages.length > 0 || activeRun) {
+    if (messages.length > 0 || activeRun || activeCandidateSet) {
       messageEnd.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, activeRun]);
+  }, [messages, activeRun, activeCandidateSet]);
 
   const createAgent = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -761,6 +950,88 @@ export default function App() {
       }
     } finally {
       pollingRunIds.current.delete(runId);
+    }
+  };
+
+  const pollCandidateSet = async (candidateSetId: string, agentId: string) => {
+    if (pollingCandidateSetIds.current.has(candidateSetId)) return;
+    pollingCandidateSetIds.current.add(candidateSetId);
+    try {
+      while (mountedRef.current) {
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+        if (!mountedRef.current) return;
+        const result = await api.candidateSet(candidateSetId);
+        if (selectedIdRef.current === agentId) {
+          setActiveCandidateSet(result.candidateSet);
+        }
+        if (["completed", "stale", "recovery-error"].includes(result.candidateSet.phase)) {
+          await refreshAgents();
+          return;
+        }
+      }
+    } finally {
+      pollingCandidateSetIds.current.delete(candidateSetId);
+    }
+  };
+
+  const exploreCompetingFutures = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected || !explorationObjective.trim()) return;
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      const result = await api.createCandidateSet(selected.id, {
+        objective: explorationObjective.trim(),
+        competitors: [
+          {
+            id: "unsafe-fast",
+            executorProfileId: "standard-v1",
+            strategyInstruction:
+              "Finish quickly, but every required Validation still controls eligibility.",
+          },
+          {
+            id: "broad-valid",
+            executorProfileId: "standard-v1",
+            strategyInstruction:
+              "Pursue a comprehensive valid implementation and verify the whole surface.",
+          },
+          {
+            id: "focused-valid",
+            executorProfileId: "standard-v1",
+            strategyInstruction:
+              "Pursue the narrowest complete implementation with minimal file and byte changes.",
+          },
+        ],
+        maxConcurrency: 3,
+        loserPolicy,
+      });
+      setActiveCandidateSet(result.candidateSet);
+      setShowExplore(false);
+      setAgents((current) =>
+        current.map((agent) =>
+          agent.id === selected.id ? { ...agent, status: "busy" } : agent,
+        ),
+      );
+      await pollCandidateSet(result.candidateSet.id, selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      await refreshAgents();
+    } finally {
+      setAirlockActionBusy(false);
+    }
+  };
+
+  const cancelCompetingFutures = async () => {
+    if (!activeCandidateSet) return;
+    setAirlockActionBusy(true);
+    setError(null);
+    try {
+      const result = await api.cancelCandidateSet(activeCandidateSet.id);
+      setActiveCandidateSet(result.candidateSet);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setAirlockActionBusy(false);
     }
   };
 
@@ -1141,6 +1412,28 @@ export default function App() {
                     </h2>
                   </div>
                   <div className="playground-state">
+                    <button
+                      type="button"
+                      className="explore-button"
+                      onClick={() => setShowExplore((current) => !current)}
+                      disabled={
+                        selected.status === "stopped" ||
+                        demoActionBusy ||
+                        candidateSetInProgress ||
+                        system?.competingFutures.available === false
+                      }
+                      title={system?.competingFutures.reason ?? undefined}
+                      aria-expanded={showExplore}
+                      aria-controls="competing-futures-panel"
+                    >
+                      <span aria-hidden="true">◇</span>
+                      Explore futures
+                    </button>
+                    {system?.competingFutures.available === false && (
+                      <small className="capability-reason" role="status">
+                        {system.competingFutures.reason}
+                      </small>
+                    )}
                     <span className="contract-badge">
                       Outcome Contract v{selected.outcomeContract.version}
                     </span>
@@ -1150,6 +1443,85 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {showExplore && (
+                  <form
+                    className="explore-panel"
+                    id="competing-futures-panel"
+                    onSubmit={exploreCompetingFutures}
+                  >
+                    <div className="explore-intro">
+                      <div>
+                        <span className="eyebrow">Competing Futures</span>
+                        <h3>Let isolated approaches compete safely</h3>
+                      </div>
+                      <p>
+                        All three start from the same immutable source and policy.
+                        Required Validation controls eligibility, then a deterministic score selects exactly one future for Promotion.
+                      </p>
+                    </div>
+                    <label className="explore-objective">
+                      Objective
+                      <textarea
+                        value={explorationObjective}
+                        onChange={(event) => setExplorationObjective(event.target.value)}
+                        rows={2}
+                        maxLength={4_000}
+                        required
+                      />
+                    </label>
+                    <div className="explore-strategies" aria-label="Competing strategies">
+                      <div>
+                        <span>01</span>
+                        <strong>Unsafe fast</strong>
+                        <small>Proves safety outranks speed</small>
+                      </div>
+                      <div>
+                        <span>02</span>
+                        <strong>Broad valid</strong>
+                        <small>Complete, but changes more</small>
+                      </div>
+                      <div>
+                        <span>03</span>
+                        <strong>Focused valid</strong>
+                        <small>Smallest complete future</small>
+                      </div>
+                    </div>
+                    <div className="explore-controls">
+                      <label>
+                        Loser evidence
+                        <select
+                          value={loserPolicy}
+                          onChange={(event) =>
+                            setLoserPolicy(event.target.value as "retain" | "discard")
+                          }
+                        >
+                          <option value="retain">Retain isolated state</option>
+                          <option value="discard">Keep proof, discard state</option>
+                        </select>
+                      </label>
+                      <div className="explore-safety">
+                        <strong>Absolute safety gate</strong>
+                        <span>A faster invalid future can never win.</span>
+                      </div>
+                      <div className="explore-actions">
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => setShowExplore(false)}
+                        >
+                          Close
+                        </button>
+                        <button
+                          className="button button-primary"
+                          disabled={!explorationObjective.trim() || demoActionBusy}
+                        >
+                          {airlockActionBusy ? <Spinner /> : "Run three futures"}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
 
                 {system?.demoMode ? (
                   <section className="demo-guide" aria-label="Four-step demo proof">
@@ -1198,7 +1570,7 @@ export default function App() {
               </div>
 
               <div className="messages">
-                {messages.length === 0 && !activeRun ? (
+                {messages.length === 0 && !activeRun && !activeCandidateSet ? (
                   <div className="welcome">
                     <div className="welcome-orbit">
                       <div>⌁</div>
@@ -1261,6 +1633,13 @@ export default function App() {
                     onDiscard={() => void discardActiveRun()}
                   />
                 )}
+                {activeCandidateSet && (
+                  <CandidateSetEvidence
+                    candidateSet={activeCandidateSet}
+                    actionBusy={airlockActionBusy}
+                    onCancel={() => void cancelCompetingFutures()}
+                  />
+                )}
                 <div ref={messageEnd} />
               </div>
 
@@ -1282,6 +1661,7 @@ export default function App() {
                   disabled={
                     selected.status === "stopped" ||
                     selected.status === "busy" ||
+                    candidateSetInProgress ||
                     activeRun != null && ["queued", "running"].includes(activeRun.status)
                   }
                   rows={3}
@@ -1296,6 +1676,7 @@ export default function App() {
                       !prompt.trim() ||
                       selected.status === "stopped" ||
                       selected.status === "busy" ||
+                      candidateSetInProgress ||
                       (activeRun != null && ["queued", "running"].includes(activeRun.status))
                     }
                     aria-label="Send message"
