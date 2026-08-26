@@ -1,0 +1,95 @@
+{
+  "description": "Agent Airlock Portable Promotion Receipt version 1 golden vector",
+  "envelope": {
+    "schema": "agent-airlock/portable-promotion-envelope",
+    "schemaVersion": 1,
+    "receipt": {
+      "protocol": {
+        "schema": "agent-airlock/portable-promotion-receipt",
+        "schemaVersion": 1,
+        "canonicalization": "RFC8785",
+        "digestAlgorithm": "SHA-256"
+      },
+      "decision": {
+        "runId": "run-golden",
+        "agentId": "agent-golden",
+        "disposition": "promoted",
+        "decidedAt": "2026-08-26T00:00:00.000Z",
+        "clockClaim": "signer-clock-not-external-timestamp"
+      },
+      "state": {
+        "before": {
+          "stateId": "state-before",
+          "compositeHash": "sha256:6db7d803e74f1ffa7d8f5adc0bf95b3e15bf4c8373fffadf546227cc6c6742cb",
+          "builtinResources": [
+            {
+              "kind": "workspace",
+              "fingerprint": "sha256:5015e2d70b640735f96379125630b83e39299b408fa797850c9529d7b07287fa"
+            }
+          ],
+          "providerResources": []
+        },
+        "after": {
+          "stateId": "state-after",
+          "compositeHash": "sha256:f39592393ef0859cb196a52693d2cea00fb2df784b3c04ae54aa7cadb8e562f8",
+          "builtinResources": [
+            {
+              "kind": "workspace",
+              "fingerprint": "sha256:61e311050a9b545ed97bddce7146166f3583a5ee48a84f6da2b5e77dbca69423"
+            }
+          ],
+          "providerResources": []
+        }
+      },
+      "outcomeContract": {
+        "schemaVersion": 1,
+        "version": 1,
+        "digest": "sha256:cc8321d6375c494d043fdd0260f21bc0ec51dacc9f6abb7f909cdcd3041b78bf"
+      },
+      "validationEvidence": {
+        "root": "sha256:3fa92e028f307de0e85447270355225fc22fd36c01d0f441ea76d26aca2ecb2a",
+        "leafCount": 1,
+        "ordering": "canonical-identity-ascending"
+      },
+      "externalActions": {
+        "commitment": "sha256:2b0dcdd40016096b852d9d5b79de2ad570249dc8e4d4ebe4fa4ab81e2aa9af35",
+        "deliveredCount": 0
+      },
+      "selection": null,
+      "assurance": null,
+      "ancestry": {
+        "rootRunId": "run-golden",
+        "parentRunId": null,
+        "depth": 0,
+        "maxDepth": 3,
+        "previousReceiptDigest": null
+      }
+    },
+    "receiptDigest": "sha256:1838711acf64d074c54994e72a44039de30e5766dde874acd29fd68ce305c965",
+    "signatureAlgorithm": "Ed25519",
+    "signature": "C7G3Jkw9nl9vVHocS_Q-9_gf2JR9NzmkxvxQxrSUIGsARCom4vsA6WkkFruakNhYYb7sE_mtFDMM7dx0sAmtAg",
+    "keyId": "sha256:898a8eca183af46feaf9f5b0e2ad13bad770837e762505b794271da115e3c7df",
+    "publicJwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "Z42i_FlnZ29SCyb1jH0H7ijQQy_xRir1UAkH8V-P9cI"
+    },
+    "disclosures": [
+      {
+        "leaf": {
+          "schemaVersion": 1,
+          "identity": "validation:required-paths",
+          "category": "validation",
+          "status": "passed",
+          "required": true,
+          "durationMs": 5,
+          "summary": "Required public artifacts are present.",
+          "valueHash": "sha256:9e7e427376ff123ca0135e91166715200433de586881ef12ebe3b13b96506384"
+        },
+        "leafIndex": 0,
+        "totalLeaves": 1,
+        "siblings": []
+      }
+    ]
+  }
+}

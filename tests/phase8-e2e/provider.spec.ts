@@ -42,7 +42,9 @@ test("the Phase 8 demo promotes and quarantines a remote Transactional Resource"
   const providerPanel = evidence.getByRole("region", {
     name: "Registered Transactional Resources",
   });
-  await expect(providerPanel.getByText("Remote versioned object")).toBeVisible();
+  await expect(
+    providerPanel.getByText("Remote versioned object", { exact: true }),
+  ).toBeVisible();
   await expect(providerPanel.getByText("http-object", { exact: true })).toBeVisible();
   await expect(providerPanel.getByText("canonical-manifest", { exact: true })).toBeVisible();
   await expect(providerPanel.getByText("promoted", { exact: true })).toBeVisible();

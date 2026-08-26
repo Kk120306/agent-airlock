@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 8, with the Phase 9 implementation at release-candidate verification
+**Delivered:** Phases 0 through 10, with the Phase 11 implementation at release-candidate verification
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -324,7 +324,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 
 ### Phase 8: Transactional Resource SDK
 
-**Status:** Release candidate implemented on `post-hackathon/phases-8-11`; final unrestricted browser and clean-clone gates pending.
+**Status:** Release candidate implemented on `post-hackathon/phases-8-11`; the production Chrome journey passes and final clean-clone verification is in progress.
 
 **Outcome**
 
@@ -452,20 +452,40 @@ A Promotion Receipt can be independently verified after it crosses a machine, te
 
 **Build**
 
-- Define a provider-neutral receipt schema for contract version, resource versions, Validation evidence hashes, disposition, and ancestry.
-- Sign receipts using ordinary public-key infrastructure.
-- Add optional immutable anchoring when multiple organizations genuinely need a shared timestamp or ownership-neutral audit trail.
-- Keep private inputs and sensitive evidence off public ledgers.
+- Define a strict provider-neutral receipt schema for contract version, resource versions, Validation evidence commitments, disposition, ancestry, Candidate Selection, and accepted Assurance provenance.
+- Sign receipts with an operator-held Ed25519 identity and publish a self-contained offline verifier.
+- Add deterministic selective disclosure and a signed local transparency log without making either necessary for receipt verification.
+- Produce optional EVM calldata over the receipt digest without a wallet, RPC, transaction, or funds.
+- Keep private inputs and sensitive evidence out of envelopes, anchors, fixtures, logs, and browser downloads.
 
 **Exit gate**
 
 - An independent verifier can confirm receipt integrity without access to the original Airlock database.
-- Redacted or private evidence remains private while its integrity remains verifiable.
+- Private evidence is not included, while the signed Merkle root commits to the complete bounded evidence set and selected redacted leaves can be verified.
 - The design works without blockchain and uses blockchain only where shared governance creates a real trust gap.
+- Key rotation preserves historical verification, while loss, substitution, unsafe permissions, and symbolic links fail closed.
+- A one-bit change to content, proof, signature, public key, algorithm, or checkpoint fails verification.
+- Cross-process protocol checks, server acceptance, the prior phase gates, and the clean-clone release gate pass without paid inference.
 
 **Beyond-expectations finish**
 
 Establish Outcome Contracts and Promotion Receipts as a portable trust protocol for Agent execution rather than a feature owned by one application.
+
+**Delivered evidence**
+
+- The standalone `@agent-airlock/portable-promotion-receipt` package implements strict bounded parsing, canonical JSON, domain-separated SHA-256 commitments, Ed25519 signatures, public JWK fingerprints, Merkle disclosures, and a network-free verifier CLI.
+- The published golden vector passes in a separate process, and adversarial mutations to signed content, public material, disclosure proofs, algorithms, or signatures are rejected.
+- Private signing keys remain in owner-only regular files outside application metadata, and adjacent non-secret identity markers make missing or substituted keys fail closed instead of silently rotating identity.
+- Historical envelopes continue to verify under their included public JWK after an explicit key rotation.
+- The server exports only complete versioned durable evidence and binds exact provider versions, Outcome Contract, required Validations, Repair ancestry, prior receipts, Candidate Selection, and accepted Assurance provenance when applicable.
+- Incomplete or contradictory evidence returns a retryable conflict without changing Canonical State or durable Run evidence.
+- The Playground starts with no evidence disclosed, previews safe evidence identities, requires regeneration after privacy settings change, and downloads the envelope, optional anchor proof, and optional EVM payload as separate bounded artifacts.
+- The verification report separates mathematical integrity from Runtime isolation, policy sufficiency, Validation correctness, signer-clock accuracy, and organizational trust.
+- The optional local transparency log signs chained checkpoints and proves inclusion and consistency, while tested split views fail verification and signature-only export remains complete.
+- The optional EVM encoder produces a frozen `anchor(bytes32)` payload with zero network calls and zero funds spent and does not claim publication or Promotion correctness.
+- The production Docker image builds every workspace, resolves all three runtime packages through the pruned workspace installation, starts as the non-root runtime user, and passes its live health boundary.
+- `npm run check:phase11:protocol` and the Phase 11 server acceptance matrix require no ModelArk credential, paid inference, provider purchase, wallet, or public blockchain transaction.
+- `npm run check:phase11:docker` turns the production-image build, runtime package imports, and live health probe into a repeatable release gate.
 
 ## Hackathon cut lines
 
@@ -486,7 +506,7 @@ They add safe repair, adversarial confidence, and a flawless three-minute story.
 
 ### Future vision
 
-Phases 8 through 11 belong in the product narrative and architecture extension points, not in the hackathon implementation unless every prior exit gate is already green.
+Phases 8 through 11 are implemented on an isolated post-hackathon branch and remain outside the frozen Phase 7 judging path.
 
 ## Three-day execution allocation
 
@@ -564,4 +584,4 @@ A phase does not advance while any critical row is red.
 - SQLite and the mock outbox are proof of abstraction, not separate product directions.
 - Repair is the hackathon's highest-value stretch because it turns containment into productive recovery.
 - Competing futures are the strongest post-hackathon expansion because they convert the same isolation boundary into a quality optimizer.
-- Portable receipts may later use cryptographic or blockchain anchoring, but only after the transactional guarantee is real and only when independent parties need shared verification.
+- Portable receipts use ordinary cryptography for independent verification and keep blockchain anchoring optional, digest-only, and limited to genuine shared-governance needs.

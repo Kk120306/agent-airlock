@@ -43,6 +43,7 @@ import type {
   RunnerResult,
   SealedCandidateReference,
 } from "./types.js";
+import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js";
 import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
@@ -1701,7 +1702,7 @@ export class AirlockRunner {
       "deferred",
       receipts,
     );
-      next.externalActions.deliveredCount = receipts.length;
+    next.externalActions.deliveredCount = receipts.length;
     next.providerResources = next.providerResources.map((resource) => ({
       ...resource,
       disposition: "promoted",
@@ -2164,11 +2165,7 @@ export function createPromotionReceipt(
   ) {
     throw new Error("Cannot create a receipt for an incomplete Run Transaction");
   }
-  const validationEvidenceHash =
-    "sha256:" +
-    createHash("sha256")
-      .update(JSON.stringify(transaction.validations))
-      .digest("hex");
+  const validationEvidenceHash = promotionValidationEvidenceHash(transaction);
   return {
     runTransactionId: transaction.id,
     disposition: transaction.disposition,

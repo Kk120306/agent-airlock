@@ -18,7 +18,9 @@ A Run without that durable decision never becomes Canonical State during recover
 | Registry Transition journal | A provider addition was verified and planned for one Agent before canonical advancement. |
 | Candidate Set aggregate | One exact shared source, sealed competitor evidence, deterministic Selection Decision, and loser cleanup progress. |
 | Agent deletion journal | A bounded archive audit was prepared before an Agent workspace rename or control-plane deletion. |
-| JSON control-plane store | Operator-facing Agent, Run, Candidate Set, Assurance Proposal, Outcome Contract history, message, and receipt metadata. |
+| JSON control-plane store | Operator-facing Agent, Run, Candidate Set, Assurance Proposal, Outcome Contract history, message, and Promotion Receipt metadata. |
+| Portable signing key and identity marker | The private Ed25519 signer and its non-secret expected public-key fingerprint. |
+| Local transparency log | An optional append-only digest sequence, signed checkpoints, and prior-checkpoint chain for shared observation. |
 
 Recovery verifies the physical sources first and repairs control-plane metadata last.
 It never rolls `canonical.json` backward.
@@ -92,6 +94,10 @@ Candidate Set recovery also uses each competitor's persisted historical provider
 | After workspace archival but before control-plane deletion | Startup requires a regular deterministic archive directory and an exactly matching bounded tombstone before removing the exact Agent aggregates. |
 | After control-plane deletion but before journal completion | Startup verifies the existing archive destination and removes the already completed journal without recreating the Agent. |
 | Agent deletion audit or physical archive state contradicts the journal | Startup fails closed before Promotion or Resource Registry transition recovery begins. |
+| Receipt export stops before its response | Canonical State and Run evidence remain unchanged, and a retry derives and signs the same receipt content. |
+| A portable signing key is missing or substituted while its identity marker remains | Export fails closed without silently rotating the signing identity, and existing envelopes remain independently verifiable. |
+| A transparency append completes but its response is lost | A retry recognizes the existing receipt digest and returns the same tree position without appending a duplicate. |
+| The optional local transparency log or checkpoint chain is malformed | Anchored export fails closed, while signature-only export remains available when the operator disables anchoring. |
 | Provider removal or contract replacement is configured | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied. |
 | Any physical contradiction | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed. |
 
@@ -164,3 +170,13 @@ npm run check:phase10:assurance
 
 These tests cover deterministic proposal replay, lineage deduplication, unknown historical inputs, stale contracts, tampering, strict HTTP review, rejection restart, immutable rollback, nested parser rejection, and interruption immediately after the physical workspace archive.
 The archived schema 2 tombstone contains only bounded identifiers, lifecycle states, provenance, and cryptographic digests for Runs, Candidate Sets, Assurance Proposals, Outcome Contract versions, and Promotion Receipts.
+
+Run the Portable Trust protocol, signing-key, transparency-log, and HTTP export matrix with:
+
+```bash
+npm run check:phase11:protocol
+npm run test -w @launchpad/server -- --run src/phase-eleven-acceptance.test.ts
+```
+
+These tests verify strict offline parsing, cross-process signature verification, one-bit tamper rejection, key loss and substitution detection, historical key rotation, Merkle disclosures, local transparency inclusion and split-view detection, zero-network EVM payload generation, exact Candidate Selection and Assurance provenance, Repair ancestry, retryable incomplete evidence, and no paid provider access.
+Follow the [portable receipt key runbook](operations/PORTABLE_RECEIPT_KEYS.md) before rotating, retiring, restoring, or investigating a signing key.

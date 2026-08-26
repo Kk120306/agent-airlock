@@ -6,6 +6,9 @@ dist/
 .data/
 .e2e-baseline/
 .e2e-demo/
+.e2e-phase8/
+.e2e-phase10/
+.e2e-phase11-real/
 .local/
 data/
 workspaces/

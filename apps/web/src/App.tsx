@@ -8,6 +8,7 @@ import type {
   CandidateSet,
   Message,
   OutcomeContractVersionRecord,
+  PortableReceiptExport,
   SystemInfo,
 } from "./types";
 
@@ -93,6 +94,270 @@ function StatusPill({ status }: { status: Agent["status"] }) {
 
 function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
+}
+
+function PortableTrustExport({
+  runId,
+  onError,
+}: {
+  runId: string;
+  onError: (message: string) => void;
+}) {
+  const [result, setResult] = useState<PortableReceiptExport | null>(null);
+  const [availableDisclosures, setAvailableDisclosures] = useState<
+    PortableReceiptExport["availableDisclosures"]
+  >([]);
+  const [selectedDisclosures, setSelectedDisclosures] = useState<string[]>([]);
+  const [localAnchor, setLocalAnchor] = useState(false);
+  const [evmPayload, setEvmPayload] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    setResult(null);
+    setAvailableDisclosures([]);
+    setSelectedDisclosures([]);
+    setLocalAnchor(false);
+    setEvmPayload(false);
+    setDirty(false);
+  }, [runId]);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const exported = await api.exportPortableReceipt(runId, {
+        disclosureIdentities: selectedDisclosures,
+        includeAncestry: true,
+        localAnchor,
+        evmPayload,
+      });
+      setResult(exported);
+      setAvailableDisclosures(exported.availableDisclosures);
+      setDirty(false);
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadJson = (value: unknown, filename: string) => {
+    if (!result || dirty) return;
+    const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleDisclosure = (identity: string, checked: boolean) => {
+    setSelectedDisclosures((current) =>
+      checked
+        ? [...current, identity].sort()
+        : current.filter((candidate) => candidate !== identity),
+    );
+    setDirty(true);
+  };
+
+  return (
+    <section className="portable-trust" aria-label="Portable trust receipt">
+      <header className="portable-trust-heading">
+        <div>
+          <span className="eyebrow">Portable Trust</span>
+          <h4>Carry the decision proof beyond this server</h4>
+          <p>
+            Ed25519 authorship, canonical SHA-256 commitments, and offline verification.
+            Raw prompts, outputs, credentials, and local paths stay out.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={() => void generate()}
+          disabled={busy}
+        >
+          {busy ? <Spinner /> : result ? "Regenerate receipt" : "Generate receipt"}
+        </button>
+      </header>
+
+      <div className="portable-options">
+        <label>
+          <input
+            type="checkbox"
+            checked={localAnchor}
+            onChange={(event) => {
+              setLocalAnchor(event.target.checked);
+              setDirty(true);
+            }}
+          />
+          <span>
+            <strong>Append to local transparency log</strong>
+            <small>Optional signed checkpoint. Receipt validity never depends on it.</small>
+          </span>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={evmPayload}
+            onChange={(event) => {
+              setEvmPayload(event.target.checked);
+              setDirty(true);
+            }}
+          />
+          <span>
+            <strong>Prepare digest-only EVM calldata</strong>
+            <small>No chain call, wallet, RPC, or funds are used.</small>
+          </span>
+        </label>
+      </div>
+
+      {availableDisclosures.length > 0 && (
+        <details className="portable-disclosures">
+          <summary>
+            Selectively disclose Validation evidence ({selectedDisclosures.length}/
+            {availableDisclosures.length})
+          </summary>
+          <p>
+            The signed Merkle root commits to every leaf. Only selected leaves and their
+            inclusion proofs enter the downloaded envelope.
+          </p>
+          <div>
+            {availableDisclosures.map((disclosure) => (
+              <label key={disclosure.identity}>
+                <input
+                  type="checkbox"
+                  checked={selectedDisclosures.includes(disclosure.identity)}
+                  onChange={(event) =>
+                    toggleDisclosure(disclosure.identity, event.target.checked)
+                  }
+                />
+                <span>
+                  <strong>
+                    {disclosure.status} {disclosure.required ? "required" : "optional"}
+                  </strong>
+                  <small>{disclosure.summary ?? disclosure.category}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {result && (
+        <div className="portable-result" data-valid={result.verification.valid}>
+          <div className="portable-result-status">
+            <span aria-hidden="true">{result.verification.valid ? "✓" : "!"}</span>
+            <div>
+              <strong>
+                {result.verification.valid
+                  ? "Self-check passed"
+                  : "Receipt verification failed"}
+              </strong>
+              <small>
+                {dirty
+                  ? "Options changed. Regenerate before downloading."
+                  : "Ready for independent offline verification."}
+              </small>
+            </div>
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() =>
+                downloadJson(
+                  result.envelope,
+                  `agent-airlock-receipt-${runId}.json`,
+                )
+              }
+              disabled={dirty || !result.verification.valid}
+            >
+              Download receipt JSON
+            </button>
+          </div>
+          <div className="portable-identities">
+            <div>
+              <span>Receipt digest</span>
+              <code>{result.envelope.receiptDigest}</code>
+            </div>
+            <div>
+              <span>Signing key</span>
+              <code>{result.envelope.keyId}</code>
+            </div>
+          </div>
+          <div className="portable-claims">
+            <div>
+              <strong>Cryptographically supported</strong>
+              <ul>
+                {result.verification.provenClaims.map((claim) => (
+                  <li key={claim}>{claim}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <strong>Not proven by this receipt</strong>
+              <ul>
+                {result.verification.unsupportedClaims.map((claim) => (
+                  <li key={claim}>{claim}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          {(result.anchor || result.evmPayload) && (
+            <div className="portable-optional-proof">
+              {result.anchor && (
+                <div>
+                  <span>
+                    Local checkpoint {result.anchor.checkpoint.checkpoint.treeSize} ·{" "}
+                    {shortHash(result.anchor.checkpoint.checkpoint.root)}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    disabled={dirty || !result.verification.valid}
+                    onClick={() =>
+                      downloadJson(
+                        result.anchor,
+                        `agent-airlock-anchor-${runId}.json`,
+                      )
+                    }
+                  >
+                    Download anchor proof
+                  </button>
+                </div>
+              )}
+              {result.evmPayload && (
+                <div>
+                  <span>
+                    EVM {result.evmPayload.methodSignature} ·{" "}
+                    {result.evmPayload.networkCalls} network calls ·{" "}
+                    {result.evmPayload.fundsSpent} funds spent
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    disabled={dirty || !result.verification.valid}
+                    onClick={() =>
+                      downloadJson(
+                        result.evmPayload,
+                        `agent-airlock-evm-payload-${runId}.json`,
+                      )
+                    }
+                  >
+                    Download EVM payload
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function assuranceOperationLabel(operation: AssuranceOperation): string {
@@ -185,7 +450,7 @@ function AssuranceInbox({
                 </div>
                 <details className="assurance-proof">
                   <summary>Inspect citations and simulation proof</summary>
-                  <div>
+                  <section aria-label="Proposal citations">
                     {proposal.citations.map((citation) => (
                       <p key={citation.operationKey + citation.runId}>
                         <code>{citation.runId}</code>
@@ -193,8 +458,11 @@ function AssuranceInbox({
                         <small>{shortHash(citation.evidenceHash)} · {citation.derivationRule}</small>
                       </p>
                     ))}
-                  </div>
-                  <div className="assurance-simulation-results">
+                  </section>
+                  <section
+                    className="assurance-simulation-results"
+                    aria-label="Historical simulation results"
+                  >
                     {proposal.simulation.results.map((result) => (
                       <p key={result.operationKey + result.runId}>
                         <code>{result.runId}</code>
@@ -213,7 +481,7 @@ function AssuranceInbox({
                         </small>
                       </p>
                     ))}
-                  </div>
+                  </section>
                   <footer>
                     Simulation {proposal.simulation.engineVersion} · {proposal.simulation.results.length} bounded results · {shortHash(proposal.simulation.digest)}
                   </footer>
@@ -247,10 +515,14 @@ function CandidateSetEvidence({
   candidateSet,
   actionBusy,
   onCancel,
+  portableTrustAvailable,
+  onPortableError,
 }: {
   candidateSet: CandidateSet;
   actionBusy: boolean;
   onCancel: () => void;
+  portableTrustAvailable: boolean;
+  onPortableError: (message: string) => void;
 }) {
   const terminal = ["completed", "stale", "recovery-error"].includes(
     candidateSet.phase,
@@ -383,6 +655,14 @@ function CandidateSetEvidence({
       {candidateSet.recoveryError && (
         <p className="candidate-set-error" role="alert">{candidateSet.recoveryError}</p>
       )}
+      {portableTrustAvailable &&
+        candidateSet.phase === "completed" &&
+        candidateSet.winnerRunId && (
+          <PortableTrustExport
+            runId={candidateSet.winnerRunId}
+            onError={onPortableError}
+          />
+        )}
       {!candidateSet.selectionDecision && !terminal && (
         <button
           type="button"
@@ -402,11 +682,15 @@ function AirlockEvidence({
   actionBusy,
   onRepair,
   onDiscard,
+  portableTrustAvailable,
+  onPortableError,
 }: {
   run: AgentRun;
   actionBusy: boolean;
   onRepair: () => void;
   onDiscard: () => void;
+  portableTrustAvailable: boolean;
+  onPortableError: (message: string) => void;
 }) {
   const transaction = run.transaction;
   if (!transaction) return null;
@@ -849,11 +1133,16 @@ function AirlockEvidence({
       )}
 
       {transaction.promotionReceipt && (
-        <footer className="receipt-row">
-          <span>Promotion Receipt</span>
-          <code>{shortHash(transaction.promotionReceipt.validationEvidenceHash)}</code>
-          <small>{transaction.promotionReceipt.disposition}</small>
-        </footer>
+        <>
+          <footer className="receipt-row">
+            <span>Promotion Receipt</span>
+            <code>{shortHash(transaction.promotionReceipt.validationEvidenceHash)}</code>
+            <small>{transaction.promotionReceipt.disposition}</small>
+          </footer>
+          {portableTrustAvailable && !recoveryFailed && (
+            <PortableTrustExport runId={run.id} onError={onPortableError} />
+          )}
+        </>
       )}
     </article>
   );
@@ -1997,6 +2286,8 @@ export default function App() {
                     actionBusy={airlockActionBusy}
                     onRepair={() => void repairActiveRun()}
                     onDiscard={() => void discardActiveRun()}
+                    portableTrustAvailable={system?.portableTrust.available === true}
+                    onPortableError={setError}
                   />
                 )}
                 {activeCandidateSet && (
@@ -2004,6 +2295,8 @@ export default function App() {
                     candidateSet={activeCandidateSet}
                     actionBusy={airlockActionBusy}
                     onCancel={() => void cancelCompetingFutures()}
+                    portableTrustAvailable={system?.portableTrust.available === true}
+                    onPortableError={setError}
                   />
                 )}
                 <div ref={messageEnd} />

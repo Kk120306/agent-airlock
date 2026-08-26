@@ -362,6 +362,49 @@ export class WorkspaceManager {
     return canonical;
   }
 
+  async verifyPortableStateProjection(
+    agentId: string,
+    stateId: string,
+    expected: {
+      workspaceContentHash: string;
+      sessionContentHash: string;
+      sqliteContentHash: string;
+    },
+  ): Promise<void> {
+    this.assertIdentifier(agentId, "agent");
+    this.assertIdentifier(stateId, "state");
+    const versionRoot = this.versionRoot(agentId, stateId);
+    const workspacePath = this.versionWorkspacePath(agentId, stateId);
+    const sessionPath = this.versionCodexHomePath(agentId, stateId);
+    const outboxPath = this.versionOutboxPath(agentId, stateId);
+    for (const candidatePath of [
+      versionRoot,
+      workspacePath,
+      sessionPath,
+      outboxPath,
+    ]) {
+      const stats = await lstat(candidatePath);
+      if (!stats.isDirectory() || stats.isSymbolicLink()) {
+        throw new Error("Portable receipt state evidence is not an immutable directory");
+      }
+    }
+    const [workspaceContentHash, sessionContentHash, sqliteSnapshot] =
+      await Promise.all([
+        this.contentHash(workspacePath),
+        this.contentHash(sessionPath),
+        this.sqlite.inspect(workspacePath),
+      ]);
+    if (
+      workspaceContentHash !== expected.workspaceContentHash ||
+      sessionContentHash !== expected.sessionContentHash ||
+      sqliteSnapshot.contentHash !== expected.sqliteContentHash
+    ) {
+      throw new Error(
+        "Portable receipt source contradicts immutable historical state",
+      );
+    }
+  }
+
   async readCanonicalForProviderTransition(
     agentId: string,
   ): Promise<CanonicalStateReference> {

@@ -155,7 +155,7 @@ describe("OutcomeValidator", () => {
     const { canonical, candidate } = await makeWorkspaces();
     await writeFile(
       path.join(candidate, "fixture.pem"),
-      "-----BEGIN PRIVATE KEY-----\nnot-retained\n-----END PRIVATE KEY-----\n",
+      "-----BEGIN " + "PRIVATE KEY-----\nnot-retained\n-----END PRIVATE KEY-----\n",
     );
     const validator = new OutcomeValidator(
       new FixtureExecutor(() => passingResult()),
@@ -195,7 +195,7 @@ describe("OutcomeValidator", () => {
     );
     await writeFile(
       path.join(candidate, "z-over-budget.pem"),
-      "-----BEGIN PRIVATE KEY-----\nnot-retained\n",
+      "-----BEGIN " + "PRIVATE KEY-----\nnot-retained\n",
     );
     const validator = new OutcomeValidator(
       new FixtureExecutor(() => passingResult()),

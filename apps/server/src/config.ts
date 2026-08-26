@@ -26,6 +26,9 @@ const envSchema = z.object({
     .positive()
     .max(8_760)
     .default(168),
+  AIRLOCK_PORTABLE_SIGNING_KEY_PATH: z.string().min(1).max(4_096).optional(),
+  AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH: z.string().min(1).max(4_096).optional(),
+  AIRLOCK_TRANSPARENCY_LOG_PATH: z.string().min(1).max(4_096).optional(),
   AIRLOCK_DEMO_MODE: z
     .enum(["true", "false"])
     .default("false")
@@ -119,6 +122,35 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
       "AIRLOCK_HTTP_OBJECT_SOCKET requires AIRLOCK_HTTP_OBJECT_URL and an initial version",
     );
   }
+  const portableSigningKeyPath = path.resolve(
+    env.AIRLOCK_PORTABLE_SIGNING_KEY_PATH ??
+      path.join(env.APP_DATA_DIR, "keys", "portable-receipt-ed25519.pem"),
+  );
+  const transparencySigningKeyPath = path.resolve(
+    env.AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH ??
+      path.join(env.APP_DATA_DIR, "keys", "portable-transparency-ed25519.pem"),
+  );
+  const transparencyLogPath = path.resolve(
+    env.AIRLOCK_TRANSPARENCY_LOG_PATH ??
+      path.join(
+        env.APP_DATA_DIR,
+        "transparency",
+        "portable-transparency-log.json",
+      ),
+  );
+  const trustCustodyPaths = [
+    portableSigningKeyPath,
+    portableSigningKeyPath + ".key-id.json",
+    transparencySigningKeyPath,
+    transparencySigningKeyPath + ".key-id.json",
+    transparencyLogPath,
+    transparencyLogPath + ".lock",
+  ];
+  if (new Set(trustCustodyPaths).size !== trustCustodyPaths.length) {
+    throw new Error(
+      "Portable receipt keys, identity markers, and transparency storage must use distinct paths",
+    );
+  }
   return {
     host: env.HOST,
     port: env.PORT,
@@ -134,6 +166,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     candidateRetentionMs: env.AIRLOCK_CANDIDATE_RETENTION_HOURS * 60 * 60 * 1_000,
     quarantineRetentionMs:
       env.AIRLOCK_QUARANTINE_RETENTION_HOURS * 60 * 60 * 1_000,
+    portableSigningKeyPath,
+    transparencySigningKeyPath,
+    transparencyLogPath,
     demoMode: env.AIRLOCK_DEMO_MODE,
     httpObjectResource:
       env.AIRLOCK_HTTP_OBJECT_URL &&

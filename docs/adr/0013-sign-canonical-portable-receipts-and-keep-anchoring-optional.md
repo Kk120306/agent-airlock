@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed for Phase 11 pending Wayfinder decision synchronization and all prior phase gates.
+Accepted locally for Phase 11 after the offline protocol, server boundary, and adversarial verification gates.
+Wayfinder ratification is tracked by [Ratify the Phase 8 through 11 trust boundaries](https://github.com/Kk120306/agent-airlock/issues/11).
 
 ## Context
 
@@ -28,6 +29,7 @@ Raw prompts, Runtime output, file contents, Validation output, credentials, envi
 The receipt commits to bounded evidence through hashes and may carry selected redacted evidence with Merkle inclusion proofs.
 
 Signing keys are ordinary Ed25519 key pairs generated and held outside the repository and application data records with restrictive filesystem permissions.
+An adjacent non-secret identity marker records the expected public key fingerprint so missing or substituted keys fail closed instead of silently creating a new identity.
 Key rotation creates a new key identifier for new receipts and preserves the public keys needed to verify historical receipts.
 Cryptographic verification proves possession of the signing key, not that the key was uncompromised or trusted by every verifier.
 Compromise and revocation policy are reported separately and never rewrite a historical signature.
@@ -66,4 +68,3 @@ Every verifier would need the signing secret and could forge receipts, so verifi
 ### Treat key rotation as invalidating old signatures
 
 Historical integrity must remain verifiable with the key that actually signed the receipt.
-

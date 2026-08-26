@@ -1,5 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
+import {
+  LocalTransparencyLog,
+  encodeOfflineEvmAnchorPayload,
+  loadOrCreatePortableSigningKey,
+  signPortableReceipt,
+  verifyPortablePromotionEnvelope,
+  type ReceiptDigest,
+} from "@agent-airlock/portable-promotion-receipt";
 import { redactSensitiveText } from "@agent-airlock/transactional-resource-sdk";
 import {
   AirlockRunError,
@@ -13,6 +21,7 @@ import {
 import {
   SELECTION_CRITERIA,
   createQualityAssertion,
+  replayCandidateSelection,
   selectCandidates,
   stableJson,
 } from "./candidate-selection.js";
@@ -44,6 +53,10 @@ import {
   createNextOutcomeContract,
 } from "./outcome-contract.js";
 import { OutcomeValidator } from "./outcome-validator.js";
+import {
+  buildPortableReceiptDraft,
+  type PortableReceiptDraft,
+} from "./portable-receipt.js";
 import {
   PromotionJournal,
   type PromotionAuthority,
@@ -88,6 +101,7 @@ export class AgentService {
   private readonly promotionJournal: PromotionJournal;
   private readonly agentDeletionJournal: AgentDeletionJournal;
   private readonly runnerEnforcesTokenBudgets: boolean;
+  private transparencyOperation: Promise<void> = Promise.resolve();
   private providerRegistryReady = false;
 
   constructor(
@@ -1314,6 +1328,226 @@ export class AgentService {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  async exportPortableReceipt(
+    runId: string,
+    options: {
+      disclosureIdentities: string[];
+      includeAncestry: boolean;
+      localAnchor: boolean;
+      evmPayload: boolean;
+    },
+  ) {
+    const initial = this.getRun(runId);
+    this.getAgent(initial.agentId);
+    if (
+      this.configuringAgents.has(initial.agentId) ||
+      this.deletingAgents.has(initial.agentId)
+    ) {
+      throw new HttpError(409, "Wait for the active Agent operation to finish");
+    }
+    this.configuringAgents.add(initial.agentId);
+    try {
+      const snapshot = this.store.snapshot();
+      const run = snapshot.runs.find((item) => item.id === runId);
+      if (!run || run.agentId !== initial.agentId) {
+        throw new HttpError(404, "Run not found");
+      }
+      const candidateSet = run.candidateSetId
+        ? snapshot.candidateSets.find((item) => item.id === run.candidateSetId) ??
+          null
+        : null;
+      if (
+        candidateSet &&
+        (candidateSet.phase === "recovery-error" ||
+          candidateSet.competitors.some(
+            (competitor) => competitor.loserDisposition === "pending",
+          ))
+      ) {
+        throw new HttpError(
+          409,
+          "Portable receipt export is blocked by unresolved Candidate evidence",
+        );
+      }
+
+      const buildDraft = async (
+        sourceRun: AgentRun,
+        seen: Set<string>,
+      ): Promise<PortableReceiptDraft> => {
+        if (seen.has(sourceRun.id)) {
+          throw new Error("Portable receipt ancestry contains a cycle");
+        }
+        const nextSeen = new Set(seen).add(sourceRun.id);
+        let previousReceiptDigest: ReceiptDigest | null = null;
+        const parentId = sourceRun.transaction?.lineage.parentRunId ?? null;
+        if (options.includeAncestry && parentId) {
+          const parent = snapshot.runs.find(
+            (item) => item.id === parentId && item.agentId === sourceRun.agentId,
+          );
+          if (
+            !parent?.transaction ||
+            !sourceRun.transaction ||
+            parent.transaction.lineage.rootRunId !==
+              sourceRun.transaction.lineage.rootRunId ||
+            parent.transaction.lineage.depth + 1 !==
+              sourceRun.transaction.lineage.depth
+          ) {
+            throw new Error("Portable receipt ancestry is incomplete or contradictory");
+          }
+          previousReceiptDigest = (await buildDraft(parent, nextSeen)).receiptDigest;
+        }
+        const sourceCandidateSet = sourceRun.candidateSetId
+          ? snapshot.candidateSets.find(
+              (item) => item.id === sourceRun.candidateSetId,
+            ) ?? null
+          : null;
+        const contractVersion = sourceRun.transaction
+          ? snapshot.outcomeContractVersions.find(
+              (record) =>
+                record.agentId === sourceRun.agentId &&
+                record.contract.version ===
+                  sourceRun.transaction!.outcomeContractVersion,
+            ) ?? null
+          : null;
+        await this.verifyPortableRunState(sourceRun);
+        return buildPortableReceiptDraft({
+          run: sourceRun,
+          candidateSet: sourceCandidateSet,
+          candidateSetRuns: sourceCandidateSet
+            ? snapshot.runs.filter(
+                (candidateRun) =>
+                  candidateRun.candidateSetId === sourceCandidateSet.id,
+              )
+            : [],
+          contractVersion,
+          previousReceiptDigest,
+        });
+      };
+
+      let draft: PortableReceiptDraft;
+      try {
+        draft = await buildDraft(run, new Set());
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(
+          409,
+          error instanceof Error
+            ? error.message
+            : "Portable receipt evidence is unavailable",
+        );
+      }
+      const requestedIdentities = new Set(options.disclosureIdentities);
+      if (requestedIdentities.size !== options.disclosureIdentities.length) {
+        throw new HttpError(400, "Portable evidence identities must be unique");
+      }
+      const disclosureByIdentity = new Map(
+        draft.disclosures.map((disclosure) => [
+          disclosure.leaf.identity,
+          disclosure,
+        ]),
+      );
+      const disclosures = options.disclosureIdentities.map((identity) => {
+        const disclosure = disclosureByIdentity.get(identity);
+        if (!disclosure) {
+          throw new HttpError(
+            400,
+            "Requested portable evidence disclosure is unavailable",
+          );
+        }
+        return disclosure;
+      });
+      let signingKey: Awaited<
+        ReturnType<typeof loadOrCreatePortableSigningKey>
+      >;
+      try {
+        signingKey = await loadOrCreatePortableSigningKey(
+          this.config.portableSigningKeyPath,
+        );
+      } catch {
+        throw new HttpError(503, "Portable receipt signing is unavailable");
+      }
+      const envelope = signPortableReceipt({
+        receipt: draft.receipt,
+        privateKey: signingKey.privateKeyPem,
+        disclosures,
+      });
+      const verification = verifyPortablePromotionEnvelope(envelope);
+      if (!verification.valid) {
+        throw new Error("Portable receipt failed its own offline verification");
+      }
+      let anchor = null;
+      if (options.localAnchor) {
+        try {
+          anchor = await this.appendPortableTransparencyAnchor(
+            envelope.receiptDigest,
+          );
+        } catch {
+          throw new HttpError(503, "Local transparency anchoring is unavailable");
+        }
+      }
+      return {
+        envelope,
+        verification,
+        availableDisclosureIdentities: draft.disclosures.map(
+          (disclosure) => disclosure.leaf.identity,
+        ),
+        availableDisclosures: draft.disclosures.map((disclosure) => ({
+          identity: disclosure.leaf.identity,
+          category: disclosure.leaf.category,
+          status: disclosure.leaf.status,
+          required: disclosure.leaf.required,
+          summary: disclosure.leaf.summary,
+        })),
+        anchor,
+        evmPayload: options.evmPayload
+          ? encodeOfflineEvmAnchorPayload(envelope.receiptDigest)
+          : null,
+      };
+    } finally {
+      this.configuringAgents.delete(initial.agentId);
+    }
+  }
+
+  private async verifyPortableRunState(run: AgentRun): Promise<void> {
+    const transaction = run.transaction;
+    if (!transaction?.canonicalStateIdAfter) {
+      throw new Error(
+        "Portable receipt export requires complete, versioned, contradiction-free Run Transaction evidence",
+      );
+    }
+    const resources = new Map(
+      transaction.resources.map((resource) => [resource.kind, resource]),
+    );
+    const expected = (side: "before" | "after") => {
+      const field = side === "before" ? "fingerprintBefore" : "fingerprintAfter";
+      const workspace = resources.get("workspace")?.[field];
+      const session = resources.get("codex-session")?.[field];
+      const sqlite = resources.get("sqlite")?.[field];
+      if (!workspace || !session || !sqlite) {
+        throw new Error("Portable receipt state Resource evidence is incomplete");
+      }
+      return {
+        workspaceContentHash: workspace,
+        sessionContentHash: session,
+        sqliteContentHash: sqlite,
+      };
+    };
+    await this.workspaces.verifyPortableStateProjection(
+      run.agentId,
+      transaction.canonicalStateIdBefore,
+      expected("before"),
+    );
+    if (
+      transaction.disposition === "promoted" &&
+      transaction.canonicalStateIdAfter !== transaction.canonicalStateIdBefore
+    ) {
+      await this.workspaces.verifyPortableStateProjection(
+        run.agentId,
+        transaction.canonicalStateIdAfter,
+        expected("after"),
+      );
+    }
+  }
+
   getCandidateSet(candidateSetId: string): CandidateSet {
     const candidateSet = this.store
       .snapshot()
@@ -1821,6 +2055,16 @@ export class AgentService {
           ? null
           : "The configured Runner cannot enforce total-token allowances before or at inference",
       },
+      portableTrust: {
+        available: true,
+        receiptSchema: "agent-airlock/portable-promotion-receipt@1",
+        signatureAlgorithm: "Ed25519",
+        verification: "offline-self-contained",
+        evidenceDisclosure: "selective-merkle-proof",
+        localTransparency: "optional",
+        evmPayload: "offline-digest-only",
+        networkRequired: false,
+      },
       runtimeProvider: this.config.runtimeProvider,
       containerEngine:
         this.config.runtimeProvider === "container"
@@ -1833,6 +2077,27 @@ export class AgentService {
           ? "Codex CLI in " + this.config.containerEngine + " Runtime"
           : "Codex CLI in application container",
     };
+  }
+
+  private async appendPortableTransparencyAnchor(
+    receiptDigest: ReceiptDigest,
+  ) {
+    const operation = this.transparencyOperation.then(async () => {
+      const transparencyKey = await loadOrCreatePortableSigningKey(
+        this.config.transparencySigningKeyPath,
+      );
+      const log = new LocalTransparencyLog(
+        this.config.transparencyLogPath,
+        transparencyKey.privateKeyPem,
+      );
+      await log.initialize();
+      return log.append(receiptDigest, now());
+    });
+    this.transparencyOperation = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
   }
 
   private buildPromotionRecoveryAuthorityContext(
@@ -2190,47 +2455,10 @@ export class AgentService {
   }
 
   private computeCandidateSetDecision(candidateSet: CandidateSet) {
-    const aggregateTokens = candidateSet.competitors.reduce(
-      (total, competitor) =>
-        total + (competitor.criterionValues["total-tokens"] ?? 0),
-      0,
+    return replayCandidateSelection(
+      candidateSet,
+      new Map(this.store.snapshot().runs.map((run) => [run.id, run])),
     );
-    const aggregateChangedBytes = candidateSet.competitors.reduce(
-      (total, competitor) =>
-        total + (competitor.criterionValues["added-bytes"] ?? 0),
-      0,
-    );
-    const aggregateExclusions = [
-      ...(aggregateTokens > candidateSet.budget.maxTotalTokens
-        ? ["aggregate-budget:total-tokens"]
-        : []),
-      ...(aggregateChangedBytes > candidateSet.budget.maxTotalChangedBytes
-        ? ["aggregate-budget:changed-bytes"]
-        : []),
-      ...(candidateSet.cancellationRequested
-        ? ["candidate-set-cancelled-before-selection"]
-        : []),
-    ];
-    return selectCandidates({
-      candidateSetId: candidateSet.id,
-      sourceStateId: candidateSet.source.stateId,
-      contract: candidateSet.selectionContract,
-      candidates: candidateSet.competitors.map((competitor) => {
-        const run = this.getRun(competitor.runId);
-        return {
-          competitorId: competitor.id,
-          requiredValidationsPassed:
-            Boolean(competitor.seal) &&
-            Boolean(run.transaction) &&
-            !run.transaction!.validations.some(
-              (validation) =>
-                validation.required && validation.status !== "passed",
-            ),
-          exclusions: [...competitor.exclusions, ...aggregateExclusions],
-          criterionValues: structuredClone(competitor.criterionValues),
-        };
-      }),
-    });
   }
 
   private async executeCandidateSet(

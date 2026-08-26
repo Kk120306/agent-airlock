@@ -261,6 +261,8 @@ Phase 8 persists provider resource records, Capability Claims, immutable source 
 Phase 9 persists exact Candidate Set source and contract snapshots, per-competitor Run links, seals, bounded criterion inputs, deterministic scorecards, one-winner or no-winner Selection Decisions, and loser cleanup progress.
 Promotion journal schema 2 additionally persists the exact Candidate Set winner authority, including decision and seal digests, and startup validates it before physical recovery.
 Phase 10 persists versioned Assurance evidence, deterministic monotonic proposals, historical simulation results, explicit operator decisions, and append-only Outcome Contract history.
+Phase 11 derives Portable Promotion Envelopes from complete versioned durable evidence without adding receipt authority to the control-plane store.
+Receipt and transparency private keys remain separate operator-owned files, and the optional transparency log persists only portable receipt digests and signed checkpoint evidence.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -297,12 +299,15 @@ Schema evolution must increment the database version and include a tested migrat
 | Selected Candidate seal, source, resource fingerprint, or Promotion evidence contradicts physical state | Surface `recovery-error`, preserve evidence, dispatch no new effect, and never select a runner-up. |
 | A new provider is configured while an older Candidate Set is unresolved | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit. |
 | Candidate Set recovery fails while a new provider is configured | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit. |
+| Portable receipt evidence is incomplete, legacy, or contradictory | Return a retryable conflict without signing an interpretation or changing Canonical State. |
+| Portable signing identity is missing, substituted, malformed, or weakly permissioned | Fail export closed without revealing a local path or silently rotating the identity. |
+| Optional transparency state is malformed | Fail anchored export closed while leaving signature-only export available. |
 
-The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
+The exact recovery sequence and fault matrix are documented in the [recovery guide](../../docs/RECOVERY.md).
 
 The implemented Phase 9 split between reversible Candidate evaluation, deterministic one-winner Selection, and irreversible Promotion is documented in the [Competing Futures architecture](../../docs/architecture/competing-futures.md) and ADR 0011.
 The implemented Phase 10 separation between evidence-backed assurance advice and operator policy authority is documented in the [Adaptive Assurance architecture](../../docs/architecture/adaptive-assurance.md) and ADR 0012.
-The proposed Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](../../docs/architecture/portable-trust.md) and ADR 0013.
+The implemented Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](../../docs/architecture/portable-trust.md) and ADR 0013.
 
 ## Trust boundaries
 
@@ -318,6 +323,11 @@ The proposed Phase 11 signed receipt and optional anchoring protocol is document
 - Provider Runtime bindings are rooted under the isolated Candidate and are derived by the trusted core.
 - Resource Provider source verification and Registry Transition journals remain inside the trusted control plane and are never exposed to Runtime.
 - Candidate Set orchestration and Selection remain inside the trusted control plane, while every competitor Runtime receives only its own Candidate bindings and the shared bounded objective.
+- Portable receipt construction runs in the trusted control plane and accepts only the strict versioned durable evidence projection, never mutable Candidate files, Runtime output, environment values, or provider-private state.
+- The portable signing key and non-secret identity marker remain outside Runtime, the control-plane database, portable envelopes, and browser responses.
+- An independent verifier trusts the envelope's mathematics but must apply its own organizational policy to the included public key identity.
+- The optional local transparency log can provide witnessed append-only evidence only to observers that retain and compare checkpoints.
+- The optional EVM encoder is a network-free formatting boundary and has no wallet, RPC, publication, confirmation, timestamp, or Promotion authority.
 - The deterministic Selection engine accepts only persisted trusted evidence and has no access to time, randomness, locale ordering, network, filesystem, environment variables, or model judgment.
 - A sealed Candidate is a commitment for later re-verification, not authority to promote itself.
 

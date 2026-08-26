@@ -4,7 +4,7 @@
 
 Phase 11 lets a fresh offline verifier validate the integrity, signer key, resource commitments, contract commitment, Validation commitment, disposition, ancestry, and optional Selection commitment of an exported Airlock decision.
 
-ADR 0013 is proposed and this document is an implementation-ready design, not yet accepted behavior.
+ADR 0013 is accepted locally and this document describes the implemented Phase 11 trust boundary.
 
 ## Package boundary
 
@@ -21,6 +21,8 @@ ADR 0013 is proposed and this document is an implementation-ready design, not ye
 
 The server may construct and sign envelopes through this package.
 The package never imports application types, reads the Airlock database, calls ModelArk, calls a Resource Provider, or performs a network request.
+The normative runtime parser and verifier enforce recursive exact keys, a one MiB envelope boundary, a 50,000-node boundary, a depth boundary, byte-bounded text, and closed algorithm identifiers.
+The JSON Schema is a portable structural description, while the runtime verifier remains authoritative for canonical ordering, uniqueness, credential and path rejection, byte lengths, semantic equality, hashing, signatures, and Merkle proofs.
 
 ## Receipt schema version 1
 
@@ -115,12 +117,14 @@ They may not include prompts, Runtime output, raw command output, secrets, priva
 ## Signing key lifecycle
 
 The POC creates an Ed25519 key in an operator-selected path outside the repository and normal application data export.
-Startup rejects group-readable or world-readable private-key permissions on supported operating systems.
+It writes an adjacent non-secret canonical identity marker containing the expected public key fingerprint.
+Startup rejects group-readable or world-readable key or marker permissions on supported operating systems, symbolic links, malformed material, a missing key with an existing marker, and a key whose fingerprint contradicts that marker.
 The private key is never serialized into the JSON store, receipt, evidence, logs, browser response, test fixture, or optional anchor.
 
-Rotation creates a new active key while retaining prior public JWK records by key identifier.
+Rotation creates a new active key and marker at a new path while retaining prior public JWK records by key identifier.
 The verifier can validate a historical envelope using its included public JWK without contacting the signer.
-An optional trust policy file may label a key trusted, retired, or compromised with an effective time, but that policy assessment is reported separately from mathematical signature validity.
+An external operator trust inventory may label a key trusted, retired, lost, or compromised with an effective time, but that policy assessment remains separate from mathematical signature validity.
+The [key rotation and compromise runbook](../../docs/operations/PORTABLE_RECEIPT_KEYS.md) defines that operational separation.
 
 ## Offline verification report
 
@@ -152,6 +156,9 @@ The local reference anchor stores only ordered receipt digests and produces:
 
 Two signed checkpoints with the same tree size and different roots constitute direct split-view evidence.
 A later larger checkpoint without a valid consistency proof is not accepted as an append-only continuation.
+The local implementation serializes writers across processes, revalidates the current log under the lock, uses an incremental Merkle accumulator for prefix verification, and persists with an atomic replace plus file and directory synchronization.
+Lock ownership is nonce-bound, and an old lock is recoverable only after its recorded process is no longer alive.
+A log history accepts exactly one checkpoint key identity, so transparency-key rotation starts a new log and explicit trust epoch.
 
 The optional EVM reference is limited to a contract interface and offline payload encoder for one receipt digest.
 The demo prints payload bytes and the exact privacy and consistency claim, performs no RPC request, submits no transaction, deploys nothing, and spends no funds.
@@ -162,22 +169,27 @@ The server builds a portable receipt only from strictly parsed durable Run Trans
 It verifies Canonical State commitments before signing a promoted decision and uses identical before and after commitments for non-Promotion dispositions.
 It refuses export when required evidence is missing, contradictory, credential-bearing, truncated beyond the schema's disclosure claim, or associated with unresolved recovery.
 
-The initial HTTP and CLI boundary is:
+The implemented HTTP and CLI boundary is:
 
 ```text
 POST /api/runs/:runId/portable-receipt
 agent-airlock-receipt verify envelope.json
-agent-airlock-receipt disclose envelope.json disclosure.json
 agent-airlock-receipt verify-anchor envelope.json anchor-proof.json
+agent-airlock-receipt evm-payload sha256:receipt-digest
 ```
 
 Receipt creation is idempotent for the same Run Transaction evidence, schema, and signing key.
 Changing signing key creates a different envelope signature and key identifier but not a different receipt digest.
+Disclosure selection changes only the envelope's proof list and never changes the signed receipt or receipt digest.
 
-## Required golden vectors and adversarial matrix
+The Playground exposes this boundary only for terminal contradiction-free Run evidence and completed selected winners.
+Export is private by default, lets the operator opt into individual redacted evidence proofs, and labels local transparency and EVM calldata as optional additions rather than correctness dependencies.
+The server self-verifies every envelope before returning it and converts incomplete evidence into a retryable conflict without creating a key or receipt.
+
+## Required golden vector and adversarial matrix
 
 - RFC 8785 strings, Unicode, safe integers, property order, arrays, and rejection cases match published vectors.
-- Receipt and key fingerprints match fixtures implemented independently in at least two processes.
+- Receipt and key fingerprints match the published vector when verified in a separate process.
 - Empty, single-leaf, odd-leaf, even-leaf, and large bounded Merkle trees match golden roots.
 - Full disclosure, selective disclosure, and no disclosure preserve the same signed receipt.
 - One-bit changes to receipt content, digest, signature, key, leaf, proof sibling, proof direction, tree size, or algorithm fail.
@@ -189,4 +201,3 @@ Changing signing key creates a different envelope signature and key identifier b
 - Inclusion and consistency proofs pass, while conflicting same-size checkpoints trigger split-view evidence.
 - EVM payload encoding is deterministic, contains only the receipt digest, makes no network call, and spends no funds.
 - A fresh clone verifies all fixtures without the Airlock server, database, ModelArk, a provider process, or blockchain access.
-

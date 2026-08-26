@@ -6,6 +6,7 @@ import type {
   Message,
   OutcomeContract,
   OutcomeContractVersionRecord,
+  PortableReceiptExport,
   SystemInfo,
 } from "./types";
 
@@ -161,6 +162,19 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  exportPortableReceipt: (
+    id: string,
+    body: {
+      disclosureIdentities: string[];
+      includeAncestry: boolean;
+      localAnchor: boolean;
+      evmPayload: boolean;
+    },
+  ) =>
+    request<PortableReceiptExport>("/api/runs/" + id + "/portable-receipt", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   repairRun: (id: string, objective?: string) =>
     request<{ run: AgentRun; message: Message }>("/api/runs/" + id + "/repair", {
       method: "POST",

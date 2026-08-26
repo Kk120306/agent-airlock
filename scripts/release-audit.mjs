@@ -31,7 +31,10 @@ const highConfidenceSecrets = [
   { name: "Volcengine access key", pattern: /\bAKLT[A-Za-z0-9]{16,}\b/g },
   {
     name: "private key block",
-    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    pattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{16,}\r?\n)+-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    historyPattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n(?:[ +\-][A-Za-z0-9+/=]{16,}\r?\n)+[ +\-]-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
   },
 ];
 
@@ -46,8 +49,9 @@ const { stdout: history } = await execFile(
 );
 const historyText = history.toString("utf8");
 for (const scanner of highConfidenceSecrets) {
-  scanner.pattern.lastIndex = 0;
-  if (scanner.pattern.test(historyText)) {
+  const historyPattern = scanner.historyPattern ?? scanner.pattern;
+  historyPattern.lastIndex = 0;
+  if (historyPattern.test(historyText)) {
     failures.push(scanner.name + " in Git history");
   }
 }

@@ -126,6 +126,16 @@ const system: SystemInfo = {
     tokenBudgetEnforcement: "unsupported",
     reason: "The configured Runner cannot enforce token budgets at the provider boundary.",
   },
+  portableTrust: {
+    available: true,
+    receiptSchema: "agent-airlock/portable-promotion-receipt@1",
+    signatureAlgorithm: "Ed25519",
+    verification: "offline-self-contained",
+    evidenceDisclosure: "selective-merkle-proof",
+    localTransparency: "optional",
+    evmPayload: "offline-digest-only",
+    networkRequired: false,
+  },
   runtimeProvider: "local-process",
   containerEngine: null,
   runtime: "local",
@@ -150,7 +160,16 @@ test("shows reviewable advice, citations, simulation, and operator authority", a
   await expect(inbox.getByText("3", { exact: true }).first()).toBeVisible();
   await expect(inbox.getByText("historical outcomes changed")).toBeVisible();
   await inbox.getByText("Inspect citations and simulation proof").click();
-  await expect(inbox.getByText("run-one")).toBeVisible();
+  await expect(
+    inbox
+      .getByRole("region", { name: "Proposal citations" })
+      .getByText("run-one", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    inbox
+      .getByRole("region", { name: "Historical simulation results" })
+      .getByText("run-one", { exact: true }),
+  ).toBeVisible();
   await expect(inbox.getByText("exact", { exact: true }).first()).toBeVisible();
   await expect(inbox.getByText("promoted to quarantined").first()).toBeVisible();
   await expect(inbox.getByText("complete retained inputs").first()).toBeVisible();

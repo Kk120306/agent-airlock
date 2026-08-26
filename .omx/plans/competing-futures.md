@@ -164,6 +164,8 @@ Startup deterministically replays the persisted Selection Decision and compares 
 | `stale` or `recovery-error` | Preserve Canonical State and all unresolved evidence for operator diagnosis. |
 
 The Candidate Set journal protects every unresolved sibling from retention cleanup.
+Any pending competitor disposition or Run Transaction disposition keeps the Agent admission lease closed, including after restart.
+Cleanup failure publishes `recovery-error` and cannot reopen the Agent as `ready` until every disposition is durably resolved.
 If the winner Promotion journal exists, its plan and the Candidate Set selection digest must name the same set, competitor, source, and seal.
 Any contradiction fails recovery closed.
 Resource Registry onboarding and generation commit remain unavailable while either Promotion recovery or Candidate Set recovery has any unresolved failure.
@@ -228,6 +230,6 @@ Additional crash injection at every non-authoritative presentation-only phase re
 
 - `npm run check:phase9:selection` runs strict admission and database parsing, deterministic Selection, token reservation, HTTP-to-CodexRunner, scoped duration cancellation, operator cancellation, terminal evidence, no-winner, tamper, authority-bound restart, loser cleanup, and provider-generation acceptance tests.
 - `npm run check:phase9:boundaries` rejects nondeterministic Selection dependencies and verifies that the sealed branch precedes Promotion planning and journaling.
-- `npm run test:phase9:ui` builds the production web bundle and verifies the explainable winner journey and mobile width when Chrome can launch.
+- `npm run test:phase9:ui` builds the production web bundle and verifies the explainable winner journey and mobile width in production Chrome.
 - `npm run demo:phase9 -- --reset` starts the credential-free Phase 8 provider fixture and deterministic Phase 9 application without paid inference.
-- The current restricted sandbox blocks loopback listeners and terminates Chrome before page creation, so the browser and clean-clone launcher gates must be rerun in an unrestricted local environment before the Phase 9 release marker is final.
+- The production Chrome journey and exact clean-clone launcher both pass in the current local environment without paid inference.

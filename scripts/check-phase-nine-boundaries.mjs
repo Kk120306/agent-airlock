@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import ts from "typescript";
 
 const projectRoot = path.resolve(".");
 const failures = [];
@@ -52,10 +53,20 @@ for (const route of [
   if (!routes.includes(route)) failures.push("HTTP boundary is missing " + route);
 }
 
-if (!/version:\s*9\b/.test(store) || !store.includes("candidateSets: []")) {
+const databaseInitializer = inspectEmptyDatabase(store);
+if (
+  !databaseInitializer ||
+  databaseInitializer.version < 9 ||
+  !databaseInitializer.initializesCandidateSets
+) {
   failures.push("Database version 9 does not initialize Candidate Sets");
 }
-if (!/version:\s*9;/.test(types) || !types.includes("candidateSets: CandidateSet[]")) {
+const databaseContract = inspectDatabaseContract(types);
+if (
+  !databaseContract ||
+  databaseContract.version < 9 ||
+  !databaseContract.requiresCandidateSets
+) {
   failures.push("Database type does not require the Candidate Set aggregate");
 }
 
@@ -80,4 +91,87 @@ function importSpecifiers(content) {
   return [
     ...content.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g),
   ].map((match) => match[2]);
+}
+
+function inspectDatabaseContract(content) {
+  const file = ts.createSourceFile(
+    "types.ts",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declaration = file.statements.find(
+    (statement) =>
+      ts.isInterfaceDeclaration(statement) && statement.name.text === "Database",
+  );
+  if (!declaration || !ts.isInterfaceDeclaration(declaration)) return null;
+  const version = declaration.members.find(
+    (member) => ts.isPropertySignature(member) && member.name.getText(file) === "version",
+  );
+  const candidateSets = declaration.members.find(
+    (member) =>
+      ts.isPropertySignature(member) && member.name.getText(file) === "candidateSets",
+  );
+  if (
+    !version ||
+    !ts.isPropertySignature(version) ||
+    !version.type ||
+    !ts.isLiteralTypeNode(version.type) ||
+    !ts.isNumericLiteral(version.type.literal)
+  ) {
+    return null;
+  }
+  return {
+    version: Number(version.type.literal.text),
+    requiresCandidateSets:
+      Boolean(candidateSets) &&
+      ts.isPropertySignature(candidateSets) &&
+      candidateSets.questionToken === undefined &&
+      candidateSets.type?.getText(file) === "CandidateSet[]",
+  };
+}
+
+function inspectEmptyDatabase(content) {
+  const file = ts.createSourceFile(
+    "store.ts",
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        !ts.isIdentifier(declaration.name) ||
+        declaration.name.text !== "emptyDatabase" ||
+        !declaration.initializer ||
+        !ts.isArrowFunction(declaration.initializer)
+      ) {
+        continue;
+      }
+      let body = declaration.initializer.body;
+      while (ts.isParenthesizedExpression(body)) body = body.expression;
+      if (!ts.isObjectLiteralExpression(body)) return null;
+      const properties = new Map(
+        body.properties.flatMap((property) =>
+          ts.isPropertyAssignment(property)
+            ? [[property.name.getText(file), property.initializer]]
+            : [],
+        ),
+      );
+      const version = properties.get("version");
+      const candidateSets = properties.get("candidateSets");
+      if (!version || !ts.isNumericLiteral(version)) return null;
+      return {
+        version: Number(version.text),
+        initializesCandidateSets:
+          Boolean(candidateSets) &&
+          ts.isArrayLiteralExpression(candidateSets) &&
+          candidateSets.elements.length === 0,
+      };
+    }
+  }
+  return null;
 }

@@ -14,6 +14,7 @@ import {
   validateOutcomeContractInput,
 } from "./outcome-contract.js";
 import { EXTERNAL_ACTION_BYPASS_DISCLOSURE } from "./external-actions.js";
+import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js";
 import type { Database } from "./types.js";
 
 const candidateIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -1341,6 +1342,13 @@ function validatePersistedAssuranceRunEvidence(
   }
   if (
     hasTrustedAssuranceEnvelope &&
+    transaction.promotionReceipt !== undefined &&
+    transaction.promotionReceipt !== null
+  ) {
+    validatePersistedPromotionReceipt(transaction, run.id as string);
+  }
+  if (
+    hasTrustedAssuranceEnvelope &&
     Array.isArray(transaction.validations) &&
     transaction.validations.some(
       (validation) =>
@@ -1352,6 +1360,64 @@ function validatePersistedAssuranceRunEvidence(
     transaction.outcomeContract === undefined
   ) {
     throw new Error("Persisted Run assurance evidence requires its Outcome Contract");
+  }
+}
+
+function validatePersistedPromotionReceipt(
+  transaction: Record<string, unknown>,
+  runId: string,
+): void {
+  const receipt = transaction.promotionReceipt;
+  if (!isRecord(receipt)) {
+    throw new Error("Persisted Promotion Receipt must be an object");
+  }
+  assertExactKeys(
+    receipt,
+    [
+      "runTransactionId",
+      "disposition",
+      "outcomeContractVersion",
+      "canonicalStateIdBefore",
+      "canonicalStateIdAfter",
+      "canonicalContentHashBefore",
+      "canonicalContentHashAfter",
+      "validationEvidenceHash",
+      "lineage",
+      "createdAt",
+    ],
+    "Persisted Promotion Receipt",
+  );
+  if (
+    receipt.runTransactionId !== runId ||
+    receipt.runTransactionId !== transaction.id ||
+    receipt.disposition !== transaction.disposition ||
+    receipt.outcomeContractVersion !== transaction.outcomeContractVersion ||
+    receipt.canonicalStateIdBefore !== transaction.canonicalStateIdBefore ||
+    receipt.canonicalStateIdAfter !== transaction.canonicalStateIdAfter ||
+    receipt.canonicalContentHashBefore !== transaction.canonicalContentHashBefore ||
+    receipt.canonicalContentHashAfter !== transaction.canonicalContentHashAfter ||
+    !isTimestamp(receipt.createdAt) ||
+    !isRecord(receipt.lineage) ||
+    !isRecord(transaction.lineage) ||
+    stableJson(receipt.lineage) !== stableJson(transaction.lineage) ||
+    !Array.isArray(transaction.validations) ||
+    !Array.isArray(transaction.providerResources)
+  ) {
+    throw new Error("Persisted Promotion Receipt contradicts its Run Transaction");
+  }
+  const expectedValidationEvidenceHash = promotionValidationEvidenceHash(
+    transaction as unknown as Parameters<typeof promotionValidationEvidenceHash>[0],
+  );
+  if (receipt.validationEvidenceHash !== expectedValidationEvidenceHash) {
+    throw new Error("Persisted Promotion Receipt contradicts Validation evidence");
+  }
+  if (
+    transaction.disposition !== "promoted" &&
+    (transaction.canonicalStateIdAfter !== transaction.canonicalStateIdBefore ||
+      transaction.canonicalContentHashAfter !==
+        transaction.canonicalContentHashBefore)
+  ) {
+    throw new Error("Persisted non-Promotion receipt changes Canonical State");
   }
 }
 

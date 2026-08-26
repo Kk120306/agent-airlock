@@ -33,7 +33,8 @@ test("advice changes only future Runs after explicit browser acceptance", async 
     const response = await responsePromise;
     const body = (await response.json()) as { run: { id: string } };
     historicalRunIds.push(body.run.id);
-    await waitForRun(request, body.run.id, "failed");
+    const historicalRun = await waitForRun(request, body.run.id, "completed");
+    expect(historicalRun.transaction?.disposition).toBe("quarantined");
   }
 
   await page.getByRole("button", { name: /Assurance/ }).click();

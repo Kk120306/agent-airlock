@@ -1,6 +1,6 @@
 # Phases 8 through 11 execution plan
 
-**Status:** Phase 10 is committed on the post-hackathon branch and Phase 11 implementation is active; unrestricted browser execution, main-workspace Git synchronization, and Wayfinder synchronization remain pending
+**Status:** Phase 10 is committed on the post-hackathon branch and Phase 11 implementation is complete at release verification; exact clean-clone, independent review, release-commit synchronization, and Wayfinder ratification remain pending
 
 **Scope:** Transactional Resource SDK, Competing Futures, Adaptive Assurance, and Portable Trust
 
@@ -136,7 +136,7 @@ The versioned HTTP object proof exercises a real process and network boundary wi
 1. Run `npm run check:phase7` on the new branch before implementation.
 2. Record the exact Phase 7 commit, test counts, browser timings, dependency audit, and release audit.
 3. Confirm `main` remains at `36dc419` and the post-hackathon branch is the only mutable branch.
-4. Add the Phase 8 Wayfinder map and decision ticket when GitHub connectivity returns.
+4. Attach the Phase 8 through 11 ADR evidence to the post-hackathon Wayfinder map and ratification ticket.
 
 Verification:
 
@@ -240,7 +240,8 @@ Phase 9 must resolve the tension between ADR 0007's single-child Repair lineage,
 The selected design must preserve one operator-visible Agent lifecycle while allowing bounded internal competitors from one exact source.
 ADR 0011 accepts a durable Candidate Set, a reversible evaluation boundary, a deterministic lexicographic Selection Contract, one persisted winner decision, and existing Promotion-journal reuse.
 The implemented architecture and adversarial acceptance matrix are recorded in `docs/architecture/competing-futures.md`.
-The implementation remains isolated from the frozen Phase 7 judge release, and its unrestricted browser and clean-clone gates remain pending outside the current sandbox.
+The implementation remains isolated from the frozen Phase 7 judge release, and its production Chrome journey now passes in the current local environment.
+The final Phase 11 clean-clone gate will reprove every inherited Phase 8 gate before release.
 
 ### Batch 9.1: Model Candidate Sets and Selection Contracts
 
@@ -277,7 +278,7 @@ The implementation remains isolated from the frozen Phase 7 judge release, and i
 
 ### Batch 9.4: Deliver the operator journey
 
-**Delivery status:** Implementation, exact clean-clone verification, and the production-bundle specification are complete; unrestricted Chrome execution remains an environment gate.
+**Delivery status:** Implementation, exact clean-clone verification, and the production Chrome journey are complete.
 
 1. Add one bounded `Explore competing futures` action to the existing Playground.
 2. Show competitor progress, Validation eligibility, deterministic score components, winner reason, and loser dispositions.
@@ -304,9 +305,9 @@ The implementation remains isolated from the frozen Phase 7 judge release, and i
 - The Runner seals validated Candidates before Promotion planning and re-verifies the exact selected seal before reusing the existing Promotion journal.
 - Selected-winner tamper, all-invalid, cancellation, restart, historical-provider onboarding, loser cleanup, and exactly-one-effect paths pass without network or paid inference.
 - The `Explore futures` production UI, responsive layout, and Playwright contract are implemented.
-- `npm run check:phase9:selection`, `npm run check:phase9:boundaries`, server and web typechecks, and the production web build pass in the restricted environment.
-- `npm run demo:phase9 -- --reset`, `npm run test:phase9:ui`, and two clean-clone gate repetitions are ready but cannot bind loopback or keep Chrome alive in the current sandbox.
-- ADR 0011 is accepted locally, while the matching Wayfinder decision cannot be synchronized until GitHub connectivity returns.
+- `npm run check:phase9:selection`, `npm run check:phase9:boundaries`, server and web typechecks, and the production web build pass.
+- `npm run demo:phase9 -- --reset`, `npm run test:phase9:ui`, and two clean-clone gate repetitions pass without paid inference.
+- ADR 0011 is accepted locally and included in the post-hackathon Wayfinder ratification ticket.
 - The reviewed source diff is synchronized between the main workspace and the temporary writable Git clone, where the Phase 9 release commit is recorded because the main workspace Git metadata is sandbox-read-only.
 
 ### Phase 9 commit
@@ -355,7 +356,7 @@ The implemented derivation, simulation, authority, API, and adversarial design i
 
 ### Batch 10.4: Make learning inspectable
 
-**Delivery status:** Implementation and production-bundle specification complete; unrestricted Chrome execution and clean-clone repetition remain environment gates.
+**Delivery status:** Implementation and production Chrome journey complete; the inherited clean-clone repetition runs as part of the final Phase 11 release gate.
 
 1. Add a compact Assurance inbox to the existing Agent surface.
 2. Show motivation, cited Runs, exact or uncertain replay impact, proposed diff, and authority boundary.
@@ -381,9 +382,9 @@ The implemented derivation, simulation, authority, API, and adversarial design i
 - The Playground Assurance inbox and rollback history present the proposed diff, base version, citations, support lineages, historical impact, unknown inputs, authority boundary, decisions, and weakening warning.
 - The Agent deletion journal closes the archive-before-database crash window, preserves its mutation lock across later I/O failures, rejects symbolic-link workspace substitution, validates decision and contract provenance semantics, and retains bounded proposal, decision, contract-history, Run, Candidate Set, and receipt digests in the archived tombstone.
 - The deterministic local fixture produces a three-lineage failure corpus without a network model, and `npm run demo:phase10 -- --reset` exposes the complete operator journey.
-- `npm run check`, `npm run check:phase10:assurance`, server and web typechecks, and the production build pass in the restricted environment.
-- `npm run test:phase10:ui` builds the exact production bundle, but the current sandbox denies the Playwright web server its `127.0.0.1` bind with `EPERM` before browser assertions begin.
-- ADR 0012 is accepted locally, while the matching Wayfinder decision cannot be synchronized until GitHub connectivity returns.
+- `npm run check`, `npm run check:phase10:assurance`, server and web typechecks, and the production build pass.
+- `npm run test:phase10:ui` passes twice against the exact production bundle, including the future-only authority sequence and 390-pixel layout.
+- ADR 0012 is accepted locally and included in the post-hackathon Wayfinder ratification ticket.
 
 ### Phase 10 commit
 
@@ -397,7 +398,7 @@ The implemented derivation, simulation, authority, API, and adversarial design i
 
 An independent verifier can validate the integrity, authorship, resource-version commitments, contract commitment, Validation commitment, disposition, and ancestry of an exported Promotion decision without the original Airlock database.
 
-ADR 0013 now proposes RFC 8785 canonical JSON, domain-separated SHA-256 receipt commitments, Ed25519 signatures, public JWK key identities, selective evidence disclosure, offline verification, and strictly optional anchoring.
+ADR 0013 accepts strict canonical JSON, domain-separated SHA-256 receipt commitments, Ed25519 signatures, public JWK key identities, selective evidence disclosure, offline verification, and strictly optional anchoring for the local implementation.
 The implementation-ready protocol, privacy boundary, key lifecycle, transparency log, offline EVM payload, and golden-vector matrix are recorded in `docs/architecture/portable-trust.md`.
 
 ### Batch 11.1: Freeze a provider-neutral receipt schema
@@ -423,7 +424,7 @@ The implementation-ready protocol, privacy boundary, key lifecycle, transparency
 2. Let an exporter include selected redacted evidence plus inclusion proofs without revealing undisclosed leaves.
 3. Verify disclosed leaves against the signed receipt's evidence root.
 4. Reject duplicate leaves, ambiguous encodings, path-like private fields, and proof-order confusion.
-5. Publish golden vectors for full disclosure, selective disclosure, no disclosure, tampering, wrong key, wrong order, and unknown algorithms.
+5. Publish one stable golden envelope vector and an adversarial matrix for disclosure modes, tampering, wrong keys, wrong order, and unknown algorithms.
 
 ### Batch 11.4: Keep anchoring optional and honest
 
@@ -432,7 +433,7 @@ The implementation-ready protocol, privacy boundary, key lifecycle, transparency
 3. Add an optional EVM reference contract or transaction-payload encoder only if it can be verified locally without funding or deploying a transaction.
 4. Never put prompts, outputs, evidence, provider metadata, user identity, or credentials in an anchor payload.
 5. Make receipt signature verification complete without any anchor.
-6. Label anchoring as additional shared-timestamp evidence rather than Promotion correctness.
+6. Label anchoring as retained-checkpoint consistency evidence rather than a trusted timestamp or Promotion correctness proof.
 
 ### Batch 11.5: Deliver the trust workflow
 
@@ -452,6 +453,7 @@ The implementation-ready protocol, privacy boundary, key lifecycle, transparency
 - Signature-only verification passes with anchoring disabled.
 - Transparency-log verification and split-view detection pass without a public blockchain.
 - Optional blockchain payload generation, if included, performs no network call and spends no funds.
+- The production Docker image resolves all package workspaces after pruning and passes its live health boundary as the non-root runtime user.
 - `npm run check:phase11` passes twice from the working tree and once from a clean clone.
 - Every prior phase gate remains green.
 - Git contains one Phase 11 commit and every Wayfinder decision is resolved.
@@ -459,6 +461,11 @@ The implementation-ready protocol, privacy boundary, key lifecycle, transparency
 ### Phase 11 commit
 
 `feat: make Promotion Receipts independently verifiable`
+
+**Delivery status:** Implemented in the working tree with the standalone protocol, HTTP export, operator UI, key runbook, one published golden vector, adversarial and cross-process checks, real durable-evidence acceptance flows, a production Docker gate, and no paid dependency.
+The mock production-bundle specification and the real browser-to-Fastify-to-verifier journey pass, including receipt, transparency-anchor, and EVM-calldata downloads at desktop and mobile widths.
+The exact clean-clone and independent review gates run after the Phase 11 commit is synchronized to the isolated post-hackathon branch.
+The post-hackathon Wayfinder map and one architecture-ratification sub-issue are live, and they close only after the clean-clone and independent review evidence is recorded.
 
 ## Expanded verification matrix
 
@@ -486,7 +493,7 @@ The implementation-ready protocol, privacy boundary, key lifecycle, transparency
 ### Adversarial and recovery
 
 - Path traversal, symlink, SSRF, DNS rebinding assumptions, oversized payload, slow response, malformed response, credential-like data, duplicate lifecycle calls, reordered calls, and capability forgery.
-- Crash injection before and after provider installation, Candidate Set decision, contract proposal acceptance, receipt persistence, and anchor append.
+- Crash injection before and after provider installation, Candidate Set decision, contract proposal acceptance, receipt export response, and anchor append.
 - Contradictory provider, manifest, journal, receipt, signature, and transparency-log state must fail closed.
 
 ### Reproducibility

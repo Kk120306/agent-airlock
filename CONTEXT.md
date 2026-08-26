@@ -108,3 +108,19 @@ _Avoid_: Tool call, queued action, side effect
 **Promotion Receipt**:
 The durable evidence connecting a Run Transaction, its Outcome Contract version, its Validation results, and the resulting Canonical State version.
 _Avoid_: Log entry, audit row
+
+**Portable Promotion Receipt**:
+The provider-neutral canonical commitment to one durable Airlock decision, its before and after state, policy, evidence root, effects, provenance, and ancestry.
+_Avoid_: Blockchain record, correctness proof, exported database row
+
+**Portable Promotion Envelope**:
+A bounded Portable Promotion Receipt together with its digest, Ed25519 signature, public JWK, verified key fingerprint, and optional selective evidence disclosures.
+_Avoid_: Certificate, credential bundle, raw evidence archive
+
+**Evidence Disclosure**:
+One redacted evidence leaf and Merkle inclusion proof intentionally included without revealing undisclosed leaves.
+_Avoid_: Validation output, full audit dump, secret proof
+
+**Transparency Checkpoint**:
+An optional signed Merkle root over an append-only sequence of receipt digests that adds shared log evidence without becoming Promotion authority.
+_Avoid_: Canonical State, blockchain truth, correctness attestation

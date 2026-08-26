@@ -96,3 +96,57 @@ describe("operator authority exposure", () => {
     ).toBe("test-network-operator-token-123");
   });
 });
+
+describe("portable receipt key custody", () => {
+  it("keeps signing material in an operator-addressable file outside metadata", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: "/tmp/airlock-portable-data",
+      AIRLOCK_PORTABLE_SIGNING_KEY_PATH: "/tmp/airlock-operator/receipt.pem",
+      AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH:
+        "/tmp/airlock-operator/transparency.pem",
+      AIRLOCK_TRANSPARENCY_LOG_PATH: "/tmp/airlock-operator/log.json",
+    });
+    expect(config.portableSigningKeyPath).toBe(
+      "/tmp/airlock-operator/receipt.pem",
+    );
+    expect(config.transparencyLogPath).toBe("/tmp/airlock-operator/log.json");
+    expect(config.transparencySigningKeyPath).toBe(
+      "/tmp/airlock-operator/transparency.pem",
+    );
+    expect(config.portableSigningKeyPath).not.toContain("db.json");
+  });
+
+  it.each([
+    [
+      "direct key reuse",
+      {
+        AIRLOCK_PORTABLE_SIGNING_KEY_PATH: "/tmp/airlock/shared.pem",
+        AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH: "/tmp/airlock/shared.pem",
+      },
+    ],
+    [
+      "normalized key reuse",
+      {
+        AIRLOCK_PORTABLE_SIGNING_KEY_PATH: "/tmp/airlock/keys/../shared.pem",
+        AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH: "/tmp/airlock/shared.pem",
+      },
+    ],
+    [
+      "identity marker collision",
+      {
+        AIRLOCK_PORTABLE_SIGNING_KEY_PATH: "/tmp/airlock/receipt.pem",
+        AIRLOCK_TRANSPARENCY_LOG_PATH:
+          "/tmp/airlock/receipt.pem.key-id.json",
+      },
+    ],
+  ])("rejects %s across trust roles", (_label, override) => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "test",
+        APP_DATA_DIR: "/tmp/airlock/custody",
+        ...override,
+      }),
+    ).toThrow(/distinct paths/);
+  });
+});

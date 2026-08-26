@@ -31,6 +31,17 @@ const messageBody = z.object({
 const repairBody = z.object({
   objective: z.string().trim().min(1).max(2_000).optional(),
 });
+const portableReceiptBody = z
+  .object({
+    disclosureIdentities: z
+      .array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/))
+      .max(256)
+      .default([]),
+    includeAncestry: z.boolean().default(true),
+    localAnchor: z.boolean().default(false),
+    evmPayload: z.boolean().default(false),
+  })
+  .strict();
 const selectionCriterionBody = z
   .object({
     kind: z.enum([
@@ -289,6 +300,12 @@ export async function createApp(
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id) };
+  });
+
+  app.post("/api/runs/:id/portable-receipt", async (request) => {
+    const { id } = runIdParams.parse(request.params);
+    const body = portableReceiptBody.parse(request.body ?? {});
+    return service.exportPortableReceipt(id, body);
   });
 
   app.get("/api/candidate-sets/:id", async (request) => {

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
+  AgentRun,
+  CandidateSet,
   CandidateScorecardEntry,
   CandidateSelectionDecision,
   SelectionContract,
@@ -166,6 +168,56 @@ export function selectCandidates(input: {
     ...withoutDigest,
     decisionDigest: digest(withoutDigest),
   };
+}
+
+export function replayCandidateSelection(
+  candidateSet: CandidateSet,
+  runsById: ReadonlyMap<string, AgentRun>,
+): CandidateSelectionDecision {
+  const aggregateTokens = candidateSet.competitors.reduce(
+    (total, competitor) =>
+      total + (competitor.criterionValues["total-tokens"] ?? 0),
+    0,
+  );
+  const aggregateChangedBytes = candidateSet.competitors.reduce(
+    (total, competitor) =>
+      total + (competitor.criterionValues["added-bytes"] ?? 0),
+    0,
+  );
+  const aggregateExclusions = [
+    ...(aggregateTokens > candidateSet.budget.maxTotalTokens
+      ? ["aggregate-budget:total-tokens"]
+      : []),
+    ...(aggregateChangedBytes > candidateSet.budget.maxTotalChangedBytes
+      ? ["aggregate-budget:changed-bytes"]
+      : []),
+    ...(candidateSet.cancellationRequested
+      ? ["candidate-set-cancelled-before-selection"]
+      : []),
+  ];
+  return selectCandidates({
+    candidateSetId: candidateSet.id,
+    sourceStateId: candidateSet.source.stateId,
+    contract: candidateSet.selectionContract,
+    candidates: candidateSet.competitors.map((competitor) => {
+      const run = runsById.get(competitor.runId);
+      if (!run) {
+        throw new Error("Candidate Set decision is missing a persisted Run");
+      }
+      return {
+        competitorId: competitor.id,
+        requiredValidationsPassed:
+          Boolean(competitor.seal) &&
+          Boolean(run.transaction) &&
+          !run.transaction!.validations.some(
+            (validation) =>
+              validation.required && validation.status !== "passed",
+          ),
+        exclusions: [...competitor.exclusions, ...aggregateExclusions],
+        criterionValues: structuredClone(competitor.criterionValues),
+      };
+    }),
+  });
 }
 
 export function createQualityAssertion(input: {

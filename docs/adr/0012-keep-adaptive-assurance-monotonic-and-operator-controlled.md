@@ -3,7 +3,7 @@
 ## Status
 
 Accepted locally for Phase 10.
-Wayfinder decision synchronization remains pending until GitHub connectivity returns.
+Wayfinder ratification is tracked by [Ratify the Phase 8 through 11 trust boundaries](https://github.com/Kk120306/agent-airlock/issues/11).
 
 ## Context
 

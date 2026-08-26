@@ -437,7 +437,96 @@ export interface SystemInfo {
     tokenBudgetEnforcement: "provider-boundary" | "unsupported";
     reason: string | null;
   };
+  portableTrust: {
+    available: boolean;
+    receiptSchema: string;
+    signatureAlgorithm: "Ed25519";
+    verification: "offline-self-contained";
+    evidenceDisclosure: "selective-merkle-proof";
+    localTransparency: "optional";
+    evmPayload: "offline-digest-only";
+    networkRequired: false;
+  };
   runtimeProvider: "local-process" | "container";
   containerEngine: string | null;
   runtime: string;
+}
+
+export interface PortablePromotionEnvelope {
+  schema: "agent-airlock/portable-promotion-envelope";
+  schemaVersion: 1;
+  receiptDigest: string;
+  signatureAlgorithm: "Ed25519";
+  signature: string;
+  keyId: string;
+  publicJwk: { crv: "Ed25519"; kty: "OKP"; x: string };
+  disclosures: Array<{
+    leaf: {
+      identity: string;
+      category: string;
+      status: string;
+      required: boolean;
+      summary: string | null;
+    };
+  }>;
+  receipt: {
+    decision: {
+      runId: string;
+      agentId: string;
+      disposition: "promoted" | "quarantined" | "discarded" | "cancelled";
+      decidedAt: string;
+    };
+    validationEvidence: { root: string; leafCount: number };
+    selection: { candidateSetId: string; decisionDigest: string } | null;
+    assurance: { proposalId: string; contractVersion: number } | null;
+    ancestry: {
+      rootRunId: string;
+      parentRunId: string | null;
+      depth: number;
+      previousReceiptDigest: string | null;
+    };
+  };
+}
+
+export interface PortableReceiptExport {
+  envelope: PortablePromotionEnvelope;
+  verification: {
+    valid: boolean;
+    checks: Array<{ name: string; valid: boolean; detail: string }>;
+    commitments: {
+      resources: number;
+      outcomeContract: boolean;
+      validationEvidence: boolean;
+      externalActions: boolean;
+      selection: boolean;
+      assurance: boolean;
+      ancestry: boolean;
+    };
+    provenClaims: string[];
+    unsupportedClaims: string[];
+  };
+  availableDisclosureIdentities: string[];
+  availableDisclosures: Array<{
+    identity: string;
+    category: string;
+    status: string;
+    required: boolean;
+    summary: string | null;
+  }>;
+  anchor: {
+    checkpoint: {
+      checkpoint: { treeSize: number; root: string; keyId: string };
+      checkpointDigest: string;
+    };
+    inclusionProof: { leafIndex: number; treeSize: number };
+  } | null;
+  evmPayload: {
+    methodSignature: "anchor(bytes32)";
+    functionSelector: string;
+    receiptDigest: string;
+    calldata: string;
+    privacyClaim: "receipt-digest-only";
+    networkCalls: 0;
+    fundsSpent: 0;
+  } | null;
 }

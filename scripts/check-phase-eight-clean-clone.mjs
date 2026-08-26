@@ -7,12 +7,23 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const phase = process.env.AIRLOCK_CLEAN_CLONE_PHASE ?? "phase8";
-if (phase !== "phase8" && phase !== "phase9" && phase !== "phase10") {
+if (
+  phase !== "phase8" &&
+  phase !== "phase9" &&
+  phase !== "phase10" &&
+  phase !== "phase11"
+) {
   process.stderr.write("Unsupported clean-clone phase: " + phase + "\n");
   process.exit(1);
 }
 const phaseLabel =
-  phase === "phase8" ? "Phase 8" : phase === "phase9" ? "Phase 9" : "Phase 10";
+  phase === "phase8"
+    ? "Phase 8"
+    : phase === "phase9"
+      ? "Phase 9"
+      : phase === "phase10"
+        ? "Phase 10"
+        : "Phase 11";
 const status = await capture("git", ["status", "--porcelain", "--untracked-files=all"], {
   cwd: projectRoot,
 });

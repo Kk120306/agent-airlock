@@ -103,6 +103,32 @@ Run the focused no-cost contract with:
 npm run check:phase10:assurance
 ```
 
+## Phase 11 Portable Trust demo
+
+Phase 11 turns complete durable Run evidence into a strict Portable Promotion Envelope that can be verified without the Airlock server or database.
+The envelope signs canonical receipt content with an operator-held Ed25519 identity and can disclose selected redacted evidence through Merkle proofs without including unselected leaves.
+Promoted Runs, retained or discarded Quarantines, Repair ancestry, exact Candidate Selection, and accepted Assurance provenance use the same bounded protocol.
+The verification report separates mathematical integrity from unsupported claims about Runtime isolation, Validation correctness, signer trust, or policy sufficiency.
+
+```bash
+npm run demo:phase11 -- --reset
+```
+
+Open <http://127.0.0.1:3199>, complete a guided Run, and use its `Portable Trust` panel.
+The panel starts with no evidence disclosed, previews safe evidence identities, and regenerates after privacy choices change.
+It downloads the independently verifiable envelope, optional local anchor proof, and optional offline EVM payload as separate bounded artifacts.
+Optional local transparency adds a signed checkpoint and inclusion proof over the receipt digest.
+Optional EVM output only encodes `anchor(bytes32)` calldata offline and performs no network request, wallet operation, transaction, or spend.
+
+Run the standalone no-cost protocol and server contracts with:
+
+```bash
+npm run check:phase11:protocol
+npm run test -w @launchpad/server -- --run src/phase-eleven-acceptance.test.ts
+```
+
+The commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
+
 ## Screenshots
 
 ### Four-step judge path
@@ -137,6 +163,10 @@ npm run check:phase10:assurance
 - Deterministic Assurance Proposals with lineage-deduplicated citations and exact, conservative, or unknown historical simulation
 - Explicit operator acceptance, durable rejection, stale-base protection, immutable Outcome Contract history, and version-creating rollback
 - Crash-recoverable Agent deletion with credential-free Run, Candidate Set, Assurance, contract-history, and receipt digests
+- Strict canonical Portable Promotion Envelopes with Ed25519 signatures and independent offline verification
+- Private-by-default Merkle evidence disclosure with exact Candidate Selection, accepted Assurance, and Repair ancestry commitments
+- Fail-closed signing-key identity markers, historical rotation verification, and an operator rotation and compromise runbook
+- Optional signed local transparency proofs and zero-network EVM calldata over receipt digests only
 - Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
@@ -335,6 +365,9 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `AIRLOCK_HTTP_OBJECT_VERSION_ID` | Unset | Trusted immutable source version registered with the HTTP object provider. |
 | `AIRLOCK_HTTP_OBJECT_FINGERPRINT` | Unset | Exact 64-character lowercase SHA-256 fingerprint of the registered source. |
 | `AIRLOCK_HTTP_OBJECT_SOCKET` | Unset | Optional local Unix socket for the HTTP object provider. |
+| `AIRLOCK_PORTABLE_SIGNING_KEY_PATH` | Under `APP_DATA_DIR/keys` | Owner-readable Ed25519 private key used only for portable receipt signatures. |
+| `AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH` | Under `APP_DATA_DIR/keys` | Separate owner-readable Ed25519 private key used only for optional local checkpoints. |
+| `AIRLOCK_TRANSPARENCY_LOG_PATH` | Under `APP_DATA_DIR/transparency` | Optional local append-only receipt-digest log. |
 | `AIRLOCK_DEMO_MODE` | `false` | Internal fixture-mode marker set by `npm run demo`; do not enable it for a credentialed POC. |
 | `AIRLOCK_DEMO_PORT` | `3199` | Loopback port used by the deterministic demo launcher. |
 | `AIRLOCK_DEMO_DATA_ROOT` | `.local/airlock-demo` | Persistent isolated state used by the deterministic demo launcher. |
@@ -352,6 +385,9 @@ flowchart LR
     Airlock --> Store["Candidate and Canonical workspace, session, and SQLite"]
     Airlock --> Effects["Deferred post-Promotion mock effects"]
     Airlock --> Registry["Capability-checked Resource Registry"]
+    Airlock --> Receipt["Portable receipt signer"]
+    Receipt --> Verifier["Offline verifier"]
+    Receipt -. optional digest only .-> Transparency["Local transparency or EVM calldata"]
     Registry --> Provider["Remote immutable resource versions"]
     Airlock --> Runtime{"Runtime provider"}
     Runtime -->|Local POC| Container["Disposable Docker / Colima / Podman container"]
@@ -396,6 +432,10 @@ Use `npm run check:phase4` for the complete no-cost four-resource proof.
 Use `npm run check:phase5` for the complete no-cost Quarantine, Repair, lineage, and discard proof.
 Use `npm run check:phase6` to add all eight Promotion interruption seams, repeated restart convergence, retention, and path-abuse proof.
 Use `npm run check:phase7` for the complete prior suite, launcher lifecycle proof, four-step production demo, mobile layout check, and release audit.
+Use `npm run check:phase8:provider` and `npm run check:phase8:conformance` for capability-checked Resource Provider lifecycle and contract proof.
+Use `npm run check:phase9:selection` and `npm run check:phase9:boundaries` for deterministic Candidate Selection and historical recovery proof.
+Use `npm run check:phase10:assurance` for evidence-backed proposal, operator authority, rollback, and deletion recovery proof.
+Use `npm run check:phase11:protocol` for cross-process signature, tamper, transparency, and zero-network EVM proof.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.
@@ -412,6 +452,8 @@ The credentialed ModelArk acceptance journey remains the browser SOP documented 
 - [Outcome roadmap](docs/product/OUTCOME_ROADMAP.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Recovery guide](docs/RECOVERY.md)
+- [Portable Trust architecture](docs/architecture/portable-trust.md)
+- [Portable receipt key runbook](docs/operations/PORTABLE_RECEIPT_KEYS.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)
 - [Security policy](SECURITY.md)
