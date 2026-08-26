@@ -56,10 +56,38 @@ describe("local transparency proofs", () => {
     expect(
       verifyTransparencyConsistency({
         proof: createTransparencyConsistencyProof(digests, 1),
-        from: first.checkpoint,
-        to: current.checkpoint,
+        from: first,
+        to: current,
       }),
     ).toBe(true);
+  });
+
+  it("rejects a mathematically consistent proof across different log identities", () => {
+    const digests = [digest("a"), digest("b")];
+    const firstKey = generatePortableSigningKey();
+    const secondKey = generatePortableSigningKey();
+    const first = createSignedTransparencyCheckpoint({
+      receiptDigests: digests.slice(0, 1),
+      priorCheckpointDigest: null,
+      createdAt: "2026-08-26T00:00:00.000Z",
+      privateKey: firstKey.privateKeyPem,
+    });
+    const current = createSignedTransparencyCheckpoint({
+      receiptDigests: digests,
+      priorCheckpointDigest: first.checkpointDigest,
+      createdAt: "2026-08-26T00:00:01.000Z",
+      privateKey: secondKey.privateKeyPem,
+    });
+
+    expect(verifySignedTransparencyCheckpoint(first).valid).toBe(true);
+    expect(verifySignedTransparencyCheckpoint(current).valid).toBe(true);
+    expect(
+      verifyTransparencyConsistency({
+        proof: createTransparencyConsistencyProof(digests, 1),
+        from: first,
+        to: current,
+      }),
+    ).toBe(false);
   });
 
   it("detects two valid same-size checkpoints with different roots", () => {

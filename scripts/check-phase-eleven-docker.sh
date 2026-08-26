@@ -18,6 +18,13 @@ docker build --quiet --tag "$IMAGE_TAG" . >/dev/null
 docker run --rm "$IMAGE_TAG" node --input-type=module -e \
   "await Promise.all([import('@agent-airlock/transactional-resource-sdk'),import('@agent-airlock/http-object-resource'),import('@agent-airlock/portable-promotion-receipt')])"
 
+RUNTIME_UID="$(docker run --rm "$IMAGE_TAG" node -e \
+  "process.stdout.write(String(process.getuid?.() ?? -1))")"
+if [ "$RUNTIME_UID" = "0" ] || [ "$RUNTIME_UID" = "-1" ]; then
+  echo "Phase 11 production image did not enforce a non-root runtime UID." >&2
+  exit 1
+fi
+
 docker run --detach \
   --name "$CONTAINER_NAME" \
   --env HOST=0.0.0.0 \
@@ -29,7 +36,7 @@ docker run --detach \
 for attempt in $(seq 1 50); do
   if docker exec "$CONTAINER_NAME" node -e \
     "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
-    echo "Phase 11 production Docker runtime and workspace imports passed."
+    echo "Phase 11 production Docker runtime, non-root UID, and workspace imports passed."
     exit 0
   fi
   if ! docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null | grep -qx true; then

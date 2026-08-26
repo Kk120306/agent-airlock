@@ -1,11 +1,11 @@
 import type { KeyObject } from "node:crypto";
 import { randomUUID } from "node:crypto";
+import { constants, type Stats } from "node:fs";
 import {
-  lstat,
   link,
   mkdir,
   open,
-  readFile,
+  readdir,
   rename,
   unlink,
 } from "node:fs/promises";
@@ -36,6 +36,8 @@ const MAXIMUM_LOG_ENTRIES = 100_000;
 const MAXIMUM_LOCK_BYTES = 1_024;
 const LOCK_WAIT_MS = 10_000;
 const LOCK_STALE_MS = 30_000;
+const RECLAIM_ELECTION_SETTLE_MS = 25;
+const MAXIMUM_RECLAIM_CLAIMS = 256;
 
 interface TransparencyLockOwner {
   pid: number;
@@ -147,14 +149,11 @@ export class LocalTransparencyLog {
   }
 
   private async readStrict(): Promise<PortableTransparencyLogFile> {
-    const stats = await lstat(this.filePath);
-    if (!stats.isFile() || stats.isSymbolicLink()) {
-      throw new Error("Local transparency log must be a regular file");
-    }
-    if (stats.size < 1 || stats.size > MAXIMUM_LOG_BYTES) {
-      throw new Error("Local transparency log exceeds its byte boundary");
-    }
-    const source = await readFile(this.filePath, "utf8");
+    const { source } = await readBoundedRegularFile(
+      this.filePath,
+      MAXIMUM_LOG_BYTES,
+      "Local transparency log",
+    );
     const parsed = parseCanonicalJson(source, MAXIMUM_LOG_BYTES);
     assertPortableTransparencyLog(parsed, this.checkpointKeyId());
     return parsed;
@@ -251,26 +250,105 @@ export class LocalTransparencyLog {
   }
 }
 
-async function clearDeadStaleLock(lockPath: string): Promise<boolean> {
-  const before = await lstat(lockPath);
-  assertRegularBoundedLock(before);
-  if (Date.now() - before.mtimeMs <= LOCK_STALE_MS) return false;
-  const owner = await readLockOwner(lockPath);
-  if (isProcessAlive(owner.pid)) return false;
-  const after = await lstat(lockPath);
-  assertRegularBoundedLock(after);
-  const currentOwner = await readLockOwner(lockPath);
+async function clearDeadStaleLock(
+  lockPath: string,
+): Promise<boolean> {
+  const before = await readLockOwnerSnapshot(lockPath);
   if (
-    before.dev !== after.dev ||
-    before.ino !== after.ino ||
-    before.size !== after.size ||
-    before.mtimeMs !== after.mtimeMs ||
-    owner.nonce !== currentOwner.nonce
+    Date.now() - before.stats.mtimeMs <= LOCK_STALE_MS ||
+    isProcessAlive(before.owner.pid)
   ) {
     return false;
   }
-  await unlink(lockPath);
-  return true;
+  const claimOwner: TransparencyLockOwner = {
+    pid: process.pid,
+    nonce: randomUUID(),
+    createdAt: new Date().toISOString(),
+  };
+  const claimPath = `${lockPath}.reclaim.${claimOwner.nonce}.claim`;
+  const temporaryPath = `${lockPath}.reclaim.${claimOwner.nonce}.tmp`;
+  let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    temporaryHandle = await open(temporaryPath, "wx", 0o600);
+    await temporaryHandle.writeFile(canonicalize(claimOwner), "utf8");
+    await temporaryHandle.sync();
+    await temporaryHandle.close();
+    temporaryHandle = undefined;
+    await rename(temporaryPath, claimPath);
+  } catch (error) {
+    await temporaryHandle?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+  try {
+    await delay(RECLAIM_ELECTION_SETTLE_MS);
+    const elected = await electedReclaimClaim(lockPath);
+    if (elected?.owner.nonce !== claimOwner.nonce) return false;
+    const after = await readLockOwnerSnapshot(lockPath);
+    if (
+      before.stats.dev !== after.stats.dev ||
+      before.stats.ino !== after.stats.ino ||
+      before.stats.size !== after.stats.size ||
+      before.stats.mtimeMs !== after.stats.mtimeMs ||
+      before.owner.nonce !== after.owner.nonce ||
+      Date.now() - after.stats.mtimeMs <= LOCK_STALE_MS ||
+      isProcessAlive(after.owner.pid)
+    ) {
+      return false;
+    }
+    const finalElection = await electedReclaimClaim(lockPath);
+    if (finalElection?.owner.nonce !== claimOwner.nonce) return false;
+    await unlink(lockPath);
+    return true;
+  } finally {
+    await unlinkOwnedClaim(claimPath, claimOwner.nonce);
+    await unlink(temporaryPath).catch(() => undefined);
+  }
+}
+
+async function electedReclaimClaim(
+  lockPath: string,
+): Promise<{ path: string; owner: TransparencyLockOwner } | null> {
+  const directory = path.dirname(lockPath);
+  const prefix = `${path.basename(lockPath)}.reclaim.`;
+  const names = (await readdir(directory)).filter(
+    (name) => name.startsWith(prefix) && name.endsWith(".claim"),
+  );
+  if (names.length > MAXIMUM_RECLAIM_CLAIMS) {
+    throw new Error("Local transparency lock has too many reclaim claims");
+  }
+  const active: Array<{ path: string; owner: TransparencyLockOwner }> = [];
+  for (const name of names) {
+    const claimPath = path.join(directory, name);
+    const snapshot = await readLockOwnerSnapshot(claimPath);
+    const nameNonce = name.slice(prefix.length, -".claim".length);
+    if (snapshot.owner.nonce !== nameNonce) {
+      throw new Error("Local transparency reclaim claim identity is invalid");
+    }
+    if (
+      Date.now() - snapshot.stats.mtimeMs > LOCK_STALE_MS ||
+      !isProcessAlive(snapshot.owner.pid)
+    ) {
+      await unlinkOwnedClaim(claimPath, snapshot.owner.nonce);
+      continue;
+    }
+    active.push({ path: claimPath, owner: snapshot.owner });
+  }
+  active.sort(
+    (left, right) =>
+      Date.parse(left.owner.createdAt) - Date.parse(right.owner.createdAt) ||
+      left.owner.nonce.localeCompare(right.owner.nonce),
+  );
+  return active[0] ?? null;
+}
+
+async function unlinkOwnedClaim(claimPath: string, nonce: string): Promise<void> {
+  try {
+    const snapshot = await readLockOwnerSnapshot(claimPath);
+    if (snapshot.owner.nonce === nonce) await unlink(claimPath);
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+  }
 }
 
 async function unlinkOwnedLock(lockPath: string, nonce: string): Promise<void> {
@@ -283,10 +361,20 @@ async function unlinkOwnedLock(lockPath: string, nonce: string): Promise<void> {
 }
 
 async function readLockOwner(lockPath: string): Promise<TransparencyLockOwner> {
-  const stats = await lstat(lockPath);
-  assertRegularBoundedLock(stats);
+  return (await readLockOwnerSnapshot(lockPath)).owner;
+}
+
+async function readLockOwnerSnapshot(lockPath: string): Promise<{
+  owner: TransparencyLockOwner;
+  stats: Stats;
+}> {
+  const { source, stats } = await readBoundedRegularFile(
+    lockPath,
+    MAXIMUM_LOCK_BYTES,
+    "Local transparency lock",
+  );
   const parsed = asRecord(
-    parseCanonicalJson(await readFile(lockPath, "utf8"), MAXIMUM_LOCK_BYTES),
+    parseCanonicalJson(source, MAXIMUM_LOCK_BYTES),
     "Local transparency lock",
   );
   assertExactKeys(
@@ -306,16 +394,69 @@ async function readLockOwner(lockPath: string): Promise<TransparencyLockOwner> {
   ) {
     throw new Error("Local transparency lock owner is invalid");
   }
-  return parsed as unknown as TransparencyLockOwner;
+  return {
+    owner: parsed as unknown as TransparencyLockOwner,
+    stats,
+  };
 }
 
-function assertRegularBoundedLock(stats: Awaited<ReturnType<typeof lstat>>): void {
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error("Local transparency lock must be a regular file");
+async function readBoundedRegularFile(
+  filePath: string,
+  maximumBytes: number,
+  label: string,
+): Promise<{
+  source: string;
+  stats: Stats;
+}> {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (hasCode(error, "ELOOP")) {
+      throw new Error(`${label} must be a regular file`);
+    }
+    throw error;
   }
-  if (stats.size < 1 || stats.size > MAXIMUM_LOCK_BYTES) {
-    throw new Error("Local transparency lock exceeds its byte boundary");
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) throw new Error(`${label} must be a regular file`);
+    if (before.size < 1 || before.size > maximumBytes) {
+      throw new Error(`${label} exceeds its byte boundary`);
+    }
+    const buffer = Buffer.alloc(before.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const result = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        null,
+      );
+      if (result.bytesRead === 0) break;
+      offset += result.bytesRead;
+    }
+    const after = await handle.stat();
+    if (
+      offset !== before.size ||
+      after.size !== before.size ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs
+    ) {
+      throw new Error(`${label} changed while it was being read`);
+    }
+    return {
+      source: buffer.subarray(0, offset).toString("utf8"),
+      stats: before,
+    };
+  } finally {
+    await handle.close();
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isProcessAlive(pid: number): boolean {

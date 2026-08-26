@@ -342,25 +342,33 @@ export function createTransparencyConsistencyProof(
 
 export function verifyTransparencyConsistency(input: {
   proof: TransparencyConsistencyProof;
-  from: TransparencyCheckpoint;
-  to: TransparencyCheckpoint;
+  from: SignedTransparencyCheckpoint;
+  to: SignedTransparencyCheckpoint;
 }): boolean {
   const { proof, from, to } = input;
   try {
     assertTransparencyConsistencyProof(proof);
-    assertTransparencyCheckpoint(from);
-    assertTransparencyCheckpoint(to);
+    if (
+      !verifySignedTransparencyCheckpoint(from).valid ||
+      !verifySignedTransparencyCheckpoint(to).valid ||
+      from.checkpoint.keyId !== to.checkpoint.keyId
+    ) {
+      return false;
+    }
+    const fromCheckpoint = from.checkpoint;
+    const toCheckpoint = to.checkpoint;
     return (
-      proof.fromSize === from.treeSize &&
-      proof.toSize === to.treeSize &&
+      proof.fromSize === fromCheckpoint.treeSize &&
+      proof.toSize === toCheckpoint.treeSize &&
       proof.receiptDigests.length === proof.toSize &&
       proof.receiptDigests.every(isDigest) &&
       transparencyRoot(proof.receiptDigests.slice(0, proof.fromSize)) ===
-        from.root &&
-      transparencyRoot(proof.receiptDigests) === to.root &&
-      (to.treeSize === from.treeSize
-        ? to.priorCheckpointDigest === from.priorCheckpointDigest
-        : to.priorCheckpointDigest !== null)
+        fromCheckpoint.root &&
+      transparencyRoot(proof.receiptDigests) === toCheckpoint.root &&
+      (toCheckpoint.treeSize === fromCheckpoint.treeSize
+        ? toCheckpoint.priorCheckpointDigest ===
+          fromCheckpoint.priorCheckpointDigest
+        : toCheckpoint.priorCheckpointDigest !== null)
     );
   } catch {
     return false;

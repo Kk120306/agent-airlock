@@ -151,8 +151,14 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
 
   const panel = page.getByRole("region", { name: "Portable trust receipt" });
   await expect(
-    panel.getByRole("heading", { name: "Carry the decision proof beyond this server" }),
+    panel.getByRole("heading", { name: "Export a signed decision statement" }),
   ).toBeVisible();
+  await expect(panel.getByText(/It proves key possession, not that the reported state existed/))
+    .toBeVisible();
+  await expect(panel.getByText(/Always included: stable Run and Agent identifiers/))
+    .toBeVisible();
+  await expect(panel.getByText(/A signature is sufficient for ordinary offline verification/))
+    .toBeVisible();
   await panel.getByRole("button", { name: "Generate receipt" }).click();
   await expect(panel.getByText("Self-check passed")).toBeVisible();
   expect(requests[0]).toEqual({
@@ -226,10 +232,118 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(panel).toBeVisible();
+  await page.reload();
+  const mobilePanel = page.getByRole("region", { name: "Portable trust receipt" });
+  await expect(mobilePanel).toBeVisible();
+  const essentialFontSizes = await mobilePanel
+    .locator(
+      ".portable-trust-heading p, .portable-options strong, .portable-options small, .portable-trust-levels",
+    )
+    .evaluateAll((elements) =>
+      elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+    );
+  expect(Math.min(...essentialFontSizes)).toBeGreaterThanOrEqual(12);
+  await mobilePanel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(mobilePanel.getByText("Self-check passed")).toBeVisible();
+  await mobilePanel.getByText(/Selectively disclose Validation evidence/).click();
+  await mobilePanel.getByRole("checkbox", { name: /passed required/ }).check();
+  await mobilePanel.getByRole("checkbox", {
+    name: /Append to local transparency log/,
+  }).check();
+  await mobilePanel.getByRole("checkbox", {
+    name: /Prepare digest-only EVM calldata/,
+  }).check();
+  await mobilePanel.getByRole("button", { name: "Regenerate receipt" }).click();
+  await expect(mobilePanel.getByText(/Local checkpoint 1/)).toBeVisible();
+  for (const buttonName of [
+    "Download receipt JSON",
+    "Download anchor proof",
+    "Download EVM payload",
+  ]) {
+    const mobileDownloadPromise = page.waitForEvent("download");
+    await mobilePanel.getByRole("button", { name: buttonName }).click();
+    const mobileDownload = await mobileDownloadPromise;
+    expect(await readDownload(mobileDownload)).not.toHaveLength(0);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     390,
   );
+});
+
+test("invalidates a generated receipt when the Run decision changes", async ({
+  page,
+}) => {
+  const quarantined = structuredClone(run);
+  quarantined.transaction!.status = "quarantined";
+  quarantined.transaction!.disposition = "quarantined";
+  quarantined.transaction!.quarantineAvailable = true;
+  quarantined.transaction!.promotionReceipt = {
+    ...quarantined.transaction!.promotionReceipt!,
+    disposition: "quarantined",
+    createdAt: "2026-08-26T02:00:01.000Z",
+  } as NonNullable<AgentRun["transaction"]>["promotionReceipt"];
+  const runState = { current: quarantined };
+  await serveProductionBundle(page, [], runState);
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.goto("http://airlock.local/");
+
+  const panel = page.getByRole("region", { name: "Portable trust receipt" });
+  await panel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(panel.getByRole("button", { name: "Download receipt JSON" }))
+    .toBeEnabled();
+  await page.getByRole("button", { name: "Discard Quarantine" }).click();
+
+  await expect(page.getByRole("heading", { name: "Discarded" })).toBeVisible();
+  const refreshedPanel = page.getByRole("region", { name: "Portable trust receipt" });
+  await expect(refreshedPanel.getByRole("button", { name: "Generate receipt" }))
+    .toBeVisible();
+  await expect(
+    refreshedPanel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toHaveCount(0);
+});
+
+test("ignores a delayed receipt response after the Run decision changes", async ({
+  page,
+}) => {
+  const quarantined = structuredClone(run);
+  quarantined.transaction!.status = "quarantined";
+  quarantined.transaction!.disposition = "quarantined";
+  quarantined.transaction!.quarantineAvailable = true;
+  quarantined.transaction!.promotionReceipt = {
+    ...quarantined.transaction!.promotionReceipt!,
+    disposition: "quarantined",
+    createdAt: "2026-08-26T02:00:01.000Z",
+  } as NonNullable<AgentRun["transaction"]>["promotionReceipt"];
+  const runState = { current: quarantined };
+  let releaseExport!: () => void;
+  const exportGate = new Promise<void>((resolve) => {
+    releaseExport = resolve;
+  });
+  await serveProductionBundle(page, [], runState, exportGate);
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.goto("http://airlock.local/");
+
+  const panel = page.getByRole("region", { name: "Portable trust receipt" });
+  await panel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(panel.getByRole("button", { name: "Loading" })).toBeVisible();
+  await page.getByRole("button", { name: "Discard Quarantine" }).click();
+  await expect(page.getByRole("heading", { name: "Discarded" })).toBeVisible();
+
+  const delayedResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        "/api/runs/run-golden/portable-receipt",
+  );
+  releaseExport();
+  await delayedResponse;
+  const refreshedPanel = page.getByRole("region", {
+    name: "Portable trust receipt",
+  });
+  await expect(refreshedPanel.getByText("Self-check passed")).toHaveCount(0);
+  await expect(
+    refreshedPanel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toHaveCount(0);
 });
 
 async function readDownload(
@@ -244,6 +358,8 @@ async function readDownload(
 async function serveProductionBundle(
   page: Page,
   requests: Array<Record<string, unknown>>,
+  runState: { current: AgentRun } = { current: run },
+  exportGate?: Promise<void>,
 ): Promise<void> {
   await page.route("http://airlock.local/**", async (route) => {
     const url = new URL(route.request().url());
@@ -264,6 +380,7 @@ async function serveProductionBundle(
     ) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       requests.push(body);
+      await exportGate;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -271,7 +388,28 @@ async function serveProductionBundle(
       });
       return;
     }
-    const response = apiResponse(url.pathname);
+    if (
+      route.request().method() === "POST" &&
+      url.pathname === "/api/runs/run-golden/discard"
+    ) {
+      const discarded = structuredClone(runState.current);
+      discarded.transaction!.status = "discarded";
+      discarded.transaction!.disposition = "discarded";
+      discarded.transaction!.quarantineAvailable = false;
+      discarded.transaction!.promotionReceipt = {
+        ...discarded.transaction!.promotionReceipt!,
+        disposition: "discarded",
+        createdAt: "2026-08-26T02:00:02.000Z",
+      } as NonNullable<AgentRun["transaction"]>["promotionReceipt"];
+      runState.current = discarded;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ run: discarded }),
+      });
+      return;
+    }
+    const response = apiResponse(url.pathname, runState.current);
     if (response) {
       await route.fulfill({
         status: 200,
@@ -284,12 +422,12 @@ async function serveProductionBundle(
   });
 }
 
-function apiResponse(pathname: string): unknown {
+function apiResponse(pathname: string, activeRun: AgentRun): unknown {
   if (pathname === "/api/auth") return { required: false };
   if (pathname === "/api/system") return system;
   if (pathname === "/api/agents") return { agents: [agent] };
   if (pathname.endsWith("/messages")) return { messages: [] };
-  if (pathname.endsWith("/runs")) return { runs: [run] };
+  if (pathname.endsWith("/runs")) return { runs: [activeRun] };
   if (pathname.endsWith("/candidate-sets")) return { candidateSets: [] };
   if (pathname.endsWith("/assurance-proposals")) return { proposals: [] };
   if (pathname.endsWith("/outcome-contract/versions")) return { versions: [] };

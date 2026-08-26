@@ -50,9 +50,9 @@ try {
   }
   await run("npm", ["ci", "--ignore-scripts"], { cwd: cloneRoot });
   for (let pass = 1; pass <= 2; pass += 1) {
-    await assertPortsAvailable([3199, 3200, 3208]);
+    await assertPortsAvailable(phasePorts(phase));
     await run("npm", ["run", "check:" + phase + ":core"], { cwd: cloneRoot });
-    await assertPortsAvailable([3199, 3200, 3208]);
+    await assertPortsAvailable(phasePorts(phase));
     const leaked = await processesContaining(cloneRoot);
     if (leaked.length > 0) {
       throw new Error(
@@ -68,6 +68,13 @@ try {
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+function phasePorts(selectedPhase) {
+  const ports = [3199, 3200, 3208];
+  if (selectedPhase === "phase10" || selectedPhase === "phase11") ports.push(3210);
+  if (selectedPhase === "phase11") ports.push(3211);
+  return ports;
 }
 
 function run(command, argumentsList, options = {}) {

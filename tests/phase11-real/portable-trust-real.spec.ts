@@ -57,6 +57,42 @@ test("a real browser exports and independently verifies a Fastify-backed receipt
   expect(evm).toMatchObject({ networkCalls: 0, fundsSpent: 0 });
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  const mobilePanel = page.getByRole("region", { name: "Portable trust receipt" });
+  await expect(mobilePanel).toBeVisible();
+  const essentialFontSizes = await mobilePanel
+    .locator(
+      ".portable-trust-heading p, .portable-options strong, .portable-options small, .portable-trust-levels",
+    )
+    .evaluateAll((elements) =>
+      elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+    );
+  expect(Math.min(...essentialFontSizes)).toBeGreaterThanOrEqual(12);
+  await mobilePanel.getByRole("checkbox", {
+    name: /Append to local transparency log/,
+  }).check();
+  await mobilePanel.getByRole("checkbox", {
+    name: /Prepare digest-only EVM calldata/,
+  }).check();
+  await mobilePanel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(mobilePanel.getByText("Self-check passed")).toBeVisible();
+
+  const mobileReceiptPromise = page.waitForEvent("download");
+  await mobilePanel.getByRole("button", { name: "Download receipt JSON" }).click();
+  const mobileReceipt = await mobileReceiptPromise;
+  const mobileReceiptPath = await mobileReceipt.path();
+  expect(mobileReceiptPath).not.toBeNull();
+  expect(
+    verifyPortablePromotionEnvelopeJson(await readFile(mobileReceiptPath!, "utf8"))
+      .valid,
+  ).toBe(true);
+
+  for (const buttonName of ["Download anchor proof", "Download EVM payload"]) {
+    const mobileDownloadPromise = page.waitForEvent("download");
+    await mobilePanel.getByRole("button", { name: buttonName }).click();
+    const mobileDownload = await mobileDownloadPromise;
+    expect(await mobileDownload.path()).not.toBeNull();
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     390,
   );

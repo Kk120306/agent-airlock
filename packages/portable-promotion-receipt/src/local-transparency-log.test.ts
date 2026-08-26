@@ -39,8 +39,8 @@ describe("durable local transparency log", () => {
     expect(
       verifyTransparencyConsistency({
         proof: reopened.consistencyProof(1),
-        from: first.checkpoint.checkpoint,
-        to: third.checkpoint.checkpoint,
+        from: first.checkpoint,
+        to: third.checkpoint,
       }),
     ).toBe(true);
   });
@@ -130,6 +130,50 @@ describe("durable local transparency log", () => {
 
     await log.initialize();
     await log.append(digest("after-recovery"));
+
+    expect(log.snapshot().entries).toHaveLength(1);
+  });
+
+  it("recovers when an earlier reclaimer was interrupted", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "airlock-log-dead-reclaimer-"),
+    );
+    const filePath = path.join(directory, "transparency.json");
+    const lockPath = `${filePath}.lock`;
+    const deadNonce = "00000000-0000-4000-8000-000000000001";
+    const deadClaimPath = `${lockPath}.reclaim.${deadNonce}.claim`;
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore",
+    });
+    const exitedPid = child.pid!;
+    await once(child, "exit");
+    const deadOwner = JSON.stringify({
+      createdAt: "2026-08-26T00:00:00.000Z",
+      nonce: "00000000-0000-4000-8000-000000000000",
+      pid: exitedPid,
+    });
+    await writeFile(lockPath, deadOwner, { mode: 0o600 });
+    await writeFile(
+      deadClaimPath,
+      JSON.stringify({
+        createdAt: "2026-08-26T00:00:00.000Z",
+        nonce: deadNonce,
+        pid: exitedPid,
+      }),
+      { mode: 0o600 },
+    );
+    await writeFile(`${lockPath}.reclaim`, "interrupted legacy mutex", {
+      mode: 0o600,
+    });
+    await Promise.all([
+      utimes(lockPath, new Date(0), new Date(0)),
+      utimes(deadClaimPath, new Date(0), new Date(0)),
+    ]);
+
+    const key = generatePortableSigningKey();
+    const log = new LocalTransparencyLog(filePath, key.privateKeyPem);
+    await log.initialize();
+    await log.append(digest("after-reclaimer-recovery"));
 
     expect(log.snapshot().entries).toHaveLength(1);
   });

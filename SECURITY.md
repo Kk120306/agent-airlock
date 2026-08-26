@@ -30,6 +30,7 @@ Do not publish credentials, personal data, or exploit details in an issue.
 - The zero-cost demo Codex fixture receives the reserved allowance through a fixture-only environment contract and refuses over-budget work before simulated execution; Airlock still audits returned usage after completion
 - Airlock cannot refund provider usage consumed by a falsely declared third-party Runner, so Runner capability composition remains part of the trusted control plane
 - A valid Portable Promotion Receipt proves exact signed content and key possession, not Runtime isolation, Outcome Contract sufficiency, Validation correctness, signer-clock accuracy, or organizational trust in the included public key
+- Immutable historical Canonical manifests and Portable Decision Authority records strengthen export-time contradiction detection but remain files controlled by the trusted host administrator
 - Evidence hashes can reveal low-entropy values through guessing even when their preimages are not included, so portable evidence is limited to credential-checked durable control-plane projections
 - A host administrator can delete or roll back the optional local transparency log, so append-only and split-view claims require independently retained signed checkpoints
 - The local transparency lock coordinates cooperating Airlock processes but cannot resist a privileged host that replaces files or lies about process state
@@ -58,6 +59,7 @@ Do not publish credentials, personal data, or exploit details in an issue.
 - Require provider onboarding to reconcile the exact configured immutable version before any Agent canonical manifest changes.
 - Keep Resource Provider evolution additive until an explicit export-and-retire migration exists for removal or contract replacement.
 - Keep Portable Promotion Receipt and transparency private keys owner-readable, outside Git and database records, and separate from ModelArk, provider, application-authentication, and wallet credentials.
+- Keep immutable historical Canonical manifests and Portable Decision Authority records owner-writable only, preserve them with application data backups, and never reconstruct missing authority from mutable JSON metadata.
 - Follow the [portable receipt key runbook](docs/operations/PORTABLE_RECEIPT_KEYS.md) for rotation, loss, or suspected compromise, and report organizational trust separately from mathematical signature validity.
 - Treat every downloaded envelope and selected Evidence Disclosure as intentionally shareable data, review the supported and unsupported claims, and disclose no leaf unless its redacted summary is appropriate for the recipient.
 - Retain independent signed transparency checkpoints when a shared append-only claim matters, because one local server cannot prevent a privileged host from hiding its latest log file.

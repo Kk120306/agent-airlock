@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import process from "node:process";
 import { parseCanonicalJson } from "./canonical.js";
 import { encodeOfflineEvmAnchorPayload } from "./evm.js";
@@ -116,14 +117,59 @@ async function readBoundedRegularFile(
   filePath: string,
   maximumBytes = 1_048_576,
 ): Promise<string> {
-  const stats = await lstat(filePath);
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error("Input must be a regular non-symbolic-link file");
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (hasCode(error, "ELOOP")) {
+      throw new Error("Input must be a regular non-symbolic-link file");
+    }
+    throw error;
   }
-  if (stats.size < 1 || stats.size > maximumBytes) {
-    throw new Error("Input exceeds the portable document byte boundary");
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) {
+      throw new Error("Input must be a regular non-symbolic-link file");
+    }
+    if (before.size < 1 || before.size > maximumBytes) {
+      throw new Error("Input exceeds the portable document byte boundary");
+    }
+    const buffer = Buffer.alloc(before.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const result = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        null,
+      );
+      if (result.bytesRead === 0) break;
+      offset += result.bytesRead;
+    }
+    const after = await handle.stat();
+    if (
+      offset !== before.size ||
+      after.size !== before.size ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs
+    ) {
+      throw new Error("Input changed while it was being read");
+    }
+    return buffer.subarray(0, offset).toString("utf8");
+  } finally {
+    await handle.close();
   }
-  return readFile(filePath, "utf8");
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
 }
 
 function renderHumanReport(

@@ -3,8 +3,10 @@ import { createReadStream } from "node:fs";
 import {
   access,
   cp,
+  link,
   lstat,
   mkdir,
+  open,
   readFile,
   readdir,
   readlink,
@@ -306,7 +308,9 @@ export class WorkspaceManager {
       if (manifest.schemaVersion === 3) {
         return this.migratePhaseEightManifest(agent, manifest);
       }
-      return this.readCanonicalForProviderTransition(agent.id);
+      const canonical = await this.readCanonicalForProviderTransition(agent.id);
+      await this.writeHistoricalCanonicalManifest(manifest);
+      return canonical;
     }
 
     const legacyPath = agent.workspacePath;
@@ -369,10 +373,51 @@ export class WorkspaceManager {
       workspaceContentHash: string;
       sessionContentHash: string;
       sqliteContentHash: string;
+      providerVersions: ResourceVersionReference[];
+      contentHash: string;
     },
-  ): Promise<void> {
+  ): Promise<CanonicalStateReference> {
     this.assertIdentifier(agentId, "agent");
     this.assertIdentifier(stateId, "state");
+    const rawManifest = await readFile(
+      this.historicalCanonicalManifestPath(agentId, stateId),
+      "utf8",
+    );
+    const manifest = JSON.parse(rawManifest) as CanonicalManifestV4;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      throw new Error("Portable receipt historical manifest is invalid");
+    }
+    this.assertExactKeys(
+      manifest as unknown as Record<string, unknown>,
+      [
+        "schemaVersion",
+        "agentId",
+        "stateId",
+        "workspacePath",
+        "codexHomePath",
+        "outboxPath",
+        "codexThreadId",
+        "workspaceContentHash",
+        "sessionContentHash",
+        "sqliteContentHash",
+        "outboxContentHash",
+        "providerVersions",
+        "contentHash",
+        "createdAt",
+        "sourceRunId",
+      ],
+      "Portable receipt historical manifest",
+    );
+    if (
+      manifest.schemaVersion !== 4 ||
+      manifest.agentId !== agentId ||
+      manifest.stateId !== stateId ||
+      typeof manifest.codexThreadId !== "string" && manifest.codexThreadId !== null ||
+      !Array.isArray(manifest.providerVersions)
+    ) {
+      throw new Error("Portable receipt historical manifest is invalid");
+    }
+    const providerVersions = normalizeProviderVersions(manifest.providerVersions);
     const versionRoot = this.versionRoot(agentId, stateId);
     const workspacePath = this.versionWorkspacePath(agentId, stateId);
     const sessionPath = this.versionCodexHomePath(agentId, stateId);
@@ -388,21 +433,33 @@ export class WorkspaceManager {
         throw new Error("Portable receipt state evidence is not an immutable directory");
       }
     }
-    const [workspaceContentHash, sessionContentHash, sqliteSnapshot] =
-      await Promise.all([
-        this.contentHash(workspacePath),
-        this.contentHash(sessionPath),
-        this.sqlite.inspect(workspacePath),
-      ]);
+    const actual = await this.buildStateReference(
+      agentId,
+      stateId,
+      manifest.codexThreadId,
+      providerVersions,
+    );
     if (
-      workspaceContentHash !== expected.workspaceContentHash ||
-      sessionContentHash !== expected.sessionContentHash ||
-      sqliteSnapshot.contentHash !== expected.sqliteContentHash
+      path.resolve(manifest.workspacePath) !== path.resolve(actual.workspacePath) ||
+      path.resolve(manifest.codexHomePath) !== path.resolve(actual.codexHomePath) ||
+      path.resolve(manifest.outboxPath) !== path.resolve(actual.outboxPath) ||
+      manifest.workspaceContentHash !== actual.workspaceContentHash ||
+      manifest.sessionContentHash !== actual.sessionContentHash ||
+      manifest.sqliteContentHash !== actual.sqliteContentHash ||
+      manifest.outboxContentHash !== actual.outboxContentHash ||
+      !sameProviderVersions(manifest.providerVersions, actual.providerVersions) ||
+      manifest.contentHash !== actual.contentHash ||
+      actual.workspaceContentHash !== expected.workspaceContentHash ||
+      actual.sessionContentHash !== expected.sessionContentHash ||
+      actual.sqliteContentHash !== expected.sqliteContentHash ||
+      !sameProviderVersions(actual.providerVersions, expected.providerVersions) ||
+      actual.contentHash !== expected.contentHash
     ) {
       throw new Error(
         "Portable receipt source contradicts immutable historical state",
       );
     }
+    return actual;
   }
 
   async readCanonicalForProviderTransition(
@@ -1668,11 +1725,67 @@ export class WorkspaceManager {
     agentId: string,
     manifest: CanonicalManifestV4,
   ): Promise<void> {
+    await this.writeHistoricalCanonicalManifest(manifest);
     const target = this.canonicalManifestPath(agentId);
     const temporary = target + "." + randomUUID() + ".tmp";
     await mkdir(path.dirname(target), { recursive: true });
     await this.writeJson(temporary, manifest);
     await rename(temporary, target);
+  }
+
+  private async writeHistoricalCanonicalManifest(
+    manifest: CanonicalManifestV4,
+  ): Promise<void> {
+    const target = this.historicalCanonicalManifestPath(
+      manifest.agentId,
+      manifest.stateId,
+    );
+    const directory = path.dirname(target);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!/^\.canonical-history-[0-9a-f-]{36}\.tmp$/.test(entry.name)) {
+        continue;
+      }
+      const temporaryRemnant = path.join(directory, entry.name);
+      const stats = await lstat(temporaryRemnant);
+      if (!stats.isFile() || stats.isSymbolicLink()) {
+        throw new Error("Historical Canonical manifest temporary path is unsafe");
+      }
+      await rm(temporaryRemnant, { force: true });
+    }
+    const temporary = path.join(
+      directory,
+      `.canonical-history-${randomUUID()}.tmp`,
+    );
+    const serialized = JSON.stringify(manifest) + "\n";
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(temporary, "wx", 0o600);
+      await handle.writeFile(serialized, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await link(temporary, target);
+    } catch (error) {
+      await handle?.close().catch(() => undefined);
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        await rm(temporary, { force: true });
+        throw error;
+      }
+      const existing = JSON.parse(await readFile(target, "utf8"));
+      if (JSON.stringify(existing) !== JSON.stringify(manifest)) {
+        throw new Error("Immutable historical Canonical State manifest changed");
+      }
+    } finally {
+      await rm(temporary, { force: true });
+    }
+    const directoryHandle = await open(directory, "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
   }
 
   private async seedCodexHome(codexHomePath: string): Promise<void> {
@@ -2285,6 +2398,18 @@ export class WorkspaceManager {
 
   private canonicalManifestPath(agentId: string): string {
     return path.join(this.agentRoot(agentId), "canonical.json");
+  }
+
+  private historicalCanonicalManifestPath(
+    agentId: string,
+    stateId: string,
+  ): string {
+    this.assertIdentifier(stateId, "state");
+    return path.join(
+      this.agentRoot(agentId),
+      ".canonical-history",
+      stateId + ".json",
+    );
   }
 
   private providerRegistryStatePath(): string {

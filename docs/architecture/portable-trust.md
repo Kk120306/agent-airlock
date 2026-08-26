@@ -2,7 +2,10 @@
 
 ## Purpose
 
-Phase 11 lets a fresh offline verifier validate the integrity, signer key, resource commitments, contract commitment, Validation commitment, disposition, ancestry, and optional Selection commitment of an exported Airlock decision.
+Phase 11 lets a fresh offline verifier validate the integrity, included signer key, resource commitments, contract commitment, Validation commitment, disposition, ancestry, and optional Selection commitment of an exported Airlock decision.
+
+Offline verification proves that the included Ed25519 public key signed the exact canonical content and that disclosed evidence belongs to its committed Merkle root.
+It does not prove who controls the key, that the committed physical state still exists, that the statements were honest, or that the underlying policy and Validations were sufficient.
 
 ADR 0013 is accepted locally and this document describes the implemented Phase 11 trust boundary.
 
@@ -42,6 +45,8 @@ The signed receipt contains only these semantic groups:
 - Agent pseudonymous identifier or explicit export alias.
 - Disposition `promoted`, `quarantined`, `discarded`, or `cancelled`.
 - Decision timestamp from the signer clock with an explicit statement that it is not an external timestamp proof.
+
+The stable Run and Agent identifiers, decision timestamp, state and resource fingerprints, and evidence commitments are required receipt fields rather than optional disclosures.
 
 ### State commitments
 
@@ -156,8 +161,10 @@ The local reference anchor stores only ordered receipt digests and produces:
 
 Two signed checkpoints with the same tree size and different roots constitute direct split-view evidence.
 A later larger checkpoint without a valid consistency proof is not accepted as an append-only continuation.
+Consistency verification authenticates both signed checkpoints and requires one checkpoint key identity before evaluating the Merkle continuation.
 The local implementation serializes writers across processes, revalidates the current log under the lock, uses an incremental Merkle accumulator for prefix verification, and persists with an atomic replace plus file and directory synchronization.
 Lock ownership is nonce-bound, and an old lock is recoverable only after its recorded process is no longer alive.
+Stale-lock recovery uses unique nonce-bound claims and deterministic election, so an interrupted reclaimer cannot strand a second global mutex.
 A log history accepts exactly one checkpoint key identity, so transparency-key rotation starts a new log and explicit trust epoch.
 
 The optional EVM reference is limited to a contract interface and offline payload encoder for one receipt digest.
@@ -166,8 +173,18 @@ The demo prints payload bytes and the exact privacy and consistency claim, perfo
 ## Export boundary
 
 The server builds a portable receipt only from strictly parsed durable Run Transaction evidence.
-It verifies Canonical State commitments before signing a promoted decision and uses identical before and after commitments for non-Promotion dispositions.
+Before mutable control-plane metadata is persisted, Airlock writes an immutable Decision Authority record for each terminal Run decision.
+That record commits the exact terminal Run Transaction, the frozen parent authority for Repair ancestry, and the final Candidate Set source, contract, competitor seals, Selection Decision, and winner when applicable.
+Export requires an exact match against this authority and never synthesizes a missing record from mutable database content.
+Decision Authority records and historical Canonical manifests are first written and synchronized under unique same-directory temporary names, then installed through non-replacing hard-link publication and directory synchronization.
+Recognizable temporary remnants from interruption are removed before retry, while an existing deterministic authority target is verified rather than replaced.
+
+Every schema 4 Canonical State also has an immutable historical manifest keyed by state identifier.
+Before signing, Airlock rebuilds the complete physical Whole-Agent state reference from the exact historical workspace, Codex home, deterministic SQLite resource, outbox, Codex thread identity, and Resource Provider versions.
+It compares the rebuilt composite and every component fingerprint with both the historical manifest and the terminal decision authority.
+Non-Promotion dispositions require identical before and after commitments.
 It refuses export when required evidence is missing, contradictory, credential-bearing, truncated beyond the schema's disclosure claim, or associated with unresolved recovery.
+Completed decisions created before Decision Authority records were introduced fail export closed because their historical authority cannot be reconstructed safely from the mutable JSON store.
 
 The implemented HTTP and CLI boundary is:
 
@@ -184,6 +201,7 @@ Disclosure selection changes only the envelope's proof list and never changes th
 
 The Playground exposes this boundary only for terminal contradiction-free Run evidence and completed selected winners.
 Export is private by default, lets the operator opt into individual redacted evidence proofs, and labels local transparency and EVM calldata as optional additions rather than correctness dependencies.
+The disclosure panel names the stable identifiers, timestamps, state and resource fingerprints, and evidence hashes that every receipt necessarily contains before the operator generates an artifact.
 The server self-verifies every envelope before returning it and converts incomplete evidence into a retryable conflict without creating a key or receipt.
 
 ## Required golden vector and adversarial matrix
@@ -199,5 +217,12 @@ The server self-verifies every envelope before returning it and converts incompl
 - Compromised-key policy changes the trust assessment but not the mathematical signature result.
 - Signature-only verification passes offline with anchoring disabled.
 - Inclusion and consistency proofs pass, while conflicting same-size checkpoints trigger split-view evidence.
+- Consistency proofs signed by different checkpoint keys fail even when their Merkle roots are mathematically compatible.
+- An interrupted stale-lock reclaimer cannot prevent later appenders from recovering the dead main lock.
+- Symbolic-link and oversized CLI inputs fail through one no-follow, bounded file handle.
 - EVM payload encoding is deterministic, contains only the receipt digest, makes no network call, and spends no funds.
 - A fresh clone verifies all fixtures without the Airlock server, database, ModelArk, a provider process, or blockchain access.
+- Coordinated rewrites of mutable Run, embedded Promotion Receipt, Candidate winner seal, Selection, and physical resource evidence fail against independent Decision Authority and historical-state records.
+- Registered Resource Provider source and installed versions export successfully, while provider-version, fingerprint, required-Validation, and historical-vector corruption fail before key creation.
+- Authority and historical-manifest interruption remnants at create, partial-write, synchronized, and published stages are recovered without publishing a partial deterministic target.
+- A Repair child preserves the exact parent authority it referenced even if the parent later receives a new discarded disposition.

@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   parseResourceVersionReference,
@@ -492,12 +492,17 @@ export class JsonStore {
   }
 
   private async persist(data: Database = this.data): Promise<void> {
-    const temporaryPath = this.filePath + ".tmp";
-    await writeFile(temporaryPath, JSON.stringify(data, null, 2) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(temporaryPath, this.filePath);
+    const temporaryPath = this.filePath + "." + randomUUID() + ".tmp";
+    try {
+      await writeFile(temporaryPath, JSON.stringify(data, null, 2) + "\n", {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      await rename(temporaryPath, this.filePath);
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
   }
 }
 

@@ -12,6 +12,7 @@ A Run without that durable decision never becomes Canonical State during recover
 | Promotion journal | A validated Candidate received an approved promotion decision. |
 | Immutable version directory | The planned physical Whole-Agent state was installed. |
 | `canonical.json` | The currently accepted Whole-Agent state. |
+| Immutable historical Canonical manifest | The complete workspace, Codex home, SQLite, outbox, thread, provider, and composite reference for one exact accepted state identifier. |
 | Atomic mock-delivery store | The supported local external effect was claimed. |
 | Resource Provider immutable version | The exact provider target in the durable Promotion plan was installed. |
 | Resource Registry generation | The exact additive provider contracts accepted by this deployment. |
@@ -19,11 +20,15 @@ A Run without that durable decision never becomes Canonical State during recover
 | Candidate Set aggregate | One exact shared source, sealed competitor evidence, deterministic Selection Decision, and loser cleanup progress. |
 | Agent deletion journal | A bounded archive audit was prepared before an Agent workspace rename or control-plane deletion. |
 | JSON control-plane store | Operator-facing Agent, Run, Candidate Set, Assurance Proposal, Outcome Contract history, message, and Promotion Receipt metadata. |
+| Portable Decision Authority journal | An append-only terminal Run Transaction commitment with frozen Repair-parent and Candidate Set authority used only for receipt export. |
 | Portable signing key and identity marker | The private Ed25519 signer and its non-secret expected public-key fingerprint. |
 | Local transparency log | An optional append-only digest sequence, signed checkpoints, and prior-checkpoint chain for shared observation. |
 
 Recovery verifies the physical sources first and repairs control-plane metadata last.
 It never rolls `canonical.json` backward.
+Portable Decision Authority is captured before terminal Run metadata is committed, but it does not authorize Promotion recovery and is never recreated from mutable control-plane metadata.
+Restart-created terminal decisions are written to Decision Authority before the recovered mutable database state is committed.
+Decision Authority and historical Canonical manifests use synchronized temporary files and non-replacing atomic publication, so a process interruption can leave only a removable temporary remnant or a complete deterministic target.
 
 ## Journal phases
 
@@ -95,9 +100,13 @@ Candidate Set recovery also uses each competitor's persisted historical provider
 | After control-plane deletion but before journal completion | Startup verifies the existing archive destination and removes the already completed journal without recreating the Agent. |
 | Agent deletion audit or physical archive state contradicts the journal | Startup fails closed before Promotion or Resource Registry transition recovery begins. |
 | Receipt export stops before its response | Canonical State and Run evidence remain unchanged, and a retry derives and signs the same receipt content. |
+| A historical Canonical manifest is missing or contradicts its physical state | Receipt export fails closed without changing Canonical State or signing the contradictory projection. |
+| Mutable Run, Promotion Receipt, Candidate Set, Selection, or winner-seal metadata contradicts Portable Decision Authority | Receipt export fails closed even when the mutable records were changed consistently with one another. |
+| A completed legacy decision has no Portable Decision Authority record | Receipt export fails closed because Airlock cannot safely infer historical authority from mutable metadata. |
 | A portable signing key is missing or substituted while its identity marker remains | Export fails closed without silently rotating the signing identity, and existing envelopes remain independently verifiable. |
 | A transparency append completes but its response is lost | A retry recognizes the existing receipt digest and returns the same tree position without appending a duplicate. |
 | The optional local transparency log or checkpoint chain is malformed | Anchored export fails closed, while signature-only export remains available when the operator disables anchoring. |
+| A transparency writer or stale-lock reclaimer exits | A live writer remains protected, while nonce-bound recovery claims elect one reclaimer and dead claims cannot strand later appenders. |
 | Provider removal or contract replacement is configured | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied. |
 | Any physical contradiction | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed. |
 

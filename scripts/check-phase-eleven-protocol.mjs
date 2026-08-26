@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +50,30 @@ try {
   );
   if (!verified.valid || verified.receiptDigest !== vector.envelope.receiptDigest) {
     throw new Error("A separate CLI process did not verify the golden receipt");
+  }
+
+  const symbolicEnvelopePath = path.join(temporaryRoot, "envelope-link.json");
+  await symlink(envelopePath, symbolicEnvelopePath);
+  const symbolicInput = await captureFailure(process.execPath, [
+    cliPath,
+    "verify",
+    symbolicEnvelopePath,
+    "--json",
+  ]);
+  if (symbolicInput.code !== 1 || !/regular non-symbolic-link/u.test(symbolicInput.stderr)) {
+    throw new Error("The CLI accepted a symbolic-link input boundary");
+  }
+
+  const oversizedPath = path.join(temporaryRoot, "oversized.json");
+  await writeFile(oversizedPath, Buffer.alloc(1_048_577, 0x20), { mode: 0o600 });
+  const oversizedInput = await captureFailure(process.execPath, [
+    cliPath,
+    "verify",
+    oversizedPath,
+    "--json",
+  ]);
+  if (oversizedInput.code !== 1 || !/byte boundary/u.test(oversizedInput.stderr)) {
+    throw new Error("The CLI accepted an oversized input boundary");
   }
 
   const tampered = structuredClone(vector.envelope);
@@ -149,8 +181,52 @@ try {
     throw new Error("Cross-process transparency append lost a receipt digest");
   }
 
+  const staleLogPath = path.join(temporaryRoot, "stale-log.json");
+  const staleLockPath = `${staleLogPath}.lock`;
+  const exited = spawn(process.execPath, ["-e", "process.exit(0)"], {
+    stdio: "ignore",
+  });
+  const exitedPid = exited.pid;
+  await once(exited, "exit");
+  if (!exitedPid) throw new Error("Could not create a dead lock owner");
+  await writeFile(
+    staleLockPath,
+    JSON.stringify({
+      createdAt: "2026-08-26T00:00:00.000Z",
+      nonce: "00000000-0000-4000-8000-000000000000",
+      pid: exitedPid,
+    }),
+    { mode: 0o600 },
+  );
+  await utimes(staleLockPath, new Date(0), new Date(0));
+  const staleContenders = Array.from({ length: 8 }, (_, index) => [
+    `sha256:${String(index + 1).repeat(64)}`,
+    `2026-08-26T00:00:${String(index + 10).padStart(2, "0")}.000Z`,
+  ]);
+  await Promise.all(
+    staleContenders.map(([digest, at]) =>
+      capture(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        appendWorker,
+        staleLogPath,
+        concurrentKeyPath,
+        digest,
+        at,
+      ]),
+    ),
+  );
+  const reopenedStaleLog = new LocalTransparencyLog(
+    staleLogPath,
+    transparencyKey.privateKeyPem,
+  );
+  await reopenedStaleLog.initialize();
+  if (reopenedStaleLog.snapshot().entries.length !== staleContenders.length) {
+    throw new Error("Concurrent stale-lock reclaim lost a receipt digest");
+  }
+
   process.stdout.write(
-    "Phase 11 cross-process receipt, tamper, anchor, concurrent log, and offline EVM vectors passed.\n",
+    "Phase 11 cross-process receipt, tamper, anchor, stale-lock recovery, concurrent log, and offline EVM vectors passed.\n",
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

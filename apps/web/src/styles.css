@@ -2336,14 +2336,14 @@ textarea:focus {
 .portable-trust-heading h4 {
   margin: 3px 0 0;
   color: #26342f;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .portable-trust-heading p {
   max-width: 620px;
   margin: 4px 0 0;
   color: #718078;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -2389,23 +2389,33 @@ textarea:focus {
 .portable-options strong,
 .portable-disclosures strong {
   color: #34483f;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .portable-options small,
 .portable-disclosures small {
   margin-top: 3px;
   color: #7d8983;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
+}
+
+.portable-trust-levels {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid #dfe8e4;
+  color: #53635c;
+  background: #f7faf8;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .portable-disclosures {
   padding: 10px 14px;
   border-bottom: 1px solid #dfe8e4;
   color: #53635c;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .portable-disclosures summary {
@@ -2481,7 +2491,7 @@ textarea:focus {
 .portable-result-status small {
   margin-top: 2px;
   color: #75827c;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .portable-identities {
@@ -2506,7 +2516,7 @@ textarea:focus {
 
 .portable-identities span {
   color: #809087;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -2516,7 +2526,7 @@ textarea:focus {
   margin-top: 4px;
   overflow: hidden;
   color: #3f5149;
-  font-size: 8px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2542,14 +2552,14 @@ textarea:focus {
 
 .portable-claims strong {
   color: #42564d;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .portable-claims ul {
   margin: 6px 0 0;
   padding-left: 14px;
   color: #75817b;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.45;
 }
 

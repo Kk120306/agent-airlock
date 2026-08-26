@@ -106,9 +106,15 @@ npm run check:phase10:assurance
 ## Phase 11 Portable Trust demo
 
 Phase 11 turns complete durable Run evidence into a strict Portable Promotion Envelope that can be verified without the Airlock server or database.
-The envelope signs canonical receipt content with an operator-held Ed25519 identity and can disclose selected redacted evidence through Merkle proofs without including unselected leaves.
+The envelope signs canonical receipt content with an operator-held Ed25519 key and can disclose selected redacted evidence through Merkle proofs without including unselected leaves.
 Promoted Runs, retained or discarded Quarantines, Repair ancestry, exact Candidate Selection, and accepted Assurance provenance use the same bounded protocol.
 The verification report separates mathematical integrity from unsupported claims about Runtime isolation, Validation correctness, signer trust, or policy sufficiency.
+A valid signature proves that the included public key matches the signature over the exact receipt content.
+It proves key possession, not the human or organization behind the key, and it does not make an incorrect statement true.
+
+Every receipt necessarily includes stable Run and Agent identifiers, decision timestamps, state and resource fingerprints, and evidence commitments.
+It never includes prompts, Runtime output, raw Validation output, file contents, environment values, credentials, local paths, or provider-private metadata.
+Individual bounded redacted evidence leaves are additional opt-in disclosures.
 
 ```bash
 npm run demo:phase11 -- --reset
@@ -119,15 +125,32 @@ The panel starts with no evidence disclosed, previews safe evidence identities, 
 It downloads the independently verifiable envelope, optional local anchor proof, and optional offline EVM payload as separate bounded artifacts.
 Optional local transparency adds a signed checkpoint and inclusion proof over the receipt digest.
 Optional EVM output only encodes `anchor(bytes32)` calldata offline and performs no network request, wallet operation, transaction, or spend.
+Use the signature alone for ordinary offline exchange with a known key.
+Use independently retained local checkpoints when cooperating observers need evidence that one operator did not silently rewrite its published sequence.
+Publish the digest to a shared public ledger only when mutually distrusting organizations need common publication evidence.
+Neither a local checkpoint nor a blockchain publication becomes Promotion authority or proves that the Agent result is correct.
 
-Run the standalone no-cost protocol and server contracts with:
+Install dependencies with Node.js 22+ and npm 10+.
+The core browser gate also requires installed Google Chrome.
+The complete release gate requires a Docker-compatible `docker` CLI, as provided by Docker Desktop, Docker Engine, or Colima.
+Podman users must enable Docker CLI and Compose compatibility before running the aggregate gate.
+
+Run the focused no-cost protocol, server, browser, and container contracts with:
 
 ```bash
 npm run check:phase11:protocol
 npm run test -w @launchpad/server -- --run src/phase-eleven-acceptance.test.ts
+npm run test:phase11:ui
+npm run check:phase11:docker
 ```
 
-The commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
+Run the inherited Phase 0 through Phase 11 core, production-image, and clean-clone release gate with:
+
+```bash
+npm run check:phase11
+```
+
+These commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
 
 ## Screenshots
 
@@ -436,6 +459,9 @@ Use `npm run check:phase8:provider` and `npm run check:phase8:conformance` for c
 Use `npm run check:phase9:selection` and `npm run check:phase9:boundaries` for deterministic Candidate Selection and historical recovery proof.
 Use `npm run check:phase10:assurance` for evidence-backed proposal, operator authority, rollback, and deletion recovery proof.
 Use `npm run check:phase11:protocol` for cross-process signature, tamper, transparency, and zero-network EVM proof.
+Use `npm run test:phase11:ui` for complete desktop and 390-pixel mobile export, download, and independent verification journeys.
+Use `npm run check:phase11:docker` for the production image, non-root UID, writable-data, package-resolution, and live-health proof.
+Use `npm run check:phase11` for the complete inherited core, Docker, and exact clean-clone release gate.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.

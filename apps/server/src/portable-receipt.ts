@@ -344,7 +344,35 @@ function assertDurablePromotionReceiptAuthority(
       transaction.canonicalContentHashAfter ===
         transaction.canonicalContentHashBefore);
   if (!authoritativeFieldsAgree || !nonPromotionPreservedState) {
-    throw new Error("Portable receipt source contradicts its durable Promotion Receipt");
+    const mismatch =
+      receipt.runTransactionId !== transaction.id
+        ? "Run identity"
+        : receipt.disposition !== transaction.disposition
+          ? "disposition"
+          : receipt.outcomeContractVersion !== transaction.outcomeContractVersion
+            ? "Outcome Contract"
+            : receipt.canonicalStateIdBefore !== transaction.canonicalStateIdBefore ||
+                receipt.canonicalStateIdAfter !== transaction.canonicalStateIdAfter
+              ? "Canonical State identity"
+              : receipt.canonicalContentHashBefore !==
+                    transaction.canonicalContentHashBefore ||
+                  receipt.canonicalContentHashAfter !==
+                    transaction.canonicalContentHashAfter
+                ? "Canonical State fingerprint"
+                : normalizeDigest(receipt.validationEvidenceHash, "Validation evidence") !==
+                    expectedValidationEvidenceHash
+                  ? "Validation evidence"
+                  : !sameLineage
+                    ? "lineage"
+                    : "non-Promotion state preservation";
+    throw new Error(
+      "Portable receipt source contradicts its durable Promotion Receipt: " +
+        mismatch +
+        ` for Run ${transaction.id}` +
+        (mismatch === "Validation evidence"
+          ? ` (${normalizeDigest(receipt.validationEvidenceHash, "Validation evidence")} != ${expectedValidationEvidenceHash})`
+          : ""),
+    );
   }
 }
 

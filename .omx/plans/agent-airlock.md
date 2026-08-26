@@ -261,7 +261,8 @@ Phase 8 persists provider resource records, Capability Claims, immutable source 
 Phase 9 persists exact Candidate Set source and contract snapshots, per-competitor Run links, seals, bounded criterion inputs, deterministic scorecards, one-winner or no-winner Selection Decisions, and loser cleanup progress.
 Promotion journal schema 2 additionally persists the exact Candidate Set winner authority, including decision and seal digests, and startup validates it before physical recovery.
 Phase 10 persists versioned Assurance evidence, deterministic monotonic proposals, historical simulation results, explicit operator decisions, and append-only Outcome Contract history.
-Phase 11 derives Portable Promotion Envelopes from complete versioned durable evidence without adding receipt authority to the control-plane store.
+Phase 11 derives Portable Promotion Envelopes from complete versioned durable evidence and requires a separate append-only Decision Authority record captured before terminal control-plane metadata.
+Immutable historical Canonical manifests let export recompute the complete physical Whole-Agent state for every referenced accepted state identifier.
 Receipt and transparency private keys remain separate operator-owned files, and the optional transparency log persists only portable receipt digests and signed checkpoint evidence.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
@@ -300,6 +301,7 @@ Schema evolution must increment the database version and include a tested migrat
 | A new provider is configured while an older Candidate Set is unresolved | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit. |
 | Candidate Set recovery fails while a new provider is configured | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit. |
 | Portable receipt evidence is incomplete, legacy, or contradictory | Return a retryable conflict without signing an interpretation or changing Canonical State. |
+| Portable Decision Authority or a historical Canonical manifest is missing or contradictory | Fail export closed without reconstructing authority from mutable database content. |
 | Portable signing identity is missing, substituted, malformed, or weakly permissioned | Fail export closed without revealing a local path or silently rotating the identity. |
 | Optional transparency state is malformed | Fail anchored export closed while leaving signature-only export available. |
 

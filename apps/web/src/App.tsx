@@ -98,9 +98,11 @@ function Spinner() {
 
 function PortableTrustExport({
   runId,
+  evidenceRevision,
   onError,
 }: {
   runId: string;
+  evidenceRevision: string;
   onError: (message: string) => void;
 }) {
   const [result, setResult] = useState<PortableReceiptExport | null>(null);
@@ -112,17 +114,22 @@ function PortableTrustExport({
   const [evmPayload, setEvmPayload] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const requestGeneration = useRef(0);
 
   useEffect(() => {
+    requestGeneration.current += 1;
     setResult(null);
     setAvailableDisclosures([]);
     setSelectedDisclosures([]);
     setLocalAnchor(false);
     setEvmPayload(false);
+    setBusy(false);
     setDirty(false);
-  }, [runId]);
+  }, [runId, evidenceRevision]);
 
   const generate = async () => {
+    const generation = requestGeneration.current + 1;
+    requestGeneration.current = generation;
     setBusy(true);
     try {
       const exported = await api.exportPortableReceipt(runId, {
@@ -131,14 +138,23 @@ function PortableTrustExport({
         localAnchor,
         evmPayload,
       });
+      if (requestGeneration.current !== generation) return;
       setResult(exported);
       setAvailableDisclosures(exported.availableDisclosures);
       setDirty(false);
     } catch (reason) {
-      onError(reason instanceof Error ? reason.message : String(reason));
+      if (requestGeneration.current === generation) {
+        onError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setBusy(false);
+      if (requestGeneration.current === generation) setBusy(false);
     }
+  };
+
+  const invalidatePendingExport = () => {
+    requestGeneration.current += 1;
+    setBusy(false);
+    setDirty(true);
   };
 
   const downloadJson = (value: unknown, filename: string) => {
@@ -162,7 +178,7 @@ function PortableTrustExport({
         ? [...current, identity].sort()
         : current.filter((candidate) => candidate !== identity),
     );
-    setDirty(true);
+    invalidatePendingExport();
   };
 
   return (
@@ -170,10 +186,16 @@ function PortableTrustExport({
       <header className="portable-trust-heading">
         <div>
           <span className="eyebrow">Portable Trust</span>
-          <h4>Carry the decision proof beyond this server</h4>
+          <h4>Export a signed decision statement</h4>
           <p>
-            Ed25519 authorship, canonical SHA-256 commitments, and offline verification.
-            Raw prompts, outputs, credentials, and local paths stay out.
+            Offline verification proves that the included Ed25519 key signed the canonical
+            content. It proves key possession, not that the reported state existed or was
+            reported truthfully.
+          </p>
+          <p>
+            Always included: stable Run and Agent identifiers, timestamps, state and resource
+            fingerprints, and evidence hashes. Raw prompts, outputs, credentials, and local
+            paths always stay out. Only bounded redacted Validation leaves are opt-in.
           </p>
         </div>
         <button
@@ -193,12 +215,15 @@ function PortableTrustExport({
             checked={localAnchor}
             onChange={(event) => {
               setLocalAnchor(event.target.checked);
-              setDirty(true);
+              invalidatePendingExport();
             }}
           />
           <span>
             <strong>Append to local transparency log</strong>
-            <small>Optional signed checkpoint. Receipt validity never depends on it.</small>
+            <small>
+              Lets cooperating observers retain checkpoints and detect later log rewrites.
+              Receipt validity never depends on it.
+            </small>
           </span>
         </label>
         <label>
@@ -207,15 +232,23 @@ function PortableTrustExport({
             checked={evmPayload}
             onChange={(event) => {
               setEvmPayload(event.target.checked);
-              setDirty(true);
+              invalidatePendingExport();
             }}
           />
           <span>
             <strong>Prepare digest-only EVM calldata</strong>
-            <small>No chain call, wallet, RPC, or funds are used.</small>
+            <small>
+              For mutually distrusting organizations that need shared publication evidence.
+              No chain call, wallet, RPC, or funds are used.
+            </small>
           </span>
         </label>
       </div>
+      <p className="portable-trust-levels">
+        A signature is sufficient for ordinary offline verification. A retained checkpoint
+        adds rewrite detection, while a public anchor only adds shared publication evidence.
+        Neither makes a false statement true or grants the signer authority.
+      </p>
 
       {availableDisclosures.length > 0 && (
         <details className="portable-disclosures">
@@ -660,6 +693,7 @@ function CandidateSetEvidence({
         candidateSet.winnerRunId && (
           <PortableTrustExport
             runId={candidateSet.winnerRunId}
+            evidenceRevision={candidateSet.selectionDecision!.decisionDigest}
             onError={onPortableError}
           />
         )}
@@ -1140,7 +1174,15 @@ function AirlockEvidence({
             <small>{transaction.promotionReceipt.disposition}</small>
           </footer>
           {portableTrustAvailable && !recoveryFailed && (
-            <PortableTrustExport runId={run.id} onError={onPortableError} />
+            <PortableTrustExport
+              runId={run.id}
+              evidenceRevision={[
+                transaction.disposition,
+                transaction.promotionReceipt.createdAt,
+                transaction.promotionReceipt.validationEvidenceHash,
+              ].join(":")}
+              onError={onPortableError}
+            />
           )}
         </>
       )}
