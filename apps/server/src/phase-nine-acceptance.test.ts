@@ -1362,8 +1362,21 @@ describe("Phase 9 Competing Futures acceptance", () => {
         loserPolicy: policy,
       });
       await expect
-        .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
+        .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase, {
+          timeout: 10_000,
+        })
         .toBe("completed");
+      await expect
+        .poll(
+          () =>
+            !(
+              service as unknown as {
+                activeExecutions: Map<string, Promise<void>>;
+              }
+            ).activeExecutions.has(agent.id),
+          { timeout: 10_000 },
+        )
+        .toBe(true);
 
       const loser = service
         .getCandidateSet(admitted.candidateSet.id)

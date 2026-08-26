@@ -40,7 +40,10 @@ import {
   createDefaultSelectionContract,
   stableJson,
 } from "./candidate-selection.js";
-import { portableDecisionTransactionHash } from "./portable-decision-journal.js";
+import {
+  PortableDecisionJournal,
+  portableDecisionTransactionHash,
+} from "./portable-decision-journal.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -149,6 +152,38 @@ class ProviderReceiptRunner extends PassingReceiptRunner {
 }
 
 describe("Phase 11 Portable Trust acceptance", () => {
+  it("synchronizes every authority namespace entry in its immediate parent", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eleven-namespace-sync-"),
+    );
+    temporaryDirectories.push(root);
+    const authorityRoot = path.join(root, "portable-decision-journal");
+    const journal = new PortableDecisionJournal(authorityRoot);
+    const internals = journal as unknown as {
+      syncDirectory: (directory: string) => Promise<void>;
+    };
+    const syncDirectory = internals.syncDirectory.bind(journal);
+    const synchronizedDirectories: string[] = [];
+    internals.syncDirectory = async (directory) => {
+      synchronizedDirectories.push(path.resolve(directory));
+      await syncDirectory(directory);
+    };
+
+    await journal.initialize();
+
+    expect(synchronizedDirectories.slice(0, 3)).toEqual([
+      path.resolve(root),
+      path.resolve(authorityRoot),
+      path.resolve(authorityRoot),
+    ]);
+    expect(
+      (await lstat(path.join(authorityRoot, ".candidate-sets"))).isDirectory(),
+    ).toBe(true);
+    expect(
+      (await lstat(path.join(authorityRoot, ".discard-cleanup"))).isDirectory(),
+    ).toBe(true);
+  });
+
   it("exports, self-verifies, anchors, and ABI-encodes one promoted Run over HTTP", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
     const agent = await harness.service.createAgent({

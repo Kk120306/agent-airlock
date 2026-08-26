@@ -66,6 +66,8 @@ export class PortableDecisionJournal {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     const stats = await this.assertDirectory(this.root, "root");
     this.rootIdentity = { dev: stats.dev, ino: stats.ino };
+    await this.syncDirectory(path.dirname(path.resolve(this.root)));
+    await this.assertPinnedRoot();
     await mkdir(this.candidateSetRoot(), { recursive: true, mode: 0o700 });
     const candidateSetStats = await this.assertDirectory(
       this.candidateSetRoot(),
@@ -75,6 +77,8 @@ export class PortableDecisionJournal {
       dev: candidateSetStats.dev,
       ino: candidateSetStats.ino,
     };
+    await this.syncDirectory(this.root);
+    await this.assertCandidateSetRoot();
     await mkdir(this.discardCleanupRoot(), { recursive: true, mode: 0o700 });
     const discardCleanupStats = await this.assertDirectory(
       this.discardCleanupRoot(),
@@ -84,6 +88,8 @@ export class PortableDecisionJournal {
       dev: discardCleanupStats.dev,
       ino: discardCleanupStats.ino,
     };
+    await this.syncDirectory(this.root);
+    await this.assertDiscardCleanupRoot();
   }
 
   async recordCandidateSetDecision(

@@ -19,6 +19,7 @@ import {
   type ResourceCandidateContext,
   type ResourceDiscardContext,
   type ResourcePrepareContext,
+  type ResourcePromotionPlan,
   type ResourcePromotionContext,
   type ResourceProviderManifest,
   type ResourceQuarantineContext,
@@ -2760,7 +2761,7 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     },
   );
 
-  it("replaces a predecessor partial provider recovery batch", async () => {
+  it("replaces repeated predecessor recovery fragments", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "airlock-phase-eight-partial-recovery-"),
     );
@@ -2856,24 +2857,93 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     );
     const predecessorJournal = JSON.parse(
       await readFile(journalPath, "utf8"),
-    ) as { transaction: RunTransaction };
+    ) as {
+      transaction: RunTransaction;
+      plan: { resourcePlans: ResourcePromotionPlan[] };
+      targetCanonical: { providerVersions: ResourceVersionReference[] };
+    };
     const baselineEventCount =
       predecessorJournal.transaction.providerResourceEvents.length;
+    const providerBResource =
+      predecessorJournal.transaction.providerResources.find(
+        (resource) => resource.providerId === "provider-b",
+      );
+    const providerBVersionId = providerBResource?.installedVersion?.versionId;
+    if (!providerBVersionId) {
+      throw new Error("Provider B Promotion version is missing");
+    }
+    const providerBValue = providers[1]?.versions.get(providerBVersionId);
+    if (providerBValue === undefined) {
+      throw new Error("Provider B Promotion value is missing");
+    }
+    providers[1]!.versions.delete(providerBVersionId);
+    const predecessorEvents: RunTransaction["providerResourceEvents"] = [];
+    await expect(
+      coordinator.reconcile({
+        agentId: agent.id,
+        runId: started.run.id,
+        plans: predecessorJournal.plan.resourcePlans,
+        expectedVersions: predecessorJournal.targetCanonical.providerVersions,
+        visibility: "canonical-manifest",
+        providerIds: ["provider-a", "provider-b"],
+        onEvent: (event) => {
+          predecessorEvents.push(event);
+        },
+      }),
+    ).rejects.toThrow("Resource reconciliation result contradicts");
+    expect(
+      predecessorEvents.map((event) => [event.providerId, event.status]),
+    ).toEqual([
+      ["provider-a", "passed"],
+      ["provider-b", "failed"],
+    ]);
+    const repeatedFailedAttempt = predecessorEvents.map((event) => ({
+      ...structuredClone(event),
+      at: new Date(Date.parse(event.at) + 1).toISOString(),
+    }));
+    predecessorJournal.transaction.providerResourceEvents.push(
+      ...predecessorEvents,
+      ...repeatedFailedAttempt,
+      {
+        ...structuredClone(predecessorEvents[0]!),
+        at: new Date(Date.parse(predecessorEvents[0]!.at) + 2).toISOString(),
+      },
+      {
+        ...structuredClone(predecessorEvents[0]!),
+        at: new Date(Date.parse(predecessorEvents[0]!.at) + 3).toISOString(),
+      },
+    );
+    predecessorJournal.transaction.status = "recovery-error";
     predecessorJournal.transaction.recovery.recoveredAfterRestart = true;
-    predecessorJournal.transaction.providerResourceEvents.push({
-      schemaVersion: 1,
-      providerId: "provider-a",
-      resourceKind: "kind-a",
-      stage: "reconcile",
-      status: "passed",
-      summary: "Predecessor persisted only the first provider verification",
-      at: new Date().toISOString(),
-    });
+    predecessorJournal.transaction.recovery.recoveryError =
+      "Promotion recovery failed: predecessor provider verification failed";
+    expect(
+      predecessorJournal.transaction.providerResourceEvents
+        .slice(-6)
+        .map((event) => [event.providerId, event.status]),
+    ).toEqual([
+      ["provider-a", "passed"],
+      ["provider-b", "failed"],
+      ["provider-a", "passed"],
+      ["provider-b", "failed"],
+      ["provider-a", "passed"],
+      ["provider-a", "passed"],
+    ]);
     await writeFile(
       journalPath,
       JSON.stringify(predecessorJournal, null, 2) + "\n",
       "utf8",
     );
+    providers[1]!.versions.set(providerBVersionId, providerBValue);
+
+    const recoveryOnlyRuntime: AgentRunner = {
+      run: async () => {
+        runtimeCalls += 1;
+        throw new Error("Recovery must not execute Runtime twice");
+      },
+      cancel: async () => false,
+      isAvailable: async () => true,
+    };
 
     const restarted = new AgentService(
       config,
@@ -2884,14 +2954,7 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         undefined,
         coordinator.initialVersions(),
       ),
-      {
-        run: async () => {
-          runtimeCalls += 1;
-          throw new Error("Recovery must not execute Runtime twice");
-        },
-        cancel: async () => false,
-        isAvailable: async () => true,
-      },
+      recoveryOnlyRuntime,
       undefined,
       undefined,
       coordinator,
@@ -2919,8 +2982,11 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     expect(
       repairedJournal.transaction.providerResourceEvents
         .slice(-providers.length)
-        .map((event) => event.providerId),
-    ).toEqual(["provider-a", "provider-b"]);
+        .map((event) => [event.providerId, event.status]),
+    ).toEqual([
+      ["provider-a", "passed"],
+      ["provider-b", "passed"],
+    ]);
     expect(runtimeCalls).toBe(1);
   });
 });

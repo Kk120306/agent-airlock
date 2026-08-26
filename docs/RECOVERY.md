@@ -37,6 +37,7 @@ Candidate Set cancellation, winner completion, and loser retention or Discard ea
 A selected winner that fails before Promotion is never replaced by a runner-up, and restart preserves both the Selection decision and the winner's authoritative retained or discarded state.
 After Selection authority exists, Airlock publishes final Candidate Set-bound Run authority before the mutable Selection projection, and Candidate Set completion never backfills missing authority.
 Decision Authority and historical Canonical manifests use synchronized temporary files and non-replacing atomic publication, so a process interruption can leave only a removable temporary remnant or a complete deterministic target.
+The portable authority root is synchronized in its data-directory parent, and each top-level authority namespace is synchronized in that root before any descendant record may authorize cleanup.
 Historical Canonical manifests use the originating Candidate or Registry Transition timestamp instead of recovery time, so a retry after history publication derives byte-identical immutable content.
 
 ## Journal phases
@@ -83,7 +84,7 @@ Candidate Set recovery also uses each competitor's persisted historical provider
 | After `canonical-advanced`                                                                                                | Supported intents are parsed from the immutable accepted outbox and claimed idempotently.                                                                                                   |
 | After physical effect dispatch                                                                                            | The same idempotency keys return the existing receipts before completion.                                                                                                                   |
 | After `effects-delivered` or `completed`                                                                                  | Final Run and Agent metadata is reconstructed without another version, effect, or assistant message.                                                                                        |
-| During a repeated completed-Promotion verification                                                                        | A complete reconciliation batch remains immutable, a predecessor partial batch is replaced after full live verification, and a transient error can later normalize without evidence growth. |
+| During a repeated completed-Promotion verification                                                                        | Authority-compatible complete reconciliation is preserved, repeated predecessor partial, failed, or duplicate attempts are normalized only after full live verification, and a transient error can later clear without evidence growth. |
 | During provider preparation cleanup                                                                                       | Runtime does not start, Canonical State stays unchanged, and failed cleanup retains a retryable composite Quarantine.                                                                       |
 | During cancellation while provider cleanup is unavailable                                                                 | Canonical State stays unchanged, the complete Candidate becomes cleanup-only Quarantine, and Discard remains retryable.                                                                     |
 | After Discard authority but before provider or local Quarantine cleanup                                                   | Repeated provider Discard is idempotent, its exact completion fact is published after all providers pass, and only then may local removal continue.                                         |
@@ -140,7 +141,7 @@ Cleanup accepts no caller-supplied path, rejects unsafe identifiers, does not tr
 Expired Quarantine loses mutable files but retains output, Validation evidence, hashes, lineage, timeline, and its Promotion Receipt.
 Immutable Discard authority is persisted before any provider or local Quarantine removal begins.
 Successful provider cleanup is then persisted as one immutable fact bound to that authority before local Candidate or Quarantine removal begins.
-The fact's per-Run directory entry is synchronized in the pinned cleanup namespace before local removal can begin.
+The cleanup namespace entry is synchronized in the portable authority root, and the fact's per-Run directory entry is synchronized in that pinned namespace before local removal can begin.
 The bounded prepare-abort path is the exception because it cleans partial provider preparation before a terminal Run can be assembled, and its later Discard authority must embed exact successful coverage for every known provider.
 If authority publication fails, every provider and local Quarantine remains untouched.
 If a provider is unavailable after authority publication, cleanup retains the local Quarantine root and retries idempotently on the next startup.
