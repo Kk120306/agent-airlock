@@ -37,6 +37,10 @@ import { ResourceRegistry } from "./resource-registry.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunTransaction, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
+import {
+  waitForRunStatus,
+  waitForRunToFinish,
+} from "../test/agent-service-workflow.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
 
 const temporaryDirectories: string[] = [];
@@ -2847,7 +2851,7 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       agent.id,
       "promote before a partial recovery replay",
     );
-    await expect.poll(() => first.getRun(started.run.id).status).toBe("failed");
+    await waitForRunStatus(first, started.run.id, "failed");
     expect(runtimeCalls).toBe(1);
 
     const journalPath = path.join(
@@ -3066,10 +3070,7 @@ async function createRejectedProviderFixture(label: string) {
 }
 
 async function waitForRun(service: AgentService, runId: string) {
-  await expect
-    .poll(() => service.getRun(runId).status, { timeout: 3_000 })
-    .toMatch(/^(completed|failed|cancelled)$/);
-  return service.getRun(runId);
+  return waitForRunToFinish(service, runId);
 }
 
 function reference(

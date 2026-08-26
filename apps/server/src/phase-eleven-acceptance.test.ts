@@ -25,6 +25,10 @@ import {
   DeterministicJsonProvider,
   jsonVersionReference,
 } from "../test/deterministic-json-provider.js";
+import {
+  waitForCandidateSetCompletion,
+  waitForRunTransactionStatus,
+} from "../test/agent-service-workflow.js";
 import { AgentService } from "./agent-service.js";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -191,9 +195,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create a portable trust receipt without a network.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     expect(harness.service.getAgent(agent.id).status).toBe("ready");
 
     const response = await harness.app.inject({
@@ -251,9 +258,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Trigger the bounded rejection fixture.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("quarantined");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "quarantined",
+      agent.id,
+    );
 
     const parentResponse = await harness.app.inject({
       method: "POST",
@@ -272,9 +282,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
     expect(repairResponse.statusCode).toBe(202);
     const repairRunId = (repairResponse.json() as { run: { id: string } }).run
       .id;
-    await expect
-      .poll(() => harness.service.getRun(repairRunId).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      repairRunId,
+      "promoted",
+      agent.id,
+    );
     const childResponse = await harness.app.inject({
       method: "POST",
       url: `/api/runs/${repairRunId}/portable-receipt`,
@@ -354,11 +367,11 @@ describe("Phase 11 Portable Trust acceptance", () => {
     const candidateSetId = (
       admission.json() as { candidateSet: { id: string } }
     ).candidateSet.id;
-    await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase, {
-        timeout: 5_000,
-      })
-      .toBe("completed");
+    await waitForCandidateSetCompletion(
+      harness.service,
+      candidateSetId,
+      agent.id,
+    );
     const candidateSet = harness.service.getCandidateSet(candidateSetId);
     expect(candidateSet.winnerRunId).not.toBeNull();
 
@@ -406,11 +419,11 @@ describe("Phase 11 Portable Trust acceptance", () => {
     const candidateSetId = (
       admission.json() as { candidateSet: { id: string } }
     ).candidateSet.id;
-    await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase, {
-        timeout: 5_000,
-      })
-      .toBe("completed");
+    await waitForCandidateSetCompletion(
+      harness.service,
+      candidateSetId,
+      agent.id,
+    );
     const retained = harness.service
       .getCandidateSet(candidateSetId)
       .competitors.find(
@@ -481,12 +494,11 @@ describe("Phase 11 Portable Trust acceptance", () => {
       },
       loserPolicy: "retain",
     });
-    await expect
-      .poll(
-        () => harness.service.getCandidateSet(admission.candidateSet.id).phase,
-        { timeout: 5_000 },
-      )
-      .toBe("completed");
+    await waitForCandidateSetCompletion(
+      harness.service,
+      admission.candidateSet.id,
+      agent.id,
+    );
     const retained = harness.service
       .getCandidateSet(admission.candidateSet.id)
       .competitors.find(
@@ -547,12 +559,13 @@ describe("Phase 11 Portable Trust acceptance", () => {
         agent.id,
         `Collect independent bounded evidence ${index + 1}.`,
       );
-      await expect
-        .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-        .toBe("quarantined");
-      await expect
-        .poll(() => harness.service.getAgent(agent.id).status)
-        .toBe("ready");
+      await waitForRunTransactionStatus(
+        harness.service,
+        admitted.run.id,
+        "quarantined",
+        agent.id,
+      );
+      expect(harness.service.getAgent(agent.id).status).toBe("ready");
     }
     const proposal = await harness.service.deriveAssuranceProposal(agent.id);
     expect(proposal).not.toBeNull();
@@ -566,9 +579,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Run under the accepted contract without changing Canonical State.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const response = await harness.app.inject({
       method: "POST",
       url: `/api/runs/${admitted.run.id}/portable-receipt`,
@@ -604,9 +620,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
     );
 
     runner.release();
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
   });
 
   it("records immutable authority before persisting a restart-created cancellation", async () => {
@@ -663,9 +682,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Retain this invalid Candidate before an interrupted Discard.",
     );
-    await expect
-      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("quarantined");
+    await waitForRunTransactionStatus(
+      first.service,
+      admitted.run.id,
+      "quarantined",
+      agent.id,
+    );
 
     const interrupted = new AgentService(
       first.config,
@@ -743,9 +765,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create a complete source for authority mutation checks.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
 
     const mutations: Array<(receipt: Record<string, unknown>) => void> = [
       (receipt) => {
@@ -806,9 +831,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
         agent.id,
         "Create terminal evidence before mutating one signed projection.",
       );
-      await expect
-        .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-        .toBe("promoted");
+      await waitForRunTransactionStatus(
+        harness.service,
+        admitted.run.id,
+        "promoted",
+        agent.id,
+      );
       await harness.store.mutate((database) => {
         const transaction = database.runs.find(
           (run) => run.id === admitted.run.id,
@@ -842,9 +870,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Promote a state that will be independently checked before export.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const stateId = harness.service.getRun(admitted.run.id).transaction!
       .canonicalStateIdAfter!;
     await writeFile(
@@ -879,9 +910,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Promote state before a historical outbox corruption check.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const stateId = harness.service.getRun(admitted.run.id).transaction!
       .canonicalStateIdAfter!;
     await writeFile(
@@ -916,9 +950,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create immutable decision authority before coordinated corruption.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     await harness.store.mutate((database) => {
       const transaction = database.runs.find(
         (run) => run.id === admitted.run.id,
@@ -948,9 +985,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create authority before a restart-time corruption check.",
     );
-    await expect
-      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      first.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const authorityDirectory = path.join(
       first.config.dataDirectory,
       "portable-decision-journal",
@@ -993,9 +1033,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create authority before deleting the mutable transaction projection.",
     );
-    await expect
-      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      first.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     await first.store.mutate((database) => {
       database.runs.find((run) => run.id === admitted.run.id)!.transaction =
         null;
@@ -1030,9 +1073,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create one valid authority before an ambiguity injection.",
     );
-    await expect
-      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      first.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const authorityDirectory = path.join(
       first.config.dataDirectory,
       "portable-decision-journal",
@@ -1109,9 +1155,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
         agent.id,
         "Create authority before a context-conflict injection.",
       );
-      await expect
-        .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-        .toBe("promoted");
+      await waitForRunTransactionStatus(
+        first.service,
+        admitted.run.id,
+        "promoted",
+        agent.id,
+      );
       const authorityDirectory = path.join(
         first.config.dataDirectory,
         "portable-decision-journal",
@@ -1183,9 +1232,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create authority before a forged recovery suffix.",
     );
-    await expect
-      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      first.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const authorityDirectory = path.join(
       first.config.dataDirectory,
       "portable-decision-journal",
@@ -1259,9 +1311,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create a Quarantine before a forged Discard suffix.",
     );
-    await expect
-      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("quarantined");
+    await waitForRunTransactionStatus(
+      first.service,
+      admitted.run.id,
+      "quarantined",
+      agent.id,
+    );
     await first.service.discardRun(admitted.run.id);
 
     const authorityDirectory = path.join(
@@ -1347,9 +1402,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create decision authority before a directory substitution check.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const runAuthorityDirectory = path.join(
       harness.config.dataDirectory,
       "portable-decision-journal",
@@ -1380,9 +1438,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Create decision authority before replacing its pinned root.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("promoted");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "promoted",
+      agent.id,
+    );
     const authorityRoot = path.join(
       harness.config.dataDirectory,
       "portable-decision-journal",
@@ -1412,9 +1473,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Retain one Candidate before crash-remnant cleanup.",
     );
-    await expect
-      .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-      .toBe("quarantined");
+    await waitForRunTransactionStatus(
+      harness.service,
+      admitted.run.id,
+      "quarantined",
+      agent.id,
+    );
     const authorityDirectory = path.join(
       harness.config.dataDirectory,
       "portable-decision-journal",
@@ -1476,12 +1540,13 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Publish one historical Canonical manifest.",
     );
-    await expect
-      .poll(() => harness.service.getRun(first.run.id).transaction?.status)
-      .toBe("promoted");
-    await expect
-      .poll(() => harness.service.getAgent(agent.id).status)
-      .toBe("ready");
+    await waitForRunTransactionStatus(
+      harness.service,
+      first.run.id,
+      "promoted",
+      agent.id,
+    );
+    expect(harness.service.getAgent(agent.id).status).toBe("ready");
     const historyDirectory = path.join(
       harness.config.workspaceRoot,
       agent.id,
@@ -1509,12 +1574,13 @@ describe("Phase 11 Portable Trust acceptance", () => {
       agent.id,
       "Publish the next state after recovering immutable history.",
     );
-    await expect
-      .poll(() => harness.service.getRun(second.run.id).transaction?.status)
-      .toBe("promoted");
-    await expect
-      .poll(() => harness.service.getAgent(agent.id).status)
-      .toBe("ready");
+    await waitForRunTransactionStatus(
+      harness.service,
+      second.run.id,
+      "promoted",
+      agent.id,
+    );
+    expect(harness.service.getAgent(agent.id).status).toBe("ready");
     expect(
       (await readdir(historyDirectory)).filter((name) => name.endsWith(".tmp")),
     ).toEqual([]);
@@ -1616,9 +1682,11 @@ describe("Phase 11 Portable Trust acceptance", () => {
     });
     const candidateSetId = admission.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
-    await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
-      .toBe("completed");
+    await waitForCandidateSetCompletion(
+      harness.service,
+      candidateSetId,
+      agent.id,
+    );
     const winnerRunId =
       harness.service.getCandidateSet(candidateSetId).winnerRunId!;
     await harness.store.mutate((database) => {
@@ -1665,9 +1733,11 @@ describe("Phase 11 Portable Trust acceptance", () => {
     });
     const candidateSetId = admission.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
-    await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
-      .toBe("completed");
+    await waitForCandidateSetCompletion(
+      harness.service,
+      candidateSetId,
+      agent.id,
+    );
     const winnerRunId =
       harness.service.getCandidateSet(candidateSetId).winnerRunId!;
     await harness.store.mutate((database) => {
@@ -1724,9 +1794,11 @@ describe("Phase 11 Portable Trust acceptance", () => {
     expect(admission.statusCode, admission.body).toBe(202);
     const candidateSetId = admission.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
-    await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
-      .toBe("completed");
+    await waitForCandidateSetCompletion(
+      harness.service,
+      candidateSetId,
+      agent.id,
+    );
     const winnerRunId =
       harness.service.getCandidateSet(candidateSetId).winnerRunId!;
     await harness.store.mutate((database) => {
@@ -1759,9 +1831,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
         agent.id,
         "Create complete evidence before exercising trust-storage failures.",
       );
-      await expect
-        .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-        .toBe("promoted");
+      await waitForRunTransactionStatus(
+        harness.service,
+        admitted.run.id,
+        "promoted",
+        agent.id,
+      );
 
       const initial = await harness.app.inject({
         method: "POST",
@@ -1869,9 +1944,12 @@ async function makeProviderHarness() {
     agent.id,
     "Promote a Candidate with a registered Resource Provider.",
   );
-  await expect
-    .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
-    .toBe("promoted");
+  await waitForRunTransactionStatus(
+    harness.service,
+    admitted.run.id,
+    "promoted",
+    agent.id,
+  );
   const transaction = harness.service.getRun(admitted.run.id).transaction!;
   return {
     ...harness,

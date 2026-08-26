@@ -9,6 +9,7 @@ import { RunCancelledError } from "./errors.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
+import { waitForRunToFinish } from "../test/agent-service-workflow.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
 
 const temporaryDirectories: string[] = [];
@@ -50,10 +51,7 @@ async function makeHarness(runner: AgentRunner): Promise<Harness> {
 }
 
 async function waitForRun(service: AgentService, runId: string) {
-  await expect
-    .poll(() => service.getRun(runId).status, { timeout: 3_000 })
-    .toMatch(/^(completed|failed|cancelled)$/);
-  return service.getRun(runId);
+  return waitForRunToFinish(service, runId);
 }
 
 describe("Phase 1 transactional workspace", () => {
