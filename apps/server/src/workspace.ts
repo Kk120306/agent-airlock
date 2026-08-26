@@ -46,8 +46,10 @@ type CanonicalManifestV2 = Omit<
   sourceRunId: string | null;
 };
 
-interface CanonicalManifestV3
-  extends Omit<CanonicalStateReference, "providerVersions"> {
+interface CanonicalManifestV3 extends Omit<
+  CanonicalStateReference,
+  "providerVersions"
+> {
   schemaVersion: 3;
   agentId: string;
   createdAt: string;
@@ -146,10 +148,7 @@ export interface ProviderRegistryVerification {
 }
 
 export type ProviderRegistryFaultPoint =
-  | "after-plan"
-  | "after-install"
-  | "after-history"
-  | "after-manifest";
+  "after-plan" | "after-install" | "after-history" | "after-manifest";
 
 export type ProviderRegistryFaultInjector = (
   point: ProviderRegistryFaultPoint,
@@ -225,7 +224,9 @@ export class WorkspaceManager {
     initialProviderVersions: readonly ResourceVersionReference[] = [],
     private readonly providerRegistryFaultInjector?: ProviderRegistryFaultInjector,
   ) {
-    this.initialProviderVersions = normalizeProviderVersions(initialProviderVersions);
+    this.initialProviderVersions = normalizeProviderVersions(
+      initialProviderVersions,
+    );
   }
 
   async initialize(
@@ -325,7 +326,8 @@ export class WorkspaceManager {
       agent.id + "-" + randomUUID(),
     );
     const agentRoot = this.agentRoot(agent.id);
-    const legacyIsAgentRoot = path.resolve(legacyPath) === path.resolve(agentRoot);
+    const legacyIsAgentRoot =
+      path.resolve(legacyPath) === path.resolve(agentRoot);
     if (legacyIsAgentRoot) {
       await rename(legacyPath, migrationPath);
     } else {
@@ -413,12 +415,15 @@ export class WorkspaceManager {
       manifest.schemaVersion !== 4 ||
       manifest.agentId !== agentId ||
       manifest.stateId !== stateId ||
-      typeof manifest.codexThreadId !== "string" && manifest.codexThreadId !== null ||
+      (typeof manifest.codexThreadId !== "string" &&
+        manifest.codexThreadId !== null) ||
       !Array.isArray(manifest.providerVersions)
     ) {
       throw new Error("Portable receipt historical manifest is invalid");
     }
-    const providerVersions = normalizeProviderVersions(manifest.providerVersions);
+    const providerVersions = normalizeProviderVersions(
+      manifest.providerVersions,
+    );
     const versionRoot = this.versionRoot(agentId, stateId);
     const workspacePath = this.versionWorkspacePath(agentId, stateId);
     const sessionPath = this.versionCodexHomePath(agentId, stateId);
@@ -431,7 +436,9 @@ export class WorkspaceManager {
     ]) {
       const stats = await lstat(candidatePath);
       if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new Error("Portable receipt state evidence is not an immutable directory");
+        throw new Error(
+          "Portable receipt state evidence is not an immutable directory",
+        );
       }
     }
     const actual = await this.buildStateReference(
@@ -441,19 +448,27 @@ export class WorkspaceManager {
       providerVersions,
     );
     if (
-      path.resolve(manifest.workspacePath) !== path.resolve(actual.workspacePath) ||
-      path.resolve(manifest.codexHomePath) !== path.resolve(actual.codexHomePath) ||
+      path.resolve(manifest.workspacePath) !==
+        path.resolve(actual.workspacePath) ||
+      path.resolve(manifest.codexHomePath) !==
+        path.resolve(actual.codexHomePath) ||
       path.resolve(manifest.outboxPath) !== path.resolve(actual.outboxPath) ||
       manifest.workspaceContentHash !== actual.workspaceContentHash ||
       manifest.sessionContentHash !== actual.sessionContentHash ||
       manifest.sqliteContentHash !== actual.sqliteContentHash ||
       manifest.outboxContentHash !== actual.outboxContentHash ||
-      !sameProviderVersions(manifest.providerVersions, actual.providerVersions) ||
+      !sameProviderVersions(
+        manifest.providerVersions,
+        actual.providerVersions,
+      ) ||
       manifest.contentHash !== actual.contentHash ||
       actual.workspaceContentHash !== expected.workspaceContentHash ||
       actual.sessionContentHash !== expected.sessionContentHash ||
       actual.sqliteContentHash !== expected.sqliteContentHash ||
-      !sameProviderVersions(actual.providerVersions, expected.providerVersions) ||
+      !sameProviderVersions(
+        actual.providerVersions,
+        expected.providerVersions,
+      ) ||
       actual.contentHash !== expected.contentHash
     ) {
       throw new Error(
@@ -475,7 +490,8 @@ export class WorkspaceManager {
       typeof manifest.workspacePath !== "string" ||
       typeof manifest.codexHomePath !== "string" ||
       typeof manifest.outboxPath !== "string" ||
-      (manifest.codexThreadId !== null && typeof manifest.codexThreadId !== "string") ||
+      (manifest.codexThreadId !== null &&
+        typeof manifest.codexThreadId !== "string") ||
       typeof manifest.workspaceContentHash !== "string" ||
       typeof manifest.sessionContentHash !== "string" ||
       typeof manifest.sqliteContentHash !== "string" ||
@@ -485,22 +501,34 @@ export class WorkspaceManager {
     ) {
       throw new Error("Invalid canonical manifest for Agent " + agentId);
     }
-    const expectedWorkspace = this.versionWorkspacePath(agentId, manifest.stateId);
-    const expectedCodexHome = this.versionCodexHomePath(agentId, manifest.stateId);
+    const expectedWorkspace = this.versionWorkspacePath(
+      agentId,
+      manifest.stateId,
+    );
+    const expectedCodexHome = this.versionCodexHomePath(
+      agentId,
+      manifest.stateId,
+    );
     const expectedOutbox = this.versionOutboxPath(agentId, manifest.stateId);
     if (
-      path.resolve(manifest.workspacePath) !== path.resolve(expectedWorkspace) ||
-      path.resolve(manifest.codexHomePath) !== path.resolve(expectedCodexHome) ||
+      path.resolve(manifest.workspacePath) !==
+        path.resolve(expectedWorkspace) ||
+      path.resolve(manifest.codexHomePath) !==
+        path.resolve(expectedCodexHome) ||
       path.resolve(manifest.outboxPath) !== path.resolve(expectedOutbox)
     ) {
-      throw new Error("Canonical manifest contains an unexpected resource path");
+      throw new Error(
+        "Canonical manifest contains an unexpected resource path",
+      );
     }
     await Promise.all([
       access(expectedWorkspace),
       access(expectedCodexHome),
       access(expectedOutbox),
     ]);
-    const providerVersions = normalizeProviderVersions(manifest.providerVersions);
+    const providerVersions = normalizeProviderVersions(
+      manifest.providerVersions,
+    );
     const actual = await this.buildStateReference(
       agentId,
       manifest.stateId,
@@ -515,7 +543,9 @@ export class WorkspaceManager {
       !sameProviderVersions(actual.providerVersions, providerVersions) ||
       actual.contentHash !== manifest.contentHash
     ) {
-      throw new Error("Canonical State content does not match its immutable manifest");
+      throw new Error(
+        "Canonical State content does not match its immutable manifest",
+      );
     }
     return actual;
   }
@@ -556,7 +586,10 @@ export class WorkspaceManager {
       throw new Error("Resource Provider registry generation must be positive");
     }
     const verificationById = new Map(
-      verifications.map((verification) => [verification.providerId, verification]),
+      verifications.map((verification) => [
+        verification.providerId,
+        verification,
+      ]),
     );
     for (const addition of additions) {
       const verification = verificationById.get(addition.providerId);
@@ -670,7 +703,9 @@ export class WorkspaceManager {
       ? current.generation
       : current.generation + 1;
     if (generation !== expectedGeneration) {
-      throw new Error("Resource Provider registry generation changed concurrently");
+      throw new Error(
+        "Resource Provider registry generation changed concurrently",
+      );
     }
     await this.writeJsonAtomically(this.providerRegistryStatePath(), {
       schemaVersion: 1,
@@ -720,7 +755,9 @@ export class WorkspaceManager {
         canonicalSessionHashBefore: canonical.sessionContentHash,
         canonicalSqliteHashBefore: canonical.sqliteContentHash,
         canonicalOutboxHashBefore: canonical.outboxContentHash,
-        canonicalProviderVersionsBefore: structuredClone(canonical.providerVersions),
+        canonicalProviderVersionsBefore: structuredClone(
+          canonical.providerVersions,
+        ),
         canonicalThreadIdBefore: canonical.codexThreadId,
         candidateThreadId: canonical.codexThreadId,
         repairSourceRunId: null,
@@ -739,7 +776,9 @@ export class WorkspaceManager {
         canonicalSessionHashBefore: canonical.sessionContentHash,
         canonicalSqliteHashBefore: canonical.sqliteContentHash,
         canonicalOutboxHashBefore: canonical.outboxContentHash,
-        canonicalProviderVersionsBefore: structuredClone(canonical.providerVersions),
+        canonicalProviderVersionsBefore: structuredClone(
+          canonical.providerVersions,
+        ),
         canonicalThreadIdBefore: canonical.codexThreadId,
         runtimeThreadId: canonical.codexThreadId,
         repairReferencePath: null,
@@ -819,7 +858,9 @@ export class WorkspaceManager {
         canonicalSessionHashBefore: canonical.sessionContentHash,
         canonicalSqliteHashBefore: canonical.sqliteContentHash,
         canonicalOutboxHashBefore: canonical.outboxContentHash,
-        canonicalProviderVersionsBefore: structuredClone(canonical.providerVersions),
+        canonicalProviderVersionsBefore: structuredClone(
+          canonical.providerVersions,
+        ),
         canonicalThreadIdBefore: canonical.codexThreadId,
         candidateThreadId: source.candidateThreadId ?? canonical.codexThreadId,
         repairSourceRunId: sourceRunId,
@@ -838,7 +879,9 @@ export class WorkspaceManager {
         canonicalSessionHashBefore: canonical.sessionContentHash,
         canonicalSqliteHashBefore: canonical.sqliteContentHash,
         canonicalOutboxHashBefore: canonical.outboxContentHash,
-        canonicalProviderVersionsBefore: structuredClone(canonical.providerVersions),
+        canonicalProviderVersionsBefore: structuredClone(
+          canonical.providerVersions,
+        ),
         canonicalThreadIdBefore: canonical.codexThreadId,
         runtimeThreadId: manifest.candidateThreadId,
         repairReferencePath,
@@ -849,15 +892,26 @@ export class WorkspaceManager {
     }
   }
 
-  async recordCandidateThread(runId: string, threadId: string | null): Promise<void> {
+  async recordCandidateThread(
+    runId: string,
+    threadId: string | null,
+  ): Promise<void> {
     const manifest = await this.readCandidate(runId);
-    if (threadId && !(await this.hasSessionArtifact(this.candidateCodexPath(runId), threadId))) {
+    if (
+      threadId &&
+      !(await this.hasSessionArtifact(this.candidateCodexPath(runId), threadId))
+    ) {
       throw new Error(
-        "Codex returned thread " + threadId + " without a Candidate session artifact",
+        "Codex returned thread " +
+          threadId +
+          " without a Candidate session artifact",
       );
     }
     manifest.candidateThreadId = threadId;
-    await this.writeJson(path.join(this.candidateRoot(runId), "candidate.json"), manifest);
+    await this.writeJson(
+      path.join(this.candidateRoot(runId), "candidate.json"),
+      manifest,
+    );
   }
 
   async promoteCandidate(
@@ -900,7 +954,9 @@ export class WorkspaceManager {
       ) ||
       current.codexThreadId !== candidate.canonicalThreadIdBefore
     ) {
-      throw new Error("Canonical State changed while the Run Transaction was active");
+      throw new Error(
+        "Canonical State changed while the Run Transaction was active",
+      );
     }
 
     await Promise.all([
@@ -939,17 +995,23 @@ export class WorkspaceManager {
     };
   }
 
-  async installPromotion(plan: PromotionPlan): Promise<CanonicalStateReference> {
+  async installPromotion(
+    plan: PromotionPlan,
+  ): Promise<CanonicalStateReference> {
     this.assertPromotionPlanIdentifiers(plan);
     const candidateRoot = this.candidateRoot(plan.runId);
     const destinationRoot = this.versionRoot(plan.agentId, plan.targetStateId);
     const candidateExists = await fileExists(candidateRoot);
     const versionExists = await fileExists(destinationRoot);
     if (candidateExists && versionExists) {
-      throw new Error("Promotion has both Candidate and installed version state");
+      throw new Error(
+        "Promotion has both Candidate and installed version state",
+      );
     }
     if (!candidateExists && !versionExists) {
-      throw new Error("Promotion has neither Candidate nor installed version state");
+      throw new Error(
+        "Promotion has neither Candidate nor installed version state",
+      );
     }
 
     if (candidateExists) {
@@ -998,7 +1060,9 @@ export class WorkspaceManager {
       plan.targetProviderVersions,
     );
     if (installed.stateId !== plan.targetStateId) {
-      throw new Error("Installed Promotion state identifier does not match its plan");
+      throw new Error(
+        "Installed Promotion state identifier does not match its plan",
+      );
     }
     return installed;
   }
@@ -1018,7 +1082,9 @@ export class WorkspaceManager {
   ): Promise<CanonicalStateReference> {
     this.assertPromotionPlanIdentifiers(plan);
     if (installed.stateId !== plan.targetStateId) {
-      throw new Error("Installed Promotion state does not match the target plan");
+      throw new Error(
+        "Installed Promotion state does not match the target plan",
+      );
     }
     const verifiedInstalled = await this.buildStateReference(
       plan.agentId,
@@ -1034,7 +1100,9 @@ export class WorkspaceManager {
         await readFile(this.canonicalManifestPath(plan.agentId), "utf8"),
       ) as CanonicalManifestV4;
       if (raw.sourceRunId !== plan.runId) {
-        throw new Error("Canonical target belongs to a different Run Transaction");
+        throw new Error(
+          "Canonical target belongs to a different Run Transaction",
+        );
       }
       return current;
     }
@@ -1144,14 +1212,24 @@ export class WorkspaceManager {
     retainedStateRoot: string,
   ): Promise<string[]> {
     this.assertIdentifier(runId, "Run");
-    const resolved = path.resolve(retainedStateRoot);
+    const resolved = path.resolve(await realpath(retainedStateRoot));
     let root: string;
-    if (resolved === path.resolve(this.candidateRoot(runId))) {
+    const candidateRoot = this.candidateRoot(runId);
+    const quarantineRoot = this.quarantineRoot(runId);
+    const resolvedCandidateRoot = (await fileExists(candidateRoot))
+      ? path.resolve(await realpath(candidateRoot))
+      : null;
+    const resolvedQuarantineRoot = (await fileExists(quarantineRoot))
+      ? path.resolve(await realpath(quarantineRoot))
+      : null;
+    if (resolved === resolvedCandidateRoot) {
       root = await this.resolveCandidateRoot(runId, null);
-    } else if (resolved === path.resolve(this.quarantineRoot(runId))) {
+    } else if (resolved === resolvedQuarantineRoot) {
       root = await this.resolveQuarantineRoot(runId, null);
     } else {
-      throw new Error("Retained provider state path is outside the Run Transaction");
+      throw new Error(
+        "Retained provider state path is outside the Run Transaction",
+      );
     }
     const candidate = await this.readCandidateAt(root, runId, null);
     return candidate.canonicalProviderVersionsBefore.map(
@@ -1159,18 +1237,23 @@ export class WorkspaceManager {
     );
   }
 
-  async repairReferenceEvidence(
-    runId: string,
-  ): Promise<{ status: "passed" | "failed" | "error"; summary: string } | null> {
+  async repairReferenceEvidence(runId: string): Promise<{
+    status: "passed" | "failed" | "error";
+    summary: string;
+  } | null> {
     const candidate = await this.readCandidate(runId);
     if (!candidate.repairReferenceHash) return null;
     try {
-      const referencePath = await this.resolveCandidatePath(runId, "repair-reference");
+      const referencePath = await this.resolveCandidatePath(
+        runId,
+        "repair-reference",
+      );
       const actualHash = await this.contentHash(referencePath);
       return actualHash === candidate.repairReferenceHash
         ? {
             status: "passed",
-            summary: "The bounded Canonical repair reference remained unchanged",
+            summary:
+              "The bounded Canonical repair reference remained unchanged",
           }
         : {
             status: "failed",
@@ -1197,7 +1280,10 @@ export class WorkspaceManager {
     };
     const candidateCutoff = Date.parse(options.candidateOlderThan);
     const quarantineCutoff = Date.parse(options.quarantineOlderThan);
-    if (!Number.isFinite(candidateCutoff) || !Number.isFinite(quarantineCutoff)) {
+    if (
+      !Number.isFinite(candidateCutoff) ||
+      !Number.isFinite(quarantineCutoff)
+    ) {
       throw new Error("State retention cutoffs must be valid ISO timestamps");
     }
     const scan = async (
@@ -1220,7 +1306,11 @@ export class WorkspaceManager {
         try {
           const root = path.join(base, runId);
           const stats = await lstat(root);
-          if (!entry.isDirectory() || !stats.isDirectory() || stats.isSymbolicLink()) {
+          if (
+            !entry.isDirectory() ||
+            !stats.isDirectory() ||
+            stats.isSymbolicLink()
+          ) {
             throw new Error("entry is not a safe directory");
           }
           const manifest = await this.readCandidateAt(root, runId, null);
@@ -1254,7 +1344,10 @@ export class WorkspaceManager {
     return result;
   }
 
-  async candidateHasPath(runId: string, relativePath: string): Promise<boolean> {
+  async candidateHasPath(
+    runId: string,
+    relativePath: string,
+  ): Promise<boolean> {
     const candidate = await this.readCandidate(runId);
     const workspacePath = path.join(this.candidateRoot(runId), "workspace");
     const target = path.resolve(workspacePath, relativePath);
@@ -1322,12 +1415,17 @@ export class WorkspaceManager {
     );
   }
 
-  async installedResourcesPath(agentId: string, stateId: string): Promise<string> {
+  async installedResourcesPath(
+    agentId: string,
+    stateId: string,
+  ): Promise<string> {
     const versionRoot = await realpath(this.versionRoot(agentId, stateId));
     const resourcesPath = await realpath(path.join(versionRoot, "resources"));
     const relative = path.relative(versionRoot, resourcesPath);
     if (relative !== "resources") {
-      throw new Error("Installed Resource Provider path escapes the version root");
+      throw new Error(
+        "Installed Resource Provider path escapes the version root",
+      );
     }
     return resourcesPath;
   }
@@ -1369,7 +1467,11 @@ export class WorkspaceManager {
   ): Promise<string> {
     const archivedAt = audit?.archivedAt ?? new Date().toISOString();
     const timestamp = archivedAt.replace(/[:.]/g, "-");
-    const destination = path.join(this.root, ".deleted", agentId + "-" + timestamp);
+    const destination = path.join(
+      this.root,
+      ".deleted",
+      agentId + "-" + timestamp,
+    );
     const source = this.agentRoot(agentId);
     let sourceStats: Awaited<ReturnType<typeof lstat>> | null = null;
     try {
@@ -1380,11 +1482,18 @@ export class WorkspaceManager {
     if (!sourceStats) {
       if (await fileExists(destination)) {
         if (!audit) {
-          throw new Error("Archived Agent workspace requires expected audit evidence");
+          throw new Error(
+            "Archived Agent workspace requires expected audit evidence",
+          );
         }
         const destinationStats = await lstat(destination);
-        if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) {
-          throw new Error("Archived Agent workspace is not a regular directory");
+        if (
+          !destinationStats.isDirectory() ||
+          destinationStats.isSymbolicLink()
+        ) {
+          throw new Error(
+            "Archived Agent workspace is not a regular directory",
+          );
         }
         const auditPath = path.join(destination, ".airlock-archive-audit.json");
         const auditStats = await lstat(auditPath);
@@ -1401,11 +1510,15 @@ export class WorkspaceManager {
           throw new Error("Archived Agent audit is malformed");
         }
         if (stableJson(persistedAudit) !== stableJson(audit)) {
-          throw new Error("Archived Agent audit contradicts deletion journal evidence");
+          throw new Error(
+            "Archived Agent audit contradicts deletion journal evidence",
+          );
         }
         return destination;
       }
-      throw new Error("Agent workspace is missing from both active and archived state");
+      throw new Error(
+        "Agent workspace is missing from both active and archived state",
+      );
     }
     if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()) {
       throw new Error("Active Agent workspace is not a regular directory");
@@ -1421,7 +1534,9 @@ export class WorkspaceManager {
       throw new Error("Active Agent workspace escapes the workspace root");
     }
     if (await fileExists(destination)) {
-      throw new Error("Agent workspace exists in both active and archived state");
+      throw new Error(
+        "Agent workspace exists in both active and archived state",
+      );
     }
     if (audit) {
       const serializedAudit = JSON.stringify(audit, null, 2) + "\n";
@@ -1445,7 +1560,10 @@ export class WorkspaceManager {
       entries.sort((left, right) => left.name.localeCompare(right.name));
       for (const entry of entries) {
         const absolute = path.join(directory, entry.name);
-        const relative = path.relative(rootPath, absolute).split(path.sep).join("/");
+        const relative = path
+          .relative(rootPath, absolute)
+          .split(path.sep)
+          .join("/");
         const stats = await lstat(absolute);
         if (stats.isDirectory()) {
           hash.update("directory\0" + relative + "\0");
@@ -1456,7 +1574,8 @@ export class WorkspaceManager {
           );
         } else if (stats.isFile()) {
           hash.update("file\0" + relative + "\0" + stats.size + "\0");
-          for await (const chunk of createReadStream(absolute)) hash.update(chunk);
+          for await (const chunk of createReadStream(absolute))
+            hash.update(chunk);
           hash.update("\0");
         } else {
           throw new Error("Unsupported state entry: " + relative);
@@ -1477,7 +1596,9 @@ export class WorkspaceManager {
       path.resolve(manifest.workspacePath) !==
         path.resolve(this.versionWorkspacePath(agent.id, manifest.stateId))
     ) {
-      throw new Error("Invalid schema 1 canonical manifest for Agent " + agent.id);
+      throw new Error(
+        "Invalid schema 1 canonical manifest for Agent " + agent.id,
+      );
     }
     const codexHomePath = this.versionCodexHomePath(agent.id, manifest.stateId);
     await Promise.all([
@@ -1518,7 +1639,9 @@ export class WorkspaceManager {
       path.resolve(manifest.workspacePath) !==
         path.resolve(this.versionWorkspacePath(agent.id, manifest.stateId))
     ) {
-      throw new Error("Invalid schema 2 canonical manifest for Agent " + agent.id);
+      throw new Error(
+        "Invalid schema 2 canonical manifest for Agent " + agent.id,
+      );
     }
     await this.sqlite.seed(manifest.workspacePath);
     await mkdir(this.versionOutboxPath(agent.id, manifest.stateId), {
@@ -1550,7 +1673,9 @@ export class WorkspaceManager {
       path.resolve(manifest.workspacePath) !==
         path.resolve(this.versionWorkspacePath(agent.id, manifest.stateId))
     ) {
-      throw new Error("Invalid schema 3 canonical manifest for Agent " + agent.id);
+      throw new Error(
+        "Invalid schema 3 canonical manifest for Agent " + agent.id,
+      );
     }
     const legacy = await this.buildStateReference(
       agent.id,
@@ -1565,7 +1690,9 @@ export class WorkspaceManager {
       legacy.sqliteContentHash !== manifest.sqliteContentHash ||
       legacy.outboxContentHash !== manifest.outboxContentHash
     ) {
-      throw new Error("Schema 3 Canonical State does not match its immutable manifest");
+      throw new Error(
+        "Schema 3 Canonical State does not match its immutable manifest",
+      );
     }
     const canonical = await this.buildStateReference(
       agent.id,
@@ -1590,7 +1717,8 @@ export class WorkspaceManager {
     codexHomePath: string,
     codexThreadId: string | null,
     sourceRunId: string | null,
-    providerVersions: readonly ResourceVersionReference[] = this.initialProviderVersions,
+    providerVersions: readonly ResourceVersionReference[] = this
+      .initialProviderVersions,
   ): Promise<CanonicalStateReference> {
     const canonical = await this.buildStateReference(
       agentId,
@@ -1602,7 +1730,9 @@ export class WorkspaceManager {
       path.resolve(canonical.workspacePath) !== path.resolve(workspacePath) ||
       path.resolve(canonical.codexHomePath) !== path.resolve(codexHomePath)
     ) {
-      throw new Error("Initial Canonical State paths do not match the version layout");
+      throw new Error(
+        "Initial Canonical State paths do not match the version layout",
+      );
     }
     await this.replaceCanonicalManifest(agentId, {
       schemaVersion: 4,
@@ -1618,7 +1748,8 @@ export class WorkspaceManager {
     agentId: string,
     stateId: string,
     codexThreadId: string | null,
-    providerVersions: readonly ResourceVersionReference[] = this.initialProviderVersions,
+    providerVersions: readonly ResourceVersionReference[] = this
+      .initialProviderVersions,
   ): Promise<CanonicalStateReference> {
     const workspacePath = this.versionWorkspacePath(agentId, stateId);
     const codexHomePath = this.versionCodexHomePath(agentId, stateId);
@@ -1635,7 +1766,8 @@ export class WorkspaceManager {
       this.contentHash(outboxPath),
     ]);
     const sqliteContentHash = sqliteSnapshot.contentHash;
-    const normalizedProviderVersions = normalizeProviderVersions(providerVersions);
+    const normalizedProviderVersions =
+      normalizeProviderVersions(providerVersions);
     const legacyFingerprintInput = {
       workspaceContentHash,
       sessionContentHash,
@@ -1651,10 +1783,7 @@ export class WorkspaceManager {
             providerVersions: normalizedProviderVersions,
           });
     const contentHash =
-      "sha256:" +
-      createHash("sha256")
-        .update(fingerprintInput)
-        .digest("hex");
+      "sha256:" + createHash("sha256").update(fingerprintInput).digest("hex");
     return {
       stateId,
       workspacePath,
@@ -1677,13 +1806,10 @@ export class WorkspaceManager {
   private async readCandidateAt(
     root: string,
     runId: string,
-    expectedProviderVersions: readonly ResourceVersionReference[] | null | undefined =
-      undefined,
+    expectedProviderVersions:
+      readonly ResourceVersionReference[] | null | undefined = undefined,
   ): Promise<CandidateManifestV4> {
-    const raw = await readFile(
-      path.join(root, "candidate.json"),
-      "utf8",
-    );
+    const raw = await readFile(path.join(root, "candidate.json"), "utf8");
     const manifest = JSON.parse(raw) as CandidateManifestV4;
     if (
       manifest.schemaVersion !== 4 ||
@@ -1765,7 +1891,9 @@ export class WorkspaceManager {
       const temporaryRemnant = path.join(directory, entry.name);
       const stats = await lstat(temporaryRemnant);
       if (!stats.isFile() || stats.isSymbolicLink()) {
-        throw new Error("Historical Canonical manifest temporary path is unsafe");
+        throw new Error(
+          "Historical Canonical manifest temporary path is unsafe",
+        );
       }
       await rm(temporaryRemnant, { force: true });
     }
@@ -1790,7 +1918,9 @@ export class WorkspaceManager {
       }
       const existing = JSON.parse(await readFile(target, "utf8"));
       if (JSON.stringify(existing) !== JSON.stringify(manifest)) {
-        throw new Error("Immutable historical Canonical State manifest changed");
+        throw new Error(
+          "Immutable historical Canonical State manifest changed",
+        );
       }
     } finally {
       await rm(temporary, { force: true });
@@ -1904,19 +2034,17 @@ export class WorkspaceManager {
   private async resolveCandidatePath(
     runId: string,
     resource:
-      | "workspace"
-      | "codex-home"
-      | "outbox"
-      | "resources"
-      | "repair-reference",
-    expectedProviderVersions: readonly ResourceVersionReference[] | null | undefined =
-      undefined,
+      "workspace" | "codex-home" | "outbox" | "resources" | "repair-reference",
+    expectedProviderVersions:
+      readonly ResourceVersionReference[] | null | undefined = undefined,
   ): Promise<string> {
     const candidateRoot = await this.resolveCandidateRoot(
       runId,
       expectedProviderVersions,
     );
-    const resourcePath = await realpath(path.join(this.candidateRoot(runId), resource));
+    const resourcePath = await realpath(
+      path.join(this.candidateRoot(runId), resource),
+    );
     const relative = path.relative(candidateRoot, resourcePath);
     if (
       relative.startsWith("..") ||
@@ -1930,8 +2058,8 @@ export class WorkspaceManager {
 
   private async resolveCandidateRoot(
     runId: string,
-    expectedProviderVersions: readonly ResourceVersionReference[] | null | undefined =
-      undefined,
+    expectedProviderVersions:
+      readonly ResourceVersionReference[] | null | undefined = undefined,
   ): Promise<string> {
     const unresolved = this.candidateRoot(runId);
     const unresolvedStats = await lstat(unresolved);
@@ -1941,7 +2069,11 @@ export class WorkspaceManager {
     const candidateBase = await realpath(path.join(this.root, ".candidates"));
     const root = await realpath(unresolved);
     const relative = path.relative(candidateBase, root);
-    if (relative.startsWith("..") || path.isAbsolute(relative) || relative !== runId) {
+    if (
+      relative.startsWith("..") ||
+      path.isAbsolute(relative) ||
+      relative !== runId
+    ) {
       throw new Error("Candidate path escapes the platform-owned root");
     }
     await this.readCandidateAt(root, runId, expectedProviderVersions);
@@ -1950,8 +2082,8 @@ export class WorkspaceManager {
 
   private async resolveQuarantineRoot(
     runId: string,
-    expectedProviderVersions: readonly ResourceVersionReference[] | null | undefined =
-      undefined,
+    expectedProviderVersions:
+      readonly ResourceVersionReference[] | null | undefined = undefined,
   ): Promise<string> {
     const unresolved = this.quarantineRoot(runId);
     const unresolvedStats = await lstat(unresolved);
@@ -1961,7 +2093,11 @@ export class WorkspaceManager {
     const quarantineBase = await realpath(path.join(this.root, ".quarantine"));
     const root = await realpath(unresolved);
     const relative = path.relative(quarantineBase, root);
-    if (relative.startsWith("..") || path.isAbsolute(relative) || relative !== runId) {
+    if (
+      relative.startsWith("..") ||
+      path.isAbsolute(relative) ||
+      relative !== runId
+    ) {
       throw new Error("Quarantine path escapes the platform-owned root");
     }
     await this.readCandidateAt(root, runId, expectedProviderVersions);
@@ -1999,7 +2135,9 @@ export class WorkspaceManager {
       ) ||
       candidate.canonicalThreadIdBefore !== plan.sourceThreadId
     ) {
-      throw new Error("Candidate State does not match its durable Promotion plan");
+      throw new Error(
+        "Candidate State does not match its durable Promotion plan",
+      );
     }
   }
 
@@ -2014,10 +2152,15 @@ export class WorkspaceManager {
       current.sessionContentHash !== plan.sourceSessionHash ||
       current.sqliteContentHash !== plan.sourceSqliteHash ||
       current.outboxContentHash !== plan.sourceOutboxHash ||
-      !sameProviderVersions(current.providerVersions, plan.sourceProviderVersions) ||
+      !sameProviderVersions(
+        current.providerVersions,
+        plan.sourceProviderVersions,
+      ) ||
       current.codexThreadId !== plan.sourceThreadId
     ) {
-      throw new Error("Canonical State contradicts the durable Promotion source");
+      throw new Error(
+        "Canonical State contradicts the durable Promotion source",
+      );
     }
   }
 
@@ -2032,10 +2175,15 @@ export class WorkspaceManager {
       actual.sessionContentHash !== expected.sessionContentHash ||
       actual.sqliteContentHash !== expected.sqliteContentHash ||
       actual.outboxContentHash !== expected.outboxContentHash ||
-      !sameProviderVersions(actual.providerVersions, expected.providerVersions) ||
+      !sameProviderVersions(
+        actual.providerVersions,
+        expected.providerVersions,
+      ) ||
       actual.codexThreadId !== expected.codexThreadId
     ) {
-      throw new Error("Installed Promotion state contradicts its durable fingerprint");
+      throw new Error(
+        "Installed Promotion state contradicts its durable fingerprint",
+      );
     }
   }
 
@@ -2123,7 +2271,10 @@ export class WorkspaceManager {
     });
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-      const journalPath = path.join(this.providerRegistryTransitionRoot(), entry.name);
+      const journalPath = path.join(
+        this.providerRegistryTransitionRoot(),
+        entry.name,
+      );
       const journal = await this.readProviderRegistryTransition(journalPath);
       if (entry.name !== journal.agentId + ".json") {
         throw new Error(
@@ -2139,12 +2290,17 @@ export class WorkspaceManager {
         await rm(journalPath, { force: true });
         continue;
       }
-      const current = await this.readCanonicalForProviderTransition(journal.agentId);
+      const current = await this.readCanonicalForProviderTransition(
+        journal.agentId,
+      );
       if (
         current.stateId === journal.targetStateId &&
         journal.phase === "installed" &&
         current.contentHash === journal.targetContentHash &&
-        sameProviderVersions(current.providerVersions, journal.targetProviderVersions)
+        sameProviderVersions(
+          current.providerVersions,
+          journal.targetProviderVersions,
+        )
       ) {
         await rm(journalPath, { force: true });
         continue;
@@ -2152,7 +2308,10 @@ export class WorkspaceManager {
       if (
         current.stateId === journal.sourceStateId &&
         current.contentHash === journal.sourceContentHash &&
-        sameProviderVersions(current.providerVersions, journal.sourceProviderVersions)
+        sameProviderVersions(
+          current.providerVersions,
+          journal.sourceProviderVersions,
+        )
       ) {
         if (journal.phase === "installed") {
           if (journal.targetContentHash === null) {
@@ -2246,7 +2405,9 @@ export class WorkspaceManager {
         (value.targetContentHash === null ||
           !/^sha256:[a-f0-9]{64}$/.test(value.targetContentHash)))
     ) {
-      throw new Error("Invalid Resource Provider registry transition fingerprints");
+      throw new Error(
+        "Invalid Resource Provider registry transition fingerprints",
+      );
     }
     const sourceProviderVersions = normalizeProviderVersions(
       value.sourceProviderVersions,
@@ -2274,7 +2435,9 @@ export class WorkspaceManager {
       (version) => !sourceById.has(version.providerId),
     );
     if (additions.length === 0) {
-      throw new Error("Resource Provider registry transition has no additive delta");
+      throw new Error(
+        "Resource Provider registry transition has no additive delta",
+      );
     }
     const verifications = value.verifications.map((verification) => {
       if (
@@ -2303,7 +2466,10 @@ export class WorkspaceManager {
       return structuredClone(verification);
     });
     const verificationById = new Map(
-      verifications.map((verification) => [verification.providerId, verification]),
+      verifications.map((verification) => [
+        verification.providerId,
+        verification,
+      ]),
     );
     if (
       verificationById.size !== verifications.length ||
@@ -2388,7 +2554,9 @@ export class WorkspaceManager {
     current: readonly ProviderRegistryDescriptor[],
     target: readonly ProviderRegistryDescriptor[],
   ): void {
-    const targetById = new Map(target.map((descriptor) => [descriptor.providerId, descriptor]));
+    const targetById = new Map(
+      target.map((descriptor) => [descriptor.providerId, descriptor]),
+    );
     for (const descriptor of current) {
       const next = targetById.get(descriptor.providerId);
       if (
@@ -2403,7 +2571,10 @@ export class WorkspaceManager {
     }
   }
 
-  private async writeJsonAtomically(target: string, value: unknown): Promise<void> {
+  private async writeJsonAtomically(
+    target: string,
+    value: unknown,
+  ): Promise<void> {
     const temporary = target + "." + randomUUID() + ".tmp";
     await mkdir(path.dirname(target), { recursive: true });
     await this.writeJson(temporary, value);
@@ -2502,7 +2673,9 @@ export class WorkspaceManager {
 function normalizeProviderVersions(
   values: readonly ResourceVersionReference[],
 ): ResourceVersionReference[] {
-  const normalized = values.map((value) => parseResourceVersionReference(value));
+  const normalized = values.map((value) =>
+    parseResourceVersionReference(value),
+  );
   normalized.sort((left, right) =>
     (left.resourceKind + "\u0000" + left.providerId).localeCompare(
       right.resourceKind + "\u0000" + right.providerId,
@@ -2512,10 +2685,14 @@ function normalizeProviderVersions(
   const resourceKinds = new Set<string>();
   for (const version of normalized) {
     if (providerIds.has(version.providerId)) {
-      throw new Error("Duplicate Canonical Resource Provider " + version.providerId);
+      throw new Error(
+        "Duplicate Canonical Resource Provider " + version.providerId,
+      );
     }
     if (resourceKinds.has(version.resourceKind)) {
-      throw new Error("Duplicate Canonical Resource kind " + version.resourceKind);
+      throw new Error(
+        "Duplicate Canonical Resource kind " + version.resourceKind,
+      );
     }
     providerIds.add(version.providerId);
     resourceKinds.add(version.resourceKind);
@@ -2547,7 +2724,8 @@ function normalizeProviderRegistryDescriptors(
   for (const descriptor of normalized) {
     if (providerIds.has(descriptor.providerId)) {
       throw new Error(
-        "Duplicate Resource Provider registry identifier " + descriptor.providerId,
+        "Duplicate Resource Provider registry identifier " +
+          descriptor.providerId,
       );
     }
     if (resourceKinds.has(descriptor.resourceKind)) {
@@ -2583,7 +2761,10 @@ function sameProviderVersions(
   left: readonly ResourceVersionReference[],
   right: readonly ResourceVersionReference[],
 ): boolean {
-  return stableJson(normalizeProviderVersions(left)) === stableJson(normalizeProviderVersions(right));
+  return (
+    stableJson(normalizeProviderVersions(left)) ===
+    stableJson(normalizeProviderVersions(right))
+  );
 }
 
 function stableJson(value: unknown): string {

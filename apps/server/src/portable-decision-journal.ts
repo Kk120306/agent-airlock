@@ -396,6 +396,7 @@ export class PortableDecisionJournal {
       group.push(record);
       recordsByTransaction.set(record.transactionEvidenceHash, group);
     }
+    assertAuthorityContextUnambiguous(records);
     if (recordsByTransaction.size === 0) return null;
     if (recordsByTransaction.size === 1) {
       return structuredClone(selectContextRichAuthority(records));
@@ -918,10 +919,94 @@ function assertPromotedRecoveryTransition(
   ) {
     throwInvalidTerminalTransition("Promotion recovery state");
   }
+  const providerEventPrefix = recovered.providerResourceEvents.slice(
+    0,
+    promoted.providerResourceEvents.length,
+  );
+  if (
+    recovered.providerResourceEvents.length <
+      promoted.providerResourceEvents.length ||
+    stableJson(providerEventPrefix) !==
+      stableJson(promoted.providerResourceEvents)
+  ) {
+    throwInvalidTerminalTransition("Promotion recovery event history");
+  }
+  const recoveryEvents = recovered.providerResourceEvents.slice(
+    promoted.providerResourceEvents.length,
+  );
+  assertPromotionRecoveryProviderEvents(promoted, recoveryEvents);
   const expected = structuredClone(promoted);
   expected.recovery.recoveredAfterRestart = true;
+  expected.providerResourceEvents = structuredClone(
+    recovered.providerResourceEvents,
+  );
   if (stableJson(expected) !== stableJson(recovered)) {
     throwInvalidTerminalTransition("Promotion recovery evidence");
+  }
+}
+
+function assertPromotionRecoveryProviderEvents(
+  promoted: RunTransaction,
+  recoveryEvents: RunTransaction["providerResourceEvents"],
+): void {
+  const providerKinds = new Map(
+    promoted.providerResources.map((resource) => [
+      resource.providerId,
+      resource.resourceKind,
+    ]),
+  );
+  if (recoveryEvents.length !== providerKinds.size) {
+    throwInvalidTerminalTransition("Promotion recovery provider coverage");
+  }
+  const seen = new Set<string>();
+  const exactEventKeys = [
+    "schemaVersion",
+    "providerId",
+    "resourceKind",
+    "stage",
+    "status",
+    "summary",
+    "at",
+  ].sort();
+  for (const event of recoveryEvents) {
+    if (
+      stableJson(Object.keys(event).sort()) !== stableJson(exactEventKeys) ||
+      event.schemaVersion !== 1 ||
+      providerKinds.get(event.providerId) !== event.resourceKind ||
+      seen.has(event.providerId) ||
+      event.stage !== "reconcile" ||
+      event.status !== "passed" ||
+      typeof event.summary !== "string" ||
+      event.summary.length === 0 ||
+      event.summary.length > 512 ||
+      !Number.isFinite(Date.parse(event.at))
+    ) {
+      throwInvalidTerminalTransition("Promotion recovery provider evidence");
+    }
+    seen.add(event.providerId);
+  }
+}
+
+function assertAuthorityContextUnambiguous(
+  records: PortableDecisionAuthorityRecord[],
+): void {
+  const parentAuthorityDigests = new Set(
+    records.map((record) => record.parentAuthorityDigest),
+  );
+  const candidateSetAuthorityDigests = new Set(
+    records.flatMap((record) =>
+      record.candidateSetAuthorityDigest
+        ? [record.candidateSetAuthorityDigest]
+        : [],
+    ),
+  );
+  if (
+    parentAuthorityDigests.size > 1 ||
+    candidateSetAuthorityDigests.size > 1
+  ) {
+    throw new Error(
+      "Portable terminal decision authority context is ambiguous",
+    );
   }
 }
 
@@ -1032,6 +1117,12 @@ function assertQuarantineDiscardTransition(
   ) {
     throwInvalidTerminalTransition("provider event history");
   }
+  assertDiscardProviderEvents(
+    quarantined,
+    discarded.providerResourceEvents.slice(
+      quarantined.providerResourceEvents.length,
+    ),
+  );
   if (
     stableJson(terminalTransitionCore(quarantined)) !==
     stableJson(terminalTransitionCore(discarded))
@@ -1049,6 +1140,54 @@ function assertQuarantineDiscardTransition(
     stableJson(normalizeResourceEvidence(discarded.providerResources))
   ) {
     throwInvalidTerminalTransition("provider evidence");
+  }
+}
+
+function assertDiscardProviderEvents(
+  quarantined: RunTransaction,
+  discardEvents: RunTransaction["providerResourceEvents"],
+): void {
+  if (discardEvents.length === 0) return;
+  const providerKinds = new Map<string, string>();
+  for (const resource of quarantined.providerResources) {
+    providerKinds.set(resource.providerId, resource.resourceKind);
+  }
+  for (const event of quarantined.providerResourceEvents) {
+    const knownKind = providerKinds.get(event.providerId);
+    if (knownKind && knownKind !== event.resourceKind) {
+      throwInvalidTerminalTransition("discard provider identity");
+    }
+    providerKinds.set(event.providerId, event.resourceKind);
+  }
+  if (discardEvents.length !== providerKinds.size) {
+    throwInvalidTerminalTransition("discard provider coverage");
+  }
+  const seen = new Set<string>();
+  const exactEventKeys = [
+    "schemaVersion",
+    "providerId",
+    "resourceKind",
+    "stage",
+    "status",
+    "summary",
+    "at",
+  ].sort();
+  for (const event of discardEvents) {
+    if (
+      stableJson(Object.keys(event).sort()) !== stableJson(exactEventKeys) ||
+      event.schemaVersion !== 1 ||
+      providerKinds.get(event.providerId) !== event.resourceKind ||
+      seen.has(event.providerId) ||
+      event.stage !== "discard" ||
+      event.status !== "passed" ||
+      typeof event.summary !== "string" ||
+      event.summary.length === 0 ||
+      event.summary.length > 512 ||
+      !Number.isFinite(Date.parse(event.at))
+    ) {
+      throwInvalidTerminalTransition("discard provider evidence");
+    }
+    seen.add(event.providerId);
   }
 }
 

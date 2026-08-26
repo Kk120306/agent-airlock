@@ -228,6 +228,10 @@ export class AgentService {
       PortableDecisionAuthorityRecord
     >();
     const terminalAuthorityFailures = new Map<string, string>();
+    const quarantineCleanupProgressRunIds = new Set<string>();
+    const authoritativeDiscardQuarantineRoots = new Set<string>();
+    const authoritativeDiscardCandidateRoots = new Set<string>();
+    const missingQuarantineRunIds = new Set<string>();
     for (const run of snapshot.runs) {
       try {
         const authority =
@@ -272,6 +276,7 @@ export class AgentService {
             run.transaction,
           );
           quarantineCleanupProgress = true;
+          quarantineCleanupProgressRunIds.add(run.id);
         }
         if (
           currentTransactionHash !== authority.transactionEvidenceHash &&
@@ -289,29 +294,37 @@ export class AgentService {
         const candidateLifecycleIsCurrent =
           this.candidateLifecycleMatchesAuthority(snapshot, run, authority);
         const requiresRecovery =
-          (!quarantineCleanupProgress &&
-            currentTransactionHash !== authority.transactionEvidenceHash) ||
+          currentTransactionHash !== authority.transactionEvidenceHash ||
           !terminalRunStatusMatches(authority.disposition, run.status) ||
           !candidateLifecycleIsCurrent;
         if (
           authority.disposition === "quarantined" &&
-          (run.status === "queued" ||
-            run.status === "running" ||
-            (currentTransactionHash !== authority.transactionEvidenceHash &&
-              !quarantineCleanupProgress)) &&
           !(await this.workspaces.quarantineExists(run.id))
         ) {
+          missingQuarantineRunIds.add(run.id);
           throw new Error(
             "Authoritative Quarantine is missing from physical Candidate State",
           );
         }
-        if (
-          authority.disposition === "discarded" &&
-          (await this.workspaces.quarantineExists(run.id))
-        ) {
-          throw new Error(
-            "Authoritative Discard contradicts physical Candidate State",
+        if (authority.disposition === "discarded") {
+          const quarantineExists = await this.workspaces.quarantineExists(
+            run.id,
           );
+          const candidateExists = await this.workspaces.candidateExists(
+            run.id,
+            true,
+          );
+          if (quarantineExists && candidateExists) {
+            throw new Error(
+              "Authoritative Discard has both Candidate and Quarantine remnants",
+            );
+          }
+          if (quarantineExists) {
+            authoritativeDiscardQuarantineRoots.add(run.id);
+          }
+          if (candidateExists) {
+            authoritativeDiscardCandidateRoots.add(run.id);
+          }
         }
         terminalAuthorities.set(run.id, authority);
         if (requiresRecovery) {
@@ -319,6 +332,38 @@ export class AgentService {
         }
       } catch (error) {
         terminalAuthorityFailures.set(run.id, boundedCandidateSetError(error));
+      }
+    }
+    for (const runId of authoritativeDiscardQuarantineRoots) {
+      try {
+        const authority = terminalAuthorities.get(runId);
+        if (!authority) {
+          throw new Error("Authoritative Discard evidence disappeared");
+        }
+        await this.completeAuthorizedDiscard(authority, "quarantine");
+      } catch (error) {
+        terminalAuthorityRecoveries.delete(runId);
+        terminalAuthorityFailures.set(
+          runId,
+          "Authoritative Discard cleanup failed: " +
+            boundedCandidateSetError(error),
+        );
+      }
+    }
+    for (const runId of authoritativeDiscardCandidateRoots) {
+      try {
+        const authority = terminalAuthorities.get(runId);
+        if (!authority) {
+          throw new Error("Authoritative Discard evidence disappeared");
+        }
+        await this.completeAuthorizedDiscard(authority, "candidate");
+      } catch (error) {
+        terminalAuthorityRecoveries.delete(runId);
+        terminalAuthorityFailures.set(
+          runId,
+          "Authoritative Discard cleanup failed: " +
+            boundedCandidateSetError(error),
+        );
       }
     }
     for (const runId of activeRunIds) {
@@ -341,9 +386,16 @@ export class AgentService {
       ...recovery.protectedRunIds,
       ...activeRunIds,
       ...unresolvedCandidateSetRunIds,
-      ...terminalAuthorityRecoveries.keys(),
+      ...terminalAuthorityFailures.keys(),
+      ...[...terminalAuthorityRecoveries.keys()].filter(
+        (runId) => !quarantineCleanupProgressRunIds.has(runId),
+      ),
     ]);
     const cleanupTransactions = new Map<string, RunTransaction>();
+    const cleanupAuthorities = new Map<
+      string,
+      PortableDecisionAuthorityRecord
+    >();
     const runsById = new Map(snapshot.runs.map((run) => [run.id, run]));
     const startupTime = Date.now();
     const cleanup = await this.workspaces.cleanupExpiredState({
@@ -354,20 +406,48 @@ export class AgentService {
         startupTime - this.config.quarantineRetentionMs,
       ).toISOString(),
       protectedRunIds,
-      beforeRemove: async ({ runId, root }) => {
+      beforeRemove: async ({ kind, runId, root }) => {
         const run = runsById.get(runId);
-        if (
-          !run?.transaction ||
-          (run.transaction.providerResources.length === 0 &&
-            !run.transaction.providerResourceEvents.some(
-              (event) => event.stage === "prepare" && event.status === "failed",
-            ))
-        ) {
+        if (!run?.transaction) return;
+        const hasProviderCleanup =
+          run.transaction.providerResources.length > 0 ||
+          run.transaction.providerResourceEvents.some(
+            (event) => event.stage === "prepare" && event.status === "failed",
+          );
+        if (kind === "candidate" && !hasProviderCleanup) return;
+        const terminalAuthority = terminalAuthorities.get(runId);
+        const cleanupSource =
+          kind === "quarantine" &&
+          terminalAuthority?.disposition === "quarantined"
+            ? terminalAuthority.transaction
+            : (cleanupTransactions.get(runId) ?? run.transaction);
+        if (kind === "quarantine") {
+          const finalTransaction = markTransactionDiscarded(
+            cleanupSource,
+            now(),
+            true,
+          );
+          const authority = await this.recordPortableDecisionAuthority(
+            runId,
+            finalTransaction,
+          );
+          if (!authority) {
+            throw new Error(
+              "Quarantine cleanup did not publish terminal Discard authority",
+            );
+          }
+          cleanupAuthorities.set(runId, authority);
+          cleanupTransactions.set(runId, finalTransaction);
+          await this.runner.discardRetainedProviderState(
+            run.agentId,
+            finalTransaction,
+            root,
+          );
           return;
         }
         const cleaned = await this.runner.discardRetainedProviderState(
           run.agentId,
-          cleanupTransactions.get(runId) ?? run.transaction,
+          cleanupSource,
           root,
           async (progress) => {
             cleanupTransactions.set(runId, structuredClone(progress));
@@ -389,10 +469,25 @@ export class AgentService {
       },
     });
 
-    const missingQuarantineDisposition = new Map<
-      string,
-      "discarded" | "recovery-error"
-    >();
+    for (const [runId, authority] of cleanupAuthorities) {
+      terminalAuthorities.set(runId, authority);
+      try {
+        if (await this.workspaces.quarantineExists(runId)) {
+          throw new Error(
+            "Authoritative Discard left a retained Quarantine remnant",
+          );
+        }
+        terminalAuthorityRecoveries.set(runId, authority);
+        terminalAuthorityFailures.delete(runId);
+      } catch (error) {
+        terminalAuthorityRecoveries.delete(runId);
+        terminalAuthorityFailures.set(
+          runId,
+          "Authoritative Discard cleanup failed: " +
+            boundedCandidateSetError(error),
+        );
+      }
+    }
     const startupAuthorityRunIds = new Set<string>();
     for (const run of snapshot.runs) {
       if (
@@ -406,14 +501,16 @@ export class AgentService {
       }
       try {
         if (await this.workspaces.quarantineExists(run.id)) continue;
-        missingQuarantineDisposition.set(
+        missingQuarantineRunIds.add(run.id);
+        terminalAuthorityFailures.set(
           run.id,
-          this.runner.providerDiscardCompleted(run.transaction)
-            ? "discarded"
-            : "recovery-error",
+          "Mutable Quarantine is missing without immutable Discard authority",
         );
-      } catch {
-        missingQuarantineDisposition.set(run.id, "recovery-error");
+      } catch (error) {
+        terminalAuthorityFailures.set(
+          run.id,
+          "Quarantine inspection failed: " + boundedCandidateSetError(error),
+        );
       }
     }
 
@@ -514,6 +611,9 @@ export class AgentService {
           run.completedAt = now();
           if (run.transaction) {
             run.transaction.status = "recovery-error";
+            if (missingQuarantineRunIds.has(run.id)) {
+              run.transaction.quarantineAvailable = false;
+            }
             run.transaction.recovery = {
               ...run.transaction.recovery,
               recoveredAfterRestart: true,
@@ -616,61 +716,12 @@ export class AgentService {
         }
       }
 
-      for (const runId of cleanup.quarantineRunIds) {
-        const run = database.runs.find((item) => item.id === runId);
-        if (
-          !run?.transaction ||
-          run.transaction.disposition !== "quarantined"
-        ) {
-          continue;
-        }
-        const discardedAt = now();
-        run.transaction = markTransactionDiscarded(
-          cleanupTransactions.get(runId) ?? run.transaction,
-          discardedAt,
-          true,
-        );
-        startupAuthorityRunIds.add(run.id);
-      }
-
       for (const runId of cleanup.candidateRunIds) {
         const run = database.runs.find((item) => item.id === runId);
         const cleaned = cleanupTransactions.get(runId);
         if (run?.transaction && cleaned) {
           run.transaction = structuredClone(cleaned);
         }
-      }
-
-      for (const [runId, disposition] of missingQuarantineDisposition) {
-        const run = database.runs.find((item) => item.id === runId);
-        if (
-          !run?.transaction ||
-          run.transaction.disposition !== "quarantined"
-        ) {
-          continue;
-        }
-        if (disposition === "discarded") {
-          run.transaction = markTransactionDiscarded(
-            run.transaction,
-            now(),
-            false,
-          );
-          run.transaction.events.at(-1)!.summary =
-            "Interrupted Discard completed; bounded decision evidence remains";
-          startupAuthorityRunIds.add(run.id);
-          continue;
-        }
-        run.status = "failed";
-        run.error =
-          "Quarantine recovery failed: mutable state is missing without complete provider Discard evidence";
-        run.transaction.status = "recovery-error";
-        run.transaction.quarantineAvailable = false;
-        run.transaction.recovery = {
-          ...run.transaction.recovery,
-          recoveredAfterRestart: true,
-          recoveryError:
-            "Mutable Quarantine is missing without complete provider Discard evidence",
-        };
       }
 
       for (const agent of database.agents) {
@@ -709,7 +760,8 @@ export class AgentService {
       .runs.filter(
         (run) =>
           run.transaction?.status === "recovery-error" ||
-          Boolean(run.transaction?.recovery.recoveryError),
+          Boolean(run.transaction?.recovery.recoveryError) ||
+          isImmutableTerminalRecoveryFailure(run),
       ).length;
     await this.transitionProviderRegistryAfterRecovery(
       registryDescriptors,
@@ -1558,7 +1610,8 @@ export class AgentService {
         (run) =>
           run.agentId === agentId &&
           (run.transaction?.status === "recovery-error" ||
-            Boolean(run.transaction?.recovery.recoveryError)),
+            Boolean(run.transaction?.recovery.recoveryError) ||
+            isImmutableTerminalRecoveryFailure(run)),
       );
   }
 
@@ -2068,8 +2121,8 @@ export class AgentService {
     runId: string,
     transaction: RunTransaction,
     candidateSetOverride?: CandidateSet | null,
-  ): Promise<void> {
-    await this.recordPortableDecisionAuthorityFromDatabase(
+  ): Promise<PortableDecisionAuthorityRecord | null> {
+    return this.recordPortableDecisionAuthorityFromDatabase(
       this.store.snapshot(),
       runId,
       transaction,
@@ -2111,14 +2164,14 @@ export class AgentService {
     runId: string,
     transaction: RunTransaction,
     candidateSetOverride?: CandidateSet | null,
-  ): Promise<void> {
+  ): Promise<PortableDecisionAuthorityRecord | null> {
     if (
       !transaction.disposition ||
       transaction.status !== transaction.disposition ||
       !transaction.promotionReceipt ||
       transaction.recovery.recoveryError !== null
     ) {
-      return;
+      return null;
     }
     const storedRun = database.runs.find((run) => run.id === runId);
     if (!storedRun) {
@@ -2142,12 +2195,44 @@ export class AgentService {
                 candidate.selectionDecision !== null,
             ) ?? null)
           : null;
-    await this.portableDecisionJournal.record({
+    return this.portableDecisionJournal.record({
       run,
       transaction,
       parentRun,
       candidateSet,
     });
+  }
+
+  private async completeAuthorizedDiscard(
+    authority: PortableDecisionAuthorityRecord,
+    kind: "candidate" | "quarantine",
+  ): Promise<void> {
+    if (authority.disposition !== "discarded") {
+      throw new Error("Physical Discard requires immutable Discard authority");
+    }
+    let retainedStateRoot: string | null;
+    if (kind === "quarantine") {
+      retainedStateRoot = await this.workspaces.retainedQuarantinePath(
+        authority.runId,
+      );
+    } else if (await this.workspaces.candidateExists(authority.runId, true)) {
+      retainedStateRoot = path.dirname(
+        await this.workspaces.candidateResourcesPath(authority.runId, true),
+      );
+    } else {
+      retainedStateRoot = null;
+    }
+    if (!retainedStateRoot) return;
+    await this.runner.discardRetainedProviderState(
+      authority.agentId,
+      authority.transaction,
+      retainedStateRoot,
+    );
+    if (kind === "quarantine") {
+      await this.workspaces.discardQuarantine(authority.runId);
+    } else {
+      await this.workspaces.cancelCandidate(authority.runId, true);
+    }
   }
 
   getCandidateSet(candidateSetId: string): CandidateSet {
@@ -2585,7 +2670,6 @@ export class AgentService {
 
   async discardRun(runId: string): Promise<AgentRun> {
     const initial = this.getRun(runId);
-    if (initial.transaction?.disposition === "discarded") return initial;
     if (
       this.configuringAgents.has(initial.agentId) ||
       this.deletingAgents.has(initial.agentId)
@@ -2610,10 +2694,10 @@ export class AgentService {
       if (!run || !transaction || !agent) {
         throw new HttpError(404, "Quarantine or Agent not found");
       }
-      if (transaction.disposition === "discarded") return run;
       if (
-        transaction.disposition !== "quarantined" ||
-        !transaction.quarantineAvailable
+        transaction.disposition !== "discarded" &&
+        (transaction.disposition !== "quarantined" ||
+          !transaction.quarantineAvailable)
       ) {
         throw new HttpError(
           409,
@@ -2633,37 +2717,57 @@ export class AgentService {
         throw new HttpError(409, "Wait for the active Repair Run to finish");
       }
 
-      let retainedTransaction: RunTransaction = transaction;
-      retainedTransaction = await this.runner.discardProviderQuarantines(
-        run.agentId,
-        retainedTransaction,
-        async (progress) => {
-          retainedTransaction = structuredClone(progress);
-          await this.store.mutate((database) => {
-            const storedRun = database.runs.find((item) => item.id === runId);
-            if (storedRun?.transaction) {
-              storedRun.transaction = structuredClone(progress);
-            }
-          });
-        },
+      const terminalAuthority =
+        await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
+          run.id,
+          run.agentId,
+        );
+      if (!terminalAuthority) {
+        throw new HttpError(
+          409,
+          "Quarantine has no immutable terminal decision authority",
+        );
+      }
+      this.assertTerminalAuthorityExtendsRun(
+        run,
+        terminalAuthority.transaction,
       );
-      await this.store.mutate((database) => {
-        const storedRun = database.runs.find((item) => item.id === runId);
-        if (
-          storedRun?.transaction &&
-          storedRun.transaction.disposition === "quarantined"
-        ) {
-          storedRun.transaction = structuredClone(retainedTransaction);
-        }
-      });
-      await this.workspaces.discardQuarantine(runId);
+      if (terminalAuthority.disposition === "discarded") {
+        await this.completeAuthorizedDiscard(terminalAuthority, "quarantine");
+        return await this.store.mutate((database) => {
+          const storedRun = database.runs.find((item) => item.id === runId);
+          if (!storedRun) throw new HttpError(404, "Quarantine not found");
+          storedRun.transaction = structuredClone(
+            terminalAuthority.transaction,
+          );
+          storedRun.status = terminalRunStatus(terminalAuthority.disposition);
+          this.applyCandidateLifecycleAuthority(
+            database,
+            storedRun,
+            terminalAuthority,
+          );
+          return structuredClone(storedRun);
+        });
+      }
+      if (terminalAuthority.disposition !== "quarantined") {
+        throw new HttpError(
+          409,
+          "Only an authoritative Quarantine can be discarded",
+        );
+      }
+      if (!(await this.workspaces.quarantineExists(run.id))) {
+        throw new Error(
+          "Authoritative Quarantine is missing from physical Candidate State",
+        );
+      }
+      transaction = structuredClone(terminalAuthority.transaction);
       const discardedAt = now();
       const discardedTransaction = markTransactionDiscarded(
-        retainedTransaction,
+        transaction,
         discardedAt,
         false,
       );
-      await this.recordPortableDecisionAuthority(
+      const discardAuthority = await this.recordPortableDecisionAuthority(
         runId,
         discardedTransaction,
         run.candidateSetId
@@ -2672,6 +2776,10 @@ export class AgentService {
             ) ?? null)
           : null,
       );
+      if (!discardAuthority) {
+        throw new Error("Discard did not publish terminal decision authority");
+      }
+      await this.completeAuthorizedDiscard(discardAuthority, "quarantine");
       return await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === runId);
         if (!storedRun?.transaction) {
@@ -2696,11 +2804,11 @@ export class AgentService {
           );
         }
         storedRun.transaction = structuredClone(discardedTransaction);
-        if (storedCandidateSet && storedCompetitor) {
-          storedCompetitor.status = "discarded";
-          storedCompetitor.loserDisposition = "discarded";
-          storedCandidateSet.updatedAt = discardedAt;
-        }
+        this.applyCandidateLifecycleAuthority(
+          database,
+          storedRun,
+          discardAuthority,
+        );
         const storedAgent = database.agents.find(
           (item) => item.id === storedRun.agentId,
         );
@@ -3708,12 +3816,25 @@ export class AgentService {
         );
       }
       let transaction = run.transaction;
+      let terminalAuthority: PortableDecisionAuthorityRecord | null = null;
       if (transaction.status === "sealed" && transaction.disposition === null) {
         transaction = await this.runner.disposeSealedCandidate(
           candidateSet.agentId,
           transaction,
           candidateSet.loserPolicy,
           async (progress) => {
+            if (
+              progress.disposition &&
+              progress.status === progress.disposition &&
+              progress.promotionReceipt
+            ) {
+              await this.recordPortableDecisionAuthority(
+                run.id,
+                progress,
+                candidateSet,
+              );
+              return;
+            }
             await this.persistRunProgress(run.id, progress);
           },
         );
@@ -3722,16 +3843,48 @@ export class AgentService {
         transaction.disposition === "quarantined" &&
         transaction.quarantineAvailable
       ) {
-        transaction = await this.runner.discardProviderQuarantines(
-          candidateSet.agentId,
-          transaction,
-          async (progress) => {
-            transaction = structuredClone(progress);
-            await this.persistTerminalCleanupProgress(run.id, progress);
-          },
-        );
-        await this.workspaces.discardQuarantine(run.id);
-        transaction = markTransactionDiscarded(transaction, now(), false);
+        const authority =
+          await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
+            run.id,
+            run.agentId,
+          );
+        if (!authority) {
+          throw new Error(
+            "Candidate Set loser Quarantine has no immutable authority",
+          );
+        }
+        this.assertTerminalAuthorityExtendsRun(run, authority.transaction);
+        if (authority.disposition === "discarded") {
+          transaction = structuredClone(authority.transaction);
+          terminalAuthority = authority;
+        } else if (authority.disposition === "quarantined") {
+          if (!(await this.workspaces.quarantineExists(run.id))) {
+            throw new Error(
+              "Candidate Set loser authoritative Quarantine is missing",
+            );
+          }
+          transaction = markTransactionDiscarded(
+            authority.transaction,
+            now(),
+            false,
+          );
+          terminalAuthority = await this.recordPortableDecisionAuthority(
+            run.id,
+            transaction,
+            candidateSet,
+          );
+          if (!terminalAuthority) {
+            throw new Error(
+              "Candidate Set loser Discard did not publish terminal authority",
+            );
+          }
+        } else {
+          throw new Error(
+            "Candidate Set loser cleanup found contradictory terminal authority",
+          );
+        }
+        await this.completeAuthorizedDiscard(terminalAuthority, "quarantine");
+        transaction = structuredClone(terminalAuthority.transaction);
       }
       if (
         !transaction.disposition ||
@@ -3744,8 +3897,8 @@ export class AgentService {
       }
       const disposition =
         transaction.disposition === "quarantined" ? "retained" : "discarded";
-      if (candidateSet.selectionDecision) {
-        await this.recordPortableDecisionAuthority(
+      if (candidateSet.selectionDecision && !terminalAuthority) {
+        terminalAuthority = await this.recordPortableDecisionAuthority(
           run.id,
           transaction,
           candidateSet,
@@ -3765,9 +3918,17 @@ export class AgentService {
           );
         }
         storedRun.transaction = structuredClone(transaction);
-        storedCompetitor.status = disposition;
-        storedCompetitor.loserDisposition = disposition;
-        storedSet.updatedAt = now();
+        if (terminalAuthority && storedSet.winnerRunId !== storedRun.id) {
+          this.applyCandidateLifecycleAuthority(
+            database,
+            storedRun,
+            terminalAuthority,
+          );
+        } else {
+          storedCompetitor.status = disposition;
+          storedCompetitor.loserDisposition = disposition;
+          storedSet.updatedAt = now();
+        }
       });
     }
     if (updatePhase) {
@@ -3778,19 +3939,6 @@ export class AgentService {
         );
       }
     }
-  }
-
-  private async persistTerminalCleanupProgress(
-    runId: string,
-    transaction: RunTransaction,
-  ): Promise<void> {
-    await this.store.mutate((database) => {
-      const run = database.runs.find((item) => item.id === runId);
-      if (!run?.transaction) {
-        throw new Error("Terminal cleanup Run disappeared");
-      }
-      run.transaction = structuredClone(transaction);
-    });
   }
 
   private async markPendingCompetitorCancelled(
@@ -4410,6 +4558,11 @@ function markTransactionDiscarded(
   next.quarantineAvailable = false;
   next.discardedAt = discardedAt;
   next = finalizeResources(next, "discarded");
+  next.providerResources = next.providerResources.map((resource) => ({
+    ...resource,
+    disposition: "discarded",
+    summary: resource.label + " Quarantine was discarded",
+  }));
   next.events.push({
     status: "discarded",
     at: discardedAt,
@@ -4427,6 +4580,15 @@ function terminalRunStatus(
   if (disposition === "promoted") return "completed";
   if (disposition === "cancelled") return "cancelled";
   return "failed";
+}
+
+function isImmutableTerminalRecoveryFailure(run: AgentRun): boolean {
+  return (
+    run.status === "failed" &&
+    Boolean(
+      run.error?.startsWith("Immutable terminal decision recovery failed:"),
+    )
+  );
 }
 
 function terminalRunStatusMatches(

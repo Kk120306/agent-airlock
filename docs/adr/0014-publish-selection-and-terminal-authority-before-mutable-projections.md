@@ -26,11 +26,19 @@ Only one immutable Selection authority record may exist for a Candidate Set.
 
 After Selection authority exists, Airlock publishes a final Candidate Set-bound authority for every already-terminal competitor before exposing the mutable Selection projection.
 A Run may therefore have both an earlier context-free authority and a later Candidate Set-bound authority for the same terminal transaction.
-An available Quarantine may later gain one authoritative Discard transaction after provider cleanup and physical removal complete.
-An interrupted completed Promotion may later gain one recovery authority whose only transaction change is `recoveredAfterRestart` from `false` to `true` after the completed Promotion journal is verified.
+Authorities for the same Run must retain one exact parent authority digest and at most one non-null Candidate Set authority digest across every transaction hash.
+An available Quarantine may later gain one authoritative Discard transaction before any provider or local physical removal begins.
+An interrupted completed Promotion may later gain one recovery authority after the completed Promotion journal is verified.
+The recovery authority changes `recoveredAfterRestart` from `false` to `true` and may append exactly one successful `reconcile` event for each provider already committed in the promoted transaction.
+The earlier provider-event prefix and every other transaction field remain exact.
 These are the only accepted transitions between different terminal transaction hashes for one Run.
-The Discard transaction must preserve the immutable Run core and exact event prefixes, append one Discard event, and retain or extend provider cleanup evidence.
+The Discard transaction must preserve the immutable Run core and exact event prefixes, append one Discard event, and retain provider recovery handles.
+Legacy Discard authorities may contain one exact successful Discard event per known provider, but new cleanup executes from the already-published Discard authority and does not rewrite that decision with mutable completion claims.
 Any other conflicting history is ambiguous and fails closed.
+
+Provider cleanup begins only after immutable Discard authority exists.
+Startup retries provider and local cleanup from that exact Discard authority and never synthesizes Discard after local state disappears.
+If Discard authority exists while local Candidate or Quarantine state remains, startup completes that authorized cleanup and atomically replays the Run plus Candidate competitor lifecycle.
 
 If startup finds Selection authority without the mutable Selection projection, it restores the exact authorized Selection rather than recomputing a new decision.
 Startup audits terminal authority for every Run, including Runs that already look terminal in mutable storage.
@@ -38,8 +46,9 @@ If the newest valid authority is ahead of the mutable Run or Candidate Set compe
 Missing or contradictory evidence produces `recovery-error` and never a synthesized cancellation.
 
 Terminal Run status and its competitor lifecycle projection are one child-level publication boundary.
-Provider cleanup progress is persisted before local Candidate or Quarantine removal, and the final child transaction plus competitor lifecycle are committed in one control-plane mutation after immutable authority exists.
-Intermediate Quarantine cleanup progress is not a new terminal decision and must preserve the authoritative Quarantine core, receipt, lifecycle events, and provider-event prefix.
+The final child transaction plus competitor lifecycle are committed in one control-plane mutation after immutable authority exists and physical cleanup succeeds.
+If authority publication fails, no provider or local physical removal begins.
+If cleanup fails after publication, the retained local root and immutable Discard authority make idempotent roll-forward retryable.
 The Agent remains `busy` until the complete Candidate Set reaches a safe aggregate terminal state because selection, winner Promotion, and loser cleanup are still part of the same Agent operation.
 Terminal authority recovery failure leaves the Agent and Resource Registry admission closed.
 

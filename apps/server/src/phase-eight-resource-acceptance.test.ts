@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   access,
+  chmod,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   symlink,
   unlink,
@@ -39,9 +41,9 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -95,7 +97,8 @@ class AcceptanceObjectProvider implements TransactionalResourceProvider {
     const sourceValue = context.repairSource
       ? this.quarantines.get(context.repairSource.quarantineId)
       : this.versions.get(context.source.versionId);
-    if (sourceValue === undefined) throw new Error("Source object is unavailable");
+    if (sourceValue === undefined)
+      throw new Error("Source object is unavailable");
     const candidateId = "candidate-" + context.runId;
     const filePath = path.join(context.candidateResourcePath, "object.json");
     await writeFile(filePath, JSON.stringify(sourceValue) + "\n", "utf8");
@@ -142,7 +145,9 @@ class AcceptanceObjectProvider implements TransactionalResourceProvider {
 
   async validate(context: ResourceCandidateContext) {
     const candidate = this.requireCandidate(context.candidate.candidateId);
-    const value = JSON.parse(await readFile(candidate.filePath, "utf8")) as unknown;
+    const value = JSON.parse(
+      await readFile(candidate.filePath, "utf8"),
+    ) as unknown;
     const valid =
       value !== null &&
       typeof value === "object" &&
@@ -197,7 +202,10 @@ class AcceptanceObjectProvider implements TransactionalResourceProvider {
       );
     }
     const value = JSON.parse(
-      await readFile(path.join(context.candidateResourcePath, "object.json"), "utf8"),
+      await readFile(
+        path.join(context.candidateResourcePath, "object.json"),
+        "utf8",
+      ),
     ) as JsonValue;
     const existing = this.versions.get(context.plan.targetVersionId);
     if (existing !== undefined && stableJson(existing) !== stableJson(value)) {
@@ -214,7 +222,9 @@ class AcceptanceObjectProvider implements TransactionalResourceProvider {
 
   async quarantine(context: ResourceQuarantineContext) {
     const candidate = this.requireCandidate(context.candidate.candidateId);
-    const value = JSON.parse(await readFile(candidate.filePath, "utf8")) as JsonValue;
+    const value = JSON.parse(
+      await readFile(candidate.filePath, "utf8"),
+    ) as JsonValue;
     const quarantineId = "quarantine-" + context.runId;
     const candidateFingerprint = fingerprint(value);
     this.quarantines.set(quarantineId, value);
@@ -233,8 +243,10 @@ class AcceptanceObjectProvider implements TransactionalResourceProvider {
     if (this.failDiscard) throw new Error("simulated provider discard outage");
     const key = context.runId;
     const alreadyDiscarded = this.discarded.has(key);
-    if (context.candidate) this.candidates.delete(context.candidate.candidateId);
-    if (context.quarantine) this.quarantines.delete(context.quarantine.quarantineId);
+    if (context.candidate)
+      this.candidates.delete(context.candidate.candidateId);
+    if (context.quarantine)
+      this.quarantines.delete(context.quarantine.quarantineId);
     this.discarded.add(key);
     return {
       schemaVersion: 1 as const,
@@ -283,9 +295,17 @@ class AcceptanceObjectProvider implements TransactionalResourceProvider {
   }
 }
 
+class InterruptedDiscardWorkspace extends WorkspaceManager {
+  override async discardQuarantine(): Promise<boolean> {
+    throw new Error("simulated interruption after Discard authority");
+  }
+}
+
 describe("Phase 8 registered Resource Provider acceptance", () => {
   it("verifies the immutable provider source before creating the first Agent", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-create-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-create-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -329,12 +349,16 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
 
     await expect(
       service.createAgent({ name: "Unverified first Agent" }),
-    ).rejects.toThrow(/Configured onboarding source was not independently verified/);
+    ).rejects.toThrow(
+      /Configured onboarding source was not independently verified/,
+    );
     expect(service.listAgents()).toEqual([]);
   });
 
   it("onboards a provider into an existing deployment before the next Run", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-onboard-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-onboard-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -373,7 +397,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       agent.id,
       "complete one Run before provider registration",
     );
-    const originalCompleted = await waitForRun(original, originalStarted.run.id);
+    const originalCompleted = await waitForRun(
+      original,
+      originalStarted.run.id,
+    );
     expect(originalCompleted.status).toBe("completed");
     const canonicalBefore = await originalWorkspaces.readCanonical(agent.id);
     expect(canonicalBefore.providerVersions).toEqual([]);
@@ -381,7 +408,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "onboarded" } satisfies JsonValue;
     provider.versions.set("version-initial", initialValue);
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const coordinator = new ResourceCoordinator(
       new ResourceRegistry([{ provider, initialVersion }]),
     );
@@ -394,9 +424,14 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const runtime: AgentRunner = {
       run: async (request) => {
         const objectPath = request.resourceBindings?.[0]?.hostPath;
-        if (!objectPath) throw new Error("Runtime did not receive provider binding");
+        if (!objectPath)
+          throw new Error("Runtime did not receive provider binding");
         await writeFile(objectPath, '{"release":"after-upgrade"}\n', "utf8");
-        await persistFixtureSession(request, "thread-upgrade", "provider-onboarding");
+        await persistFixtureSession(
+          request,
+          "thread-upgrade",
+          "provider-onboarding",
+        );
         return { output: "upgraded", threadId: "thread-upgrade", usage: null };
       },
       cancel: async () => false,
@@ -422,18 +457,26 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       providerVersions: [initialVersion],
     });
     expect(canonicalOnboarded.stateId).not.toBe(canonicalBefore.stateId);
-    expect(canonicalOnboarded.contentHash).not.toBe(canonicalBefore.contentHash);
+    expect(canonicalOnboarded.contentHash).not.toBe(
+      canonicalBefore.contentHash,
+    );
     expect(upgraded.getAgent(agent.id)).toMatchObject({
       canonicalStateId: canonicalOnboarded.stateId,
       status: "ready",
       lastError: null,
     });
     const registry = JSON.parse(
-      await readFile(path.join(config.workspaceRoot, ".resource-registry.json"), "utf8"),
+      await readFile(
+        path.join(config.workspaceRoot, ".resource-registry.json"),
+        "utf8",
+      ),
     ) as { generation: number };
     expect(registry.generation).toBe(1);
 
-    const started = await upgraded.sendMessage(agent.id, "use the onboarded provider");
+    const started = await upgraded.sendMessage(
+      agent.id,
+      "use the onboarded provider",
+    );
     const completed = await waitForRun(upgraded, started.run.id);
     expect(completed).toMatchObject({
       status: "completed",
@@ -447,7 +490,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       "version-" + started.run.id,
     );
     expect(
-      provider.versions.get(canonicalAfterRun.providerVersions[0]?.versionId ?? "missing"),
+      provider.versions.get(
+        canonicalAfterRun.providerVersions[0]?.versionId ?? "missing",
+      ),
     ).toEqual({ release: "after-upgrade" });
   });
 
@@ -488,7 +533,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       );
       const firstCoordinator = new ResourceCoordinator(
         new ResourceRegistry(
-          withPriorProvider ? [{ provider: providerA, initialVersion: versionA }] : [],
+          withPriorProvider
+            ? [{ provider: providerA, initialVersion: versionA }]
+            : [],
         ),
       );
       const firstWorkspaces = new WorkspaceManager(
@@ -503,7 +550,8 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
             (binding) => binding.providerId === "provider-a",
           )?.hostPath;
           if (withPriorProvider) {
-            if (!providerPath) throw new Error("Historical provider binding is missing");
+            if (!providerPath)
+              throw new Error("Historical provider binding is missing");
             await writeFile(
               providerPath,
               '{"release":"provider-a-promoted"}\n',
@@ -605,7 +653,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         lastError: null,
       });
       const canonical = await nextWorkspaces.readCanonical(agent.id);
-      expect(canonical.providerVersions.map((version) => version.providerId)).toEqual(
+      expect(
+        canonical.providerVersions.map((version) => version.providerId),
+      ).toEqual(
         withPriorProvider ? ["provider-a", "provider-b"] : ["provider-b"],
       );
       expect(providerB.versions.get("version-b")).toEqual(valueB);
@@ -625,7 +675,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
   );
 
   it("leaves Canonical State untouched when provider onboarding cannot verify its source", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-onboard-fail-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-onboard-fail-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -637,7 +689,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     });
     const runtime: AgentRunner = {
       run: async () => {
-        throw new Error("A failed registry transition must not execute the Runtime");
+        throw new Error(
+          "A failed registry transition must not execute the Runtime",
+        );
       },
       cancel: async () => false,
       isAvailable: async () => true,
@@ -650,16 +704,28 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       runtime,
     );
     await original.initialize();
-    const agent = await original.createAgent({ name: "Failed provider onboarding" });
+    const agent = await original.createAgent({
+      name: "Failed provider onboarding",
+    });
     const canonicalBefore = await originalWorkspaces.readCanonical(agent.id);
-    const manifestPath = path.join(config.workspaceRoot, agent.id, "canonical.json");
-    const registryPath = path.join(config.workspaceRoot, ".resource-registry.json");
+    const manifestPath = path.join(
+      config.workspaceRoot,
+      agent.id,
+      "canonical.json",
+    );
+    const registryPath = path.join(
+      config.workspaceRoot,
+      ".resource-registry.json",
+    );
     const manifestBefore = await readFile(manifestPath, "utf8");
     const registryBefore = await readFile(registryPath, "utf8");
 
     const provider = new AcceptanceObjectProvider();
     const missingValue = { release: "missing" } satisfies JsonValue;
-    const missingVersion = reference("version-missing", fingerprint(missingValue));
+    const missingVersion = reference(
+      "version-missing",
+      fingerprint(missingValue),
+    );
     const coordinator = new ResourceCoordinator(
       new ResourceRegistry([{ provider, initialVersion: missingVersion }]),
     );
@@ -695,12 +761,16 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
     const recoveryView = new WorkspaceManager(config.workspaceRoot);
     await recoveryView.initialize();
-    await expect(recoveryView.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(recoveryView.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
     expect(await readFile(registryPath, "utf8")).toBe(registryBefore);
   });
 
   it("rejects a keyed credential summary before an onboarding journal is persisted", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-onboard-secret-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-onboard-secret-"),
+    );
     temporaryDirectories.push(root);
     const config = loadConfig({
       NODE_ENV: "test",
@@ -712,7 +782,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     });
     const runtime: AgentRunner = {
       run: async () => {
-        throw new Error("Credential-bearing onboarding must not execute Runtime");
+        throw new Error(
+          "Credential-bearing onboarding must not execute Runtime",
+        );
       },
       cancel: async () => false,
       isAvailable: async () => true,
@@ -725,10 +797,19 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       runtime,
     );
     await original.initialize();
-    const agent = await original.createAgent({ name: "Credential-safe onboarding" });
+    const agent = await original.createAgent({
+      name: "Credential-safe onboarding",
+    });
     const canonicalBefore = await originalWorkspaces.readCanonical(agent.id);
-    const manifestPath = path.join(config.workspaceRoot, agent.id, "canonical.json");
-    const registryPath = path.join(config.workspaceRoot, ".resource-registry.json");
+    const manifestPath = path.join(
+      config.workspaceRoot,
+      agent.id,
+      "canonical.json",
+    );
+    const registryPath = path.join(
+      config.workspaceRoot,
+      ".resource-registry.json",
+    );
     const manifestBefore = await readFile(manifestPath, "utf8");
     const registryBefore = await readFile(registryPath, "utf8");
 
@@ -741,7 +822,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       new ResourceRegistry([
         {
           provider,
-          initialVersion: reference("version-initial", fingerprint(initialValue)),
+          initialVersion: reference(
+            "version-initial",
+            fingerprint(initialValue),
+          ),
         },
       ]),
     );
@@ -766,21 +850,30 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     expect(JSON.stringify(failedAgent)).not.toContain(credential);
     await expect(
       readFile(
-        path.join(config.workspaceRoot, ".registry-transitions", agent.id + ".json"),
+        path.join(
+          config.workspaceRoot,
+          ".registry-transitions",
+          agent.id + ".json",
+        ),
         "utf8",
       ),
     ).rejects.toThrow();
     expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
     expect(await readFile(registryPath, "utf8")).toBe(registryBefore);
-    expect(await readFile(path.join(config.dataDirectory, "db.json"), "utf8")).not
-      .toContain(credential);
+    expect(
+      await readFile(path.join(config.dataDirectory, "db.json"), "utf8"),
+    ).not.toContain(credential);
     const recoveryView = new WorkspaceManager(config.workspaceRoot);
     await recoveryView.initialize();
-    await expect(recoveryView.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(recoveryView.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
   });
 
   it("rejects keyed provider evidence before it enters a persisted Run transaction", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-run-secret-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-run-secret-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
@@ -789,7 +882,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       new ResourceRegistry([
         {
           provider,
-          initialVersion: reference("version-initial", fingerprint(initialValue)),
+          initialVersion: reference(
+            "version-initial",
+            fingerprint(initialValue),
+          ),
         },
       ]),
     );
@@ -812,7 +908,11 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         const binding = request.resourceBindings?.[0]?.hostPath;
         if (!binding) throw new Error("provider binding missing");
         await writeFile(binding, '{"release":"candidate"}\n', "utf8");
-        await persistFixtureSession(request, "thread-credential-safe", "credential-safe");
+        await persistFixtureSession(
+          request,
+          "thread-credential-safe",
+          "credential-safe",
+        );
         return {
           output: "candidate returned",
           threadId: "thread-credential-safe",
@@ -836,24 +936,32 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const credential = "token:runtransactioncredential123456";
     provider.changeSummaryOverride = credential;
 
-    const started = await service.sendMessage(agent.id, "reject credential evidence");
+    const started = await service.sendMessage(
+      agent.id,
+      "reject credential evidence",
+    );
     const failed = await waitForRun(service, started.run.id);
 
     expect(failed.status).toBe("failed");
     expect(failed.transaction?.disposition).toBe("quarantined");
     expect(JSON.stringify(failed)).not.toContain(credential);
-    expect(await readFile(path.join(config.dataDirectory, "db.json"), "utf8")).not
-      .toContain(credential);
+    expect(
+      await readFile(path.join(config.dataDirectory, "db.json"), "utf8"),
+    ).not.toContain(credential);
   });
 
   it("discards a retained Quarantine through its historical provider generation", async () => {
     const fixture = await createRejectedProviderFixture("generation-discard");
     const quarantineId =
-      fixture.rejected.transaction?.providerResources[0]?.quarantine?.quarantineId;
+      fixture.rejected.transaction?.providerResources[0]?.quarantine
+        ?.quarantineId;
     expect(quarantineId).toBeTruthy();
 
     const initialValue = { release: "canonical" } satisfies JsonValue;
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const providerB = new AcceptanceObjectProvider(
       "provider-b",
       "json-object-b",
@@ -909,14 +1017,20 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     expect(restarted.getRun(fixture.runId).transaction).toMatchObject({
       disposition: "discarded",
       quarantineAvailable: false,
-      providerResources: [{ providerId: "acceptance-object", disposition: "discarded" }],
+      providerResources: [
+        { providerId: "acceptance-object", disposition: "discarded" },
+      ],
     });
-    expect(fixture.provider.quarantines.has(quarantineId ?? "missing")).toBe(false);
+    expect(fixture.provider.quarantines.has(quarantineId ?? "missing")).toBe(
+      false,
+    );
     expect(providerB.discarded.has(fixture.runId)).toBe(false);
   });
 
   it("retains cleanup-only Quarantine when cancellation cannot discard provider state", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-cancel-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-cancel-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
@@ -925,7 +1039,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       new ResourceRegistry([
         {
           provider,
-          initialVersion: reference("version-initial", fingerprint(initialValue)),
+          initialVersion: reference(
+            "version-initial",
+            fingerprint(initialValue),
+          ),
         },
       ]),
     );
@@ -973,7 +1090,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     await service.initialize();
     const agent = await service.createAgent({ name: "Cancellation cleanup" });
     const canonicalBefore = await workspaces.readCanonical(agent.id);
-    const started = await service.sendMessage(agent.id, "wait for cancellation");
+    const started = await service.sendMessage(
+      agent.id,
+      "wait for cancellation",
+    );
     await runtimeStarted;
     provider.failDiscard = true;
 
@@ -987,9 +1107,12 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       },
     });
     expect(retained.transaction?.quarantinePath).toBeTruthy();
-    await expect(access(retained.transaction?.quarantinePath ?? "missing")).resolves
-      .toBeUndefined();
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(
+      access(retained.transaction?.quarantinePath ?? "missing"),
+    ).resolves.toBeUndefined();
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
     expect(provider.candidates.has("candidate-" + started.run.id)).toBe(true);
 
     provider.failDiscard = false;
@@ -998,7 +1121,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
   });
 
   it("rejects a post-Runtime provider symlink before trusted hooks can read it", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-symlink-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-symlink-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
@@ -1007,7 +1132,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       new ResourceRegistry([
         {
           provider,
-          initialVersion: reference("version-initial", fingerprint(initialValue)),
+          initialVersion: reference(
+            "version-initial",
+            fingerprint(initialValue),
+          ),
         },
       ]),
     );
@@ -1069,14 +1197,19 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
   });
 
   it("aborts before Runtime and makes failed prepare cleanup retryable", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-prepare-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-prepare-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
     provider.versions.set("version-initial", initialValue);
     provider.failPrepare = true;
     provider.failDiscard = true;
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const coordinator = new ResourceCoordinator(
       new ResourceRegistry([{ provider, initialVersion }]),
     );
@@ -1098,7 +1231,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const runner: AgentRunner = {
       run: async () => {
         runtimeCalls += 1;
-        throw new Error("Runtime must not execute after Resource prepare fails");
+        throw new Error(
+          "Runtime must not execute after Resource prepare fails",
+        );
       },
       cancel: async () => false,
       isAvailable: async () => true,
@@ -1115,7 +1250,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     await service.initialize();
     const agent = await service.createAgent({ name: "Prepare failure" });
     const canonicalBefore = await workspaces.readCanonical(agent.id);
-    const started = await service.sendMessage(agent.id, "must abort before Runtime");
+    const started = await service.sendMessage(
+      agent.id,
+      "must abort before Runtime",
+    );
     const failed = await waitForRun(service, started.run.id);
 
     expect(runtimeCalls).toBe(0);
@@ -1132,9 +1270,12 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       },
     });
     const quarantinePath = failed.transaction?.quarantinePath;
-    if (!quarantinePath) throw new Error("Prepare cleanup failure was not retained");
+    if (!quarantinePath)
+      throw new Error("Prepare cleanup failure was not retained");
     await expect(access(quarantinePath)).resolves.toBeUndefined();
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
 
     await expect(service.repairRun(started.run.id)).rejects.toThrow(
       /cannot start a Repair Run/,
@@ -1143,9 +1284,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     await expect(service.discardRun(started.run.id)).rejects.toThrow(
       /failed evidence-preserving Discard/,
     );
-    expect(service.getRun(started.run.id).transaction?.quarantineAvailable).toBe(
-      true,
-    );
+    expect(
+      service.getRun(started.run.id).transaction?.quarantineAvailable,
+    ).toBe(true);
     await expect(access(quarantinePath)).resolves.toBeUndefined();
 
     provider.failDiscard = false;
@@ -1175,7 +1316,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         ],
       },
     });
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
     expect(runtimeCalls).toBe(0);
   });
 
@@ -1185,7 +1328,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
     provider.versions.set("version-initial", initialValue);
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const registry = new ResourceRegistry([{ provider, initialVersion }]);
     const coordinator = new ResourceCoordinator(registry);
     const config = loadConfig({
@@ -1206,28 +1352,47 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const runner: AgentRunner = {
       run: async (request) => {
         const objectPath = request.resourceBindings?.[0]?.hostPath;
-        if (!objectPath) throw new Error("Runtime did not receive provider binding");
+        if (!objectPath)
+          throw new Error("Runtime did not receive provider binding");
         if (turn === 0) {
           await writeFile(objectPath, '{"release":"accepted-one"}\n', "utf8");
-          await writeFile(path.join(request.workspacePath, "accepted.txt"), "accepted\n");
+          await writeFile(
+            path.join(request.workspacePath, "accepted.txt"),
+            "accepted\n",
+          );
         } else if (turn === 1) {
-          await writeFile(objectPath, '{"release":"rejected-future"}\n', "utf8");
+          await writeFile(
+            objectPath,
+            '{"release":"rejected-future"}\n',
+            "utf8",
+          );
           await unlink(path.join(request.workspacePath, "AGENTS.md"));
         } else if (request.repairReferencePath) {
           await expect(readFile(objectPath, "utf8")).resolves.toContain(
             "rejected-future",
           );
-          await writeFile(objectPath, '{"release":"repaired-future"}\n', "utf8");
+          await writeFile(
+            objectPath,
+            '{"release":"repaired-future"}\n',
+            "utf8",
+          );
           await writeFile(
             path.join(request.workspacePath, "AGENTS.md"),
-            await readFile(path.join(request.repairReferencePath, "AGENTS.md"), "utf8"),
+            await readFile(
+              path.join(request.repairReferencePath, "AGENTS.md"),
+              "utf8",
+            ),
             "utf8",
           );
         } else {
           await writeFile(objectPath, '{"release":"discard-me"}\n', "utf8");
           await unlink(path.join(request.workspacePath, "AGENTS.md"));
         }
-        await persistFixtureSession(request, "thread-phase-eight", "turn-" + turn);
+        await persistFixtureSession(
+          request,
+          "thread-phase-eight",
+          "turn-" + turn,
+        );
         turn += 1;
         return {
           output: "fixture turn " + turn,
@@ -1266,7 +1431,9 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     });
     expect(acceptedCanonical.providerVersions).toHaveLength(1);
     expect(
-      provider.versions.get(acceptedCanonical.providerVersions[0]?.versionId ?? "missing"),
+      provider.versions.get(
+        acceptedCanonical.providerVersions[0]?.versionId ?? "missing",
+      ),
     ).toEqual({ release: "accepted-one" });
 
     const rejected = await service.sendMessage(agent.id, "reject provider");
@@ -1280,20 +1447,31 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         },
       ],
     });
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(acceptedCanonical);
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      acceptedCanonical,
+    );
 
     const repair = await service.repairRun(rejected.run.id);
     const repairedRun = await waitForRun(service, repair.run.id);
     const repairedCanonical = await workspaces.readCanonical(agent.id);
     expect(repairedRun.transaction?.disposition).toBe("promoted");
     expect(
-      provider.versions.get(repairedCanonical.providerVersions[0]?.versionId ?? "missing"),
+      provider.versions.get(
+        repairedCanonical.providerVersions[0]?.versionId ?? "missing",
+      ),
     ).toEqual({ release: "repaired-future" });
 
-    const discardCandidate = await service.sendMessage(agent.id, "reject provider again");
-    const discardCandidateRun = await waitForRun(service, discardCandidate.run.id);
+    const discardCandidate = await service.sendMessage(
+      agent.id,
+      "reject provider again",
+    );
+    const discardCandidateRun = await waitForRun(
+      service,
+      discardCandidate.run.id,
+    );
     const quarantineId =
-      discardCandidateRun.transaction?.providerResources[0]?.quarantine?.quarantineId;
+      discardCandidateRun.transaction?.providerResources[0]?.quarantine
+        ?.quarantineId;
     expect(provider.quarantines.has(quarantineId ?? "missing")).toBe(true);
     const discarded = await service.discardRun(discardCandidate.run.id);
     expect(discarded.transaction).toMatchObject({
@@ -1301,17 +1479,24 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       providerResources: [{ disposition: "discarded" }],
     });
     expect(provider.quarantines.has(quarantineId ?? "missing")).toBe(false);
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(repairedCanonical);
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      repairedCanonical,
+    );
   });
 
   it("quarantines every Candidate resource when provider Validation fails", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-validation-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-validation-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
     provider.versions.set("version-initial", initialValue);
     provider.failValidation = true;
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const coordinator = new ResourceCoordinator(
       new ResourceRegistry([{ provider, initialVersion }]),
     );
@@ -1332,10 +1517,23 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const runner: AgentRunner = {
       run: async (request) => {
         const objectPath = request.resourceBindings?.[0]?.hostPath;
-        if (!objectPath) throw new Error("Runtime did not receive provider binding");
-        await writeFile(objectPath, '{"release":"provider-rejected"}\n', "utf8");
-        await persistFixtureSession(request, "thread-validation", "provider-rejected");
-        return { output: "candidate", threadId: "thread-validation", usage: null };
+        if (!objectPath)
+          throw new Error("Runtime did not receive provider binding");
+        await writeFile(
+          objectPath,
+          '{"release":"provider-rejected"}\n',
+          "utf8",
+        );
+        await persistFixtureSession(
+          request,
+          "thread-validation",
+          "provider-rejected",
+        );
+        return {
+          output: "candidate",
+          threadId: "thread-validation",
+          usage: null,
+        };
       },
       cancel: async () => false,
       isAvailable: async () => true,
@@ -1377,17 +1575,24 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         (resource) => resource.disposition === "quarantined",
       ),
     ).toBe(true);
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
   });
 
   it("turns contradictory provider Promotion evidence into durable recovery error", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-contradiction-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-contradiction-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
     provider.versions.set("version-initial", initialValue);
     provider.contradictPromotion = true;
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const config = loadConfig({
       NODE_ENV: "test",
       APP_DATA_DIR: path.join(root, "data"),
@@ -1410,7 +1615,8 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       run: async (request) => {
         runtimeCalls += 1;
         const objectPath = request.resourceBindings?.[0]?.hostPath;
-        if (!objectPath) throw new Error("Runtime did not receive provider binding");
+        if (!objectPath)
+          throw new Error("Runtime did not receive provider binding");
         await writeFile(objectPath, '{"release":"must-not-install"}\n', "utf8");
         await persistFixtureSession(
           request,
@@ -1489,17 +1695,24 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         ),
     ).toBe(true);
     expect(runtimeCalls).toBe(1);
-    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(canonicalBefore);
+    await expect(workspaces.readCanonical(agent.id)).resolves.toEqual(
+      canonicalBefore,
+    );
     expect(provider.versions.size).toBe(1);
   });
 
   it("discards provider Quarantine before expired local state is removed", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-expiry-"));
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-phase-eight-expiry-"),
+    );
     temporaryDirectories.push(root);
     const provider = new AcceptanceObjectProvider();
     const initialValue = { release: "canonical" } satisfies JsonValue;
     provider.versions.set("version-initial", initialValue);
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
+    const initialVersion = reference(
+      "version-initial",
+      fingerprint(initialValue),
+    );
     const coordinator = new ResourceCoordinator(
       new ResourceRegistry([{ provider, initialVersion }]),
     );
@@ -1521,7 +1734,8 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     const runner: AgentRunner = {
       run: async (request) => {
         const objectPath = request.resourceBindings?.[0]?.hostPath;
-        if (!objectPath) throw new Error("Runtime did not receive provider binding");
+        if (!objectPath)
+          throw new Error("Runtime did not receive provider binding");
         await writeFile(objectPath, '{"release":"expired-future"}\n', "utf8");
         await unlink(path.join(request.workspacePath, "AGENTS.md"));
         await persistFixtureSession(request, "thread-expiry", "expired-future");
@@ -1542,7 +1756,10 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     await first.initialize();
     const agent = await first.createAgent({ name: "Provider expiry" });
     const canonicalBefore = await workspaces.readCanonical(agent.id);
-    const started = await first.sendMessage(agent.id, "retain a rejected future");
+    const started = await first.sendMessage(
+      agent.id,
+      "retain a rejected future",
+    );
     const rejected = await waitForRun(first, started.run.id);
     const quarantinePath = rejected.transaction?.quarantinePath;
     const quarantineId =
@@ -1557,7 +1774,11 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
       unknown
     >;
     manifest.createdAt = "2000-01-01T00:00:00.000Z";
-    await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    await writeFile(
+      manifestPath,
+      JSON.stringify(manifest, null, 2) + "\n",
+      "utf8",
+    );
 
     const restartConfig = loadConfig({
       ...configInput,
@@ -1615,7 +1836,7 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     );
   });
 
-  it("finishes an interrupted Discard after provider evidence and local removal", async () => {
+  it("refuses to bless mutable provider evidence after local Quarantine disappears", async () => {
     const fixture = await createRejectedProviderFixture("discard-interruption");
     const transaction = fixture.rejected.transaction;
     if (!transaction?.quarantinePath) {
@@ -1659,7 +1880,66 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     await restarted.initialize();
 
     expect(restarted.getRun(fixture.runId)).toMatchObject({
-      status: "completed",
+      status: "failed",
+      transaction: {
+        status: "recovery-error",
+        disposition: "quarantined",
+        quarantineAvailable: false,
+        recovery: {
+          recoveryError: expect.stringContaining(
+            "Authoritative Quarantine is missing",
+          ),
+        },
+      },
+    });
+  });
+
+  it("recovers when Discard authority exists before interrupted local removal", async () => {
+    const fixture = await createRejectedProviderFixture(
+      "discard-authority-interruption",
+    );
+    const quarantinePath = fixture.rejected.transaction?.quarantinePath;
+    if (!quarantinePath) {
+      throw new Error("Fixture did not retain a composite Quarantine");
+    }
+    const interrupted = new AgentService(
+      fixture.config,
+      new JsonStore(path.join(fixture.config.dataDirectory, "db.json")),
+      new InterruptedDiscardWorkspace(
+        fixture.config.workspaceRoot,
+        undefined,
+        undefined,
+        fixture.coordinator.initialVersions(),
+      ),
+      fixture.runtime,
+      undefined,
+      undefined,
+      fixture.coordinator,
+    );
+    await interrupted.initialize();
+    await expect(interrupted.discardRun(fixture.runId)).rejects.toThrow(
+      "simulated interruption after Discard authority",
+    );
+    await expect(access(quarantinePath)).resolves.toBeUndefined();
+
+    const restarted = new AgentService(
+      fixture.config,
+      new JsonStore(path.join(fixture.config.dataDirectory, "db.json")),
+      new WorkspaceManager(
+        fixture.config.workspaceRoot,
+        undefined,
+        undefined,
+        fixture.coordinator.initialVersions(),
+      ),
+      fixture.runtime,
+      undefined,
+      undefined,
+      fixture.coordinator,
+    );
+    await restarted.initialize();
+
+    expect(restarted.getRun(fixture.runId)).toMatchObject({
+      status: "failed",
       transaction: {
         status: "discarded",
         disposition: "discarded",
@@ -1667,16 +1947,71 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         recovery: { recoveryError: null },
       },
     });
-    expect(
-      restarted.getRun(fixture.runId).transaction?.events.at(-1)?.summary,
-    ).toBe("Interrupted Discard completed; bounded decision evidence remains");
+    await expect(access(quarantinePath)).rejects.toThrow();
   });
 
+  it.skipIf(process.platform === "win32")(
+    "preserves every Quarantine when Discard authority publication fails",
+    async () => {
+      const fixture = await createRejectedProviderFixture(
+        "discard-authority-publication",
+      );
+      const quarantinePath = fixture.rejected.transaction?.quarantinePath;
+      const providerQuarantineId =
+        fixture.rejected.transaction?.providerResources[0]?.quarantine
+          ?.quarantineId;
+      if (!quarantinePath || !providerQuarantineId) {
+        throw new Error("Fixture did not retain a composite Quarantine");
+      }
+      const authorityDirectory = path.join(
+        fixture.config.dataDirectory,
+        "portable-decision-journal",
+        fixture.runId,
+      );
+      await chmod(authorityDirectory, 0o500);
+      try {
+        await expect(
+          fixture.service.discardRun(fixture.runId),
+        ).rejects.toThrow();
+      } finally {
+        await chmod(authorityDirectory, 0o700);
+      }
+
+      expect(fixture.service.getRun(fixture.runId).transaction).toMatchObject({
+        disposition: "quarantined",
+        quarantineAvailable: true,
+        providerResources: [{ disposition: "quarantined" }],
+      });
+      expect(providerQuarantineId).toBeTruthy();
+      expect(fixture.provider.quarantines.has(providerQuarantineId)).toBe(true);
+      await expect(access(quarantinePath)).resolves.toBeUndefined();
+      expect(
+        (await readdir(authorityDirectory)).filter((entry) =>
+          entry.endsWith(".json"),
+        ),
+      ).toHaveLength(1);
+
+      await expect(
+        fixture.service.discardRun(fixture.runId),
+      ).resolves.toMatchObject({
+        transaction: { disposition: "discarded" },
+      });
+      expect(fixture.provider.quarantines.has(providerQuarantineId)).toBe(
+        false,
+      );
+      await expect(access(quarantinePath)).rejects.toThrow();
+    },
+  );
+
   it("fails closed when mutable Quarantine disappears without provider Discard", async () => {
-    const fixture = await createRejectedProviderFixture("discard-contradiction");
+    const fixture = await createRejectedProviderFixture(
+      "discard-contradiction",
+    );
     const quarantineId =
-      fixture.rejected.transaction?.providerResources[0]?.quarantine?.quarantineId;
-    if (!quarantineId) throw new Error("Fixture did not retain provider Quarantine");
+      fixture.rejected.transaction?.providerResources[0]?.quarantine
+        ?.quarantineId;
+    if (!quarantineId)
+      throw new Error("Fixture did not retain provider Quarantine");
     await fixture.workspaces.discardQuarantine(fixture.runId);
 
     const restarted = new AgentService(
@@ -1697,7 +2032,7 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
 
     expect(restarted.getRun(fixture.runId)).toMatchObject({
       status: "failed",
-      error: expect.stringContaining("missing without complete provider Discard"),
+      error: expect.stringContaining("Authoritative Quarantine is missing"),
       transaction: {
         status: "recovery-error",
         disposition: "quarantined",
@@ -1705,7 +2040,7 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
         recovery: {
           recoveredAfterRestart: true,
           recoveryError: expect.stringContaining(
-            "missing without complete provider Discard evidence",
+            "Authoritative Quarantine is missing",
           ),
         },
       },
@@ -1723,117 +2058,137 @@ describe("Phase 8 registered Resource Provider acceptance", () => {
     "after-validated",
     "after-version-install",
     "after-canonical-advance",
-  ] as const)("reconciles provider Promotion after a crash at %s", async (faultPoint) => {
-    const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-crash-"));
-    temporaryDirectories.push(root);
-    const provider = new AcceptanceObjectProvider();
-    const initialValue = { release: "canonical" } satisfies JsonValue;
-    provider.versions.set("version-initial", initialValue);
-    const initialVersion = reference("version-initial", fingerprint(initialValue));
-    const config = loadConfig({
-      NODE_ENV: "test",
-      APP_DATA_DIR: path.join(root, "data"),
-      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
-      CODEX_HOME: path.join(root, "codex"),
-      ARK_API_KEY: "test-key",
-      ARK_MODEL: "ep-test",
-    });
-    const firstCoordinator = new ResourceCoordinator(
-      new ResourceRegistry([{ provider, initialVersion }]),
-    );
-    const firstWorkspaces = new WorkspaceManager(
-      config.workspaceRoot,
-      undefined,
-      undefined,
-      firstCoordinator.initialVersions(),
-    );
-    const firstRunner: AgentRunner = {
-      run: async (request) => {
-        const objectPath = request.resourceBindings?.[0]?.hostPath;
-        if (!objectPath) throw new Error("Runtime did not receive provider binding");
-        await writeFile(objectPath, '{"release":"crash-safe"}\n', "utf8");
-        await persistFixtureSession(request, "thread-crash", "crash-safe");
-        return { output: "prepared", threadId: "thread-crash", usage: null };
-      },
-      cancel: async () => false,
-      isAvailable: async () => true,
-    };
-    let injected = false;
-    const firstService = new AgentService(
-      config,
-      new JsonStore(path.join(config.dataDirectory, "db.json")),
-      firstWorkspaces,
-      firstRunner,
-      undefined,
-      (point) => {
-        if (!injected && point === faultPoint) {
-          injected = true;
-          throw new Error("simulated process interruption");
-        }
-      },
-      firstCoordinator,
-    );
-    await firstService.initialize();
-    const agent = await firstService.createAgent({ name: "Crash recovery" });
-    const started = await firstService.sendMessage(agent.id, "promote crash-safe object");
-    const interrupted = await waitForRun(firstService, started.run.id);
-    expect(interrupted.status).toBe("failed");
+    "after-completed",
+  ] as const)(
+    "reconciles provider Promotion after a crash at %s",
+    async (faultPoint) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), "airlock-phase-eight-crash-"),
+      );
+      temporaryDirectories.push(root);
+      const provider = new AcceptanceObjectProvider();
+      const initialValue = { release: "canonical" } satisfies JsonValue;
+      provider.versions.set("version-initial", initialValue);
+      const initialVersion = reference(
+        "version-initial",
+        fingerprint(initialValue),
+      );
+      const config = loadConfig({
+        NODE_ENV: "test",
+        APP_DATA_DIR: path.join(root, "data"),
+        AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+        CODEX_HOME: path.join(root, "codex"),
+        ARK_API_KEY: "test-key",
+        ARK_MODEL: "ep-test",
+      });
+      const firstCoordinator = new ResourceCoordinator(
+        new ResourceRegistry([{ provider, initialVersion }]),
+      );
+      const firstWorkspaces = new WorkspaceManager(
+        config.workspaceRoot,
+        undefined,
+        undefined,
+        firstCoordinator.initialVersions(),
+      );
+      const firstRunner: AgentRunner = {
+        run: async (request) => {
+          const objectPath = request.resourceBindings?.[0]?.hostPath;
+          if (!objectPath)
+            throw new Error("Runtime did not receive provider binding");
+          await writeFile(objectPath, '{"release":"crash-safe"}\n', "utf8");
+          await persistFixtureSession(request, "thread-crash", "crash-safe");
+          return { output: "prepared", threadId: "thread-crash", usage: null };
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      };
+      let injected = false;
+      const firstService = new AgentService(
+        config,
+        new JsonStore(path.join(config.dataDirectory, "db.json")),
+        firstWorkspaces,
+        firstRunner,
+        undefined,
+        (point) => {
+          if (!injected && point === faultPoint) {
+            injected = true;
+            throw new Error("simulated process interruption");
+          }
+        },
+        firstCoordinator,
+      );
+      await firstService.initialize();
+      const agent = await firstService.createAgent({ name: "Crash recovery" });
+      const started = await firstService.sendMessage(
+        agent.id,
+        "promote crash-safe object",
+      );
+      const interrupted = await waitForRun(firstService, started.run.id);
+      expect(interrupted.status).toBe("failed");
 
-    const restartedCoordinator = new ResourceCoordinator(
-      new ResourceRegistry([{ provider, initialVersion }]),
-    );
-    const restartedRunner: AgentRunner = {
-      run: async () => {
-        throw new Error("Recovery must not execute the Runtime twice");
-      },
-      cancel: async () => false,
-      isAvailable: async () => true,
-    };
-    const restarted = new AgentService(
-      config,
-      new JsonStore(path.join(config.dataDirectory, "db.json")),
-      new WorkspaceManager(
+      const restartedCoordinator = new ResourceCoordinator(
+        new ResourceRegistry([{ provider, initialVersion }]),
+      );
+      const restartedRunner: AgentRunner = {
+        run: async () => {
+          throw new Error("Recovery must not execute the Runtime twice");
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      };
+      const restarted = new AgentService(
+        config,
+        new JsonStore(path.join(config.dataDirectory, "db.json")),
+        new WorkspaceManager(
+          config.workspaceRoot,
+          undefined,
+          undefined,
+          restartedCoordinator.initialVersions(),
+        ),
+        restartedRunner,
+        undefined,
+        undefined,
+        restartedCoordinator,
+      );
+      await restarted.initialize();
+      const recovered = restarted.getRun(started.run.id);
+      const canonical = await new WorkspaceManager(
         config.workspaceRoot,
         undefined,
         undefined,
         restartedCoordinator.initialVersions(),
-      ),
-      restartedRunner,
-      undefined,
-      undefined,
-      restartedCoordinator,
-    );
-    await restarted.initialize();
-    const recovered = restarted.getRun(started.run.id);
-    const canonical = await new WorkspaceManager(
-      config.workspaceRoot,
-      undefined,
-      undefined,
-      restartedCoordinator.initialVersions(),
-    ).readCanonical(agent.id);
-    expect(recovered).toMatchObject({
-      status: "completed",
-      error: null,
-      transaction: {
-        disposition: "promoted",
-        recovery: { journalPhase: "completed", recoveredAfterRestart: true },
-        providerResources: [{ disposition: "promoted" }],
-      },
-    });
-    expect(provider.versions.size).toBe(2);
-    expect(
-      provider.versions.get(canonical.providerVersions[0]?.versionId ?? "missing"),
-    ).toEqual({ release: "crash-safe" });
-  });
+      ).readCanonical(agent.id);
+      expect(recovered).toMatchObject({
+        status: "completed",
+        error: null,
+        transaction: {
+          disposition: "promoted",
+          recovery: { journalPhase: "completed", recoveredAfterRestart: true },
+          providerResources: [{ disposition: "promoted" }],
+        },
+      });
+      expect(provider.versions.size).toBe(2);
+      expect(
+        provider.versions.get(
+          canonical.providerVersions[0]?.versionId ?? "missing",
+        ),
+      ).toEqual({ release: "crash-safe" });
+    },
+  );
 });
 
 async function createRejectedProviderFixture(label: string) {
-  const root = await mkdtemp(path.join(tmpdir(), "airlock-phase-eight-" + label + "-"));
+  const root = await mkdtemp(
+    path.join(tmpdir(), "airlock-phase-eight-" + label + "-"),
+  );
   temporaryDirectories.push(root);
   const provider = new AcceptanceObjectProvider();
   const initialValue = { release: "canonical" } satisfies JsonValue;
   provider.versions.set("version-initial", initialValue);
-  const initialVersion = reference("version-initial", fingerprint(initialValue));
+  const initialVersion = reference(
+    "version-initial",
+    fingerprint(initialValue),
+  );
   const coordinator = new ResourceCoordinator(
     new ResourceRegistry([{ provider, initialVersion }]),
   );
@@ -1855,7 +2210,8 @@ async function createRejectedProviderFixture(label: string) {
   const runtime: AgentRunner = {
     run: async (request) => {
       const objectPath = request.resourceBindings?.[0]?.hostPath;
-      if (!objectPath) throw new Error("Runtime did not receive provider binding");
+      if (!objectPath)
+        throw new Error("Runtime did not receive provider binding");
       await writeFile(objectPath, '{"release":"rejected-discard"}\n', "utf8");
       await unlink(path.join(request.workspacePath, "AGENTS.md"));
       await persistFixtureSession(request, "thread-discard", label);

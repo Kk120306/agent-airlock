@@ -861,7 +861,9 @@ describe("Phase 9 Competing Futures acceptance", () => {
       loserPolicy: "retain",
     });
     await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
+      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase, {
+        timeout: 5_000,
+      })
       .toBe("completed");
     const completed = first.getCandidateSet(admitted.candidateSet.id);
     const authoritativeDecision = structuredClone(completed.selectionDecision);
@@ -1389,12 +1391,19 @@ describe("Phase 9 Competing Futures acceptance", () => {
       interrupted.discardedAt = null;
       interrupted.promotionReceipt = null;
 
-      const recovered = await airlockRunner.disposeSealedCandidate(
+      const recovery = airlockRunner.disposeSealedCandidate(
         agent.id,
         interrupted,
         policy,
         async () => undefined,
       );
+      if (policy === "discard") {
+        await expect(recovery).rejects.toThrow(
+          "Sealed loser physical state contradicts its durable cleanup evidence",
+        );
+        continue;
+      }
+      const recovered = await recovery;
       expect(recovered).toMatchObject({
         status: policy === "retain" ? "quarantined" : "discarded",
         disposition: policy === "retain" ? "quarantined" : "discarded",

@@ -180,13 +180,20 @@ Before mutable control-plane metadata is persisted, Airlock writes an immutable 
 Before mutable Candidate Set Selection is persisted, Airlock separately writes one immutable Candidate Set Decision Authority that commits the final source, contracts, loser policy, bounded competitor evidence, Selection Decision, selected competitor, winner Run, and decision timestamp.
 Airlock then publishes a final Candidate Set-bound authority for every already-terminal competitor before exposing the mutable Selection projection.
 A terminal Run may retain both its earlier context-free authority and its final Candidate Set-bound authority for the same transaction hash.
+All authorities for one Run must retain one exact parent authority digest and at most one non-null Candidate Set authority digest, so duplicate transaction hashes cannot hide contradictory ancestry or Selection context.
 An available Quarantine may later add one different authoritative Discard transaction when the immutable Run core and event prefixes prove the valid lifecycle transition.
-An interrupted completed Promotion may add one recovery authority only when the exact transaction differs by changing `recoveredAfterRestart` from `false` to `true` after journal verification.
+An interrupted completed Promotion may add one recovery authority only after the completed Promotion journal is verified.
+That recovery authority must change `recoveredAfterRestart` from `false` to `true` and may append exactly one successful `reconcile` event for every provider already committed by the promoted transaction.
+Every other transaction field and the complete earlier provider-event prefix remain exact.
 No other multi-hash terminal history is accepted.
 Export requires an exact match against this authority and never synthesizes a missing record from mutable database content.
 Terminal progress callbacks may publish authority, but they do not expose the terminal transaction through the mutable store before the enclosing child Run and competitor lifecycle update is complete.
-Provider Discard progress is persisted before physical removal, and the final Run transaction plus loser lifecycle are published in one database replacement after immutable authority exists.
-Intermediate Quarantine cleanup evidence must retain the authoritative transaction core, receipt, Run events, and provider-event prefix, so it cannot masquerade as a second terminal decision.
+Airlock publishes immutable Discard authority before invoking provider Discard or removing local Candidate or Quarantine state.
+The authority commits the irreversible decision and retains every provider recovery handle; it does not claim that later physical cleanup already completed.
+The final Run transaction plus loser lifecycle are published in one database replacement only after provider and local cleanup succeed.
+If interruption leaves local state behind after Discard authority exists, startup retries provider cleanup idempotently, removes the authorized remnant, and replays the exact authority.
+If local state disappears without Discard authority, recovery fails closed even when mutable provider progress claims cleanup succeeded.
+If authority publication fails, every local and provider Quarantine remains available for retry.
 The Agent remains busy until the complete Candidate Set finishes Selection, winner Promotion, and loser cleanup.
 Candidate Set cancellation and cleanup record authority at the branch that makes the terminal decision, while aggregate completion performs no authority reconstruction.
 Decision Authority records and historical Canonical manifests are first written and synchronized under unique same-directory temporary names, then installed through non-replacing hard-link publication and directory synchronization.

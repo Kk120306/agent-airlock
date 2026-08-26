@@ -34,7 +34,10 @@ import { ResourceRegistry } from "./resource-registry.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js";
-import { stableJson } from "./candidate-selection.js";
+import {
+  createDefaultSelectionContract,
+  stableJson,
+} from "./candidate-selection.js";
 import { portableDecisionTransactionHash } from "./portable-decision-journal.js";
 
 const temporaryDirectories: string[] = [];
@@ -102,17 +105,32 @@ class ThreeQuarantinesThenPassRunner extends PassingReceiptRunner {
 
 class GatedReceiptRunner extends PassingReceiptRunner {
   private releaseExecution!: () => void;
+  private signalExecutionStarted!: () => void;
   private readonly executionGate = new Promise<void>((resolve) => {
     this.releaseExecution = resolve;
+  });
+  private readonly executionStarted = new Promise<void>((resolve) => {
+    this.signalExecutionStarted = resolve;
   });
 
   release(): void {
     this.releaseExecution();
   }
 
+  waitUntilStarted(): Promise<void> {
+    return this.executionStarted;
+  }
+
   override async run(request: RunnerRequest): Promise<RunnerResult> {
+    this.signalExecutionStarted();
     await this.executionGate;
     return super.run(request);
+  }
+}
+
+class InterruptedDiscardWorkspace extends WorkspaceManager {
+  override async discardQuarantine(): Promise<boolean> {
+    throw new Error("simulated interruption after Discard authority");
   }
 }
 
@@ -302,7 +320,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
       admission.json() as { candidateSet: { id: string } }
     ).candidateSet.id;
     await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
+      .poll(() => harness.service.getCandidateSet(candidateSetId).phase, {
+        timeout: 5_000,
+      })
       .toBe("completed");
     const candidateSet = harness.service.getCandidateSet(candidateSetId);
     expect(candidateSet.winnerRunId).not.toBeNull();
@@ -352,7 +372,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
       admission.json() as { candidateSet: { id: string } }
     ).candidateSet.id;
     await expect
-      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
+      .poll(() => harness.service.getCandidateSet(candidateSetId).phase, {
+        timeout: 5_000,
+      })
       .toBe("completed");
     const retained = harness.service
       .getCandidateSet(candidateSetId)
@@ -394,6 +416,90 @@ describe("Phase 11 Portable Trust acceptance", () => {
         directAfterDiscard.json<PortableExportResponse>().envelope,
       ).valid,
     ).toBe(true);
+  });
+
+  it("atomically recovers a retained loser after Discard authority precedes removal", async () => {
+    const harness = await makeHarness(new BoundedReceiptRunner());
+    const agent = await harness.service.createAgent({
+      name: "Atomic retained-loser recovery",
+    });
+    const admission = await harness.service.createCandidateSet(agent.id, {
+      objective: "Recover one authorized loser Discard atomically.",
+      competitors: [
+        {
+          id: "alpha",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Produce a minimal valid future.",
+        },
+        {
+          id: "beta",
+          executorProfileId: "standard-v1",
+          strategyInstruction: "Produce a second valid future.",
+        },
+      ],
+      selectionContract: createDefaultSelectionContract(),
+      maxConcurrency: 2,
+      budget: {
+        maxDurationMsPerCompetitor: 600_000,
+        maxTotalTokens: 2_000_000,
+        maxTotalChangedBytes: 200_000_000,
+      },
+      loserPolicy: "retain",
+    });
+    await expect
+      .poll(
+        () => harness.service.getCandidateSet(admission.candidateSet.id).phase,
+        { timeout: 5_000 },
+      )
+      .toBe("completed");
+    const retained = harness.service
+      .getCandidateSet(admission.candidateSet.id)
+      .competitors.find(
+        (competitor) => competitor.loserDisposition === "retained",
+      );
+    if (!retained) throw new Error("Fixture retained no losing Candidate");
+    const quarantinePath = harness.service.getRun(retained.runId).transaction
+      ?.quarantinePath;
+    if (!quarantinePath) throw new Error("Fixture retained no Quarantine path");
+
+    const interrupted = new AgentService(
+      harness.config,
+      new JsonStore(path.join(harness.config.dataDirectory, "db.json")),
+      new InterruptedDiscardWorkspace(harness.config.workspaceRoot),
+      new BoundedReceiptRunner(),
+    );
+    await interrupted.initialize();
+    await expect(interrupted.discardRun(retained.runId)).rejects.toThrow(
+      "simulated interruption after Discard authority",
+    );
+    expect(
+      interrupted
+        .getCandidateSet(admission.candidateSet.id)
+        .competitors.find((competitor) => competitor.id === retained.id),
+    ).toMatchObject({ status: "retained", loserDisposition: "retained" });
+    expect((await lstat(quarantinePath)).isDirectory()).toBe(true);
+
+    const restartedStore = new JsonStore(
+      path.join(harness.config.dataDirectory, "db.json"),
+    );
+    const restarted = new AgentService(
+      harness.config,
+      restartedStore,
+      new WorkspaceManager(harness.config.workspaceRoot),
+      new BoundedReceiptRunner(),
+    );
+    await restarted.initialize();
+    const snapshot = restartedStore.snapshot();
+    expect(
+      snapshot.runs.find((run) => run.id === retained.runId)?.transaction
+        ?.disposition,
+    ).toBe("discarded");
+    expect(
+      snapshot.candidateSets
+        .find((candidateSet) => candidateSet.id === admission.candidateSet.id)
+        ?.competitors.find((competitor) => competitor.id === retained.id),
+    ).toMatchObject({ status: "discarded", loserDisposition: "discarded" });
+    await expect(lstat(quarantinePath)).rejects.toThrow();
   });
 
   it("binds an operator-accepted Assurance Proposal to future Run receipts", async () => {
@@ -483,9 +589,8 @@ describe("Phase 11 Portable Trust acceptance", () => {
       ".candidates",
       admitted.run.id,
     );
-    await expect
-      .poll(async () => (await lstat(candidateRoot)).isDirectory())
-      .toBe(true);
+    await runner.waitUntilStarted();
+    expect((await lstat(candidateRoot)).isDirectory()).toBe(true);
     await rm(candidateRoot, { recursive: true });
 
     const restartedStore = new JsonStore(
@@ -527,28 +632,27 @@ describe("Phase 11 Portable Trust acceptance", () => {
       .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
       .toBe("quarantined");
 
-    const originalMutate = first.store.mutate.bind(first.store);
-    let mutationCount = 0;
-    first.store.mutate = (async (
-      mutation: Parameters<JsonStore["mutate"]>[0],
-    ) => {
-      mutationCount += 1;
-      if (mutationCount === 2) {
-        throw new Error("simulated crash after immutable Discard authority");
-      }
-      return originalMutate(mutation);
-    }) as JsonStore["mutate"];
-    await expect(first.service.discardRun(admitted.run.id)).rejects.toThrow(
-      /simulated crash/,
+    const interrupted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new InterruptedDiscardWorkspace(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
     );
-    first.store.mutate = originalMutate as JsonStore["mutate"];
+    await interrupted.initialize();
+    await expect(interrupted.discardRun(admitted.run.id)).rejects.toThrow(
+      /simulated interruption after Discard authority/,
+    );
 
-    expect(first.service.getRun(admitted.run.id).transaction?.disposition).toBe(
+    expect(interrupted.getRun(admitted.run.id).transaction?.disposition).toBe(
       "quarantined",
     );
-    await expectFileMissing(
-      path.join(first.config.workspaceRoot, ".quarantine", admitted.run.id),
-    );
+    expect(
+      (
+        await lstat(
+          path.join(first.config.workspaceRoot, ".quarantine", admitted.run.id),
+        )
+      ).isDirectory(),
+    ).toBe(true);
     const authorityDirectory = path.join(
       first.config.dataDirectory,
       "portable-decision-journal",
@@ -845,6 +949,43 @@ describe("Phase 11 Portable Trust acceptance", () => {
     });
   });
 
+  it("keeps registry and Agent admission closed when a terminal Run projection is missing", async () => {
+    const first = await makeHarness(new PassingReceiptRunner());
+    const agent = await first.service.createAgent({
+      name: "Missing terminal projection",
+    });
+    const admitted = await first.service.sendMessage(
+      agent.id,
+      "Create authority before deleting the mutable transaction projection.",
+    );
+    await expect
+      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+      .toBe("promoted");
+    await first.store.mutate((database) => {
+      database.runs.find((run) => run.id === admitted.run.id)!.transaction =
+        null;
+    });
+
+    const restarted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new WorkspaceManager(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
+    );
+    await restarted.initialize();
+    expect(restarted.getAgent(agent.id)).toMatchObject({ status: "error" });
+    expect(restarted.getRun(admitted.run.id)).toMatchObject({
+      status: "failed",
+      transaction: null,
+      error: expect.stringContaining(
+        "Immutable terminal decision recovery failed",
+      ),
+    });
+    await expect(
+      restarted.sendMessage(agent.id, "This must remain blocked."),
+    ).rejects.toMatchObject({ statusCode: 503 });
+  });
+
   it("rejects two individually valid but conflicting terminal authorities", async () => {
     const first = await makeHarness(new PassingReceiptRunner());
     const agent = await first.service.createAgent({
@@ -920,6 +1061,246 @@ describe("Phase 11 Portable Trust acceptance", () => {
         evmPayload: false,
       }),
     ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it.each(["parentAuthorityDigest", "candidateSetAuthorityDigest"] as const)(
+    "rejects same-transaction authorities with conflicting %s",
+    async (contextField) => {
+      const first = await makeHarness(new PassingReceiptRunner());
+      const agent = await first.service.createAgent({
+        name: "Ambiguous authority context",
+      });
+      const admitted = await first.service.sendMessage(
+        agent.id,
+        "Create authority before a context-conflict injection.",
+      );
+      await expect
+        .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+        .toBe("promoted");
+      const authorityDirectory = path.join(
+        first.config.dataDirectory,
+        "portable-decision-journal",
+        admitted.run.id,
+      );
+      const authorityFile = (await readdir(authorityDirectory)).find((entry) =>
+        entry.endsWith(".json"),
+      )!;
+      const original = JSON.parse(
+        await readFile(path.join(authorityDirectory, authorityFile), "utf8"),
+      );
+      const conflictingDigest = `sha256:${"e".repeat(64)}`;
+      const unsigned = {
+        schemaVersion: original.schemaVersion,
+        transactionEvidenceHash: original.transactionEvidenceHash,
+        parentAuthorityDigest: original.parentAuthorityDigest,
+        candidateSetAuthorityDigest: original.candidateSetAuthorityDigest,
+        runId: original.runId,
+        agentId: original.agentId,
+        disposition: original.disposition,
+        decidedAt: original.decidedAt,
+      };
+      unsigned[contextField] = conflictingDigest;
+      const authorityDigest =
+        "sha256:" +
+        createHash("sha256").update(stableJson(unsigned)).digest("hex");
+      await writeFile(
+        path.join(
+          authorityDirectory,
+          authorityDigest.replace("sha256:", "sha256-") + ".json",
+        ),
+        JSON.stringify({
+          ...unsigned,
+          authorityDigest,
+          transaction: original.transaction,
+        }) + "\n",
+        "utf8",
+      );
+
+      const restarted = new AgentService(
+        first.config,
+        new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+        new WorkspaceManager(first.config.workspaceRoot),
+        new PassingReceiptRunner(),
+      );
+      await restarted.initialize();
+      expect(restarted.getAgent(agent.id)).toMatchObject({ status: "error" });
+      expect(restarted.getRun(admitted.run.id)).toMatchObject({
+        status: "failed",
+        transaction: { status: "recovery-error" },
+      });
+      await expect(
+        restarted.exportPortableReceipt(admitted.run.id, {
+          disclosureIdentities: [],
+          includeAncestry: false,
+          localAnchor: false,
+          evmPayload: false,
+        }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+    },
+  );
+
+  it("rejects forged provider evidence in a Promotion recovery authority", async () => {
+    const first = await makeHarness(new PassingReceiptRunner());
+    const agent = await first.service.createAgent({
+      name: "Strict Promotion recovery authority",
+    });
+    const admitted = await first.service.sendMessage(
+      agent.id,
+      "Create authority before a forged recovery suffix.",
+    );
+    await expect
+      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+      .toBe("promoted");
+    const authorityDirectory = path.join(
+      first.config.dataDirectory,
+      "portable-decision-journal",
+      admitted.run.id,
+    );
+    const authorityFile = (await readdir(authorityDirectory)).find((entry) =>
+      entry.endsWith(".json"),
+    )!;
+    const original = JSON.parse(
+      await readFile(path.join(authorityDirectory, authorityFile), "utf8"),
+    );
+    const recoveredTransaction = structuredClone(original.transaction);
+    recoveredTransaction.recovery.recoveredAfterRestart = true;
+    recoveredTransaction.providerResourceEvents.push({
+      schemaVersion: 1,
+      providerId: "forged-provider",
+      resourceKind: "forged-kind",
+      stage: "reconcile",
+      status: "passed",
+      summary: "Forged provider reconciliation",
+      at: new Date().toISOString(),
+    });
+    const transactionEvidenceHash =
+      portableDecisionTransactionHash(recoveredTransaction);
+    const unsigned = {
+      schemaVersion: original.schemaVersion,
+      transactionEvidenceHash,
+      parentAuthorityDigest: original.parentAuthorityDigest,
+      candidateSetAuthorityDigest: original.candidateSetAuthorityDigest,
+      runId: original.runId,
+      agentId: original.agentId,
+      disposition: original.disposition,
+      decidedAt: original.decidedAt,
+    };
+    const authorityDigest =
+      "sha256:" +
+      createHash("sha256").update(stableJson(unsigned)).digest("hex");
+    await writeFile(
+      path.join(
+        authorityDirectory,
+        authorityDigest.replace("sha256:", "sha256-") + ".json",
+      ),
+      JSON.stringify({
+        ...unsigned,
+        authorityDigest,
+        transaction: recoveredTransaction,
+      }) + "\n",
+      "utf8",
+    );
+
+    const restarted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new WorkspaceManager(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
+    );
+    await restarted.initialize();
+    expect(restarted.getAgent(agent.id)).toMatchObject({ status: "error" });
+    expect(restarted.getRun(admitted.run.id)).toMatchObject({
+      status: "failed",
+      transaction: { status: "recovery-error" },
+    });
+  });
+
+  it("rejects forged provider evidence in a Discard authority", async () => {
+    const first = await makeHarness(new QuarantineThenRepairRunner());
+    const agent = await first.service.createAgent({
+      name: "Strict Discard authority",
+    });
+    const admitted = await first.service.sendMessage(
+      agent.id,
+      "Create a Quarantine before a forged Discard suffix.",
+    );
+    await expect
+      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+      .toBe("quarantined");
+    await first.service.discardRun(admitted.run.id);
+
+    const authorityDirectory = path.join(
+      first.config.dataDirectory,
+      "portable-decision-journal",
+      admitted.run.id,
+    );
+    const authorityRecords = await Promise.all(
+      (await readdir(authorityDirectory))
+        .filter((entry) => entry.endsWith(".json"))
+        .map(async (entry) => ({
+          entry,
+          authority: JSON.parse(
+            await readFile(path.join(authorityDirectory, entry), "utf8"),
+          ),
+        })),
+    );
+    const discarded = authorityRecords.find(
+      ({ authority }) => authority.disposition === "discarded",
+    );
+    if (!discarded) throw new Error("Discard authority fixture is missing");
+    await rm(path.join(authorityDirectory, discarded.entry));
+
+    const forgedTransaction = structuredClone(discarded.authority.transaction);
+    forgedTransaction.providerResourceEvents.push({
+      schemaVersion: 1,
+      providerId: "forged-provider",
+      resourceKind: "forged-kind",
+      stage: "discard",
+      status: "passed",
+      summary: "Forged provider Discard",
+      at: new Date().toISOString(),
+    });
+    const transactionEvidenceHash =
+      portableDecisionTransactionHash(forgedTransaction);
+    const unsigned = {
+      schemaVersion: discarded.authority.schemaVersion,
+      transactionEvidenceHash,
+      parentAuthorityDigest: discarded.authority.parentAuthorityDigest,
+      candidateSetAuthorityDigest:
+        discarded.authority.candidateSetAuthorityDigest,
+      runId: discarded.authority.runId,
+      agentId: discarded.authority.agentId,
+      disposition: discarded.authority.disposition,
+      decidedAt: discarded.authority.decidedAt,
+    };
+    const authorityDigest =
+      "sha256:" +
+      createHash("sha256").update(stableJson(unsigned)).digest("hex");
+    await writeFile(
+      path.join(
+        authorityDirectory,
+        authorityDigest.replace("sha256:", "sha256-") + ".json",
+      ),
+      JSON.stringify({
+        ...unsigned,
+        authorityDigest,
+        transaction: forgedTransaction,
+      }) + "\n",
+      "utf8",
+    );
+
+    const restarted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new WorkspaceManager(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
+    );
+    await restarted.initialize();
+    expect(restarted.getAgent(agent.id)).toMatchObject({ status: "error" });
+    expect(restarted.getRun(admitted.run.id)).toMatchObject({
+      status: "failed",
+      transaction: { status: "recovery-error" },
+    });
   });
 
   it("rejects a symbolic-link substitution at the decision authority boundary", async () => {
