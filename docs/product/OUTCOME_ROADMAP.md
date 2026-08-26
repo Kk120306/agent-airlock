@@ -360,7 +360,7 @@ Make the conformance suite executable so provider claims can be verified, not me
 - The credential-free HTTP object provider depends only on the SDK and fails closed for timeout, oversized, malformed, wrong-content-type, unavailable, source-mismatch, and tampered responses.
 - Provider preparation failure prevents Runtime invocation, provider-only rejection quarantines the whole Candidate, and repeated Promotion installs one immutable version.
 - Lost prepare responses, partial multi-provider progress, cancellation cleanup outages, and post-Runtime symbolic-link substitutions retain retryable evidence while Canonical State remains unchanged.
-- Immutable Discard authority is persisted before provider or local removal, successful provider cleanup gains an authority-bound immutable completion fact before local removal, and missing contradictory state becomes `recovery-error`.
+- Immutable Discard authority is persisted before ordinary provider or local removal, successful provider cleanup gains an authority-bound immutable completion fact before local removal, prepare-abort authority embeds exact cleanup proof, and missing contradictory state becomes `recovery-error`.
 - Provider removal and contract replacement fail closed until an explicit export-and-retire migration exists.
 - `npm run check:phase8:conformance` emits readable and JSON evidence from the public CLI.
 - `npm run demo:phase8 -- --reset` and the dedicated production Chrome specification exercise remote Promotion and Quarantine while leaving the Phase 7 judge launcher unchanged.

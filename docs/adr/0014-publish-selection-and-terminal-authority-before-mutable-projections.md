@@ -33,13 +33,14 @@ The recovery authority changes `recoveredAfterRestart` from `false` to `true` an
 The earlier provider-event prefix and every other transaction field remain exact.
 These are the only accepted transitions between different terminal transaction hashes for one Run.
 The Discard transaction must preserve the immutable Run core and exact event prefixes, append one Discard event, and retain provider recovery handles.
-Legacy Discard authorities may contain one exact successful Discard event per known provider, but new cleanup executes from the already-published Discard authority and does not rewrite that decision with mutable completion claims.
+Legacy and prepare-abort Discard authorities may contain one exact successful Discard event per known provider, but ordinary terminal cleanup executes from the already-published Discard authority and does not rewrite that decision with mutable completion claims.
 After every required provider confirms evidence-preserving Discard, Airlock publishes one immutable cleanup completion fact bound to the exact Discard authority before removing the local recovery root.
 Any other conflicting history is ambiguous and fails closed.
 
 Provider cleanup begins only after immutable Discard authority exists.
+The bounded exception is cleanup of partial provider preparation before a terminal Run can be assembled, and the resulting authority is accepted only when it embeds exact successful Discard coverage for every known provider.
 Startup retries provider and local cleanup from that exact Discard authority and never synthesizes Discard after local state disappears.
-If the local recovery root is missing, startup accepts provider cleanup only when the exact authority-bound cleanup completion fact exists and passes complete provider coverage validation.
+If the local recovery root is missing, startup accepts provider cleanup only when either the authority embeds complete provider Discard evidence or the exact authority-bound cleanup completion fact exists and passes complete provider coverage validation.
 If Discard authority exists while local Candidate or Quarantine state remains, startup completes that authorized cleanup and atomically replays the Run plus Candidate competitor lifecycle.
 A selected winner that fails before Promotion remains the historical Selection winner, while its terminal Quarantine or Discard authority controls only retained state and competitor cleanup lifecycle.
 

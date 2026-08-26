@@ -1478,6 +1478,8 @@ export class AirlockRunner {
   ): Promise<ReconciledPromotion> {
     let record = structuredClone(initial);
     let transaction = structuredClone(record.transaction);
+    const wasAlreadyRecovered =
+      record.transaction.recovery.recoveredAfterRestart;
     transaction.recovery = {
       ...transaction.recovery,
       recoveredAfterRestart: true,
@@ -1621,8 +1623,14 @@ export class AirlockRunner {
 
     if (record.phase === "effects-delivered") {
       const canonical = await this.verifyJournalCanonical(record);
-      await this.verifyProviderVersions(record, canonical, recordResourceEvent);
+      const verificationEvents: RunTransaction["providerResourceEvents"] = [];
+      await this.verifyProviderVersions(record, canonical, (event) => {
+        appendBoundedResourceEvent(verificationEvents, event);
+      });
       await this.verifyDeliveredEffects(record, canonical);
+      for (const event of verificationEvents) {
+        appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      }
       transaction = this.recordTransition(
         transaction,
         "promoted",
@@ -1635,14 +1643,24 @@ export class AirlockRunner {
       transaction = record.transaction;
     } else if (record.phase === "completed") {
       const canonical = await this.verifyJournalCanonical(record);
-      await this.verifyProviderVersions(record, canonical, recordResourceEvent);
+      const verificationEvents: RunTransaction["providerResourceEvents"] = [];
+      await this.verifyProviderVersions(record, canonical, (event) => {
+        appendBoundedResourceEvent(verificationEvents, event);
+      });
       await this.verifyDeliveredEffects(record, canonical);
-      transaction.recovery.recoveredAfterRestart = true;
-      record = await this.promotionJournal.updateTransaction(
-        record.runId,
-        transaction,
-      );
-      transaction = record.transaction;
+      if (wasAlreadyRecovered) {
+        transaction = record.transaction;
+      } else {
+        for (const event of verificationEvents) {
+          appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+        }
+        transaction.recovery.recoveredAfterRestart = true;
+        record = await this.promotionJournal.updateTransaction(
+          record.runId,
+          transaction,
+        );
+        transaction = record.transaction;
+      }
     }
 
     if (!record.targetCanonical) {

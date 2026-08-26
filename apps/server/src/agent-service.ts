@@ -61,6 +61,7 @@ import {
   PortableDecisionJournal,
   assertPromotionRecoveryProgress,
   assertQuarantineCleanupProgress,
+  hasCompleteProviderDiscardEvidence,
   portableCandidateSetAuthorityHash,
   portableDecisionTransactionHash,
   type CandidateSetDecisionAuthorityRecord,
@@ -479,7 +480,7 @@ export class AgentService {
             finalTransaction,
             root,
           );
-          if (requiresProviderDiscard(finalTransaction)) {
+          if (requiresProviderDiscardCleanupFact(finalTransaction)) {
             await this.portableDecisionJournal.recordDiscardCleanup(
               authority,
               cleaned,
@@ -2273,7 +2274,7 @@ export class AgentService {
     } else {
       retainedStateRoot = null;
     }
-    if (requiresProviderDiscard(authority.transaction)) {
+    if (requiresProviderDiscardCleanupFact(authority.transaction)) {
       const completed =
         await this.portableDecisionJournal.readDiscardCleanup(authority);
       if (!completed) {
@@ -3916,7 +3917,6 @@ export class AgentService {
             await this.persistRunProgress(run.id, progress);
           },
           async (cleaned) => {
-            if (!requiresProviderDiscard(cleaned)) return;
             const authority =
               terminalAuthority ??
               (await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
@@ -3927,6 +3927,9 @@ export class AgentService {
               throw new Error(
                 "Candidate Set loser provider cleanup has no Discard authority",
               );
+            }
+            if (!requiresProviderDiscardCleanupFact(authority.transaction)) {
+              return;
             }
             await this.portableDecisionJournal.recordDiscardCleanup(
               authority,
@@ -4671,12 +4674,16 @@ function markTransactionDiscarded(
   return next;
 }
 
-function requiresProviderDiscard(transaction: RunTransaction): boolean {
-  return (
+function requiresProviderDiscardCleanupFact(
+  transaction: RunTransaction,
+): boolean {
+  const hasProviderRecoveryState =
     transaction.providerResources.length > 0 ||
     transaction.providerResourceEvents.some(
       (event) => event.stage === "prepare" && event.status === "failed",
-    )
+    );
+  return (
+    hasProviderRecoveryState && !hasCompleteProviderDiscardEvidence(transaction)
   );
 }
 
@@ -4699,74 +4706,111 @@ function isEquivalentRecoveredPromotionReplay(
     return false;
   }
   const providerCount = authority.providerResources.length;
-  if (
-    replay.providerResources.length !== providerCount ||
-    authority.providerResourceEvents.length < providerCount ||
-    replay.providerResourceEvents.length < providerCount ||
-    !isExactPromotionReconciliationSuffix(replay, providerCount)
-  ) {
-    return false;
-  }
-  const replayBeforeLatest = structuredClone(replay);
-  replayBeforeLatest.providerResourceEvents =
-    replay.providerResourceEvents.slice(
-      0,
-      providerCount === 0 ? undefined : -providerCount,
-    );
-  if (stableJson(replayBeforeLatest) === stableJson(authority)) {
-    return true;
-  }
-  if (
-    stableJson(
-      authority.providerResourceEvents.slice(
-        0,
-        providerCount === 0 ? undefined : -providerCount,
-      ),
-    ) !==
-    stableJson(
-      replay.providerResourceEvents.slice(
-        0,
-        providerCount === 0 ? undefined : -providerCount,
-      ),
-    )
-  ) {
-    return false;
-  }
-  const expected = structuredClone(authority);
-  expected.providerResourceEvents = structuredClone(
-    replay.providerResourceEvents,
-  );
-  return stableJson(expected) === stableJson(replay);
-}
-
-function isExactPromotionReconciliationSuffix(
-  transaction: RunTransaction,
-  providerCount: number,
-): boolean {
-  if (providerCount === 0) return true;
   const providerKinds = new Map(
-    transaction.providerResources.map((resource) => [
+    authority.providerResources.map((resource) => [
       resource.providerId,
       resource.resourceKind,
     ]),
   );
-  const seen = new Set<string>();
-  const events = transaction.providerResourceEvents.slice(-providerCount);
-  return (
-    events.length === providerCount &&
-    events.every((event) => {
-      if (
-        providerKinds.get(event.providerId) !== event.resourceKind ||
-        seen.has(event.providerId) ||
-        event.stage !== "reconcile" ||
-        event.status !== "passed"
-      ) {
-        return false;
-      }
-      seen.add(event.providerId);
+  if (
+    replay.providerResources.length !== providerCount ||
+    providerKinds.size !== providerCount
+  ) {
+    return false;
+  }
+  const authorityCore = structuredClone(authority);
+  const replayCore = structuredClone(replay);
+  authorityCore.providerResourceEvents = [];
+  replayCore.providerResourceEvents = [];
+  if (stableJson(authorityCore) !== stableJson(replayCore)) {
+    return false;
+  }
+  if (providerCount === 0) {
+    return (
+      stableJson(authority.providerResourceEvents) ===
+      stableJson(replay.providerResourceEvents)
+    );
+  }
+  let commonEventCount = 0;
+  while (
+    commonEventCount < authority.providerResourceEvents.length &&
+    commonEventCount < replay.providerResourceEvents.length &&
+    stableJson(authority.providerResourceEvents[commonEventCount]) ===
+      stableJson(replay.providerResourceEvents[commonEventCount])
+  ) {
+    commonEventCount += 1;
+  }
+  for (let split = commonEventCount; split >= 0; split -= 1) {
+    const authorityRecoveryEvents =
+      authority.providerResourceEvents.slice(split);
+    const replayRecoveryEvents = replay.providerResourceEvents.slice(split);
+    if (
+      authorityRecoveryEvents.length === 0 &&
+      replayRecoveryEvents.length === 0
+    ) {
+      continue;
+    }
+    if (
+      isExactPromotionReconciliationSequence(
+        authorityRecoveryEvents,
+        providerKinds,
+      ) &&
+      isExactPromotionReconciliationSequence(
+        replayRecoveryEvents,
+        providerKinds,
+      )
+    ) {
       return true;
-    })
-  );
+    }
+  }
+  return false;
+}
+
+function isExactPromotionReconciliationSequence(
+  events: RunTransaction["providerResourceEvents"],
+  providerKinds: Map<string, string>,
+): boolean {
+  const providerCount = providerKinds.size;
+  if (providerCount === 0) return true;
+  if (events.length === 0) return true;
+  if (events.length % providerCount !== 0) return false;
+  const exactEventKeys = [
+    "schemaVersion",
+    "providerId",
+    "resourceKind",
+    "stage",
+    "status",
+    "summary",
+    "at",
+  ].sort();
+  for (let offset = 0; offset < events.length; offset += providerCount) {
+    const seen = new Set<string>();
+    const batch = events.slice(offset, offset + providerCount);
+    if (
+      !batch.every((event) => {
+        if (
+          stableJson(Object.keys(event).sort()) !==
+            stableJson(exactEventKeys) ||
+          event.schemaVersion !== 1 ||
+          providerKinds.get(event.providerId) !== event.resourceKind ||
+          seen.has(event.providerId) ||
+          event.stage !== "reconcile" ||
+          event.status !== "passed" ||
+          typeof event.summary !== "string" ||
+          event.summary.length === 0 ||
+          event.summary.length > 512 ||
+          !Number.isFinite(Date.parse(event.at))
+        ) {
+          return false;
+        }
+        seen.add(event.providerId);
+        return true;
+      })
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function terminalRunStatus(
