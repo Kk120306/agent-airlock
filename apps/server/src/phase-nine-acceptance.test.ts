@@ -31,6 +31,7 @@ import { AirlockRunner } from "./airlock-runner.js";
 import { stableJson } from "./candidate-selection.js";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { RunCancelledError } from "./errors.js";
 import { createRunner } from "./runner-factory.js";
 import { ResourceCoordinator } from "./resource-coordinator.js";
 import { ResourceRegistry } from "./resource-registry.js";
@@ -209,6 +210,54 @@ class GatedCompetingFuturesRunner extends CompetingFuturesRunner {
     if (this.startedCount === 2) this.allStartedSignal.resolve();
     await this.releaseSignal.promise;
     return super.run(request);
+  }
+}
+
+class BudgetCancellationRunner extends CompetingFuturesRunner {
+  private readonly slowStartedSignal = deferredSignal();
+  private rejectSlowRun: ((error: Error) => void) | null = null;
+  private slowExecutionId: string | null = null;
+
+  readonly cancelledExecutionIds: string[] = [];
+  readonly slowStarted = this.slowStartedSignal.promise;
+
+  override async run(request: RunnerRequest): Promise<RunnerResult> {
+    const competitor = request.prompt.match(
+      /Competitor ([A-Za-z0-9._:-]+)\./,
+    )?.[1];
+    if (competitor !== "slow-valid") return super.run(request);
+
+    this.requests.push(structuredClone(request));
+    this.active += 1;
+    this.maximumActive = Math.max(this.maximumActive, this.active);
+    this.slowExecutionId = request.executionId;
+    try {
+      return await new Promise<never>((_resolve, reject) => {
+        this.rejectSlowRun = reject;
+        this.slowStartedSignal.resolve();
+      });
+    } finally {
+      this.rejectSlowRun = null;
+      this.active -= 1;
+    }
+  }
+
+  override async cancel(
+    _agentId: string,
+    executionId?: string,
+  ): Promise<boolean> {
+    if (
+      !executionId ||
+      executionId !== this.slowExecutionId ||
+      !this.rejectSlowRun
+    ) {
+      return false;
+    }
+    const reject = this.rejectSlowRun;
+    this.rejectSlowRun = null;
+    this.cancelledExecutionIds.push(executionId);
+    reject(new RunCancelledError("fixture cancelled the over-budget Runtime"));
+    return true;
   }
 }
 
@@ -462,11 +511,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
       config.workspaceRoot,
       config.codexHome,
     );
+    const runner = new BudgetCancellationRunner();
     const service = new AgentService(
       config,
       new JsonStore(path.join(config.dataDirectory, "db.json")),
       workspaces,
-      createRunner(config),
+      runner,
     );
     await service.initialize();
     const app = await createApp(config, service);
@@ -476,7 +526,6 @@ describe("Phase 9 Competing Futures acceptance", () => {
       payload: { name: "Bounded Competing Futures" },
     });
     const agentId = created.json<{ agent: { id: string } }>().agent.id;
-    const startedAt = Date.now();
     const admitted = await app.inject({
       method: "POST",
       url: "/api/agents/" + agentId + "/candidate-sets",
@@ -497,7 +546,7 @@ describe("Phase 9 Competing Futures acceptance", () => {
         ],
         maxConcurrency: 2,
         budget: {
-          maxDurationMsPerCompetitor: 1_000,
+          maxDurationMsPerCompetitor: 5_000,
           maxTotalTokens: 2_000_000,
           maxTotalChangedBytes: 200_000_000,
         },
@@ -507,6 +556,7 @@ describe("Phase 9 Competing Futures acceptance", () => {
     expect(admitted.statusCode).toBe(202);
     const candidateSetId = admitted.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
+    await runner.slowStarted;
     await waitForCandidateSetTerminalPhase(
       service,
       candidateSetId,
@@ -515,14 +565,25 @@ describe("Phase 9 Competing Futures acceptance", () => {
     );
 
     const candidateSet = service.getCandidateSet(candidateSetId);
-    expect(Date.now() - startedAt).toBeLessThan(4_000);
     expect(candidateSet.selectedCompetitorId).toBe("focused-valid");
-    expect(
-      candidateSet.competitors.find((item) => item.id === "slow-valid"),
-    ).toMatchObject({
+    const slowCompetitor = candidateSet.competitors.find(
+      (item) => item.id === "slow-valid",
+    );
+    expect(slowCompetitor).toMatchObject({
+      status: "discarded",
       exclusions: ["competitor-budget:duration-ms"],
       loserDisposition: "discarded",
     });
+    const slowRun = service.getRun(slowCompetitor!.runId);
+    expect(slowRun).toMatchObject({
+      status: "failed",
+      error: "Candidate evaluation exceeded its duration budget",
+      transaction: {
+        status: "cancelled",
+        disposition: "cancelled",
+      },
+    });
+    expect(runner.cancelledExecutionIds).toEqual([slowRun.id]);
     expect(
       (await service.listExternalEffects()).map((effect) => effect.intentId),
     ).toEqual(["focused-valid-effect"]);
