@@ -37,14 +37,15 @@ import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js";
 import { stableJson } from "./candidate-selection.js";
+import { portableDecisionTransactionHash } from "./portable-decision-journal.js";
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -122,7 +123,8 @@ class ProviderReceiptRunner extends PassingReceiptRunner {
     const objectPath = request.resourceBindings?.find(
       (binding) => binding.providerId === "portable-json",
     )?.hostPath;
-    if (!objectPath) throw new Error("Runtime did not receive the JSON provider binding");
+    if (!objectPath)
+      throw new Error("Runtime did not receive the JSON provider binding");
     await writeFile(objectPath, '{"release":"portable-promoted"}\n', "utf8");
     return super.run(request);
   }
@@ -131,7 +133,9 @@ class ProviderReceiptRunner extends PassingReceiptRunner {
 describe("Phase 11 Portable Trust acceptance", () => {
   it("exports, self-verifies, anchors, and ABI-encodes one promoted Run over HTTP", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable winner" });
+    const agent = await harness.service.createAgent({
+      name: "Portable winner",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Create a portable trust receipt without a network.",
@@ -158,9 +162,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
     expect(result.envelope.receipt.decision.disposition).toBe("promoted");
     expect(result.envelope.disclosures).toEqual([]);
     expect(result.availableDisclosureIdentities.length).toBeGreaterThan(0);
-    expect(verifySignedTransparencyCheckpoint(result.anchor!.checkpoint).valid).toBe(
-      true,
-    );
+    expect(
+      verifySignedTransparencyCheckpoint(result.anchor!.checkpoint).valid,
+    ).toBe(true);
     expect(
       verifyTransparencyInclusion(
         result.anchor!.inclusionProof,
@@ -190,7 +194,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
 
   it("chains a Repair to its quarantined parent and preserves old signatures after Discard", async () => {
     const harness = await makeHarness(new QuarantineThenRepairRunner());
-    const agent = await harness.service.createAgent({ name: "Portable ancestry" });
+    const agent = await harness.service.createAgent({
+      name: "Portable ancestry",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Trigger the bounded rejection fixture.",
@@ -214,7 +220,8 @@ describe("Phase 11 Portable Trust acceptance", () => {
       payload: { objective: "Restore the required public artifact." },
     });
     expect(repairResponse.statusCode).toBe(202);
-    const repairRunId = (repairResponse.json() as { run: { id: string } }).run.id;
+    const repairRunId = (repairResponse.json() as { run: { id: string } }).run
+      .id;
     await expect
       .poll(() => harness.service.getRun(repairRunId).transaction?.status)
       .toBe("promoted");
@@ -251,18 +258,27 @@ describe("Phase 11 Portable Trust acceptance", () => {
     });
     const discarded = discardedResponse.json() as PortableExportResponse;
     expect(discarded.envelope.receipt.decision.disposition).toBe("discarded");
-    expect(discarded.envelope.receiptDigest).not.toBe(parent.envelope.receiptDigest);
+    expect(discarded.envelope.receiptDigest).not.toBe(
+      parent.envelope.receiptDigest,
+    );
     expect(verifyPortablePromotionEnvelope(parent.envelope).valid).toBe(true);
-    expect(verifyPortablePromotionEnvelope(discarded.envelope).valid).toBe(true);
+    expect(verifyPortablePromotionEnvelope(discarded.envelope).valid).toBe(
+      true,
+    );
 
     const repeatedChildResponse = await harness.app.inject({
       method: "POST",
       url: `/api/runs/${repairRunId}/portable-receipt`,
       payload: { includeAncestry: true },
     });
-    expect(repeatedChildResponse.statusCode, repeatedChildResponse.body).toBe(200);
-    const repeatedChild = repeatedChildResponse.json() as PortableExportResponse;
-    expect(repeatedChild.envelope.receiptDigest).toBe(child.envelope.receiptDigest);
+    expect(repeatedChildResponse.statusCode, repeatedChildResponse.body).toBe(
+      200,
+    );
+    const repeatedChild =
+      repeatedChildResponse.json() as PortableExportResponse;
+    expect(repeatedChild.envelope.receiptDigest).toBe(
+      child.envelope.receiptDigest,
+    );
     expect(repeatedChild.envelope.receipt.ancestry.previousReceiptDigest).toBe(
       parent.envelope.receiptDigest,
     );
@@ -274,7 +290,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
 
   it("commits the durable Candidate Set selection into the winner receipt", async () => {
     const harness = await makeHarness(new BoundedReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable selection" });
+    const agent = await harness.service.createAgent({
+      name: "Portable selection",
+    });
     const admission = await harness.app.inject({
       method: "POST",
       url: `/api/agents/${agent.id}/candidate-sets`,
@@ -320,19 +338,93 @@ describe("Phase 11 Portable Trust acceptance", () => {
     expect(result.verification.commitments.selection).toBe(true);
   });
 
+  it("composes retained-loser Discard with direct and historical receipts", async () => {
+    const harness = await makeHarness(new BoundedReceiptRunner());
+    const agent = await harness.service.createAgent({
+      name: "Portable retained loser",
+    });
+    const admission = await harness.app.inject({
+      method: "POST",
+      url: `/api/agents/${agent.id}/candidate-sets`,
+      payload: {
+        objective: "Retain one losing future for later audited disposal.",
+        competitors: [
+          {
+            id: "alpha",
+            executorProfileId: "standard-v1",
+            strategyInstruction: "Produce a minimal valid future.",
+          },
+          {
+            id: "beta",
+            executorProfileId: "standard-v1",
+            strategyInstruction: "Produce a second valid future.",
+          },
+        ],
+        maxConcurrency: 2,
+        loserPolicy: "retain",
+      },
+    });
+    expect(admission.statusCode, admission.body).toBe(202);
+    const candidateSetId = (
+      admission.json() as { candidateSet: { id: string } }
+    ).candidateSet.id;
+    await expect
+      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
+      .toBe("completed");
+    const retained = harness.service
+      .getCandidateSet(candidateSetId)
+      .competitors.find(
+        (competitor) => competitor.loserDisposition === "retained",
+      );
+    expect(retained).toBeDefined();
+
+    const parentResponse = await harness.app.inject({
+      method: "POST",
+      url: `/api/runs/${retained!.runId}/portable-receipt`,
+      payload: {},
+    });
+    expect(parentResponse.statusCode, parentResponse.body).toBe(200);
+    const parent = parentResponse.json() as PortableExportResponse;
+    expect(parent.envelope.receipt.decision.disposition).toBe("quarantined");
+
+    const discardedRun = await harness.service.discardRun(retained!.runId);
+    expect(discardedRun.transaction?.disposition).toBe("discarded");
+    expect(
+      harness.service
+        .getCandidateSet(candidateSetId)
+        .competitors.find((competitor) => competitor.id === retained!.id),
+    ).toMatchObject({ status: "discarded", loserDisposition: "discarded" });
+    const directAfterDiscard = await harness.app.inject({
+      method: "POST",
+      url: `/api/runs/${retained!.runId}/portable-receipt`,
+      payload: {},
+    });
+    expect(directAfterDiscard.statusCode, directAfterDiscard.body).toBe(200);
+    expect(
+      directAfterDiscard.json<PortableExportResponse>().envelope.receipt
+        .decision.disposition,
+    ).toBe("discarded");
+
+    expect(verifyPortablePromotionEnvelope(parent.envelope).valid).toBe(true);
+    expect(
+      verifyPortablePromotionEnvelope(
+        directAfterDiscard.json<PortableExportResponse>().envelope,
+      ).valid,
+    ).toBe(true);
+  });
+
   it("binds an operator-accepted Assurance Proposal to future Run receipts", async () => {
     const harness = await makeHarness(new ThreeQuarantinesThenPassRunner());
-    const agent = await harness.service.createAgent({ name: "Portable assurance" });
+    const agent = await harness.service.createAgent({
+      name: "Portable assurance",
+    });
     for (let index = 0; index < 3; index += 1) {
       const admitted = await harness.service.sendMessage(
         agent.id,
         `Collect independent bounded evidence ${index + 1}.`,
       );
       await expect
-        .poll(
-          () =>
-            harness.service.getRun(admitted.run.id).transaction?.status,
-        )
+        .poll(() => harness.service.getRun(admitted.run.id).transaction?.status)
         .toBe("quarantined");
       await expect
         .poll(() => harness.service.getAgent(agent.id).status)
@@ -370,7 +462,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
   it("refuses an export with incomplete durable evidence as a retryable conflict", async () => {
     const runner = new GatedReceiptRunner();
     const harness = await makeHarness(runner);
-    const agent = await harness.service.createAgent({ name: "Portable conflict" });
+    const agent = await harness.service.createAgent({
+      name: "Portable conflict",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Hold this Runtime before durable decision evidence exists.",
@@ -394,7 +488,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
   it("records immutable authority before persisting a restart-created cancellation", async () => {
     const runner = new GatedReceiptRunner();
     const first = await makeHarness(runner);
-    const agent = await first.service.createAgent({ name: "Restart authority" });
+    const agent = await first.service.createAgent({
+      name: "Restart authority",
+    });
     const admitted = await first.service.sendMessage(
       agent.id,
       "Interrupt this Run after Candidate creation.",
@@ -404,7 +500,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
       ".candidates",
       admitted.run.id,
     );
-    await expect.poll(async () => (await lstat(candidateRoot)).isDirectory()).toBe(true);
+    await expect
+      .poll(async () => (await lstat(candidateRoot)).isDirectory())
+      .toBe(true);
     await rm(candidateRoot, { recursive: true });
 
     const restartedStore = new JsonStore(
@@ -433,9 +531,92 @@ describe("Phase 11 Portable Trust acceptance", () => {
     expect(response.statusCode, response.body).toBe(200);
   });
 
+  it("replays the exact Discard authority after interruption before mutable publication", async () => {
+    const first = await makeHarness(new QuarantineThenRepairRunner());
+    const agent = await first.service.createAgent({
+      name: "Exact Discard replay",
+    });
+    const admitted = await first.service.sendMessage(
+      agent.id,
+      "Retain this invalid Candidate before an interrupted Discard.",
+    );
+    await expect
+      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+      .toBe("quarantined");
+
+    const originalMutate = first.store.mutate.bind(first.store);
+    let mutationCount = 0;
+    first.store.mutate = (async (
+      mutation: Parameters<JsonStore["mutate"]>[0],
+    ) => {
+      mutationCount += 1;
+      if (mutationCount === 2) {
+        throw new Error("simulated crash after immutable Discard authority");
+      }
+      return originalMutate(mutation);
+    }) as JsonStore["mutate"];
+    await expect(first.service.discardRun(admitted.run.id)).rejects.toThrow(
+      /simulated crash/,
+    );
+    first.store.mutate = originalMutate as JsonStore["mutate"];
+
+    expect(first.service.getRun(admitted.run.id).transaction?.disposition).toBe(
+      "quarantined",
+    );
+    await expectFileMissing(
+      path.join(first.config.workspaceRoot, ".quarantine", admitted.run.id),
+    );
+    const authorityDirectory = path.join(
+      first.config.dataDirectory,
+      "portable-decision-journal",
+      admitted.run.id,
+    );
+    const authorities = await Promise.all(
+      (await readdir(authorityDirectory))
+        .filter((entry) => entry.endsWith(".json"))
+        .map(async (entry) =>
+          JSON.parse(
+            await readFile(path.join(authorityDirectory, entry), "utf8"),
+          ),
+        ),
+    );
+    const discardedAuthority = authorities.find(
+      (authority) => authority.disposition === "discarded",
+    );
+    expect(discardedAuthority).toBeDefined();
+
+    const restarted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new WorkspaceManager(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
+    );
+    await restarted.initialize();
+    const recovered = restarted.getRun(admitted.run.id);
+    expect(stableJson(recovered.transaction)).toBe(
+      stableJson(discardedAuthority.transaction),
+    );
+    expect(recovered).toMatchObject({
+      status: "failed",
+      transaction: {
+        status: "discarded",
+        disposition: "discarded",
+      },
+    });
+    const app = await createApp(first.config, restarted);
+    const receipt = await app.inject({
+      method: "POST",
+      url: `/api/runs/${admitted.run.id}/portable-receipt`,
+      payload: {},
+    });
+    expect(receipt.statusCode, receipt.body).toBe(200);
+  });
+
   it("rejects every contradictory durable Promotion Receipt authority field before signing", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable authority" });
+    const agent = await harness.service.createAgent({
+      name: "Portable authority",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Create a complete source for authority mutation checks.",
@@ -532,7 +713,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
 
   it("physically verifies immutable historical state before signing", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable physical state" });
+    const agent = await harness.service.createAgent({
+      name: "Portable physical state",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Promote a state that will be independently checked before export.",
@@ -559,13 +742,17 @@ describe("Phase 11 Portable Trust acceptance", () => {
       payload: {},
     });
     expect(response.statusCode).toBe(409);
-    expect(response.json<{ error: string }>().error).toMatch(/immutable historical/);
+    expect(response.json<{ error: string }>().error).toMatch(
+      /immutable historical/,
+    );
     await expectFileMissing(harness.config.portableSigningKeyPath);
   });
 
   it("recomputes the outbox-bound composite hash before signing", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable outbox authority" });
+    const agent = await harness.service.createAgent({
+      name: "Portable outbox authority",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Promote state before a historical outbox corruption check.",
@@ -592,13 +779,17 @@ describe("Phase 11 Portable Trust acceptance", () => {
       payload: {},
     });
     expect(response.statusCode).toBe(409);
-    expect(response.json<{ error: string }>().error).toMatch(/immutable historical/);
+    expect(response.json<{ error: string }>().error).toMatch(
+      /immutable historical/,
+    );
     await expectFileMissing(harness.config.portableSigningKeyPath);
   });
 
   it("rejects coordinated Run Transaction and embedded receipt corruption", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable decision journal" });
+    const agent = await harness.service.createAgent({
+      name: "Portable decision journal",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Create immutable decision authority before coordinated corruption.",
@@ -624,6 +815,128 @@ describe("Phase 11 Portable Trust acceptance", () => {
       /decision authority|immutable historical/,
     );
     await expectFileMissing(harness.config.portableSigningKeyPath);
+  });
+
+  it("keeps execution admission closed after terminal authority recovery fails", async () => {
+    const first = await makeHarness(new PassingReceiptRunner());
+    const agent = await first.service.createAgent({
+      name: "Closed terminal recovery",
+    });
+    const admitted = await first.service.sendMessage(
+      agent.id,
+      "Create authority before a restart-time corruption check.",
+    );
+    await expect
+      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+      .toBe("promoted");
+    const authorityDirectory = path.join(
+      first.config.dataDirectory,
+      "portable-decision-journal",
+      admitted.run.id,
+    );
+    const authorityFile = (await readdir(authorityDirectory)).find((entry) =>
+      entry.endsWith(".json"),
+    )!;
+    const authorityPath = path.join(authorityDirectory, authorityFile);
+    const authority = JSON.parse(await readFile(authorityPath, "utf8"));
+    authority.transaction.canonicalStateIdAfter = "contradictory-state";
+    await writeFile(authorityPath, JSON.stringify(authority) + "\n", "utf8");
+
+    const restarted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new WorkspaceManager(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
+    );
+    await restarted.initialize();
+    expect(restarted.getAgent(agent.id)).toMatchObject({ status: "error" });
+    expect(restarted.getRun(admitted.run.id)).toMatchObject({
+      status: "failed",
+      transaction: { status: "recovery-error" },
+    });
+    await expect(
+      restarted.sendMessage(agent.id, "This must remain blocked."),
+    ).rejects.toMatchObject({ statusCode: 503 });
+    await expect(restarted.startAgent(agent.id)).rejects.toMatchObject({
+      statusCode: 409,
+    });
+  });
+
+  it("rejects two individually valid but conflicting terminal authorities", async () => {
+    const first = await makeHarness(new PassingReceiptRunner());
+    const agent = await first.service.createAgent({
+      name: "Ambiguous terminal authority",
+    });
+    const admitted = await first.service.sendMessage(
+      agent.id,
+      "Create one valid authority before an ambiguity injection.",
+    );
+    await expect
+      .poll(() => first.service.getRun(admitted.run.id).transaction?.status)
+      .toBe("promoted");
+    const authorityDirectory = path.join(
+      first.config.dataDirectory,
+      "portable-decision-journal",
+      admitted.run.id,
+    );
+    const authorityFile = (await readdir(authorityDirectory)).find((entry) =>
+      entry.endsWith(".json"),
+    )!;
+    const original = JSON.parse(
+      await readFile(path.join(authorityDirectory, authorityFile), "utf8"),
+    );
+    const conflictingTransaction = structuredClone(original.transaction);
+    conflictingTransaction.events.at(-1).summary =
+      "A contradictory but internally hashed terminal history";
+    const transactionEvidenceHash = portableDecisionTransactionHash(
+      conflictingTransaction,
+    );
+    const unsigned = {
+      schemaVersion: 1,
+      transactionEvidenceHash,
+      parentAuthorityDigest: original.parentAuthorityDigest,
+      candidateSetAuthorityDigest: original.candidateSetAuthorityDigest,
+      runId: original.runId,
+      agentId: original.agentId,
+      disposition: original.disposition,
+      decidedAt: original.decidedAt,
+    };
+    const authorityDigest =
+      "sha256:" +
+      createHash("sha256").update(stableJson(unsigned)).digest("hex");
+    await writeFile(
+      path.join(
+        authorityDirectory,
+        authorityDigest.replace("sha256:", "sha256-") + ".json",
+      ),
+      JSON.stringify({
+        ...unsigned,
+        authorityDigest,
+        transaction: conflictingTransaction,
+      }) + "\n",
+      "utf8",
+    );
+
+    const restarted = new AgentService(
+      first.config,
+      new JsonStore(path.join(first.config.dataDirectory, "db.json")),
+      new WorkspaceManager(first.config.workspaceRoot),
+      new PassingReceiptRunner(),
+    );
+    await restarted.initialize();
+    expect(restarted.getAgent(agent.id)).toMatchObject({ status: "error" });
+    expect(restarted.getRun(admitted.run.id)).toMatchObject({
+      status: "failed",
+      transaction: { status: "recovery-error" },
+    });
+    await expect(
+      restarted.exportPortableReceipt(admitted.run.id, {
+        disclosureIdentities: [],
+        includeAncestry: false,
+        localAnchor: false,
+        evmPayload: false,
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
   });
 
   it("rejects a symbolic-link substitution at the decision authority boundary", async () => {
@@ -685,13 +998,17 @@ describe("Phase 11 Portable Trust acceptance", () => {
       payload: {},
     });
     expect(response.statusCode).toBe(409);
-    expect(response.json<{ error: string }>().error).toMatch(/decision authority/);
+    expect(response.json<{ error: string }>().error).toMatch(
+      /decision authority/,
+    );
     await expectFileMissing(harness.config.portableSigningKeyPath);
   });
 
   it("cleans every crash-stage authority remnant before publishing the next decision", async () => {
     const harness = await makeHarness(new QuarantineThenRepairRunner());
-    const agent = await harness.service.createAgent({ name: "Crash-safe authority" });
+    const agent = await harness.service.createAgent({
+      name: "Crash-safe authority",
+    });
     const admitted = await harness.service.sendMessage(
       agent.id,
       "Retain one Candidate before crash-remnant cleanup.",
@@ -739,7 +1056,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
     const discarded = await harness.service.discardRun(admitted.run.id);
     expect(discarded.transaction?.disposition).toBe("discarded");
     expect(
-      (await readdir(authorityDirectory)).filter((name) => name.endsWith(".tmp")),
+      (await readdir(authorityDirectory)).filter((name) =>
+        name.endsWith(".tmp"),
+      ),
     ).toEqual([]);
     const response = await harness.app.inject({
       method: "POST",
@@ -751,7 +1070,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
 
   it("cleans historical-manifest crash remnants before the next Promotion", async () => {
     const harness = await makeHarness(new PassingReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Crash-safe history" });
+    const agent = await harness.service.createAgent({
+      name: "Crash-safe history",
+    });
     const first = await harness.service.sendMessage(
       agent.id,
       "Publish one historical Canonical manifest.",
@@ -828,45 +1149,51 @@ describe("Phase 11 Portable Trust acceptance", () => {
     "installed-fingerprint",
     "required-provider-validation",
     "historical-provider-vector",
-  ] as const)("rejects %s corruption before creating a signing key", async (kind) => {
-    const harness = await makeProviderHarness();
-    if (kind === "historical-provider-vector") {
-      const manifestPath = path.join(
-        harness.config.workspaceRoot,
-        harness.agentId,
-        ".canonical-history",
-        harness.stateId + ".json",
-      );
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
-        providerVersions: Array<{ versionId: string }>;
-      };
-      manifest.providerVersions[0]!.versionId = "forged-history-version";
-      await writeFile(manifestPath, JSON.stringify(manifest) + "\n");
-    } else {
-      await harness.store.mutate((database) => {
-        const resource = database.runs.find((run) => run.id === harness.runId)!
-          .transaction!.providerResources[0]!;
-        if (kind === "installed-version") {
-          resource.installedVersion!.versionId = "forged-installed-version";
-        } else if (kind === "installed-fingerprint") {
-          resource.installedVersion!.fingerprint = "f".repeat(64);
-        } else {
-          resource.validations = [];
-        }
+  ] as const)(
+    "rejects %s corruption before creating a signing key",
+    async (kind) => {
+      const harness = await makeProviderHarness();
+      if (kind === "historical-provider-vector") {
+        const manifestPath = path.join(
+          harness.config.workspaceRoot,
+          harness.agentId,
+          ".canonical-history",
+          harness.stateId + ".json",
+        );
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+          providerVersions: Array<{ versionId: string }>;
+        };
+        manifest.providerVersions[0]!.versionId = "forged-history-version";
+        await writeFile(manifestPath, JSON.stringify(manifest) + "\n");
+      } else {
+        await harness.store.mutate((database) => {
+          const resource = database.runs.find(
+            (run) => run.id === harness.runId,
+          )!.transaction!.providerResources[0]!;
+          if (kind === "installed-version") {
+            resource.installedVersion!.versionId = "forged-installed-version";
+          } else if (kind === "installed-fingerprint") {
+            resource.installedVersion!.fingerprint = "f".repeat(64);
+          } else {
+            resource.validations = [];
+          }
+        });
+      }
+      const response = await harness.app.inject({
+        method: "POST",
+        url: `/api/runs/${harness.runId}/portable-receipt`,
+        payload: {},
       });
-    }
-    const response = await harness.app.inject({
-      method: "POST",
-      url: `/api/runs/${harness.runId}/portable-receipt`,
-      payload: {},
-    });
-    expect(response.statusCode).toBe(409);
-    await expectFileMissing(harness.config.portableSigningKeyPath);
-  });
+      expect(response.statusCode).toBe(409);
+      await expectFileMissing(harness.config.portableSigningKeyPath);
+    },
+  );
 
   it("replays Candidate Selection and validates the winner seal before signing", async () => {
     const harness = await makeHarness(new BoundedReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable sealed winner" });
+    const agent = await harness.service.createAgent({
+      name: "Portable sealed winner",
+    });
     const admission = await harness.app.inject({
       method: "POST",
       url: `/api/agents/${agent.id}/candidate-sets`,
@@ -893,7 +1220,8 @@ describe("Phase 11 Portable Trust acceptance", () => {
     await expect
       .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
       .toBe("completed");
-    const winnerRunId = harness.service.getCandidateSet(candidateSetId).winnerRunId!;
+    const winnerRunId =
+      harness.service.getCandidateSet(candidateSetId).winnerRunId!;
     await harness.store.mutate((database) => {
       database.runs.find((run) => run.id === winnerRunId)!.output =
         "Forged output after the winner seal.";
@@ -904,13 +1232,17 @@ describe("Phase 11 Portable Trust acceptance", () => {
       payload: {},
     });
     expect(response.statusCode).toBe(409);
-    expect(response.json<{ error: string }>().error).toMatch(/Selection evidence/);
+    expect(response.json<{ error: string }>().error).toMatch(
+      /Selection evidence/,
+    );
     await expectFileMissing(harness.config.portableSigningKeyPath);
   });
 
   it("binds a coordinated winner-seal rewrite to immutable Candidate authority", async () => {
     const harness = await makeHarness(new BoundedReceiptRunner());
-    const agent = await harness.service.createAgent({ name: "Portable sealed authority" });
+    const agent = await harness.service.createAgent({
+      name: "Portable sealed authority",
+    });
     const admission = await harness.app.inject({
       method: "POST",
       url: `/api/agents/${agent.id}/candidate-sets`,
@@ -937,7 +1269,8 @@ describe("Phase 11 Portable Trust acceptance", () => {
     await expect
       .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
       .toBe("completed");
-    const winnerRunId = harness.service.getCandidateSet(candidateSetId).winnerRunId!;
+    const winnerRunId =
+      harness.service.getCandidateSet(candidateSetId).winnerRunId!;
     await harness.store.mutate((database) => {
       const candidateSet = database.candidateSets.find(
         (candidate) => candidate.id === candidateSetId,
@@ -948,8 +1281,62 @@ describe("Phase 11 Portable Trust acceptance", () => {
       winner.seal!.transactionEvidenceHash = `sha256:${"e".repeat(64)}`;
       const { sealDigest: _oldDigest, ...unsigned } = winner.seal!;
       winner.seal!.sealDigest =
-        "sha256:" + createHash("sha256").update(stableJson(unsigned)).digest("hex");
+        "sha256:" +
+        createHash("sha256").update(stableJson(unsigned)).digest("hex");
     });
+    const response = await harness.app.inject({
+      method: "POST",
+      url: `/api/runs/${winnerRunId}/portable-receipt`,
+      payload: {},
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ error: string }>().error).toMatch(
+      /decision authority|Candidate Set/,
+    );
+    await expectFileMissing(harness.config.portableSigningKeyPath);
+  });
+
+  it("binds loser cleanup policy to immutable Candidate authority", async () => {
+    const harness = await makeHarness(new BoundedReceiptRunner());
+    const agent = await harness.service.createAgent({
+      name: "Portable loser policy authority",
+    });
+    const admission = await harness.app.inject({
+      method: "POST",
+      url: `/api/agents/${agent.id}/candidate-sets`,
+      payload: {
+        objective: "Bind irreversible loser cleanup to the selected policy.",
+        competitors: [
+          {
+            id: "alpha",
+            executorProfileId: "standard-v1",
+            strategyInstruction: "Produce one valid future.",
+          },
+          {
+            id: "beta",
+            executorProfileId: "standard-v1",
+            strategyInstruction: "Produce another valid future.",
+          },
+        ],
+        maxConcurrency: 2,
+        loserPolicy: "retain",
+      },
+    });
+    expect(admission.statusCode, admission.body).toBe(202);
+    const candidateSetId = admission.json<{ candidateSet: { id: string } }>()
+      .candidateSet.id;
+    await expect
+      .poll(() => harness.service.getCandidateSet(candidateSetId).phase)
+      .toBe("completed");
+    const winnerRunId =
+      harness.service.getCandidateSet(candidateSetId).winnerRunId!;
+    await harness.store.mutate((database) => {
+      const candidateSet = database.candidateSets.find(
+        (candidate) => candidate.id === candidateSetId,
+      )!;
+      candidateSet.loserPolicy = "discard";
+    });
+
     const response = await harness.app.inject({
       method: "POST",
       url: `/api/runs/${winnerRunId}/portable-receipt`,
@@ -966,7 +1353,9 @@ describe("Phase 11 Portable Trust acceptance", () => {
     "fails optional trust storage closed without leaking operator paths",
     async () => {
       const harness = await makeHarness(new PassingReceiptRunner());
-      const agent = await harness.service.createAgent({ name: "Portable custody" });
+      const agent = await harness.service.createAgent({
+        name: "Portable custody",
+      });
       const admitted = await harness.service.sendMessage(
         agent.id,
         "Create complete evidence before exercising trust-storage failures.",
@@ -1016,10 +1405,12 @@ describe("Phase 11 Portable Trust acceptance", () => {
       expect(unsafeKey.json()).toEqual({
         error: "Portable receipt signing is unavailable",
       });
-      expect(unsafeKey.body).not.toContain(harness.config.portableSigningKeyPath);
-      expect(harness.service.getRun(admitted.run.id).transaction?.disposition).toBe(
-        "promoted",
+      expect(unsafeKey.body).not.toContain(
+        harness.config.portableSigningKeyPath,
       );
+      expect(
+        harness.service.getRun(admitted.run.id).transaction?.disposition,
+      ).toBe("promoted");
     },
   );
 });
@@ -1072,7 +1463,9 @@ async function makeProviderHarness() {
     ]),
   );
   const harness = await makeHarness(new ProviderReceiptRunner(), coordinator);
-  const agent = await harness.service.createAgent({ name: "Portable provider" });
+  const agent = await harness.service.createAgent({
+    name: "Portable provider",
+  });
   const admitted = await harness.service.sendMessage(
     agent.id,
     "Promote a Candidate with a registered Resource Provider.",

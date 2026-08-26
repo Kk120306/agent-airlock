@@ -210,11 +210,16 @@ The demo prints payload bytes and the exact privacy and consistency claim, perfo
 
 The server builds a portable receipt only from strictly parsed durable Run Transaction evidence.
 Before mutable control-plane metadata is persisted, Airlock writes an immutable Decision Authority record for each terminal Run decision.
-Before mutable Candidate Set Selection is persisted, Airlock separately writes one immutable Candidate Set Decision Authority that commits the final source, contracts, bounded competitor evidence, Selection Decision, selected competitor, winner Run, and decision timestamp.
+Before mutable Candidate Set Selection is persisted, Airlock separately writes one immutable Candidate Set Decision Authority that commits the final source, contracts, loser policy, bounded competitor evidence, Selection Decision, selected competitor, winner Run, and decision timestamp.
 Airlock then publishes a final Candidate Set-bound authority for every already-terminal competitor before exposing the mutable Selection projection.
-A terminal Run may retain both its earlier context-free authority and its final Candidate Set-bound authority, but every record for that Run must commit the same terminal transaction hash.
+A terminal Run may retain both its earlier context-free authority and its final Candidate Set-bound authority for the same transaction hash.
+An available Quarantine may later add one different authoritative Discard transaction when the immutable Run core and event prefixes prove the valid lifecycle transition.
+An interrupted completed Promotion may add one recovery authority only when the exact transaction differs by changing `recoveredAfterRestart` from `false` to `true` after journal verification.
+No other multi-hash terminal history is accepted.
 Export requires an exact match against this authority and never synthesizes a missing record from mutable database content.
 Terminal progress callbacks may publish authority, but they do not expose the terminal transaction through the mutable store before the enclosing child Run and competitor lifecycle update is complete.
+Provider Discard progress is persisted before physical removal, and the final Run transaction plus loser lifecycle are published in one database replacement after immutable authority exists.
+Intermediate Quarantine cleanup evidence must retain the authoritative transaction core, receipt, Run events, and provider-event prefix, so it cannot masquerade as a second terminal decision.
 The Agent remains busy until the complete Candidate Set finishes Selection, winner Promotion, and loser cleanup.
 Candidate Set cancellation and cleanup record authority at the branch that makes the terminal decision, while aggregate completion performs no authority reconstruction.
 Decision Authority records and historical Canonical manifests are first written and synchronized under unique same-directory temporary names, then installed through non-replacing hard-link publication and directory synchronization.
@@ -226,6 +231,8 @@ Before signing, Airlock rebuilds the complete physical Whole-Agent state referen
 It compares the rebuilt composite and every component fingerprint with both the historical manifest and the terminal decision authority.
 Non-Promotion dispositions require identical before and after commitments.
 It refuses export when required evidence is missing, contradictory, credential-bearing, truncated beyond the schema's disclosure claim, or associated with unresolved recovery.
+Startup audits authority for active and already-terminal Runs, selects only one unambiguous latest lifecycle decision, and replays that exact transaction with any Candidate competitor projection that is behind it.
+Authority corruption leaves the Run in `recovery-error`, the Agent in `error`, and execution plus Resource Registry admission closed.
 Completed decisions created before Decision Authority records were introduced fail export closed because their historical authority cannot be reconstructed safely from the mutable JSON store.
 
 The implemented HTTP and CLI boundary is:

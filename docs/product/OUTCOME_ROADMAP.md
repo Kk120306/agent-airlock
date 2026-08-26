@@ -47,20 +47,20 @@ The winning story is:
 
 ## Outcome ladder
 
-| Phase | Product outcome | Competitive level | Irreversible proof |
-| --- | --- | --- | --- |
-| 0. Baseline locked | The unmodified starter journey is understood and repeatable. | Eligibility | Browser acceptance flow and `npm run check` pass. |
-| 1. Harmless failure | A rejected Agent Run cannot change Canonical State. | Qualifying | Destructive candidate is quarantined and canonical hash is unchanged. |
-| 2. Explainable decision | The operator can understand exactly why a future was accepted or rejected. | Strong submission | Outcome Contract, change summary, timeline, and bounded evidence agree. |
-| 3. Whole-Agent continuity | Workspace and Codex session advance or remain unchanged together. | Podium | Rejected work does not pollute the next turn, while promoted work continues correctly. |
-| 4. Transactional effects | The model works across files, SQLite, and a deferred external action. | Podium plus | Rejection changes none of them and promotion delivers the action exactly once. |
-| 5. Recoverable intelligence | Airlock can repair a quarantined future without contaminating Canonical State. | Winning target | A Repair Run turns real failure evidence into a validated promoted result. |
-| 6. Adversarial resilience | Crashes and obvious bypass attempts fail closed. | Winning target | Fault injection, path escape, symlink, timeout, and duplicate-delivery tests pass. |
-| 7. Judge-ready release | A reviewer understands and believes the whole product in three minutes. | Submission release | Fresh-clone setup, live demo, architecture, and full checks pass without hidden steps. |
-| 8. Transactional Resource SDK | Other developers can put new resources behind Airlock. | Post-hackathon platform | A provider adapter passes a shared conformance suite. |
-| 9. Competing futures | Several Agents or models can attempt the same task and only the best valid future is promoted. | Category-defining product | Deterministic evaluation ranks isolated candidates without cross-contamination. |
-| 10. Adaptive assurance | Airlock learns which protections should be strengthened from observed failures. | Intelligent control plane | Suggested contract changes are explainable, versioned, reviewed, and never silently weakened. |
-| 11. Portable trust | Promotion evidence can be verified across runtimes and organizations. | Ecosystem standard | A provider-neutral signed Promotion Receipt verifies independently of the original Airlock instance. |
+| Phase                         | Product outcome                                                                                | Competitive level         | Irreversible proof                                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 0. Baseline locked            | The unmodified starter journey is understood and repeatable.                                   | Eligibility               | Browser acceptance flow and `npm run check` pass.                                                    |
+| 1. Harmless failure           | A rejected Agent Run cannot change Canonical State.                                            | Qualifying                | Destructive candidate is quarantined and canonical hash is unchanged.                                |
+| 2. Explainable decision       | The operator can understand exactly why a future was accepted or rejected.                     | Strong submission         | Outcome Contract, change summary, timeline, and bounded evidence agree.                              |
+| 3. Whole-Agent continuity     | Workspace and Codex session advance or remain unchanged together.                              | Podium                    | Rejected work does not pollute the next turn, while promoted work continues correctly.               |
+| 4. Transactional effects      | The model works across files, SQLite, and a deferred external action.                          | Podium plus               | Rejection changes none of them and promotion delivers the action exactly once.                       |
+| 5. Recoverable intelligence   | Airlock can repair a quarantined future without contaminating Canonical State.                 | Winning target            | A Repair Run turns real failure evidence into a validated promoted result.                           |
+| 6. Adversarial resilience     | Crashes and obvious bypass attempts fail closed.                                               | Winning target            | Fault injection, path escape, symlink, timeout, and duplicate-delivery tests pass.                   |
+| 7. Judge-ready release        | A reviewer understands and believes the whole product in three minutes.                        | Submission release        | Fresh-clone setup, live demo, architecture, and full checks pass without hidden steps.               |
+| 8. Transactional Resource SDK | Other developers can put new resources behind Airlock.                                         | Post-hackathon platform   | A provider adapter passes a shared conformance suite.                                                |
+| 9. Competing futures          | Several Agents or models can attempt the same task and only the best valid future is promoted. | Category-defining product | Deterministic evaluation ranks isolated candidates without cross-contamination.                      |
+| 10. Adaptive assurance        | Airlock learns which protections should be strengthened from observed failures.                | Intelligent control plane | Suggested contract changes are explainable, versioned, reviewed, and never silently weakened.        |
+| 11. Portable trust            | Promotion evidence can be verified across runtimes and organizations.                          | Ecosystem standard        | A provider-neutral signed Promotion Receipt verifies independently of the original Airlock instance. |
 
 ## Hackathon phases
 
@@ -484,8 +484,10 @@ Establish Outcome Contracts and Promotion Receipts as a portable trust protocol 
 - The server exports only complete versioned durable evidence and binds exact provider versions, Outcome Contract, required Validations, Repair ancestry, prior receipts, Candidate Selection, and accepted Assurance provenance when applicable.
 - Promoted, retained, discarded, and cancelled Candidate Runs can each export an independently verifiable receipt after the Candidate Set completes.
 - Every terminal path publishes immutable Run authority before its mutable child projection, and one immutable Candidate Set Decision Authority is published before mutable Selection.
-- Startup restores missing Selection from that exact authority and replays an already-authorized terminal Run instead of synthesizing a contradictory cancellation.
+- Candidate Set authority binds loser policy before irreversible cleanup, an available Quarantine may advance only through one evidence-preserving authoritative Discard, and completed Promotion recovery may add only its exact restart marker.
+- Startup audits active and already-terminal Runs, restores missing Selection from exact authority, and replays the newest valid Run plus competitor lifecycle instead of synthesizing a contradictory decision.
 - Child Run and competitor status become visible together, while the Agent deliberately remains busy until the Candidate Set completes Selection, winner Promotion, and loser cleanup.
+- Provider loser cleanup progress is durable before physical removal, and terminal authority failure keeps Agent execution plus Resource Registry admission closed.
 - Promotion and provider-onboarding history reuse timestamps from their durable source evidence, which makes recovery after history publication byte-identical and lets installed Registry Transitions roll forward safely.
 - Incomplete or contradictory evidence returns a retryable conflict without changing Canonical State or durable Run evidence.
 - The Playground starts with no evidence disclosed, previews safe evidence identities, requires regeneration after privacy settings change, and offers one evidence-packet download plus separate expert downloads for each component.
@@ -551,12 +553,12 @@ A smaller falsifiable guarantee scores better than a larger unreliable claim.
 
 ## Judging strategy
 
-| Judging category | Weight | Evidence designed into the roadmap |
-| --- | ---: | --- |
-| End-to-end middleware behavior | 40% | Browser-to-Runtime Candidate State, real Validation, promotion, quarantine, repair, SQLite, and outbox effects. |
-| Technical design and integration | 25% | A narrow `AgentRunner` seam, versioned contracts, Transactional Resource boundaries, and recoverable promotion. |
-| Verification and robustness | 20% | Paired positive and negative tests, canonical fingerprints, fault injection, redaction, cleanup, and bypass disclosure. |
-| Demo and reproducibility | 15% | One-command startup, deterministic fixtures, one-page architecture, three-minute hero scenario, and explicit limitations. |
+| Judging category                 | Weight | Evidence designed into the roadmap                                                                                        |
+| -------------------------------- | -----: | ------------------------------------------------------------------------------------------------------------------------- |
+| End-to-end middleware behavior   |    40% | Browser-to-Runtime Candidate State, real Validation, promotion, quarantine, repair, SQLite, and outbox effects.           |
+| Technical design and integration |    25% | A narrow `AgentRunner` seam, versioned contracts, Transactional Resource boundaries, and recoverable promotion.           |
+| Verification and robustness      |    20% | Paired positive and negative tests, canonical fingerprints, fault injection, redaction, cleanup, and bypass disclosure.   |
+| Demo and reproducibility         |    15% | One-command startup, deterministic fixtures, one-page architecture, three-minute hero scenario, and explicit limitations. |
 
 The roadmap intentionally spends most implementation effort on the 40% behavior category while using the same artifacts to earn the design and robustness points.
 The final polish phase protects the remaining 15% instead of treating presentation as last-minute decoration.
@@ -578,16 +580,16 @@ This one scenario demonstrates useful behavior, a trusted boundary, an Agent-spe
 Review the scorecard at every phase boundary.
 A phase does not advance while any critical row is red.
 
-| Dimension | Green condition |
-| --- | --- |
-| User outcome | The operator can accomplish the phase promise through the normal Playground journey. |
+| Dimension        | Green condition                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| User outcome     | The operator can accomplish the phase promise through the normal Playground journey.            |
 | Safety invariant | Rejection, cancellation, timeout, and interruption preserve the last confirmed Canonical State. |
-| Evidence | The final disposition can be explained from persisted bounded evidence. |
-| Automation | The phase's success and failure claims have deterministic automated coverage. |
-| Baseline | Agent CRUD, lifecycle, Playground, model execution, persistence, and follow-up still work. |
-| Reproducibility | A teammate can reproduce the phase from documented setup. |
-| Demo clarity | The new value can be shown in one concise visual beat. |
-| Scope control | No unproven later-phase dependency is required for the current promise. |
+| Evidence         | The final disposition can be explained from persisted bounded evidence.                         |
+| Automation       | The phase's success and failure claims have deterministic automated coverage.                   |
+| Baseline         | Agent CRUD, lifecycle, Playground, model execution, persistence, and follow-up still work.      |
+| Reproducibility  | A teammate can reproduce the phase from documented setup.                                       |
+| Demo clarity     | The new value can be shown in one concise visual beat.                                          |
+| Scope control    | No unproven later-phase dependency is required for the current promise.                         |
 
 ## Product decisions this roadmap makes
 

@@ -61,7 +61,9 @@ import {
 } from "./portable-receipt.js";
 import {
   PortableDecisionJournal,
+  assertQuarantineCleanupProgress,
   portableCandidateSetAuthorityHash,
+  portableDecisionTransactionHash,
   type CandidateSetDecisionAuthorityRecord,
   type PortableDecisionAuthorityRecord,
 } from "./portable-decision-journal.js";
@@ -119,8 +121,9 @@ export class AgentService {
     private readonly store: JsonStore,
     private readonly workspaces: WorkspaceManager,
     runner: AgentRunner,
-    validationCommandExecutor: ValidationCommandExecutor =
-      new ContainerValidationCommandExecutor(config),
+    validationCommandExecutor: ValidationCommandExecutor = new ContainerValidationCommandExecutor(
+      config,
+    ),
     promotionFaultInjector?: PromotionFaultInjector,
     private readonly resourceCoordinator: ResourceCoordinator = new ResourceCoordinator(
       new ResourceRegistry(),
@@ -157,7 +160,9 @@ export class AgentService {
     this.providerRegistryReady = false;
     await this.store.initialize();
     await this.sanitizePersistedErrors();
-    await this.workspaces.initialize({ recoverProviderRegistryTransitions: false });
+    await this.workspaces.initialize({
+      recoverProviderRegistryTransitions: false,
+    });
     await this.actionDispatcher.initialize();
     await this.promotionJournal.initialize();
     await this.portableDecisionJournal.initialize();
@@ -165,14 +170,14 @@ export class AgentService {
     await this.reconcileAgentDeletions();
     await this.workspaces.recoverProviderRegistryTransitions();
     const registryDescriptors = this.resourceCoordinator.registryDescriptors();
-    const registryGeneration = await this.workspaces.nextProviderRegistryGeneration(
-      registryDescriptors,
-    );
+    const registryGeneration =
+      await this.workspaces.nextProviderRegistryGeneration(registryDescriptors);
     const snapshot = this.store.snapshot();
-    const promotionAuthority = await this.buildPromotionRecoveryAuthorityContext(
-      snapshot.candidateSets,
-      snapshot.runs,
-    );
+    const promotionAuthority =
+      await this.buildPromotionRecoveryAuthorityContext(
+        snapshot.candidateSets,
+        snapshot.runs,
+      );
     const unresolvedCandidateSetRunIds = new Set(
       snapshot.candidateSets
         .filter(
@@ -189,7 +194,8 @@ export class AgentService {
       snapshot.runs
         .filter(
           (run) =>
-            run.status !== "completed" || unresolvedCandidateSetRunIds.has(run.id),
+            run.status !== "completed" ||
+            unresolvedCandidateSetRunIds.has(run.id),
         )
         .map((run) => run.id),
     );
@@ -201,7 +207,9 @@ export class AgentService {
           promotionAuthority.expectedCandidateSetAuthorities,
       },
     );
-    const recoveredRunIds = new Set(recovery.recovered.map((item) => item.runId));
+    const recoveredRunIds = new Set(
+      recovery.recovered.map((item) => item.runId),
+    );
     const recoveryFailures = new Map(
       recovery.failures
         .filter((failure) => failure.runId)
@@ -218,9 +226,12 @@ export class AgentService {
       string,
       PortableDecisionAuthorityRecord
     >();
+    const terminalAuthorities = new Map<
+      string,
+      PortableDecisionAuthorityRecord
+    >();
     const terminalAuthorityFailures = new Map<string, string>();
-    for (const runId of activeRunIds) {
-      const run = snapshot.runs.find((item) => item.id === runId)!;
+    for (const run of snapshot.runs) {
       try {
         const authority =
           await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
@@ -229,20 +240,88 @@ export class AgentService {
           );
         if (!authority) continue;
         this.assertTerminalAuthorityExtendsRun(run, authority.transaction);
+        if (authority.candidateSetAuthorityDigest) {
+          if (!run.candidateSetId) {
+            throw new Error(
+              "Candidate-bound terminal authority has no Candidate Set Run link",
+            );
+          }
+          const candidateAuthority =
+            await this.portableDecisionJournal.readCandidateSetDecisionById(
+              run.candidateSetId,
+            );
+          if (
+            !candidateAuthority ||
+            candidateAuthority.agentId !== run.agentId ||
+            candidateAuthority.candidateSetAuthorityDigest !==
+              authority.candidateSetAuthorityDigest
+          ) {
+            throw new Error(
+              "Candidate-bound terminal authority has no matching Selection authority",
+            );
+          }
+        }
+        const currentTransactionHash = run.transaction
+          ? portableDecisionTransactionHash(run.transaction)
+          : null;
+        let quarantineCleanupProgress = false;
+        if (
+          currentTransactionHash !== authority.transactionEvidenceHash &&
+          run.transaction?.disposition === "quarantined" &&
+          authority.disposition === "quarantined"
+        ) {
+          assertQuarantineCleanupProgress(
+            authority.transaction,
+            run.transaction,
+          );
+          quarantineCleanupProgress = true;
+        }
+        if (
+          currentTransactionHash !== authority.transactionEvidenceHash &&
+          run.transaction?.disposition &&
+          !quarantineCleanupProgress &&
+          !(
+            run.transaction.disposition === "quarantined" &&
+            authority.disposition === "discarded"
+          )
+        ) {
+          throw new Error(
+            "Immutable terminal decision contradicts the persisted terminal Run",
+          );
+        }
+        const candidateLifecycleIsCurrent =
+          this.candidateLifecycleMatchesAuthority(snapshot, run, authority);
+        const requiresRecovery =
+          (!quarantineCleanupProgress &&
+            currentTransactionHash !== authority.transactionEvidenceHash) ||
+          !terminalRunStatusMatches(authority.disposition, run.status) ||
+          !candidateLifecycleIsCurrent;
         if (
           authority.disposition === "quarantined" &&
+          (run.status === "queued" ||
+            run.status === "running" ||
+            (currentTransactionHash !== authority.transactionEvidenceHash &&
+              !quarantineCleanupProgress)) &&
           !(await this.workspaces.quarantineExists(run.id))
         ) {
           throw new Error(
             "Authoritative Quarantine is missing from physical Candidate State",
           );
         }
-        terminalAuthorityRecoveries.set(run.id, authority);
+        if (
+          authority.disposition === "discarded" &&
+          (await this.workspaces.quarantineExists(run.id))
+        ) {
+          throw new Error(
+            "Authoritative Discard contradicts physical Candidate State",
+          );
+        }
+        terminalAuthorities.set(run.id, authority);
+        if (requiresRecovery) {
+          terminalAuthorityRecoveries.set(run.id, authority);
+        }
       } catch (error) {
-        terminalAuthorityFailures.set(
-          run.id,
-          boundedCandidateSetError(error),
-        );
+        terminalAuthorityFailures.set(run.id, boundedCandidateSetError(error));
       }
     }
     for (const runId of activeRunIds) {
@@ -265,6 +344,7 @@ export class AgentService {
       ...recovery.protectedRunIds,
       ...activeRunIds,
       ...unresolvedCandidateSetRunIds,
+      ...terminalAuthorityRecoveries.keys(),
     ]);
     const cleanupTransactions = new Map<string, RunTransaction>();
     const runsById = new Map(snapshot.runs.map((run) => [run.id, run]));
@@ -321,7 +401,9 @@ export class AgentService {
       if (
         run.transaction?.disposition !== "quarantined" ||
         !run.transaction.quarantineAvailable ||
-        cleanup.quarantineRunIds.includes(run.id)
+        cleanup.quarantineRunIds.includes(run.id) ||
+        terminalAuthorityRecoveries.has(run.id) ||
+        terminalAuthorityFailures.has(run.id)
       ) {
         continue;
       }
@@ -341,7 +423,9 @@ export class AgentService {
     await this.store.mutate(async (database) => {
       for (const recovered of recovery.recovered) {
         const run = database.runs.find((item) => item.id === recovered.runId);
-        const agent = database.agents.find((item) => item.id === recovered.agentId);
+        const agent = database.agents.find(
+          (item) => item.id === recovered.agentId,
+        );
         if (
           !run ||
           !agent ||
@@ -354,13 +438,34 @@ export class AgentService {
         run.output = recovered.result.output;
         run.error = null;
         run.usage = recovered.result.usage;
-        run.transaction = recovered.transaction;
-        startupAuthorityRunIds.add(run.id);
+        const existingAuthority = terminalAuthorities.get(run.id);
+        const recoveryTransactionHash = portableDecisionTransactionHash(
+          recovered.transaction,
+        );
+        const authorityAlreadyRecovered =
+          existingAuthority?.transactionEvidenceHash ===
+          recoveryTransactionHash;
+        run.transaction = structuredClone(
+          authorityAlreadyRecovered && existingAuthority
+            ? existingAuthority.transaction
+            : recovered.transaction,
+        );
+        if (existingAuthority) {
+          this.applyCandidateLifecycleAuthority(
+            database,
+            run,
+            existingAuthority,
+          );
+        }
+        if (!authorityAlreadyRecovered) {
+          startupAuthorityRunIds.add(run.id);
+        }
         run.completedAt = completedAt;
         if (
           !run.candidateSetId &&
           !database.messages.some(
-            (message) => message.runId === run.id && message.role === "assistant",
+            (message) =>
+              message.runId === run.id && message.role === "assistant",
           )
         ) {
           database.messages.push({
@@ -399,11 +504,7 @@ export class AgentService {
       }
 
       for (const run of database.runs) {
-        if (
-          (run.status !== "queued" && run.status !== "running") ||
-          recoveredRunIds.has(run.id) ||
-          recoveryFailures.has(run.id)
-        ) {
+        if (recoveredRunIds.has(run.id) || recoveryFailures.has(run.id)) {
           continue;
         }
         const terminalAuthority = terminalAuthorityRecoveries.get(run.id);
@@ -425,21 +526,29 @@ export class AgentService {
           continue;
         }
         if (terminalAuthority) {
+          const wasActive = run.status === "queued" || run.status === "running";
           const transaction = structuredClone(terminalAuthority.transaction);
           run.transaction = transaction;
-          run.status =
-            transaction.disposition === "cancelled"
-              ? "cancelled"
-              : transaction.disposition === "promoted"
-                ? "completed"
-                : "failed";
-          run.error =
-            transaction.disposition === "quarantined"
-              ? "Server restarted after the authoritative Quarantine decision"
-              : transaction.disposition === "cancelled"
-                ? "Server restarted after the authoritative cancellation decision"
-                : null;
-          run.completedAt = transaction.promotionReceipt!.createdAt;
+          run.status = terminalRunStatus(terminalAuthority.disposition);
+          if (wasActive) {
+            run.error =
+              transaction.disposition === "quarantined"
+                ? "Server restarted after the authoritative Quarantine decision"
+                : transaction.disposition === "cancelled"
+                  ? "Server restarted after the authoritative cancellation decision"
+                  : null;
+            run.completedAt = transaction.promotionReceipt!.createdAt;
+          } else if (!run.completedAt) {
+            run.completedAt = transaction.promotionReceipt!.createdAt;
+          }
+          this.applyCandidateLifecycleAuthority(
+            database,
+            run,
+            terminalAuthority,
+          );
+          continue;
+        }
+        if (run.status !== "queued" && run.status !== "running") {
           continue;
         }
         const retained = interrupted.get(run.id);
@@ -447,7 +556,8 @@ export class AgentService {
         run.completedAt = completedAt;
         if (retained?.quarantinePath && run.transaction) {
           run.status = "failed";
-          run.error = "Server restarted; the interrupted Candidate was retained in Quarantine";
+          run.error =
+            "Server restarted; the interrupted Candidate was retained in Quarantine";
           run.transaction.status = "quarantined";
           run.transaction.disposition = "quarantined";
           run.transaction.quarantinePath = retained.quarantinePath;
@@ -464,13 +574,17 @@ export class AgentService {
           run.transaction.events.push({
             status: "quarantined",
             at: completedAt,
-            summary: "Server restart retained the interrupted Candidate in Quarantine",
+            summary:
+              "Server restart retained the interrupted Candidate in Quarantine",
           });
-          run.transaction.promotionReceipt = createPromotionReceipt(run.transaction);
+          run.transaction.promotionReceipt = createPromotionReceipt(
+            run.transaction,
+          );
           startupAuthorityRunIds.add(run.id);
         } else if (retained?.error && run.transaction) {
           run.status = "failed";
-          run.error = "Interrupted Candidate recovery failed: " + retained.error;
+          run.error =
+            "Interrupted Candidate recovery failed: " + retained.error;
           run.transaction.status = "recovery-error";
           run.transaction.recovery = {
             ...run.transaction.recovery,
@@ -497,7 +611,9 @@ export class AgentService {
               at: completedAt,
               summary: "Server restarted before Candidate State was available",
             });
-            run.transaction.promotionReceipt = createPromotionReceipt(run.transaction);
+            run.transaction.promotionReceipt = createPromotionReceipt(
+              run.transaction,
+            );
             startupAuthorityRunIds.add(run.id);
           }
         }
@@ -505,7 +621,10 @@ export class AgentService {
 
       for (const runId of cleanup.quarantineRunIds) {
         const run = database.runs.find((item) => item.id === runId);
-        if (!run?.transaction || run.transaction.disposition !== "quarantined") {
+        if (
+          !run?.transaction ||
+          run.transaction.disposition !== "quarantined"
+        ) {
           continue;
         }
         const discardedAt = now();
@@ -527,7 +646,10 @@ export class AgentService {
 
       for (const [runId, disposition] of missingQuarantineDisposition) {
         const run = database.runs.find((item) => item.id === runId);
-        if (!run?.transaction || run.transaction.disposition !== "quarantined") {
+        if (
+          !run?.transaction ||
+          run.transaction.disposition !== "quarantined"
+        ) {
           continue;
         }
         if (disposition === "discarded") {
@@ -560,14 +682,16 @@ export class AgentService {
         );
         const corruptJournalFailure = database.runs
           .filter((run) => run.agentId === agent.id)
-          .map((run) => recoveryFailures.get(run.id))
+          .map(
+            (run) =>
+              recoveryFailures.get(run.id)?.message ??
+              terminalAuthorityFailures.get(run.id),
+          )
           .find((failure) => failure !== undefined);
         if (recoveryFailure || corruptJournalFailure) {
           agent.status = "error";
           agent.lastError =
-            recoveryFailure?.message ??
-            corruptJournalFailure?.message ??
-            null;
+            recoveryFailure?.message ?? corruptJournalFailure ?? null;
           agent.updatedAt = now();
         } else if (agent.status === "busy") {
           agent.status = "ready";
@@ -583,11 +707,19 @@ export class AgentService {
       await this.reconcileCandidateSetsAfterStartup(
         promotionAuthority.invalidCandidateSets,
       );
+    const runRecoveryFailureCount = this.store
+      .snapshot()
+      .runs.filter(
+        (run) =>
+          run.transaction?.status === "recovery-error" ||
+          Boolean(run.transaction?.recovery.recoveryError),
+      ).length;
     await this.transitionProviderRegistryAfterRecovery(
       registryDescriptors,
       registryGeneration,
       recovery.failures.length,
       candidateSetRecoveryFailureCount,
+      runRecoveryFailureCount,
     );
   }
 
@@ -596,19 +728,20 @@ export class AgentService {
     registryGeneration: number,
     promotionRecoveryFailureCount: number,
     candidateSetRecoveryFailureCount: number,
+    runRecoveryFailureCount: number,
   ): Promise<void> {
     const canonicalStates = new Map<string, CanonicalStateReference>();
     const canonicalErrors = new Map<string, string>();
     const agents = this.store.snapshot().agents;
     if (
       promotionRecoveryFailureCount === 0 &&
-      candidateSetRecoveryFailureCount === 0
+      candidateSetRecoveryFailureCount === 0 &&
+      runRecoveryFailureCount === 0
     ) {
       for (const agent of agents) {
         try {
-          const current = await this.workspaces.ensureCanonicalForProviderTransition(
-            agent,
-          );
+          const current =
+            await this.workspaces.ensureCanonicalForProviderTransition(agent);
           const additions = this.workspaces.providerVersionsToOnboard(
             current.providerVersions,
           );
@@ -636,16 +769,19 @@ export class AgentService {
       for (const agent of agents) {
         canonicalErrors.set(
           agent.id,
-          candidateSetRecoveryFailureCount > 0
-            ? "Resource Registry transition deferred until every prior-generation Candidate Set recovers"
-            : "Resource Registry transition deferred until every prior-generation Promotion recovers",
+          runRecoveryFailureCount > 0
+            ? "Resource Registry transition deferred until every terminal Run authority recovers"
+            : candidateSetRecoveryFailureCount > 0
+              ? "Resource Registry transition deferred until every prior-generation Candidate Set recovers"
+              : "Resource Registry transition deferred until every prior-generation Promotion recovers",
         );
       }
     }
     if (
       canonicalErrors.size === 0 &&
       promotionRecoveryFailureCount === 0 &&
-      candidateSetRecoveryFailureCount === 0
+      candidateSetRecoveryFailureCount === 0 &&
+      runRecoveryFailureCount === 0
     ) {
       await this.workspaces.commitProviderRegistryGeneration(
         registryDescriptors,
@@ -668,8 +804,12 @@ export class AgentService {
           agent.updatedAt = now();
         } else if (
           agent.status === "error" &&
-          (agent.lastError?.startsWith("Canonical State reconciliation failed:") ||
-            agent.lastError?.startsWith("Resource Registry transition deferred"))
+          (agent.lastError?.startsWith(
+            "Canonical State reconciliation failed:",
+          ) ||
+            agent.lastError?.startsWith(
+              "Resource Registry transition deferred",
+            ))
         ) {
           agent.status = "ready";
           agent.lastError = null;
@@ -700,7 +840,9 @@ export class AgentService {
   listAgents(): Agent[] {
     return this.store
       .snapshot()
-      .agents.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .agents.sort((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt),
+      );
   }
 
   getAgent(id: string): Agent {
@@ -773,7 +915,10 @@ export class AgentService {
         const agent = database.agents.find((item) => item.id === id);
         if (!agent) throw new HttpError(404, "Agent not found");
         if (agent.status === "busy") {
-          throw new HttpError(409, "Stop the active run before editing this Agent");
+          throw new HttpError(
+            409,
+            "Stop the active run before editing this Agent",
+          );
         }
         agent.name = proposed.name;
         agent.description = proposed.description;
@@ -793,7 +938,10 @@ export class AgentService {
   async deleteAgent(id: string): Promise<{ archivedWorkspace: string }> {
     this.getAgent(id);
     if (this.configuringAgents.has(id) || this.deletingAgents.has(id)) {
-      throw new HttpError(409, "Wait for the Agent configuration update to finish");
+      throw new HttpError(
+        409,
+        "Wait for the Agent configuration update to finish",
+      );
     }
     this.configuringAgents.add(id);
     try {
@@ -808,14 +956,14 @@ export class AgentService {
           const transaction = run.transaction;
           return Boolean(
             transaction &&
-              (transaction.quarantineAvailable ||
-                transaction.disposition === "quarantined" ||
-                transaction.status === "recovery-error" ||
-                transaction.providerResources.some(
-                  (resource) =>
-                    resource.disposition === null ||
-                    resource.disposition === "quarantined",
-                )),
+            (transaction.quarantineAvailable ||
+              transaction.disposition === "quarantined" ||
+              transaction.status === "recovery-error" ||
+              transaction.providerResources.some(
+                (resource) =>
+                  resource.disposition === null ||
+                  resource.disposition === "quarantined",
+              )),
           );
         }) ||
         agentCandidateSets.some((candidateSet) =>
@@ -860,8 +1008,12 @@ export class AgentService {
         archivedAt,
         agentRuns,
         agentCandidateSets,
-        persisted.assuranceProposals.filter((proposal) => proposal.agentId === id),
-        persisted.outcomeContractVersions.filter((record) => record.agentId === id),
+        persisted.assuranceProposals.filter(
+          (proposal) => proposal.agentId === id,
+        ),
+        persisted.outcomeContractVersions.filter(
+          (record) => record.agentId === id,
+        ),
         pendingDeletion?.audit.schemaVersion ?? 2,
       );
       await this.agentDeletionJournal.begin(id, audit);
@@ -1033,9 +1185,10 @@ export class AgentService {
       database.assuranceProposals = database.assuranceProposals.filter(
         (item) => item.agentId !== agentId,
       );
-      database.outcomeContractVersions = database.outcomeContractVersions.filter(
-        (item) => item.agentId !== agentId,
-      );
+      database.outcomeContractVersions =
+        database.outcomeContractVersions.filter(
+          (item) => item.agentId !== agentId,
+        );
     });
   }
 
@@ -1105,7 +1258,9 @@ export class AgentService {
       .sort((left, right) => right.contract.version - left.contract.version);
   }
 
-  async deriveAssuranceProposal(agentId: string): Promise<AssuranceProposal | null> {
+  async deriveAssuranceProposal(
+    agentId: string,
+  ): Promise<AssuranceProposal | null> {
     this.assertAgentConfigurationAvailable(agentId);
     this.configuringAgents.add(agentId);
     try {
@@ -1124,7 +1279,8 @@ export class AgentService {
         );
         if (!currentAgent) throw new HttpError(404, "Agent not found");
         if (
-          currentAgent.outcomeContract.version !== proposal.baseContractVersion ||
+          currentAgent.outcomeContract.version !==
+            proposal.baseContractVersion ||
           outcomeContractHash(currentAgent.outcomeContract) !==
             proposal.baseContractHash
         ) {
@@ -1149,7 +1305,8 @@ export class AgentService {
         }
         const updatedAt = now();
         for (const candidate of database.assuranceProposals) {
-          if (candidate.agentId !== agentId || candidate.state !== "ready") continue;
+          if (candidate.agentId !== agentId || candidate.state !== "ready")
+            continue;
           candidate.state =
             candidate.baseContractVersion === proposal.baseContractVersion &&
             candidate.baseContractHash === proposal.baseContractHash
@@ -1168,7 +1325,10 @@ export class AgentService {
   async acceptAssuranceProposal(
     proposalId: string,
     reason: string,
-  ): Promise<{ proposal: AssuranceProposal; outcomeContract: OutcomeContract }> {
+  ): Promise<{
+    proposal: AssuranceProposal;
+    outcomeContract: OutcomeContract;
+  }> {
     const decisionReason = normalizeAssuranceDecisionReason(reason);
     const snapshot = this.store.snapshot();
     const pending = snapshot.assuranceProposals.find(
@@ -1183,7 +1343,9 @@ export class AgentService {
           (candidate) => candidate.id === proposalId,
         );
         const agent = proposal
-          ? database.agents.find((candidate) => candidate.id === proposal.agentId)
+          ? database.agents.find(
+              (candidate) => candidate.id === proposal.agentId,
+            )
           : null;
         if (!proposal || !agent) {
           return { kind: "missing" as const };
@@ -1194,7 +1356,8 @@ export class AgentService {
         verifyAssuranceProposalIntegrity(proposal);
         if (
           agent.outcomeContract.version !== proposal.baseContractVersion ||
-          outcomeContractHash(agent.outcomeContract) !== proposal.baseContractHash
+          outcomeContractHash(agent.outcomeContract) !==
+            proposal.baseContractHash
         ) {
           proposal.state = "stale";
           proposal.updatedAt = now();
@@ -1206,7 +1369,10 @@ export class AgentService {
           database.runs,
           proposal.createdAt,
         );
-        if (!reproduced || reproduced.proposalDigest !== proposal.proposalDigest) {
+        if (
+          !reproduced ||
+          reproduced.proposalDigest !== proposal.proposalDigest
+        ) {
           throw new HttpError(
             409,
             "Assurance Proposal no longer reproduces from retained evidence",
@@ -1335,7 +1501,9 @@ export class AgentService {
     this.configuringAgents.add(agentId);
     try {
       return await this.store.mutate((database) => {
-        const agent = database.agents.find((candidate) => candidate.id === agentId);
+        const agent = database.agents.find(
+          (candidate) => candidate.id === agentId,
+        );
         if (!agent) throw new HttpError(404, "Agent not found");
         if (agent.outcomeContract.version !== expectedCurrentVersion) {
           throw new HttpError(
@@ -1345,7 +1513,8 @@ export class AgentService {
         }
         const target = database.outcomeContractVersions.find(
           (record) =>
-            record.agentId === agentId && record.contract.version === targetVersion,
+            record.agentId === agentId &&
+            record.contract.version === targetVersion,
         );
         if (!target) {
           throw new HttpError(404, "Outcome Contract version not found");
@@ -1398,8 +1567,20 @@ export class AgentService {
     return (
       this.configuringAgents.has(agentId) ||
       this.deletingAgents.has(agentId) ||
+      this.hasUnresolvedRunRecovery(agentId) ||
       this.hasUnresolvedCandidateDisposition(agentId)
     );
+  }
+
+  private hasUnresolvedRunRecovery(agentId: string): boolean {
+    return this.store
+      .snapshot()
+      .runs.some(
+        (run) =>
+          run.agentId === agentId &&
+          (run.transaction?.status === "recovery-error" ||
+            Boolean(run.transaction?.recovery.recoveryError)),
+      );
   }
 
   private hasUnresolvedCandidateDisposition(agentId: string): boolean {
@@ -1477,8 +1658,9 @@ export class AgentService {
         throw new HttpError(404, "Run not found");
       }
       const candidateSet = run.candidateSetId
-        ? snapshot.candidateSets.find((item) => item.id === run.candidateSetId) ??
-          null
+        ? (snapshot.candidateSets.find(
+            (item) => item.id === run.candidateSetId,
+          ) ?? null)
         : null;
       if (
         candidateSet &&
@@ -1517,9 +1699,9 @@ export class AgentService {
           );
         }
         const sourceCandidateSet = sourceRun.candidateSetId
-          ? snapshot.candidateSets.find(
+          ? (snapshot.candidateSets.find(
               (item) => item.id === sourceRun.candidateSetId,
-            ) ?? null
+            ) ?? null)
           : null;
         const authority =
           recordedAuthority ??
@@ -1538,11 +1720,19 @@ export class AgentService {
             "Portable receipt Candidate Set contradicts immutable decision authority",
           );
         }
+        const candidateSetAtAuthority = sourceCandidateSet
+          ? projectCandidateSetLifecycleAtAuthority(
+              sourceCandidateSet,
+              sourceRun,
+              authority.disposition,
+            )
+          : null;
         let previousReceiptDigest: ReceiptDigest | null = null;
         const parentId = sourceRun.transaction?.lineage.parentRunId ?? null;
         if (options.includeAncestry && parentId) {
           const parent = snapshot.runs.find(
-            (item) => item.id === parentId && item.agentId === sourceRun.agentId,
+            (item) =>
+              item.id === parentId && item.agentId === sourceRun.agentId,
           );
           if (
             !parent?.transaction ||
@@ -1552,15 +1742,20 @@ export class AgentService {
             parent.transaction.lineage.depth + 1 !==
               sourceRun.transaction.lineage.depth
           ) {
-            throw new Error("Portable receipt ancestry is incomplete or contradictory");
+            throw new Error(
+              "Portable receipt ancestry is incomplete or contradictory",
+            );
           }
           if (!authority.parentAuthorityDigest) {
-            throw new Error("Portable receipt ancestry authority is incomplete");
+            throw new Error(
+              "Portable receipt ancestry authority is incomplete",
+            );
           }
-          const parentAuthority = await this.portableDecisionJournal.readByDigest(
-            parent.id,
-            authority.parentAuthorityDigest,
-          );
+          const parentAuthority =
+            await this.portableDecisionJournal.readByDigest(
+              parent.id,
+              authority.parentAuthorityDigest,
+            );
           if (
             parentAuthority.runId !== parent.id ||
             parentAuthority.agentId !== parent.agentId ||
@@ -1569,7 +1764,9 @@ export class AgentService {
             parentAuthority.transaction.lineage.depth + 1 !==
               sourceRun.transaction.lineage.depth
           ) {
-            throw new Error("Portable receipt ancestry authority is contradictory");
+            throw new Error(
+              "Portable receipt ancestry authority is contradictory",
+            );
           }
           previousReceiptDigest = (
             await buildDraft(
@@ -1580,22 +1777,28 @@ export class AgentService {
           ).receiptDigest;
         }
         const contractVersion = sourceRun.transaction
-          ? snapshot.outcomeContractVersions.find(
+          ? (snapshot.outcomeContractVersions.find(
               (record) =>
                 record.agentId === sourceRun.agentId &&
                 record.contract.version ===
                   sourceRun.transaction!.outcomeContractVersion,
-            ) ?? null
+            ) ?? null)
           : null;
         await this.verifyPortableRunState(sourceRun, sourceCandidateSet);
         const sourceDraft = buildPortableReceiptDraft({
           run: sourceRun,
-          candidateSet: sourceCandidateSet,
-          candidateSetRuns: sourceCandidateSet
-            ? snapshot.runs.filter(
-                (candidateRun) =>
-                  candidateRun.candidateSetId === sourceCandidateSet.id,
-              )
+          candidateSet: candidateSetAtAuthority,
+          candidateSetRuns: candidateSetAtAuthority
+            ? snapshot.runs
+                .filter(
+                  (candidateRun) =>
+                    candidateRun.candidateSetId === candidateSetAtAuthority.id,
+                )
+                .map((candidateRun) =>
+                  candidateRun.id === sourceRun.id
+                    ? structuredClone(sourceRun)
+                    : candidateRun,
+                )
             : [],
           contractVersion,
           previousReceiptDigest,
@@ -1662,7 +1865,10 @@ export class AgentService {
             envelope.receiptDigest,
           );
         } catch {
-          throw new HttpError(503, "Local transparency anchoring is unavailable");
+          throw new HttpError(
+            503,
+            "Local transparency anchoring is unavailable",
+          );
         }
       }
       const evmPayload = options.evmPayload
@@ -1729,12 +1935,15 @@ export class AgentService {
       transaction.resources.map((resource) => [resource.kind, resource]),
     );
     const expected = (side: "before" | "after") => {
-      const field = side === "before" ? "fingerprintBefore" : "fingerprintAfter";
+      const field =
+        side === "before" ? "fingerprintBefore" : "fingerprintAfter";
       const workspace = resources.get("workspace")?.[field];
       const session = resources.get("codex-session")?.[field];
       const sqlite = resources.get("sqlite")?.[field];
       if (!workspace || !session || !sqlite) {
-        throw new Error("Portable receipt state Resource evidence is incomplete");
+        throw new Error(
+          "Portable receipt state Resource evidence is incomplete",
+        );
       }
       const providerVersions = transaction.providerResources.map((resource) => {
         const version =
@@ -1768,7 +1977,8 @@ export class AgentService {
       candidateSet &&
       (candidateSet.source.stateId !== before.stateId ||
         candidateSet.source.contentHash !== before.contentHash ||
-        candidateSet.source.workspaceContentHash !== before.workspaceContentHash ||
+        candidateSet.source.workspaceContentHash !==
+          before.workspaceContentHash ||
         candidateSet.source.sessionContentHash !== before.sessionContentHash ||
         candidateSet.source.sqliteContentHash !== before.sqliteContentHash ||
         candidateSet.source.outboxContentHash !== before.outboxContentHash ||
@@ -1824,7 +2034,8 @@ export class AgentService {
       current.canonicalContentHashBefore !==
         terminal.canonicalContentHashBefore ||
       current.outcomeContractVersion !== terminal.outcomeContractVersion ||
-      stableJson(current.outcomeContract) !== stableJson(terminal.outcomeContract) ||
+      stableJson(current.outcomeContract) !==
+        stableJson(terminal.outcomeContract) ||
       stableJson(current.lineage) !== stableJson(terminal.lineage) ||
       !terminal.disposition ||
       terminal.status !== terminal.disposition ||
@@ -1834,6 +2045,74 @@ export class AgentService {
         "Immutable terminal decision contradicts the active Run projection",
       );
     }
+  }
+
+  private candidateLifecycleMatchesAuthority(
+    database: Database,
+    run: AgentRun,
+    authority: PortableDecisionAuthorityRecord,
+  ): boolean {
+    if (!authority.candidateSetAuthorityDigest) return true;
+    if (!run.candidateSetId) {
+      throw new Error(
+        "Candidate-bound terminal authority has no Candidate Set Run link",
+      );
+    }
+    const candidateSet = database.candidateSets.find(
+      (candidate) => candidate.id === run.candidateSetId,
+    );
+    const competitor = candidateSet?.competitors.find(
+      (candidate) => candidate.runId === run.id,
+    );
+    if (!candidateSet || !competitor || candidateSet.agentId !== run.agentId) {
+      throw new Error(
+        "Candidate-bound terminal authority contradicts Candidate Set evidence",
+      );
+    }
+    if (
+      portableCandidateSetAuthorityHash(candidateSet) !==
+      authority.candidateSetAuthorityDigest
+    ) {
+      return true;
+    }
+    const expected = terminalCompetitorLifecycle(
+      candidateSet,
+      run,
+      authority.disposition,
+    );
+    return (
+      competitor.status === expected.status &&
+      competitor.loserDisposition === expected.loserDisposition
+    );
+  }
+
+  private applyCandidateLifecycleAuthority(
+    database: Database,
+    run: AgentRun,
+    authority: PortableDecisionAuthorityRecord,
+  ): void {
+    if (!authority.candidateSetAuthorityDigest) return;
+    const candidateSet = database.candidateSets.find(
+      (candidate) => candidate.id === run.candidateSetId,
+    )!;
+    if (
+      portableCandidateSetAuthorityHash(candidateSet) !==
+      authority.candidateSetAuthorityDigest
+    ) {
+      return;
+    }
+    this.candidateLifecycleMatchesAuthority(database, run, authority);
+    const competitor = candidateSet.competitors.find(
+      (candidate) => candidate.runId === run.id,
+    )!;
+    const expected = terminalCompetitorLifecycle(
+      candidateSet,
+      run,
+      authority.disposition,
+    );
+    competitor.status = expected.status;
+    competitor.loserDisposition = expected.loserDisposition;
+    candidateSet.updatedAt = now();
   }
 
   private async recordPortableDecisionAuthority(
@@ -1898,21 +2177,21 @@ export class AgentService {
     }
     const run = { ...storedRun, transaction: structuredClone(transaction) };
     const parentRun = transaction.lineage.parentRunId
-      ? database.runs.find(
+      ? (database.runs.find(
           (candidate) =>
             candidate.id === transaction.lineage.parentRunId &&
             candidate.agentId === run.agentId,
-        ) ?? null
+        ) ?? null)
       : null;
     const candidateSet =
       candidateSetOverride !== undefined
         ? candidateSetOverride
         : run.candidateSetId
-          ? database.candidateSets.find(
+          ? (database.candidateSets.find(
               (candidate) =>
                 candidate.id === run.candidateSetId &&
                 candidate.selectionDecision !== null,
-            ) ?? null
+            ) ?? null)
           : null;
     await this.portableDecisionJournal.record({
       run,
@@ -2049,19 +2328,28 @@ export class AgentService {
       const agent = database.agents.find((item) => item.id === agentId);
       if (!agent) throw new HttpError(404, "Agent not found");
       if (agent.status === "stopped") {
-        throw new HttpError(409, "Start the Agent before exploring competing futures");
+        throw new HttpError(
+          409,
+          "Start the Agent before exploring competing futures",
+        );
       }
       if (agent.status === "busy") {
         throw new HttpError(409, "This Agent already has an active operation");
       }
       if (this.isAgentLocked(agentId)) {
-        throw new HttpError(409, "Wait for the Agent configuration update to finish");
+        throw new HttpError(
+          409,
+          "Wait for the Agent configuration update to finish",
+        );
       }
       if (
         agent.canonicalStateId !== canonical.stateId ||
         agent.outcomeContract.version !== candidateSet.outcomeContract.version
       ) {
-        throw new HttpError(409, "Canonical State changed during Candidate Set admission");
+        throw new HttpError(
+          409,
+          "Canonical State changed during Candidate Set admission",
+        );
       }
       agent.status = "busy";
       agent.lastError = null;
@@ -2155,7 +2443,10 @@ export class AgentService {
         throw new HttpError(409, "This Agent is already running");
       }
       if (this.isAgentLocked(agentId)) {
-        throw new HttpError(409, "Wait for the Agent configuration update to finish");
+        throw new HttpError(
+          409,
+          "Wait for the Agent configuration update to finish",
+        );
       }
       storedAgent.workspacePath = canonical.workspacePath;
       storedAgent.canonicalStateId = canonical.stateId;
@@ -2190,7 +2481,10 @@ export class AgentService {
       );
     }
     if (this.quarantineOperations.has(sourceRunId)) {
-      throw new HttpError(409, "This Quarantine already has an active operation");
+      throw new HttpError(
+        409,
+        "This Quarantine already has an active operation",
+      );
     }
     this.quarantineOperations.add(sourceRunId);
     try {
@@ -2207,7 +2501,10 @@ export class AgentService {
         sourceTransaction.disposition !== "quarantined" ||
         !sourceTransaction.quarantineAvailable
       ) {
-        throw new HttpError(409, "Only an available Quarantine can start a Repair Run");
+        throw new HttpError(
+          409,
+          "Only an available Quarantine can start a Repair Run",
+        );
       }
       if (!this.runner.canRepairProviderQuarantine(sourceTransaction)) {
         throw new HttpError(
@@ -2215,7 +2512,9 @@ export class AgentService {
           "This Quarantine was retained for Resource cleanup and cannot start a Repair Run",
         );
       }
-      if (sourceTransaction.lineage.depth >= sourceTransaction.lineage.maxDepth) {
+      if (
+        sourceTransaction.lineage.depth >= sourceTransaction.lineage.maxDepth
+      ) {
         throw new HttpError(
           409,
           "This repair lineage reached its configured maximum depth",
@@ -2273,8 +2572,12 @@ export class AgentService {
         createdAt: timestamp,
       };
       const agentAtStart = await this.store.mutate((database) => {
-        const storedSource = database.runs.find((item) => item.id === sourceRunId);
-        const agent = database.agents.find((item) => item.id === source.agentId);
+        const storedSource = database.runs.find(
+          (item) => item.id === sourceRunId,
+        );
+        const agent = database.agents.find(
+          (item) => item.id === source.agentId,
+        );
         if (!storedSource?.transaction || !agent) {
           throw new HttpError(404, "Quarantine or Agent not found");
         }
@@ -2282,16 +2585,25 @@ export class AgentService {
           storedSource.transaction.disposition !== "quarantined" ||
           !storedSource.transaction.quarantineAvailable
         ) {
-          throw new HttpError(409, "Only an available Quarantine can start a Repair Run");
+          throw new HttpError(
+            409,
+            "Only an available Quarantine can start a Repair Run",
+          );
         }
         if (agent.status === "stopped") {
-          throw new HttpError(409, "Start the Agent before repairing this Quarantine");
+          throw new HttpError(
+            409,
+            "Start the Agent before repairing this Quarantine",
+          );
         }
         if (agent.status === "busy") {
           throw new HttpError(409, "This Agent is already running");
         }
         if (this.isAgentLocked(agent.id)) {
-          throw new HttpError(409, "Wait for the Agent configuration update to finish");
+          throw new HttpError(
+            409,
+            "Wait for the Agent configuration update to finish",
+          );
         }
         if (
           database.runs.some(
@@ -2332,7 +2644,10 @@ export class AgentService {
       throw new HttpError(409, "Wait for the active Agent operation to finish");
     }
     if (this.quarantineOperations.has(runId)) {
-      throw new HttpError(409, "This Quarantine already has an active operation");
+      throw new HttpError(
+        409,
+        "This Quarantine already has an active operation",
+      );
     }
     this.configuringAgents.add(initial.agentId);
     this.quarantineOperations.add(runId);
@@ -2347,8 +2662,14 @@ export class AgentService {
         throw new HttpError(404, "Quarantine or Agent not found");
       }
       if (transaction.disposition === "discarded") return run;
-      if (transaction.disposition !== "quarantined" || !transaction.quarantineAvailable) {
-        throw new HttpError(409, "Only an available Quarantine can be discarded");
+      if (
+        transaction.disposition !== "quarantined" ||
+        !transaction.quarantineAvailable
+      ) {
+        throw new HttpError(
+          409,
+          "Only an available Quarantine can be discarded",
+        );
       }
       if (agent.status === "busy") {
         throw new HttpError(409, "Wait for the active Agent Run to finish");
@@ -2397,9 +2718,9 @@ export class AgentService {
         runId,
         discardedTransaction,
         run.candidateSetId
-          ? snapshot.candidateSets.find(
+          ? (snapshot.candidateSets.find(
               (candidateSet) => candidateSet.id === run.candidateSetId,
-            ) ?? null
+            ) ?? null)
           : null,
       );
       return await this.store.mutate((database) => {
@@ -2407,10 +2728,30 @@ export class AgentService {
         if (!storedRun?.transaction) {
           throw new HttpError(404, "Quarantine not found");
         }
-        if (storedRun.transaction.disposition === "discarded") {
-          return structuredClone(storedRun);
+        const storedCandidateSet = storedRun.candidateSetId
+          ? database.candidateSets.find(
+              (candidateSet) => candidateSet.id === storedRun.candidateSetId,
+            )
+          : null;
+        const storedCompetitor = storedCandidateSet?.competitors.find(
+          (competitor) => competitor.runId === storedRun.id,
+        );
+        if (
+          storedRun.candidateSetId &&
+          (!storedCandidateSet ||
+            !storedCompetitor ||
+            storedCandidateSet.winnerRunId === storedRun.id)
+        ) {
+          throw new Error(
+            "Discarded Candidate Set Run contradicts its competitor lifecycle",
+          );
         }
         storedRun.transaction = structuredClone(discardedTransaction);
+        if (storedCandidateSet && storedCompetitor) {
+          storedCompetitor.status = "discarded";
+          storedCompetitor.loserDisposition = "discarded";
+          storedCandidateSet.updatedAt = discardedAt;
+        }
         const storedAgent = database.agents.find(
           (item) => item.id === storedRun.agentId,
         );
@@ -2462,18 +2803,15 @@ export class AgentService {
         this.config.runtimeProvider === "container"
           ? this.config.containerEngine
           : null,
-      runtime:
-        this.config.demoMode
-          ? "Deterministic Codex protocol fixture"
-          : this.config.runtimeProvider === "container"
+      runtime: this.config.demoMode
+        ? "Deterministic Codex protocol fixture"
+        : this.config.runtimeProvider === "container"
           ? "Codex CLI in " + this.config.containerEngine + " Runtime"
           : "Codex CLI in application container",
     };
   }
 
-  private async appendPortableTransparencyAnchor(
-    receiptDigest: ReceiptDigest,
-  ) {
+  private async appendPortableTransparencyAnchor(receiptDigest: ReceiptDigest) {
     const operation = this.transparencyOperation.then(async () => {
       const transparencyKey = await loadOrCreatePortableSigningKey(
         this.config.transparencySigningKeyPath,
@@ -2503,7 +2841,10 @@ export class AgentService {
     const candidateSetRunIds = new Set(
       runs.filter((run) => run.candidateSetId !== null).map((run) => run.id),
     );
-    const expectedCandidateSetAuthorities = new Map<string, PromotionAuthority>();
+    const expectedCandidateSetAuthorities = new Map<
+      string,
+      PromotionAuthority
+    >();
     const invalidCandidateSets = new Map<string, string>();
     const runsById = new Map(runs.map((run) => [run.id, run]));
     for (const candidateSet of candidateSets) {
@@ -2534,9 +2875,7 @@ export class AgentService {
 
   private async candidateSetPromotionAuthority(
     candidateSet: CandidateSet,
-    runsById = new Map(
-      this.store.snapshot().runs.map((run) => [run.id, run]),
-    ),
+    runsById = new Map(this.store.snapshot().runs.map((run) => [run.id, run])),
   ): Promise<PromotionAuthority | null> {
     if (candidateSet.schemaVersion !== 1) {
       throw new Error("Candidate Set schema is unsupported");
@@ -2562,7 +2901,8 @@ export class AgentService {
         assertPersistedSealIdentity(candidateSet, competitor);
         if (
           !run.transaction ||
-          run.transaction.candidateStateId !== competitor.seal.candidateStateId ||
+          run.transaction.candidateStateId !==
+            competitor.seal.candidateStateId ||
           run.output === null ||
           competitor.seal.runtimeResultHash !==
             airlockEvidenceHash({
@@ -2574,7 +2914,9 @@ export class AgentService {
             competitor.seal.transactionEvidenceHash !==
               airlockEvidenceHash(run.transaction))
         ) {
-          throw new Error("Candidate Set seal contradicts its persisted Run evidence");
+          throw new Error(
+            "Candidate Set seal contradicts its persisted Run evidence",
+          );
         }
       }
     }
@@ -2583,14 +2925,18 @@ export class AgentService {
         candidateSet.selectedCompetitorId !== null ||
         candidateSet.winnerRunId !== null
       ) {
-        throw new Error("Candidate Set winner exists without a Selection Decision");
+        throw new Error(
+          "Candidate Set winner exists without a Selection Decision",
+        );
       }
       return null;
     }
     await this.portableDecisionJournal.readCandidateSetDecision(candidateSet);
     const replayed = this.computeCandidateSetDecision(candidateSet);
     if (stableJson(replayed) !== stableJson(candidateSet.selectionDecision)) {
-      throw new Error("Candidate Set Selection Decision failed deterministic replay");
+      throw new Error(
+        "Candidate Set Selection Decision failed deterministic replay",
+      );
     }
     const selectedId = candidateSet.selectionDecision.winnerCompetitorId;
     if (selectedId === null) {
@@ -2598,7 +2944,9 @@ export class AgentService {
         candidateSet.selectedCompetitorId !== null ||
         candidateSet.winnerRunId !== null
       ) {
-        throw new Error("No-winner Selection Decision contradicts winner links");
+        throw new Error(
+          "No-winner Selection Decision contradicts winner links",
+        );
       }
       return null;
     }
@@ -2610,7 +2958,9 @@ export class AgentService {
       candidateSet.selectedCompetitorId !== selectedId ||
       candidateSet.winnerRunId !== winner.runId
     ) {
-      throw new Error("Selection Decision contradicts the persisted winner seal");
+      throw new Error(
+        "Selection Decision contradicts the persisted winner seal",
+      );
     }
     return {
       schemaVersion: 1,
@@ -2657,7 +3007,9 @@ export class AgentService {
             candidateSet.phase === "admitted" ||
             candidateSet.phase === "evaluating"
           ) {
-            await this.normalizeInterruptedCandidateSetEvaluations(candidateSetId);
+            await this.normalizeInterruptedCandidateSetEvaluations(
+              candidateSetId,
+            );
           }
           candidateSet = this.getCandidateSet(candidateSetId);
           const canonical =
@@ -2692,7 +3044,8 @@ export class AgentService {
                 (item) => item.id === candidateSetId,
               );
               const winner = storedSet?.competitors.find(
-                (competitor) => competitor.id === storedSet.selectedCompetitorId,
+                (competitor) =>
+                  competitor.id === storedSet.selectedCompetitorId,
               );
               const agent = database.agents.find(
                 (item) => item.id === candidateSet.agentId,
@@ -2810,9 +3163,12 @@ export class AgentService {
           competitor.status === "running" ||
           competitor.status === "eligible"
         ) {
-          competitor.status = run.status === "cancelled" ? "cancelled" : "ineligible";
+          competitor.status =
+            run.status === "cancelled" ? "cancelled" : "ineligible";
           competitor.exclusions = ["restart-interrupted-evaluation"];
-          competitor.error = run.error ? boundedCandidateSetError(run.error) : null;
+          competitor.error = run.error
+            ? boundedCandidateSetError(run.error)
+            : null;
           competitor.completedAt = run.completedAt ?? timestamp;
         }
       }
@@ -2877,9 +3233,9 @@ export class AgentService {
     authorized.selectionDecision = structuredClone(decision);
     authorized.selectedCompetitorId = decision.winnerCompetitorId;
     authorized.winnerRunId = decision.winnerCompetitorId
-      ? authorized.competitors.find(
+      ? (authorized.competitors.find(
           (competitor) => competitor.id === decision.winnerCompetitorId,
-        )?.runId ?? null
+        )?.runId ?? null)
       : null;
     authorized.decidedAt = candidateSet.updatedAt;
     return authorized;
@@ -2955,7 +3311,10 @@ export class AgentService {
             if (!competitor) return;
             const current = this.getCandidateSet(admitted.id);
             if (current.cancellationRequested) {
-              await this.markPendingCompetitorCancelled(admitted.id, competitor.id);
+              await this.markPendingCompetitorCancelled(
+                admitted.id,
+                competitor.id,
+              );
               continue;
             }
             await this.evaluateCandidateSetCompetitor(
@@ -3165,7 +3524,7 @@ export class AgentService {
             await this.workspaces.readCanonical(candidateSet.agentId),
             candidateSet.outcomeContract,
             this.config.maxRepairDepth,
-        ),
+          ),
         async (transaction) => {
           await this.persistRunProgress(run.id, transaction);
         },
@@ -3190,9 +3549,12 @@ export class AgentService {
       }
       const completedAt = now();
       const sourceMatches =
-        result.transaction.canonicalStateIdBefore === candidateSet.source.stateId &&
-        result.transaction.canonicalContentHashBefore === candidateSet.source.contentHash &&
-        result.transaction.outcomeContractVersion === candidateSet.outcomeContract.version;
+        result.transaction.canonicalStateIdBefore ===
+          candidateSet.source.stateId &&
+        result.transaction.canonicalContentHashBefore ===
+          candidateSet.source.contentHash &&
+        result.transaction.outcomeContractVersion ===
+          candidateSet.outcomeContract.version;
       if (!sourceMatches) {
         throw new StaleCandidateSourceError(
           "Sibling Candidate did not share the admitted source and Outcome Contract",
@@ -3216,7 +3578,9 @@ export class AgentService {
         );
         const storedRun = database.runs.find((item) => item.id === run.id);
         if (competitor) {
-          competitor.status = result.sealedCandidate ? "eligible" : "ineligible";
+          competitor.status = result.sealedCandidate
+            ? "eligible"
+            : "ineligible";
           competitor.criterionValues = values;
           competitor.exclusions = exclusions;
           competitor.evaluationDurationMs = durationMs;
@@ -3277,7 +3641,8 @@ export class AgentService {
         if (run) {
           run.status = cancelled ? "cancelled" : "failed";
           run.error = message;
-          if (error instanceof AirlockRunError) run.transaction = error.transaction;
+          if (error instanceof AirlockRunError)
+            run.transaction = error.transaction;
           run.completedAt = completedAt;
         }
         if (storedSet) storedSet.updatedAt = completedAt;
@@ -3288,7 +3653,9 @@ export class AgentService {
     }
   }
 
-  private async promoteCandidateSetWinner(candidateSetId: string): Promise<void> {
+  private async promoteCandidateSetWinner(
+    candidateSetId: string,
+  ): Promise<void> {
     const candidateSet = this.getCandidateSet(candidateSetId);
     const authority = await this.candidateSetPromotionAuthority(candidateSet);
     const winner = candidateSet.competitors.find(
@@ -3300,7 +3667,9 @@ export class AgentService {
       winner.runId !== candidateSet.winnerRunId ||
       authority.winnerRunId !== winner.runId
     ) {
-      throw new Error("Candidate Set winner decision has no matching sealed Candidate");
+      throw new Error(
+        "Candidate Set winner decision has no matching sealed Candidate",
+      );
     }
     const run = this.getRun(winner.runId);
     if (!run.transaction || run.output === null) {
@@ -3364,7 +3733,9 @@ export class AgentService {
       storedRun.error = null;
       storedRun.completedAt = promotedAt;
       if (!result.canonicalState) {
-        throw new Error("Selected Candidate Promotion returned no Canonical State");
+        throw new Error(
+          "Selected Candidate Promotion returned no Canonical State",
+        );
       }
       agent.workspacePath = result.canonicalState.workspacePath;
       agent.canonicalStateId = result.canonicalState.stateId;
@@ -3405,6 +3776,10 @@ export class AgentService {
         transaction = await this.runner.discardProviderQuarantines(
           candidateSet.agentId,
           transaction,
+          async (progress) => {
+            transaction = structuredClone(progress);
+            await this.persistTerminalCleanupProgress(run.id, progress);
+          },
         );
         await this.workspaces.discardQuarantine(run.id);
         transaction = markTransactionDiscarded(transaction, now(), false);
@@ -3427,45 +3802,45 @@ export class AgentService {
           candidateSet,
         );
       }
-      if (stableJson(transaction) !== stableJson(run.transaction)) {
-        await this.store.mutate((database) => {
-          const storedRun = database.runs.find((item) => item.id === run.id);
-          if (storedRun) storedRun.transaction = structuredClone(transaction);
-        });
-      }
-      await this.updateCompetitorDisposition(
-        candidateSetId,
-        competitor.id,
-        disposition,
-        disposition,
-      );
+      await this.store.mutate((database) => {
+        const storedSet = database.candidateSets.find(
+          (item) => item.id === candidateSetId,
+        );
+        const storedCompetitor = storedSet?.competitors.find(
+          (item) => item.id === competitor.id,
+        );
+        const storedRun = database.runs.find((item) => item.id === run.id);
+        if (!storedSet || !storedCompetitor || !storedRun) {
+          throw new Error(
+            "Candidate Set loser disappeared before terminal publication",
+          );
+        }
+        storedRun.transaction = structuredClone(transaction);
+        storedCompetitor.status = disposition;
+        storedCompetitor.loserDisposition = disposition;
+        storedSet.updatedAt = now();
+      });
     }
     if (updatePhase) {
       const latest = this.getCandidateSet(candidateSetId);
       if (latest.phase !== "cleaning-losers") {
-        throw new Error("Candidate Set loser cleanup changed phase unexpectedly");
+        throw new Error(
+          "Candidate Set loser cleanup changed phase unexpectedly",
+        );
       }
     }
   }
 
-  private async updateCompetitorDisposition(
-    candidateSetId: string,
-    competitorId: string,
-    status: "retained" | "discarded",
-    disposition: "retained" | "discarded",
+  private async persistTerminalCleanupProgress(
+    runId: string,
+    transaction: RunTransaction,
   ): Promise<void> {
     await this.store.mutate((database) => {
-      const candidateSet = database.candidateSets.find(
-        (item) => item.id === candidateSetId,
-      );
-      const competitor = candidateSet?.competitors.find(
-        (item) => item.id === competitorId,
-      );
-      if (competitor) {
-        competitor.status = status;
-        competitor.loserDisposition = disposition;
+      const run = database.runs.find((item) => item.id === runId);
+      if (!run?.transaction) {
+        throw new Error("Terminal cleanup Run disappeared");
       }
-      if (candidateSet) candidateSet.updatedAt = now();
+      run.transaction = structuredClone(transaction);
     });
   }
 
@@ -3486,10 +3861,14 @@ export class AgentService {
       throw new Error("Candidate Set pending competitor disappeared");
     }
     if (competitor.status !== "pending" || run.status !== "queued") {
-      throw new Error("Candidate Set pending competitor changed before cancellation");
+      throw new Error(
+        "Candidate Set pending competitor changed before cancellation",
+      );
     }
     if (!run.transaction) {
-      throw new Error("Candidate Set pending competitor has no Run Transaction");
+      throw new Error(
+        "Candidate Set pending competitor has no Run Transaction",
+      );
     }
     const terminalTransaction = markTransactionCancelledBeforeStart(
       run.transaction,
@@ -3517,13 +3896,16 @@ export class AgentService {
         storedCompetitor.status !== "pending" ||
         storedRun.status !== "queued"
       ) {
-        throw new Error("Candidate Set pending competitor changed during cancellation");
+        throw new Error(
+          "Candidate Set pending competitor changed during cancellation",
+        );
       }
       storedCompetitor.status = "cancelled";
       storedCompetitor.exclusions = ["candidate-set-cancelled"];
       storedCompetitor.completedAt = completedAt;
       storedRun.status = "cancelled";
-      storedRun.error = "Candidate Set was cancelled before this competitor started";
+      storedRun.error =
+        "Candidate Set was cancelled before this competitor started";
       storedRun.completedAt = completedAt;
       storedRun.transaction = structuredClone(terminalTransaction);
       storedCandidateSet.updatedAt = completedAt;
@@ -3539,7 +3921,9 @@ export class AgentService {
         (item) => item.id === candidateSetId,
       );
       if (!candidateSet) throw new Error("Candidate Set not found");
-      const allowed: Partial<Record<CandidateSet["phase"], CandidateSet["phase"][]>> = {
+      const allowed: Partial<
+        Record<CandidateSet["phase"], CandidateSet["phase"][]>
+      > = {
         admitted: ["evaluating"],
         evaluating: ["evaluated"],
         selected: ["promoting"],
@@ -3626,12 +4010,12 @@ export class AgentService {
       const canonical = await this.workspaces.readCanonical(agentAtStart.id);
       const repairSourceRunId = run.transaction?.lineage.parentRunId ?? null;
       const repairProviderQuarantines = repairSourceRunId
-        ? this.store
+        ? (this.store
             .snapshot()
             .runs.find((candidate) => candidate.id === repairSourceRunId)
             ?.transaction?.providerResources.flatMap((resource) =>
               resource.quarantine ? [resource.quarantine] : [],
-            ) ?? []
+            ) ?? [])
         : [];
       const result = await this.runner.run(
         {
@@ -3651,7 +4035,7 @@ export class AgentService {
             await this.workspaces.readCanonical(agentAtStart.id),
             agentAtStart.outcomeContract,
             this.config.maxRepairDepth,
-        ),
+          ),
         async (transaction) => {
           await this.persistRunProgress(run.id, transaction);
         },
@@ -3660,7 +4044,9 @@ export class AgentService {
       await this.recordPortableDecisionAuthority(run.id, result.transaction);
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
-        const agent = database.agents.find((item) => item.id === agentAtStart.id);
+        const agent = database.agents.find(
+          (item) => item.id === agentAtStart.id,
+        );
         if (!storedRun || !agent) return;
         storedRun.status = "completed";
         storedRun.output = result.output;
@@ -3682,7 +4068,8 @@ export class AgentService {
           agent.codexThreadId = result.canonicalState.codexThreadId;
           agent.lastError = null;
         } else {
-          agent.lastError = "Run quarantined because a required Validation failed";
+          agent.lastError =
+            "Run quarantined because a required Validation failed";
         }
         agent.updatedAt = completedAt;
       });
@@ -3710,7 +4097,10 @@ export class AgentService {
           terminalTransaction,
           "Validation was skipped because the Run was cancelled before execution",
         );
-        terminalTransaction = finalizeResources(terminalTransaction, "cancelled");
+        terminalTransaction = finalizeResources(
+          terminalTransaction,
+          "cancelled",
+        );
         terminalTransaction.events.push({
           status: "cancelled",
           at: completedAt,
@@ -3724,7 +4114,9 @@ export class AgentService {
       }
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
-        const agent = database.agents.find((item) => item.id === agentAtStart.id);
+        const agent = database.agents.find(
+          (item) => item.id === agentAtStart.id,
+        );
         if (storedRun) {
           storedRun.status = cancelled ? "cancelled" : "failed";
           storedRun.error = message;
@@ -3766,7 +4158,10 @@ export class AgentService {
         throw new HttpError(404, "Agent not found");
       }
       if (status === "ready" && agent.status === "busy") {
-        throw new HttpError(409, "Stop the active run before starting this Agent");
+        throw new HttpError(
+          409,
+          "Stop the active run before starting this Agent",
+        );
       }
       agent.status = status;
       if (status === "ready") agent.lastError = null;
@@ -3898,20 +4293,24 @@ function assertPersistedSealIdentity(
 
 function airlockEvidenceHash(value: unknown): string {
   return (
-    "sha256:" +
-    createHash("sha256").update(stableJson(value)).digest("hex")
+    "sha256:" + createHash("sha256").update(stableJson(value)).digest("hex")
   );
 }
 
 function buildRepairPrompt(source: AgentRun, objective?: string): string {
   const failedEvidence =
     source.transaction?.validations
-      .filter((validation) => validation.required && validation.status !== "passed")
+      .filter(
+        (validation) => validation.required && validation.status !== "passed",
+      )
       .map((validation) => {
-        const output = validation.output ? "\nEvidence: " + validation.output : "";
+        const output = validation.output
+          ? "\nEvidence: " + validation.output
+          : "";
         return "- " + validation.name + ": " + validation.summary + output;
       })
-      .join("\n") || "- The prior Run did not retain a decisive Validation detail.";
+      .join("\n") ||
+    "- The prior Run did not retain a decisive Validation detail.";
   const boundedObjective =
     objective?.trim() ||
     "Correct only the recorded required Validation failures while preserving useful quarantined work.";
@@ -4016,7 +4415,8 @@ function candidateTokenAllowance(
   const index = candidateSet.competitors.findIndex(
     (competitor) => competitor.id === competitorId,
   );
-  if (index < 0) throw new Error("Candidate Set token reservation has no competitor");
+  if (index < 0)
+    throw new Error("Candidate Set token reservation has no competitor");
   const base = Math.floor(
     candidateSet.budget.maxTotalTokens / candidateSet.competitors.length,
   );
@@ -4048,7 +4448,9 @@ function completeInterruptedValidationEvidence(
   summary: string,
 ): RunTransaction {
   const next = structuredClone(transaction);
-  const existing = new Set(next.validations.map((validation) => validation.name));
+  const existing = new Set(
+    next.validations.map((validation) => validation.name),
+  );
   const required = [
     { name: "path-safety", required: true },
     { name: "protected-paths", required: true },
@@ -4097,6 +4499,70 @@ function markTransactionDiscarded(
   return next;
 }
 
+function terminalRunStatus(
+  disposition: NonNullable<RunTransaction["disposition"]>,
+): AgentRun["status"] {
+  if (disposition === "promoted") return "completed";
+  if (disposition === "cancelled") return "cancelled";
+  return "failed";
+}
+
+function terminalRunStatusMatches(
+  disposition: NonNullable<RunTransaction["disposition"]>,
+  status: AgentRun["status"],
+): boolean {
+  if (disposition === "promoted") return status === "completed";
+  if (disposition === "cancelled") return status === "cancelled";
+  return status === "completed" || status === "failed";
+}
+
+function terminalCompetitorLifecycle(
+  candidateSet: CandidateSet,
+  run: AgentRun,
+  disposition: NonNullable<RunTransaction["disposition"]>,
+): Pick<CandidateSetCompetitor, "status" | "loserDisposition"> {
+  if (disposition === "promoted") {
+    if (
+      candidateSet.winnerRunId !== run.id ||
+      candidateSet.selectedCompetitorId !== run.competitorId
+    ) {
+      throw new Error(
+        "Promoted terminal authority contradicts the Candidate Set winner",
+      );
+    }
+    return { status: "promoted", loserDisposition: "winner" };
+  }
+  if (candidateSet.winnerRunId === run.id) {
+    throw new Error(
+      "Losing terminal authority contradicts the Candidate Set winner",
+    );
+  }
+  if (disposition === "quarantined") {
+    return { status: "retained", loserDisposition: "retained" };
+  }
+  return { status: "discarded", loserDisposition: "discarded" };
+}
+
+function projectCandidateSetLifecycleAtAuthority(
+  candidateSet: CandidateSet,
+  run: AgentRun,
+  disposition: NonNullable<RunTransaction["disposition"]>,
+): CandidateSet {
+  const projected = structuredClone(candidateSet);
+  const competitor = projected.competitors.find(
+    (candidate) => candidate.runId === run.id,
+  );
+  if (!competitor) {
+    throw new Error(
+      "Portable receipt authority has no Candidate Set competitor",
+    );
+  }
+  const lifecycle = terminalCompetitorLifecycle(projected, run, disposition);
+  competitor.status = lifecycle.status;
+  competitor.loserDisposition = lifecycle.loserDisposition;
+  return projected;
+}
+
 function markTransactionCancelledBeforeStart(
   transaction: RunTransaction,
   cancelledAt: string,
@@ -4111,7 +4577,8 @@ function markTransactionCancelledBeforeStart(
     status: "rejected",
     deliveredAt: null,
   }));
-  if (next.sqlite?.before) next.sqlite.after = structuredClone(next.sqlite.before);
+  if (next.sqlite?.before)
+    next.sqlite.after = structuredClone(next.sqlite.before);
   next = completeInterruptedValidationEvidence(
     next,
     "Validation could not run because the Candidate Set cancelled this Run before execution",

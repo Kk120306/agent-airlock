@@ -147,7 +147,7 @@ Post-Runtime confinement rescans remain mandatory for every competitor.
 Candidate Sets live in database version 9 inside the trusted control-plane store, outside every Runtime mount, and every mutation uses atomic JSON replacement.
 Version 9 startup strictly parses Candidate Set and competitor fields, bounds, seals, Run cross-references, and Selection Decision structure before recovery.
 The strict HTTP admission schema rejects unknown or oversized input before persistence, Candidate Set fields remain bounded and credential-checked, and the deterministic Selection Decision carries a replayable digest before it can authorize Promotion.
-One immutable Candidate Set Decision Authority is published before the mutable Selection projection and commits the exact source, contracts, bounded competitor evidence, Selection Decision, selected competitor, winner Run, and decision timestamp.
+One immutable Candidate Set Decision Authority is published before the mutable Selection projection and commits the exact source, contracts, loser policy, bounded competitor evidence, Selection Decision, selected competitor, winner Run, and decision timestamp.
 Promotion journal schema 2 stores a versioned authority that names the exact Candidate Set, competitor, winner Run, decision digest, seal digest, source identifier, and source content hash.
 Startup deterministically replays the persisted Selection Decision and compares the complete expected authority before any Promotion recovery step may install state, advance Canonical State, or dispatch effects.
 
@@ -193,6 +193,8 @@ It rejects credentials, unknown fields, duplicate competitor identifiers, unboun
 Cancellation before a winner decision quarantines or discards every sibling according to policy and leaves Canonical State unchanged.
 Each terminal cancellation and loser-cleanup branch publishes immutable Decision Authority before its Run or competitor metadata, and Candidate Set completion never reconstructs missing authority from the mutable aggregate.
 After immutable Selection authority is published, every already-terminal competitor receives a final Candidate Set-bound authority before mutable Selection becomes visible.
+Provider Discard events are durably projected before local removal, and final loser Run plus competitor lifecycle metadata are published in one control-plane mutation.
+Startup audits even already-terminal loser Runs and replays the newest valid Candidate Set-bound authority when either child projection is behind.
 Cancellation after a winner decision cannot reverse the durable selection or approved Promotion and instead follows existing forward-recovery semantics.
 
 ## Initial deterministic proof
@@ -225,8 +227,10 @@ Additional crash injection at every non-authoritative presentation-only phase re
 - Crash recovery after canonical advancement dispatches only winner intents and completes loser cleanup.
 - Crash recovery after physical loser Quarantine or removal but before terminal metadata reconciles that exact disposition without recreating Candidate State.
 - A terminal Candidate Set Run and its competitor lifecycle status become visible together at the child boundary.
+- Immutable Selection authority binds the loser policy that authorizes irreversible cleanup.
 - The Agent deliberately remains busy until the aggregate Candidate Set completes Selection, winner Promotion, and loser cleanup.
 - A restart after immutable terminal authority publication replays that exact transaction or enters `recovery-error`; it never synthesizes a conflicting cancellation.
+- Terminal authority recovery failure keeps Agent execution and Resource Registry admission closed.
 - Winner Promotion contradiction produces `recovery-error` and never promotes a runner-up.
 - Retained losers remain Repair-ineligible until a later explicit lineage decision.
 - Ordinary Run and Repair regression suites remain byte-compatible.

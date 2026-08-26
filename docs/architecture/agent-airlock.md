@@ -175,8 +175,8 @@ Validation proceeds in a deterministic order so evidence remains understandable:
 5. Enforce change-count and added-byte limits.
 6. Scan changed content for configured secret patterns.
 7. Execute operator-defined validation commands in a constrained container.
-All required Validations must pass before promotion begins.
-The Candidate Codex home is also rejected before Promotion if it contains any symbolic link or if the returned thread has no matching rollout artifact.
+   All required Validations must pass before promotion begins.
+   The Candidate Codex home is also rejected before Promotion if it contains any symbolic link or if the returned thread has no matching rollout artifact.
 
 Outcome Contract schema version 1 is a bounded data model rather than a policy language.
 Its default requires `AGENTS.md` and `README.md`, protects `AGENTS.md`, limits a Run to 200 changed files and 2 MiB of candidate payload across added or modified files, scans for Ark key assignments and bearer tokens, and defines no command Validations until the operator adds them.
@@ -198,12 +198,20 @@ interface TransactionalResourceProvider {
   readonly manifest: ResourceProviderManifest;
   prepare(context: ResourcePrepareContext): Promise<PreparedResource>;
   describe(context: ResourceCandidateContext): Promise<ResourceChangeEvidence>;
-  validate(context: ResourceCandidateContext): Promise<ResourceValidationEvidence[]>;
-  planPromotion(context: ResourceCandidateContext): Promise<ResourcePromotionPlan>;
+  validate(
+    context: ResourceCandidateContext,
+  ): Promise<ResourceValidationEvidence[]>;
+  planPromotion(
+    context: ResourceCandidateContext,
+  ): Promise<ResourcePromotionPlan>;
   promote(context: ResourcePromotionContext): Promise<ResourceVersionReference>;
-  quarantine(context: ResourceQuarantineContext): Promise<ResourceQuarantineHandle>;
+  quarantine(
+    context: ResourceQuarantineContext,
+  ): Promise<ResourceQuarantineHandle>;
   discard(context: ResourceDiscardContext): Promise<ResourceDiscardResult>;
-  reconcile(context: ResourceReconcileContext): Promise<ResourceReconciliationResult>;
+  reconcile(
+    context: ResourceReconcileContext,
+  ): Promise<ResourceReconciliationResult>;
 }
 ```
 
@@ -271,43 +279,43 @@ Schema evolution must increment the database version and include a tested migrat
 
 ## Failure semantics
 
-| Failure | Required result |
-| --- | --- |
-| Candidate preparation fails | Do not invoke the AgentRunner and leave Canonical State unchanged. |
-| AgentRunner fails or times out | Quarantine bounded evidence and leave Canonical State unchanged. |
-| Validation fails | Quarantine Candidate State and identify the failing Validation. |
-| Repair source is stale, missing, exhausted, or already has a child | Reject the operation before scheduling and leave both realities unchanged. |
-| Repair reference changes | Fail its required Validation and quarantine the Repair Run. |
-| Operator discards Quarantine | Remove only mutable Quarantine state and retain bounded evidence with `discarded` disposition. |
-| Evidence persistence fails before promotion | Fail closed without promotion. |
-| Process stops after an approved journal | Reconcile the same decision forward to one target version and at most one supported mock effect. |
-| Journal and physical state contradict | Preserve current Canonical State, dispatch no new effect, and surface `recovery-error`. |
-| Candidate or Quarantine retention expires | Remove only unprotected mutable state and retain bounded control-plane evidence. |
-| Resource Provider preparation fails | Do not invoke Runtime, discard every possible provider Candidate idempotently, and retain a composite Quarantine when cleanup cannot finish. |
-| Provider onboarding source cannot be verified | Preserve the prior canonical manifest and Resource Registry generation and place the affected Agent in an explicit error state. |
-| Registry Transition is interrupted | Reconcile the journal against exact installed and canonical fingerprints, then either retry from the prior state or finish the accepted transition. |
-| Registry Transition journal is malformed or forged | Reject it before deleting any state or rewriting Canonical State. |
-| Prior-generation Promotion recovery fails | Preserve its historical state, defer every Registry Transition and registry-generation commit, and surface `recovery-error`. |
-| Provider removal or contract replacement is configured | Reject the non-additive registry evolution before changing Canonical State. |
-| Required provider Validation fails | Quarantine every built-in and provider resource while leaving the canonical manifest unchanged. |
-| Provider Promotion or reconciliation contradicts the durable plan | Preserve current Canonical State and surface `recovery-error`. |
-| Provider cleanup is unavailable | Retain local mutable state and retry before removal. |
-| Local Quarantine is missing without complete provider Discard evidence | Fail recovery closed and do not claim remote cleanup. |
-| Candidate Set admission or preparation conflicts with another Agent operation | Reject the set before sibling Runtime execution and leave Canonical State unchanged. |
-| A competitor fails required Validation | Exclude that Candidate from Selection regardless of its ranking inputs and dispatch none of its effects. |
-| Every competitor is invalid or incomplete | Persist `no-winner`, leave Canonical State unchanged, and reconcile every loser disposition. |
-| Process stops before Candidate Set Selection | Preserve complete seals, mark partial evaluations ineligible without replaying Runtime, and deterministically select only from persisted evidence. |
-| Process stops after immutable Candidate Set Decision Authority but before mutable Selection | Restore the exact authorized Selection and never recompute a different winner. |
-| Process stops after Candidate Set Selection | Resume Promotion for only the exact persisted winner, then reconcile loser cleanup idempotently. |
-| Candidate Set and Promotion-journal authorities disagree | Reject physical Promotion recovery before installation, canonical advancement, or effect dispatch and surface `recovery-error`. |
-| Selected Candidate seal, source, resource fingerprint, or Promotion evidence contradicts physical state | Surface `recovery-error`, preserve evidence, dispatch no new effect, and never select a runner-up. |
-| A new provider is configured while an older Candidate Set is unresolved | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit. |
-| Candidate Set recovery fails while a new provider is configured | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit. |
-| Portable receipt evidence is incomplete, legacy, or contradictory | Return a retryable conflict without signing an interpretation or changing Canonical State. |
-| Terminal Run authority exists while its mutable Run projection still appears active | Verify stable identity and required physical Quarantine, then replay the exact terminal transaction or enter `recovery-error`. |
-| Portable Decision Authority or a historical Canonical manifest is missing or contradictory | Fail export closed without reconstructing authority from mutable database content. |
-| Portable signing identity is missing, substituted, malformed, or weakly permissioned | Fail export closed without revealing a local path or silently rotating the identity. |
-| Optional transparency state is malformed | Fail anchored export closed while leaving signature-only export available. |
+| Failure                                                                                                 | Required result                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Candidate preparation fails                                                                             | Do not invoke the AgentRunner and leave Canonical State unchanged.                                                                                                                                                                                               |
+| AgentRunner fails or times out                                                                          | Quarantine bounded evidence and leave Canonical State unchanged.                                                                                                                                                                                                 |
+| Validation fails                                                                                        | Quarantine Candidate State and identify the failing Validation.                                                                                                                                                                                                  |
+| Repair source is stale, missing, exhausted, or already has a child                                      | Reject the operation before scheduling and leave both realities unchanged.                                                                                                                                                                                       |
+| Repair reference changes                                                                                | Fail its required Validation and quarantine the Repair Run.                                                                                                                                                                                                      |
+| Operator discards Quarantine                                                                            | Remove only mutable Quarantine state and retain bounded evidence with `discarded` disposition.                                                                                                                                                                   |
+| Evidence persistence fails before promotion                                                             | Fail closed without promotion.                                                                                                                                                                                                                                   |
+| Process stops after an approved journal                                                                 | Reconcile the same decision forward to one target version and at most one supported mock effect.                                                                                                                                                                 |
+| Journal and physical state contradict                                                                   | Preserve current Canonical State, dispatch no new effect, and surface `recovery-error`.                                                                                                                                                                          |
+| Candidate or Quarantine retention expires                                                               | Remove only unprotected mutable state and retain bounded control-plane evidence.                                                                                                                                                                                 |
+| Resource Provider preparation fails                                                                     | Do not invoke Runtime, discard every possible provider Candidate idempotently, and retain a composite Quarantine when cleanup cannot finish.                                                                                                                     |
+| Provider onboarding source cannot be verified                                                           | Preserve the prior canonical manifest and Resource Registry generation and place the affected Agent in an explicit error state.                                                                                                                                  |
+| Registry Transition is interrupted                                                                      | Reconcile the journal against exact installed and canonical fingerprints, then either retry from the prior state or finish the accepted transition.                                                                                                              |
+| Registry Transition journal is malformed or forged                                                      | Reject it before deleting any state or rewriting Canonical State.                                                                                                                                                                                                |
+| Prior-generation Promotion recovery fails                                                               | Preserve its historical state, defer every Registry Transition and registry-generation commit, and surface `recovery-error`.                                                                                                                                     |
+| Provider removal or contract replacement is configured                                                  | Reject the non-additive registry evolution before changing Canonical State.                                                                                                                                                                                      |
+| Required provider Validation fails                                                                      | Quarantine every built-in and provider resource while leaving the canonical manifest unchanged.                                                                                                                                                                  |
+| Provider Promotion or reconciliation contradicts the durable plan                                       | Preserve current Canonical State and surface `recovery-error`.                                                                                                                                                                                                   |
+| Provider cleanup is unavailable                                                                         | Retain local mutable state and retry before removal.                                                                                                                                                                                                             |
+| Local Quarantine is missing without complete provider Discard evidence                                  | Fail recovery closed and do not claim remote cleanup.                                                                                                                                                                                                            |
+| Candidate Set admission or preparation conflicts with another Agent operation                           | Reject the set before sibling Runtime execution and leave Canonical State unchanged.                                                                                                                                                                             |
+| A competitor fails required Validation                                                                  | Exclude that Candidate from Selection regardless of its ranking inputs and dispatch none of its effects.                                                                                                                                                         |
+| Every competitor is invalid or incomplete                                                               | Persist `no-winner`, leave Canonical State unchanged, and reconcile every loser disposition.                                                                                                                                                                     |
+| Process stops before Candidate Set Selection                                                            | Preserve complete seals, mark partial evaluations ineligible without replaying Runtime, and deterministically select only from persisted evidence.                                                                                                               |
+| Process stops after immutable Candidate Set Decision Authority but before mutable Selection             | Restore the exact authorized Selection and never recompute a different winner.                                                                                                                                                                                   |
+| Process stops after Candidate Set Selection                                                             | Resume Promotion for only the exact persisted winner, then reconcile loser cleanup idempotently.                                                                                                                                                                 |
+| Candidate Set and Promotion-journal authorities disagree                                                | Reject physical Promotion recovery before installation, canonical advancement, or effect dispatch and surface `recovery-error`.                                                                                                                                  |
+| Selected Candidate seal, source, resource fingerprint, or Promotion evidence contradicts physical state | Surface `recovery-error`, preserve evidence, dispatch no new effect, and never select a runner-up.                                                                                                                                                               |
+| A new provider is configured while an older Candidate Set is unresolved                                 | Recover the Candidate Set with its historical provider subset before Registry Transition or generation commit.                                                                                                                                                   |
+| Candidate Set recovery fails while a new provider is configured                                         | Keep the prior Resource Registry generation authoritative and refuse onboarding or generation commit.                                                                                                                                                            |
+| Portable receipt evidence is incomplete, legacy, or contradictory                                       | Return a retryable conflict without signing an interpretation or changing Canonical State.                                                                                                                                                                       |
+| Terminal Run authority is ahead of an active or already-terminal mutable Run or Candidate competitor    | Verify stable identity, the strictly bounded Quarantine-to-Discard or completed-Promotion recovery progression, Candidate Set authority, and physical disposition, then replay the exact newest transaction plus competitor lifecycle or enter `recovery-error`. |
+| Portable Decision Authority or a historical Canonical manifest is missing or contradictory              | Fail export closed without reconstructing authority from mutable database content.                                                                                                                                                                               |
+| Portable signing identity is missing, substituted, malformed, or weakly permissioned                    | Fail export closed without revealing a local path or silently rotating the identity.                                                                                                                                                                             |
+| Optional transparency state is malformed                                                                | Fail anchored export closed while leaving signature-only export available.                                                                                                                                                                                       |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 
