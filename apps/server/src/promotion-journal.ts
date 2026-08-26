@@ -124,7 +124,9 @@ export class PromotionJournal {
         recoveryResult: {
           output: recoveryOutput,
           threadId: input.result.threadId,
-          usage: input.result.usage ? structuredClone(input.result.usage) : null,
+          usage: input.result.usage
+            ? structuredClone(input.result.usage)
+            : null,
         },
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -157,7 +159,10 @@ export class PromotionJournal {
       }
       if (nextIndex !== currentIndex + 1) {
         throw new Error(
-          "Promotion journal cannot advance from " + current.phase + " to " + phase,
+          "Promotion journal cannot advance from " +
+            current.phase +
+            " to " +
+            phase,
         );
       }
       const transaction = structuredClone(updates.transaction);
@@ -200,7 +205,8 @@ export class PromotionJournal {
       nextTransaction.recovery = {
         ...nextTransaction.recovery,
         journalPhase: current.phase,
-        recoveredAfterRestart: true,
+        recoveredAfterRestart:
+          current.transaction.recovery.recoveredAfterRestart,
         recoveryError: message.slice(0, 500),
       };
       const next = {
@@ -246,9 +252,7 @@ export class PromotionJournal {
     if (Buffer.byteLength(raw, "utf8") > maximumJournalBytes) {
       throw new Error("Promotion journal exceeds 2000000 bytes");
     }
-    const parsed = upgradeLegacyResourcePlan(
-      JSON.parse(raw) as unknown,
-    );
+    const parsed = upgradeLegacyResourcePlan(JSON.parse(raw) as unknown);
     this.validateRecord(parsed);
     return structuredClone(parsed);
   }
@@ -263,7 +267,10 @@ export class PromotionJournal {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
       const runId = entry.name.slice(0, -5);
       if (!safeIdentifierPattern.test(runId)) {
-        errors.push({ runId: null, message: "Unsafe Promotion journal filename" });
+        errors.push({
+          runId: null,
+          message: "Unsafe Promotion journal filename",
+        });
         continue;
       }
       try {
@@ -281,24 +288,30 @@ export class PromotionJournal {
     return { records, errors };
   }
 
-  private validateRecord(value: unknown): asserts value is PromotionJournalRecord {
+  private validateRecord(
+    value: unknown,
+  ): asserts value is PromotionJournalRecord {
     if (!value || typeof value !== "object") {
       throw new Error("Promotion journal must be an object");
     }
     const record = value as PromotionJournalRecord;
-    assertExactKeys(record, [
-      "schemaVersion",
-      "runId",
-      "agentId",
-      "authority",
-      "phase",
-      "plan",
-      "targetCanonical",
-      "transaction",
-      "recoveryResult",
-      "createdAt",
-      "updatedAt",
-    ], "Promotion journal");
+    assertExactKeys(
+      record,
+      [
+        "schemaVersion",
+        "runId",
+        "agentId",
+        "authority",
+        "phase",
+        "plan",
+        "targetCanonical",
+        "transaction",
+        "recoveryResult",
+        "createdAt",
+        "updatedAt",
+      ],
+      "Promotion journal",
+    );
     if (
       record.schemaVersion !== 2 ||
       !safeIdentifierPattern.test(record.runId) ||
@@ -321,7 +334,9 @@ export class PromotionJournal {
     validatePromotionAuthority(record);
     const phaseIndex = phaseOrder.indexOf(record.phase);
     if (phaseIndex >= 1 && !record.targetCanonical) {
-      throw new Error("Installed Promotion journal phase requires target fingerprints");
+      throw new Error(
+        "Installed Promotion journal phase requires target fingerprints",
+      );
     }
     if (
       record.targetCanonical &&
@@ -402,9 +417,12 @@ function validatePromotionAuthority(record: PromotionJournalRecord): void {
     authority.sourceStateId !== record.plan.sourceStateId ||
     authority.sourceContentHash !== record.plan.sourceContentHash ||
     authority.sourceStateId !== record.transaction.canonicalStateIdBefore ||
-    authority.sourceContentHash !== record.transaction.canonicalContentHashBefore
+    authority.sourceContentHash !==
+      record.transaction.canonicalContentHashBefore
   ) {
-    throw new Error("Candidate Set Promotion authority contradicts its journal");
+    throw new Error(
+      "Candidate Set Promotion authority contradicts its journal",
+    );
   }
 }
 
@@ -433,8 +451,16 @@ function validateResourceEvidence(record: PromotionJournalRecord): void {
     "target provider versions",
   );
   const resourcePlans = parsePromotionPlanVector(record.plan.resourcePlans);
-  assertSameProviderSet(sourceVersions, targetVersions, "provider version vectors");
-  assertSameProviderSet(sourceVersions, resourcePlans, "Resource Promotion plans");
+  assertSameProviderSet(
+    sourceVersions,
+    targetVersions,
+    "provider version vectors",
+  );
+  assertSameProviderSet(
+    sourceVersions,
+    resourcePlans,
+    "Resource Promotion plans",
+  );
 
   for (const [providerId, plan] of resourcePlans) {
     const source = sourceVersions.get(providerId);
@@ -449,7 +475,9 @@ function validateResourceEvidence(record: PromotionJournalRecord): void {
       target.versionId !== plan.targetVersionId ||
       target.fingerprint !== plan.targetFingerprint
     ) {
-      throw new Error("Resource Promotion plan contradicts its version vectors");
+      throw new Error(
+        "Resource Promotion plan contradicts its version vectors",
+      );
     }
   }
 
@@ -495,12 +523,17 @@ function validateResourceEvidence(record: PromotionJournalRecord): void {
     const source = parseResourceVersionReference(resource.source, manifest);
     if (
       resource.change !== null &&
-      parseResourceChangeEvidence(resource.change, manifest).fingerprintBefore !==
-        source.fingerprint
+      parseResourceChangeEvidence(resource.change, manifest)
+        .fingerprintBefore !== source.fingerprint
     ) {
-      throw new Error("Promotion journal Resource change contradicts its source");
+      throw new Error(
+        "Promotion journal Resource change contradicts its source",
+      );
     }
-    if (!Array.isArray(resource.validations) || resource.validations.length > 64) {
+    if (
+      !Array.isArray(resource.validations) ||
+      resource.validations.length > 64
+    ) {
       throw new Error("Promotion journal Resource Validations are invalid");
     }
     for (const validation of resource.validations) {
@@ -535,13 +568,20 @@ function validateResourceEvidence(record: PromotionJournalRecord): void {
       !plannedTarget ||
       stableJson(plan) !== stableJson(evidencePlan) ||
       stableJson(source) !== stableJson(plannedSource) ||
-      (installed !== null && stableJson(installed) !== stableJson(plannedTarget))
+      (installed !== null &&
+        stableJson(installed) !== stableJson(plannedTarget))
     ) {
-      throw new Error("Promotion journal provider evidence contradicts its durable plan");
+      throw new Error(
+        "Promotion journal provider evidence contradicts its durable plan",
+      );
     }
     evidenceByProvider.set(manifest.providerId, manifest.resourceKind);
   }
-  assertSameProviderSet(sourceVersions, evidenceByProvider, "provider evidence");
+  assertSameProviderSet(
+    sourceVersions,
+    evidenceByProvider,
+    "provider evidence",
+  );
 
   if (
     !Array.isArray(record.transaction.providerResourceEvents) ||
@@ -580,10 +620,18 @@ function validateResourceEvidence(record: PromotionJournalRecord): void {
       record.targetCanonical.providerVersions,
       "target Canonical provider versions",
     );
-    assertSameProviderSet(targetVersions, canonicalVersions, "target Canonical versions");
+    assertSameProviderSet(
+      targetVersions,
+      canonicalVersions,
+      "target Canonical versions",
+    );
     for (const [providerId, version] of targetVersions) {
-      if (stableJson(version) !== stableJson(canonicalVersions.get(providerId))) {
-        throw new Error("Target Canonical provider version contradicts its plan");
+      if (
+        stableJson(version) !== stableJson(canonicalVersions.get(providerId))
+      ) {
+        throw new Error(
+          "Target Canonical provider version contradicts its plan",
+        );
       }
     }
   }
@@ -617,7 +665,9 @@ function parsePromotionPlanVector(
   for (const value of values) {
     const accepted = parseResourcePromotionPlan(value);
     if (indexed.has(accepted.providerId)) {
-      throw new Error("Promotion journal has duplicate Resource Promotion plan");
+      throw new Error(
+        "Promotion journal has duplicate Resource Promotion plan",
+      );
     }
     indexed.set(accepted.providerId, accepted);
   }
@@ -635,7 +685,9 @@ function assertSameProviderSet(
     expectedIds.length !== actualIds.length ||
     expectedIds.some((providerId, index) => providerId !== actualIds[index])
   ) {
-    throw new Error("Promotion journal " + label + " provider set is inconsistent");
+    throw new Error(
+      "Promotion journal " + label + " provider set is inconsistent",
+    );
   }
 }
 
@@ -675,24 +727,27 @@ function upgradeLegacyResourcePlan(value: unknown): unknown {
         ? {
             ...(record.targetCanonical as Record<string, unknown>),
             providerVersions: Array.isArray(
-              (record.targetCanonical as Record<string, unknown>).providerVersions,
+              (record.targetCanonical as Record<string, unknown>)
+                .providerVersions,
             )
-              ? (record.targetCanonical as Record<string, unknown>).providerVersions
+              ? (record.targetCanonical as Record<string, unknown>)
+                  .providerVersions
               : [],
           }
         : record.targetCanonical,
-    transaction:
-      transaction
-        ? {
-            ...transaction,
-            providerResources: Array.isArray(transaction.providerResources)
-              ? transaction.providerResources
-              : [],
-            providerResourceEvents: Array.isArray(transaction.providerResourceEvents)
-              ? transaction.providerResourceEvents
-              : [],
-          }
-        : record.transaction,
+    transaction: transaction
+      ? {
+          ...transaction,
+          providerResources: Array.isArray(transaction.providerResources)
+            ? transaction.providerResources
+            : [],
+          providerResourceEvents: Array.isArray(
+            transaction.providerResourceEvents,
+          )
+            ? transaction.providerResourceEvents
+            : [],
+        }
+      : record.transaction,
     plan: {
       ...plan,
       sourceProviderVersions: Array.isArray(plan.sourceProviderVersions)
@@ -701,7 +756,9 @@ function upgradeLegacyResourcePlan(value: unknown): unknown {
       targetProviderVersions: Array.isArray(plan.targetProviderVersions)
         ? plan.targetProviderVersions
         : [],
-      resourcePlans: Array.isArray(plan.resourcePlans) ? plan.resourcePlans : [],
+      resourcePlans: Array.isArray(plan.resourcePlans)
+        ? plan.resourcePlans
+        : [],
     },
   };
 }

@@ -306,7 +306,7 @@ describe("Phase 6 durable Promotion recovery", () => {
         status: "recovery-error",
         recovery: {
           journalPhase: "version-installed",
-          recoveredAfterRestart: true,
+          recoveredAfterRestart: false,
           recoveryError: expect.stringContaining("contradicts"),
         },
       },
