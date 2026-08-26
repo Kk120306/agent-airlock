@@ -30,6 +30,7 @@ import { ResourceRegistry } from "./resource-registry.js";
 import { JsonStore } from "./store.js";
 import type {
   AgentRunner,
+  CandidateSetPhase,
   CandidateSelectionDecision,
   Database,
   RunnerRequest,
@@ -39,6 +40,68 @@ import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
 
 const temporaryDirectories: string[] = [];
+const candidateSetWorkflowTimeoutMs = 15_000;
+
+type TerminalCandidateSetPhase = Extract<
+  CandidateSetPhase,
+  "completed" | "stale" | "recovery-error"
+>;
+
+type AgentServiceExecutionState = {
+  activeExecutions: Map<string, Promise<void>>;
+};
+
+function hasActiveExecution(service: AgentService, agentId: string): boolean {
+  return (service as unknown as AgentServiceExecutionState).activeExecutions.has(
+    agentId,
+  );
+}
+
+async function waitForAgentExecutionToStop(
+  service: AgentService,
+  agentId: string,
+): Promise<void> {
+  await expect
+    .poll(() => !hasActiveExecution(service, agentId), {
+      timeout: candidateSetWorkflowTimeoutMs,
+    })
+    .toBe(true);
+}
+
+async function waitForCandidateSetPhase(
+  service: AgentService,
+  candidateSetId: string,
+  expectedPhase: CandidateSetPhase,
+): Promise<void> {
+  await expect
+    .poll(() => service.getCandidateSet(candidateSetId).phase, {
+      timeout: candidateSetWorkflowTimeoutMs,
+    })
+    .toBe(expectedPhase);
+}
+
+async function waitForCandidateSetTerminalPhase(
+  service: AgentService,
+  candidateSetId: string,
+  expectedPhase: TerminalCandidateSetPhase,
+  agentId: string,
+): Promise<void> {
+  await waitForCandidateSetPhase(service, candidateSetId, expectedPhase);
+  await waitForAgentExecutionToStop(service, agentId);
+}
+
+async function waitForCandidateSetRecoveryError(
+  service: AgentService,
+  candidateSetId: string,
+  agentId: string,
+): Promise<void> {
+  await expect
+    .poll(() => service.getCandidateSet(candidateSetId).recoveryError, {
+      timeout: candidateSetWorkflowTimeoutMs,
+    })
+    .not.toBeNull();
+  await waitForAgentExecutionToStop(service, agentId);
+}
 
 function deferredSignal(): {
   promise: Promise<void>;
@@ -406,11 +469,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
     expect(admitted.statusCode).toBe(202);
     const candidateSetId = admitted.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
-    await expect
-      .poll(() => service.getCandidateSet(candidateSetId).phase, {
-        timeout: 15_000,
-      })
-      .toBe("completed");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      candidateSetId,
+      "completed",
+      agentId,
+    );
 
     const candidateSet = service.getCandidateSet(candidateSetId);
     expect(candidateSet.selectedCompetitorId).toBe("focused-valid");
@@ -499,11 +563,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
     expect(admitted.statusCode).toBe(202);
     const candidateSetId = admitted.json<{ candidateSet: { id: string } }>()
       .candidateSet.id;
-    await expect
-      .poll(() => service.getCandidateSet(candidateSetId).phase, {
-        timeout: 8_000,
-      })
-      .toBe("completed");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      candidateSetId,
+      "completed",
+      agentId,
+    );
 
     const candidateSet = service.getCandidateSet(candidateSetId);
     expect(Date.now() - startedAt).toBeLessThan(4_000);
@@ -585,7 +650,7 @@ describe("Phase 9 Competing Futures acceptance", () => {
       ARK_API_KEY: "phase-nine-fixture-key",
       ARK_MODEL: "phase-nine-fixture-model",
     });
-    const runner = new CompetingFuturesRunner();
+    const runner = new GatedCompetingFuturesRunner();
     const workspaces = new WorkspaceManager(config.workspaceRoot);
     const service = new AgentService(
       config,
@@ -638,11 +703,14 @@ describe("Phase 9 Competing Futures acceptance", () => {
     const candidateSetId = admitted.json<{
       candidateSet: { id: string };
     }>().candidateSet.id;
-    await expect
-      .poll(() => service.getCandidateSet(candidateSetId).phase, {
-        timeout: 10_000,
-      })
-      .toBe("completed");
+    await runner.allStarted;
+    runner.release();
+    await waitForCandidateSetTerminalPhase(
+      service,
+      candidateSetId,
+      "completed",
+      agentId,
+    );
 
     const candidateSet = service.getCandidateSet(candidateSetId);
     expect(
@@ -785,12 +853,16 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "discard",
     });
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("promoting");
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
-      .not.toBeNull();
+    await waitForCandidateSetPhase(
+      first,
+      admitted.candidateSet.id,
+      "promoting",
+    );
+    await waitForCandidateSetRecoveryError(
+      first,
+      admitted.candidateSet.id,
+      agent.id,
+    );
     expect(
       first.getCandidateSet(admitted.candidateSet.id).selectedCompetitorId,
     ).toBe("focused-valid");
@@ -860,11 +932,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "retain",
     });
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase, {
-        timeout: 5_000,
-      })
-      .toBe("completed");
+    await waitForCandidateSetTerminalPhase(
+      first,
+      admitted.candidateSet.id,
+      "completed",
+      agent.id,
+    );
     const completed = first.getCandidateSet(admitted.candidateSet.id);
     const authoritativeDecision = structuredClone(completed.selectionDecision);
     const authoritativeDecidedAt = completed.decidedAt;
@@ -955,9 +1028,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "retain",
     });
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("completed");
+    await waitForCandidateSetTerminalPhase(
+      first,
+      admitted.candidateSet.id,
+      "completed",
+      agent.id,
+    );
     const loser = first
       .getCandidateSet(admitted.candidateSet.id)
       .competitors.find((competitor) => competitor.id === "broad-valid");
@@ -1079,12 +1155,16 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "discard",
     });
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("promoting");
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
-      .not.toBeNull();
+    await waitForCandidateSetPhase(
+      first,
+      admitted.candidateSet.id,
+      "promoting",
+    );
+    await waitForCandidateSetRecoveryError(
+      first,
+      admitted.candidateSet.id,
+      agent.id,
+    );
     await expect(first.deleteAgent(agent.id)).rejects.toMatchObject({
       statusCode: 409,
       message: expect.stringContaining("Promotion recovery"),
@@ -1241,12 +1321,16 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "discard",
     });
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("promoting");
-    await expect
-      .poll(() => first.getCandidateSet(admitted.candidateSet.id).recoveryError)
-      .not.toBeNull();
+    await waitForCandidateSetPhase(
+      first,
+      admitted.candidateSet.id,
+      "promoting",
+    );
+    await waitForCandidateSetRecoveryError(
+      first,
+      admitted.candidateSet.id,
+      agent.id,
+    );
 
     const initialValue = { release: "canonical" };
     const initialVersion = versionReference(
@@ -1361,22 +1445,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
         },
         loserPolicy: policy,
       });
-      await expect
-        .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase, {
-          timeout: 10_000,
-        })
-        .toBe("completed");
-      await expect
-        .poll(
-          () =>
-            !(
-              service as unknown as {
-                activeExecutions: Map<string, Promise<void>>;
-              }
-            ).activeExecutions.has(agent.id),
-          { timeout: 10_000 },
-        )
-        .toBe(true);
+      await waitForCandidateSetTerminalPhase(
+        service,
+        admitted.candidateSet.id,
+        "completed",
+        agent.id,
+      );
 
       const loser = service
         .getCandidateSet(admitted.candidateSet.id)
@@ -1517,16 +1591,10 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "discard",
     });
-    await expect.poll(() => writesBlocked).toBe(true);
     await expect
-      .poll(() =>
-        (
-          service as unknown as {
-            activeExecutions: Map<string, Promise<void>>;
-          }
-        ).activeExecutions.has(agent.id),
-      )
-      .toBe(false);
+      .poll(() => writesBlocked, { timeout: candidateSetWorkflowTimeoutMs })
+      .toBe(true);
+    await waitForAgentExecutionToStop(service, agent.id);
     store.mutate = originalMutate as JsonStore["mutate"];
 
     const interrupted = service.getCandidateSet(admitted.candidateSet.id);
@@ -1613,9 +1681,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "retain",
     });
-    await expect
-      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("recovery-error");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      admitted.candidateSet.id,
+      "recovery-error",
+      agent.id,
+    );
 
     const failed = service.getCandidateSet(admitted.candidateSet.id);
     expect(failed.selectedCompetitorId).toBe("focused-valid");
@@ -1781,9 +1852,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
     ).rejects.toMatchObject({ statusCode: 409 });
 
     workspaces.releaseCleanup();
-    await expect
-      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("stale");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      admitted.candidateSet.id,
+      "stale",
+      agent.id,
+    );
     expect(service.getAgent(agent.id).status).toBe("ready");
     expect(
       service
@@ -1843,9 +1917,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
     await runner.allCompleted;
     workspaces.injectDriftAfterReads(2);
     runner.releaseResults();
-    await expect
-      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("recovery-error");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      admitted.candidateSet.id,
+      "recovery-error",
+      agent.id,
+    );
 
     const failed = service.getCandidateSet(admitted.candidateSet.id);
     expect(failed.recoveryError).toContain("fixture cleanup unavailable");
@@ -1939,9 +2016,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
       loserPolicy: "discard",
     });
     await service.cancelCandidateSet(admitted.candidateSet.id);
-    await expect
-      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("completed");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      admitted.candidateSet.id,
+      "completed",
+      agent.id,
+    );
 
     const cancelled = service.getCandidateSet(admitted.candidateSet.id);
     expect(cancelled.cancellationRequested).toBe(true);
@@ -2066,9 +2146,12 @@ describe("Phase 9 Competing Futures acceptance", () => {
       },
       loserPolicy: "discard",
     });
-    await expect
-      .poll(() => service.getCandidateSet(admitted.candidateSet.id).phase)
-      .toBe("completed");
+    await waitForCandidateSetTerminalPhase(
+      service,
+      admitted.candidateSet.id,
+      "completed",
+      agent.id,
+    );
 
     const candidateSet = service.getCandidateSet(admitted.candidateSet.id);
     expect(candidateSet.selectedCompetitorId).toBeNull();
