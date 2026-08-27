@@ -8,7 +8,9 @@ const TRANSIENT_RATE_LIMIT_CODES = new Set([
   "ServerOverloaded",
   "RequestBurstTooFast",
 ]);
-const TRANSIENT_RETRY_DELAYS_MS = [500, 1_500];
+const TRANSIENT_RETRY_DELAYS_MS = [1_000, 3_000, 7_000];
+const MAXIMUM_RETRY_AFTER_MS = 10_000;
+const MAXIMUM_TOTAL_RETRY_DELAY_MS = 15_000;
 
 function requiredValue(environment, name) {
   const value = environment[name]?.trim();
@@ -64,9 +66,9 @@ function providerMessage(status, errorCode = null) {
   }
   if (status === 429) {
     if (errorCode && TRANSIENT_RATE_LIMIT_CODES.has(errorCode)) {
-      return `ModelArk returned HTTP 429 (${errorCode}) after bounded retries because provider capacity is temporarily unavailable. Keep Free Credits Only Mode enabled and retry later.`;
+      return "ModelArk returned HTTP 429 after a bounded warm-up because provider capacity or burst protection is temporarily unavailable. Keep Free Credits Only Mode enabled and retry later.";
     }
-    return "ModelArk returned HTTP 429 because the configured inference limit or free capacity is unavailable. Keep Free Credits Only Mode enabled and retry later, or activate another model that still has free quota.";
+    return "ModelArk returned HTTP 429 because the configured inference limit or free quota is unavailable. Keep Free Credits Only Mode enabled and retry later, or configure another operator-approved model that visibly has remaining free quota.";
   }
   return `ModelArk preflight failed with HTTP ${status}. Provider response details were withheld to protect account metadata.`;
 }
@@ -157,6 +159,18 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function retryDelay(response, retry) {
+  const fallbackDelay = TRANSIENT_RETRY_DELAYS_MS[retry];
+  const retryAfter = response.headers.get("retry-after")?.trim() ?? "";
+  if (!/^\d+$/.test(retryAfter)) return fallbackDelay;
+  const providerDelay = Number(retryAfter) * 1_000;
+  if (!Number.isSafeInteger(providerDelay)) return fallbackDelay;
+  return Math.min(
+    Math.max(fallbackDelay, providerDelay),
+    MAXIMUM_RETRY_AFTER_MS,
+  );
+}
+
 export async function checkModelArkLive({
   environment = process.env,
   fetchImplementation = fetch,
@@ -169,6 +183,8 @@ export async function checkModelArkLive({
     environment.ARK_BASE_URL?.trim() ||
       "https://ark.cn-beijing.volces.com/api/v3",
   );
+  let requestCount = 0;
+  let totalRetryDelayMs = 0;
   for (const [index, model] of models.entries()) {
     let requestResult;
     for (let retry = 0; ; retry += 1) {
@@ -179,12 +195,19 @@ export async function checkModelArkLive({
         model,
         timeoutMs,
       });
+      requestCount += 1;
       const transient =
         requestResult.response.status === 429 &&
         requestResult.errorCode !== null &&
         TRANSIENT_RATE_LIMIT_CODES.has(requestResult.errorCode);
       if (!transient || retry >= TRANSIENT_RETRY_DELAYS_MS.length) break;
-      await delayImplementation(TRANSIENT_RETRY_DELAYS_MS[retry]);
+      const delay = Math.min(
+        retryDelay(requestResult.response, retry),
+        MAXIMUM_TOTAL_RETRY_DELAY_MS - totalRetryDelayMs,
+      );
+      if (delay <= 0) break;
+      await delayImplementation(delay);
+      totalRetryDelayMs += delay;
     }
     const { response, payload, errorCode } = requestResult;
     if (!response.ok) {
@@ -214,6 +237,8 @@ export async function checkModelArkLive({
           ? payload.id.slice(0, 128)
           : "not-reported",
       attemptCount: index + 1,
+      requestCount,
+      retryDelayMs: totalRetryDelayMs,
     };
   }
   throw new Error("ModelArk preflight exhausted its configured models");

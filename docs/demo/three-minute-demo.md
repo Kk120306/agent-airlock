@@ -116,12 +116,14 @@ Live ModelArk conformance must be proven again at judging time because free prov
 
 Configure `ARK_API_KEY`, `ARK_MODEL`, and the region-matching `ARK_BASE_URL` only in the local `.env` file.
 Optionally configure up to three activated free-quota models in `ARK_MODEL_FALLBACKS`.
+Confirm that each configured model visibly has remaining free quota in Model activation.
 Run `npm run check:modelark` to fail fast with minimal credential-safe Responses API requests.
 Run `npm run poc:doctor` to prove provider and container readiness as independent checks.
 The doctor also drives the pinned real Codex CLI through a local two-turn Responses tool-call fixture, but that protocol proof never substitutes for the separate live ModelArk check.
 Run `npm run test:container-transaction` to extend that proof through the production CodeJam HTTP control plane, required Validation, Promotion, independent receipt verification, restart, and accepted-session continuation.
 Run `npm run test:container-browser` to prove the same real Codex Candidate and Promotion path through Chrome.
 Only HTTP 404 and 429 advance through the operator-approved list, and the first successful model becomes the Runtime's `ARK_MODEL`.
+Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.
 Keep Free Credits Only Mode enabled for every configured model.
 Run `npm run poc`, select an Agent, and execute one short safe Promotion through the same Playground.
 Confirm that model output, Candidate State, Validation, Promotion, and follow-up continuity use the same middleware boundary.

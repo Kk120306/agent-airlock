@@ -63,9 +63,11 @@ Use its result before the live demo to distinguish a ModelArk capacity failure f
 Before building the Runtime, it performs a minimal Responses API request and prints neither the credential nor model output.
 `ARK_MODEL_FALLBACKS` accepts a comma-separated list of operator-approved models and is bounded to four unique models including `ARK_MODEL`.
 Only HTTP 404 and 429 advance to the next model.
+Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.
 Authentication, network, timeout, malformed-response, and all other failures stop immediately.
 The model that completes preflight becomes the Runtime's `ARK_MODEL`.
 Keep Free Credits Only Mode enabled for every activated model because the launcher does not change or verify account billing settings.
+Confirm that every configured model is activated and visibly has remaining free quota in Model activation before the demo.
 Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass that fail-fast provider check explicitly.
 Explicit process environment variables take precedence.
 Keep the Beijing default for mainland Volcengine credentials.

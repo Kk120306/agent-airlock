@@ -38,6 +38,8 @@ test("proves a completed Responses API request without returning the key", async
         model: "dola-seed-test",
         responseId: "response-1",
         attemptCount: 1,
+        requestCount: 1,
+        retryDelayMs: 0,
       });
       assert.doesNotMatch(JSON.stringify(result), /secret-live-key/);
     },
@@ -72,6 +74,8 @@ test("selects an operator-approved fallback after a model-specific failure", asy
       assert.deepEqual(attemptedModels, ["ep-primary", "ep-fallback"]);
       assert.equal(result.model, "ep-fallback");
       assert.equal(result.attemptCount, 2);
+      assert.equal(result.requestCount, 2);
+      assert.equal(result.retryDelayMs, 0);
     },
   );
 });
@@ -156,8 +160,10 @@ test("turns common provider failures into actionable bounded errors", async () =
 });
 
 test("does not expose provider account metadata in rate-limit errors", async () => {
+  let requestCount = 0;
   await withServer(
     (_request, response) => {
+      requestCount += 1;
       response.writeHead(429, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
@@ -183,6 +189,7 @@ test("does not expose provider account metadata in rate-limit errors", async () 
       }
       assert.match(message, /HTTP 429.*Free Credits Only Mode/);
       assert.doesNotMatch(message, /3003612015|req-secret-123|secret-live-key/);
+      assert.equal(requestCount, 1);
     },
   );
 });
@@ -220,7 +227,139 @@ test("retries only allowlisted transient ModelArk capacity errors", async () => 
       });
       assert.equal(result.responseId, "response-after-capacity");
       assert.equal(requestCount, 3);
-      assert.deepEqual(delays, [500, 1_500]);
+      assert.equal(result.requestCount, 3);
+      assert.equal(result.retryDelayMs, 4_000);
+      assert.deepEqual(delays, [1_000, 3_000]);
+    },
+  );
+});
+
+test("honors numeric Retry-After guidance within a strict delay cap", async () => {
+  let requestCount = 0;
+  const delays = [];
+  await withServer(
+    (_request, response) => {
+      requestCount += 1;
+      response.writeHead(requestCount < 3 ? 429 : 200, {
+        "content-type": "application/json",
+        "retry-after": requestCount === 1 ? "5" : "999999999999999999999",
+      });
+      response.end(
+        requestCount < 3
+          ? JSON.stringify({ error: { code: "RequestBurstTooFast" } })
+          : JSON.stringify({ id: "response-after-burst", status: "completed" }),
+      );
+    },
+    async (baseUrl) => {
+      const result = await checkModelArkLive({
+        environment: {
+          ARK_API_KEY: "secret-live-key",
+          ARK_MODEL: "dola-seed-test",
+          ARK_BASE_URL: baseUrl,
+        },
+        delayImplementation: async (milliseconds) => {
+          delays.push(milliseconds);
+        },
+      });
+      assert.equal(result.responseId, "response-after-burst");
+      assert.equal(result.requestCount, 3);
+      assert.equal(result.retryDelayMs, 8_000);
+      assert.deepEqual(delays, [5_000, 3_000]);
+      assert.ok(delays.every((delay) => delay <= 10_000));
+    },
+  );
+});
+
+test("bounds the complete transient warm-up and withholds the provider code", async () => {
+  let requestCount = 0;
+  const delays = [];
+  await withServer(
+    (_request, response) => {
+      requestCount += 1;
+      response.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "30",
+      });
+      response.end(
+        JSON.stringify({
+          error: {
+            code: "ServerOverloaded",
+            message: "account 3003612015 request req-secret-123",
+          },
+        }),
+      );
+    },
+    async (baseUrl) => {
+      let message = "";
+      try {
+        await checkModelArkLive({
+          environment: {
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "dola-seed-test",
+            ARK_BASE_URL: baseUrl,
+          },
+          delayImplementation: async (milliseconds) => {
+            delays.push(milliseconds);
+          },
+        });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      assert.equal(requestCount, 3);
+      assert.deepEqual(delays, [10_000, 5_000]);
+      assert.equal(delays.reduce((total, delay) => total + delay, 0), 15_000);
+      assert.match(message, /bounded warm-up.*temporarily unavailable/);
+      assert.doesNotMatch(
+        message,
+        /ServerOverloaded|3003612015|req-secret-123|secret-live-key/,
+      );
+    },
+  );
+});
+
+test("preserves a fallback chance after the shared warm-up budget is exhausted", async () => {
+  const attemptedModels = [];
+  const delays = [];
+  await withServer(
+    async (request, response) => {
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      const model = JSON.parse(raw).model;
+      attemptedModels.push(model);
+      if (model === "ep-primary") {
+        response.writeHead(429, {
+          "content-type": "application/json",
+          "retry-after": "30",
+        });
+        response.end(JSON.stringify({ error: { code: "ServerOverloaded" } }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: "fallback-ready", status: "completed" }));
+    },
+    async (baseUrl) => {
+      const result = await checkModelArkLive({
+        environment: {
+          ARK_API_KEY: "secret-live-key",
+          ARK_MODEL: "ep-primary",
+          ARK_MODEL_FALLBACKS: "ep-fallback",
+          ARK_BASE_URL: baseUrl,
+        },
+        delayImplementation: async (milliseconds) => {
+          delays.push(milliseconds);
+        },
+      });
+      assert.deepEqual(attemptedModels, [
+        "ep-primary",
+        "ep-primary",
+        "ep-primary",
+        "ep-fallback",
+      ]);
+      assert.deepEqual(delays, [10_000, 5_000]);
+      assert.equal(result.model, "ep-fallback");
+      assert.equal(result.attemptCount, 2);
+      assert.equal(result.requestCount, 4);
+      assert.equal(result.retryDelayMs, 15_000);
     },
   );
 });

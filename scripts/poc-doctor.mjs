@@ -93,7 +93,7 @@ export async function inspectPocReadiness({
           "modelark",
           "Live ModelArk response",
           "pass",
-          `A Responses API request completed after ${result.attemptCount} bounded model attempt${result.attemptCount === 1 ? "" : "s"}. No output or credential was printed.`,
+          `A Responses API request completed after ${result.attemptCount} bounded model attempt${result.attemptCount === 1 ? "" : "s"}, ${result.requestCount ?? result.attemptCount} request${(result.requestCount ?? result.attemptCount) === 1 ? "" : "s"}, and ${result.retryDelayMs ?? 0} ms of provider-directed warm-up. No output or credential was printed.`,
         ),
       );
     } catch (error) {

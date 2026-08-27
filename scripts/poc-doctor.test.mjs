@@ -15,7 +15,11 @@ test("proves each live prerequisite without returning configured values", async 
     commandImplementation: async (command, args) => {
       commands.push([command, ...args]);
     },
-    modelArkCheck: async () => ({ attemptCount: 1 }),
+    modelArkCheck: async () => ({
+      attemptCount: 1,
+      requestCount: 3,
+      retryDelayMs: 4_000,
+    }),
     nodeVersion: "22.14.0",
   });
 
@@ -34,6 +38,10 @@ test("proves each live prerequisite without returning configured values", async 
     ],
   );
   assert.equal(commands[0][0], "docker");
+  assert.match(
+    report.checks.find(({ id }) => id === "modelark")?.detail ?? "",
+    /1 bounded model attempt, 3 requests, and 4000 ms/,
+  );
   assert.match(commands.at(-3).join(" "), /--network none/);
   assert.match(commands.at(-2).join(" "), /probe-codex-session\.sh/);
   assert.match(commands.at(-1).join(" "), /probe-codex-protocol\.sh/);

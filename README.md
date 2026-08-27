@@ -266,8 +266,10 @@ npm run poc
 
 `check:modelark` performs a minimal Responses API request and prints neither the credential nor model output.
 If `ARK_MODEL_FALLBACKS` is set, it may try up to three additional operator-approved models only after HTTP 404 or 429 responses.
+For allowlisted temporary capacity and burst-protection responses, it performs a bounded warm-up and honors numeric `Retry-After` guidance up to 10 seconds per wait and 15 seconds across the configured model list.
 It stops immediately on authentication, network, timeout, malformed-response, and other provider failures.
 Keep Free Credits Only Mode enabled for every configured model because the launcher does not change or verify account billing settings.
+Confirm that each configured model is activated and visibly has remaining free quota in Model activation before the demo.
 `poc:doctor` checks Node.js, hidden credential presence, one live Responses request, the container engine, the Runtime image, a hardened in-container Codex launch, Candidate session copy isolation, and a real two-turn Codex tool-call protocol probe.
 It reports those checks independently, so provider HTTP 429 capacity failures cannot be confused with an application or Runtime failure.
 `npm run poc` repeats that fail-fast preflight before installing dependencies or building the Runtime image.
