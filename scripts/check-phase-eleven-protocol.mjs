@@ -1,0 +1,493 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  buildPortableEvidencePacket,
+  buildPortableDecisionChain,
+  createSignedTransparencyCheckpoint,
+  createTransparencyInclusionProof,
+  generatePortableSigningKey,
+  LocalTransparencyLog,
+} from "../packages/portable-promotion-receipt/dist/index.js";
+
+const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const packageRoot = path.join(
+  projectRoot,
+  "packages",
+  "portable-promotion-receipt",
+);
+const cliPath = path.join(packageRoot, "dist", "cli.js");
+const vectorPath = path.join(
+  packageRoot,
+  "vectors",
+  "portable-receipt-v1.golden.json",
+);
+const temporaryRoot = await mkdtemp(
+  path.join(os.tmpdir(), "airlock-phase-eleven-protocol-"),
+);
+
+try {
+  const vectorSource = await readFile(vectorPath, "utf8");
+  if (/PRIVATE KEY|\/Users\/|\/private\//.test(vectorSource)) {
+    throw new Error("Published receipt vector crossed the private-data boundary");
+  }
+  const vector = JSON.parse(vectorSource);
+  const envelopePath = path.join(temporaryRoot, "envelope.json");
+  await writeFile(envelopePath, JSON.stringify(vector.envelope) + "\n", {
+    mode: 0o600,
+  });
+
+  const verified = JSON.parse(
+    await capture(process.execPath, [cliPath, "verify", envelopePath, "--json"]),
+  );
+  if (!verified.valid || verified.receiptDigest !== vector.envelope.receiptDigest) {
+    throw new Error("A separate CLI process did not verify the golden receipt");
+  }
+
+  const symbolicEnvelopePath = path.join(temporaryRoot, "envelope-link.json");
+  await symlink(envelopePath, symbolicEnvelopePath);
+  const symbolicInput = await captureFailure(process.execPath, [
+    cliPath,
+    "verify",
+    symbolicEnvelopePath,
+    "--json",
+  ]);
+  if (symbolicInput.code !== 1 || !/regular non-symbolic-link/u.test(symbolicInput.stderr)) {
+    throw new Error("The CLI accepted a symbolic-link input boundary");
+  }
+
+  const oversizedPath = path.join(temporaryRoot, "oversized.json");
+  await writeFile(oversizedPath, Buffer.alloc(1_048_577, 0x20), { mode: 0o600 });
+  const oversizedInput = await captureFailure(process.execPath, [
+    cliPath,
+    "verify",
+    oversizedPath,
+    "--json",
+  ]);
+  if (oversizedInput.code !== 1 || !/byte boundary/u.test(oversizedInput.stderr)) {
+    throw new Error("The CLI accepted an oversized input boundary");
+  }
+
+  const tampered = structuredClone(vector.envelope);
+  tampered.receipt.decision.agentId += "-tampered";
+  const tamperedPath = path.join(temporaryRoot, "tampered.json");
+  await writeFile(tamperedPath, JSON.stringify(tampered) + "\n", { mode: 0o600 });
+  const rejected = await captureFailure(process.execPath, [
+    cliPath,
+    "verify",
+    tamperedPath,
+    "--json",
+  ]);
+  const rejectionReport = JSON.parse(rejected.stdout);
+  if (rejected.code !== 1 || rejectionReport.valid) {
+    throw new Error("A separate CLI process accepted tampered receipt content");
+  }
+
+  const evm = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "evm-payload",
+      vector.envelope.receiptDigest,
+    ]),
+  );
+  if (
+    evm.functionSelector !== "0xeecdf927" ||
+    evm.receiptDigest !== vector.envelope.receiptDigest ||
+    evm.networkCalls !== 0 ||
+    evm.fundsSpent !== 0
+  ) {
+    throw new Error("Offline EVM payload did not match the frozen digest-only vector");
+  }
+
+  const transparencyKey = generatePortableSigningKey();
+  const checkpoint = createSignedTransparencyCheckpoint({
+    receiptDigests: [vector.envelope.receiptDigest],
+    priorCheckpointDigest: null,
+    createdAt: "2026-08-26T00:00:01.000Z",
+    privateKey: transparencyKey.privateKeyPem,
+  });
+  const anchorPath = path.join(temporaryRoot, "anchor.json");
+  await writeFile(
+    anchorPath,
+    JSON.stringify({
+      checkpoint,
+      inclusionProof: createTransparencyInclusionProof(
+        [vector.envelope.receiptDigest],
+        0,
+      ),
+    }) + "\n",
+    { mode: 0o600 },
+  );
+  const anchorReport = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "verify-anchor",
+      envelopePath,
+      anchorPath,
+      "--json",
+    ]),
+  );
+  if (!anchorReport.valid) {
+    throw new Error("A separate CLI process did not verify the optional anchor");
+  }
+
+  const packetPath = path.join(temporaryRoot, "evidence-packet.json");
+  const packet = buildPortableEvidencePacket({
+    envelope: vector.envelope,
+    anchor: {
+      checkpoint,
+      inclusionProof: createTransparencyInclusionProof(
+        [vector.envelope.receiptDigest],
+        0,
+      ),
+    },
+    evmPayload: evm,
+  });
+  await writeFile(packetPath, JSON.stringify(packet) + "\n", { mode: 0o600 });
+  const packetReport = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "verify-packet",
+      packetPath,
+      "--json",
+    ]),
+  );
+  if (
+    !packetReport.valid ||
+    !packetReport.anchor?.valid ||
+    !packetReport.evmPayload?.valid
+  ) {
+    throw new Error("A separate CLI process did not verify the evidence packet");
+  }
+
+  const alteredPacket = structuredClone(packet);
+  alteredPacket.evmPayload.calldata = `0xeecdf927${"f".repeat(64)}`;
+  const alteredPacketPath = path.join(temporaryRoot, "altered-evidence-packet.json");
+  await writeFile(alteredPacketPath, JSON.stringify(alteredPacket) + "\n", {
+    mode: 0o600,
+  });
+  const alteredPacketResult = await captureFailure(process.execPath, [
+    cliPath,
+    "verify-packet",
+    alteredPacketPath,
+    "--json",
+  ]);
+  if (
+    alteredPacketResult.code !== 1 ||
+    JSON.parse(alteredPacketResult.stdout).valid !== false
+  ) {
+    throw new Error("A separate CLI process accepted an altered evidence packet");
+  }
+
+  const chainPath = path.join(temporaryRoot, "decision-chain.json");
+  const chain = buildPortableDecisionChain([packet]);
+  await writeFile(chainPath, JSON.stringify(chain) + "\n", { mode: 0o600 });
+  const chainReport = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "verify-chain",
+      chainPath,
+      "--json",
+    ]),
+  );
+  if (
+    !chainReport.valid ||
+    chainReport.packets.length !== 1 ||
+    chainReport.leafReceiptDigest !== vector.envelope.receiptDigest
+  ) {
+    throw new Error("A separate CLI process did not verify the decision chain");
+  }
+
+  const policyAuthority = generatePortableSigningKey();
+  const policyAuthorityPath = path.join(temporaryRoot, "policy-authority.pem");
+  const trustPolicyPath = path.join(temporaryRoot, "trust-policy.json");
+  const signedTrustPolicyPath = path.join(temporaryRoot, "signed-trust-policy.json");
+  await writeFile(policyAuthorityPath, policyAuthority.privateKeyPem, { mode: 0o600 });
+  await writeFile(
+    trustPolicyPath,
+    JSON.stringify({
+      schema: "agent-airlock/signing-key-trust-policy",
+      schemaVersion: 1,
+      policyId: "phase-eleven-cli-policy",
+      issuedAt: "2026-08-25T00:00:00.000Z",
+      expiresAt: "2027-08-25T00:00:00.000Z",
+      keys: [
+        {
+          keyId: vector.envelope.keyId,
+          status: "active",
+          validFrom: "2026-08-25T00:00:00.000Z",
+          validUntil: null,
+          agentIds: [vector.envelope.receipt.decision.agentId],
+          dispositions: [vector.envelope.receipt.decision.disposition],
+          note: "Cross-process policy authority vector",
+        },
+      ],
+    }) + "\n",
+    { mode: 0o600 },
+  );
+  const signedPolicySource = await capture(process.execPath, [
+    cliPath,
+    "sign-policy",
+    trustPolicyPath,
+    policyAuthorityPath,
+  ]);
+  await writeFile(signedTrustPolicyPath, signedPolicySource, { mode: 0o600 });
+  const policyReport = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "verify-policy",
+      signedTrustPolicyPath,
+      "--authority",
+      policyAuthority.keyId,
+      "--json",
+    ]),
+  );
+  if (!policyReport.valid || !policyReport.authorityTrusted) {
+    throw new Error("A separate CLI process did not authorize the signed trust policy");
+  }
+  const untrustedPolicy = await captureFailure(process.execPath, [
+    cliPath,
+    "verify-policy",
+    signedTrustPolicyPath,
+    "--authority",
+    `sha256:${"f".repeat(64)}`,
+    "--json",
+  ]);
+  if (
+    untrustedPolicy.code !== 1 ||
+    JSON.parse(untrustedPolicy.stdout).authorityTrusted !== false
+  ) {
+    throw new Error("The CLI allowed a signed policy to authorize its own authority");
+  }
+
+  const nextPolicyAuthority = generatePortableSigningKey();
+  const nextPolicyAuthorityPath = path.join(
+    temporaryRoot,
+    "next-policy-authority.pem",
+  );
+  const authorityRotationPath = path.join(temporaryRoot, "authority-rotation.json");
+  const signedAuthorityRotationPath = path.join(
+    temporaryRoot,
+    "signed-authority-rotation.json",
+  );
+  const rotatedPolicyPath = path.join(temporaryRoot, "rotated-trust-policy.json");
+  await writeFile(nextPolicyAuthorityPath, nextPolicyAuthority.privateKeyPem, {
+    mode: 0o600,
+  });
+  await writeFile(
+    authorityRotationPath,
+    JSON.stringify({
+      schema: "agent-airlock/policy-authority-rotation",
+      schemaVersion: 1,
+      rotationId: "phase-eleven-authority-rotation",
+      issuedAt: "2026-08-25T00:00:00.000Z",
+      effectiveAt: "2026-08-26T00:00:00.000Z",
+      expiresAt: "2027-08-26T00:00:00.000Z",
+      previousAuthorityKeyId: policyAuthority.keyId,
+      nextAuthorityKeyId: nextPolicyAuthority.keyId,
+      nextAuthorityPublicJwk: nextPolicyAuthority.publicJwk,
+    }) + "\n",
+    { mode: 0o600 },
+  );
+  await writeFile(
+    signedAuthorityRotationPath,
+    await capture(process.execPath, [
+      cliPath,
+      "sign-authority-rotation",
+      authorityRotationPath,
+      policyAuthorityPath,
+    ]),
+    { mode: 0o600 },
+  );
+  const rotationReport = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "verify-authority-rotation",
+      signedAuthorityRotationPath,
+      "--authority",
+      policyAuthority.keyId,
+      "--json",
+    ]),
+  );
+  if (!rotationReport.valid || rotationReport.nextAuthorityKeyId !== nextPolicyAuthority.keyId) {
+    throw new Error("A separate CLI process did not verify policy-authority rotation");
+  }
+  await writeFile(
+    rotatedPolicyPath,
+    await capture(process.execPath, [
+      cliPath,
+      "sign-policy",
+      trustPolicyPath,
+      nextPolicyAuthorityPath,
+    ]),
+    { mode: 0o600 },
+  );
+  const rotatedPolicyReport = JSON.parse(
+    await capture(process.execPath, [
+      cliPath,
+      "verify-policy",
+      rotatedPolicyPath,
+      "--authority",
+      policyAuthority.keyId,
+      "--rotation",
+      signedAuthorityRotationPath,
+      "--json",
+    ]),
+  );
+  if (
+    !rotatedPolicyReport.valid ||
+    !rotatedPolicyReport.rotation.valid ||
+    !rotatedPolicyReport.policy.valid
+  ) {
+    throw new Error("A separate CLI process did not authorize the rotated policy");
+  }
+
+  const concurrentKeyPath = path.join(temporaryRoot, "concurrent-key.pem");
+  const concurrentLogPath = path.join(temporaryRoot, "concurrent-log.json");
+  await writeFile(concurrentKeyPath, transparencyKey.privateKeyPem, { mode: 0o600 });
+  const concurrentLog = new LocalTransparencyLog(
+    concurrentLogPath,
+    transparencyKey.privateKeyPem,
+  );
+  await concurrentLog.initialize();
+  const appendWorker = [
+    "import { readFile } from 'node:fs/promises';",
+    "import { LocalTransparencyLog } from '@agent-airlock/portable-promotion-receipt';",
+    "const [logPath,keyPath,digest,at]=process.argv.slice(1);",
+    "const log=new LocalTransparencyLog(logPath,await readFile(keyPath,'utf8'));",
+    "await log.initialize();",
+    "await log.append(digest,at);",
+  ].join("");
+  const [firstAppend, secondAppend] = [
+    ["sha256:" + "6".repeat(64), "2026-08-26T00:00:02.000Z"],
+    ["sha256:" + "7".repeat(64), "2026-08-26T00:00:03.000Z"],
+  ];
+  await Promise.all(
+    [firstAppend, secondAppend].map(([digest, at]) =>
+      capture(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        appendWorker,
+        concurrentLogPath,
+        concurrentKeyPath,
+        digest,
+        at,
+      ]),
+    ),
+  );
+  const reopenedConcurrentLog = new LocalTransparencyLog(
+    concurrentLogPath,
+    transparencyKey.privateKeyPem,
+  );
+  await reopenedConcurrentLog.initialize();
+  if (reopenedConcurrentLog.snapshot().entries.length !== 2) {
+    throw new Error("Cross-process transparency append lost a receipt digest");
+  }
+
+  const staleLogPath = path.join(temporaryRoot, "stale-log.json");
+  const staleLockPath = `${staleLogPath}.lock`;
+  const exited = spawn(process.execPath, ["-e", "process.exit(0)"], {
+    stdio: "ignore",
+  });
+  const exitedPid = exited.pid;
+  await once(exited, "exit");
+  if (!exitedPid) throw new Error("Could not create a dead lock owner");
+  await writeFile(
+    staleLockPath,
+    JSON.stringify({
+      createdAt: "2026-08-26T00:00:00.000Z",
+      nonce: "00000000-0000-4000-8000-000000000000",
+      pid: exitedPid,
+    }),
+    { mode: 0o600 },
+  );
+  await utimes(staleLockPath, new Date(0), new Date(0));
+  const staleContenders = Array.from({ length: 8 }, (_, index) => [
+    `sha256:${String(index + 1).repeat(64)}`,
+    `2026-08-26T00:00:${String(index + 10).padStart(2, "0")}.000Z`,
+  ]);
+  await Promise.all(
+    staleContenders.map(([digest, at]) =>
+      capture(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        appendWorker,
+        staleLogPath,
+        concurrentKeyPath,
+        digest,
+        at,
+      ]),
+    ),
+  );
+  const reopenedStaleLog = new LocalTransparencyLog(
+    staleLogPath,
+    transparencyKey.privateKeyPem,
+  );
+  await reopenedStaleLog.initialize();
+  if (reopenedStaleLog.snapshot().entries.length !== staleContenders.length) {
+    throw new Error("Concurrent stale-lock reclaim lost a receipt digest");
+  }
+
+  process.stdout.write(
+    "Phase 11 cross-process receipt, evidence packet, decision chain, signed trust policy, authority rotation, tamper, anchor, stale-lock recovery, concurrent log, and offline EVM vectors passed.\n",
+  );
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+function capture(command, argumentsList) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, argumentsList, {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(command + " failed: " + stderr.trim()));
+    });
+  });
+}
+
+function captureFailure(command, argumentsList) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, argumentsList, {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0 || code === null) {
+        reject(new Error("Expected the child process to reject the input"));
+        return;
+      }
+      resolve({ code, stdout, stderr });
+    });
+  });
+}

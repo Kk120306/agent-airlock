@@ -1,4 +1,12 @@
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,6 +33,39 @@ class FakeRunner implements AgentRunner {
   }
   async isAvailable(): Promise<boolean> {
     return true;
+  }
+}
+
+class InterruptingArchiveWorkspaceManager extends WorkspaceManager {
+  private interrupted = false;
+
+  override async archiveAgent(
+    agentId: string,
+    audit?: Parameters<WorkspaceManager["archiveAgent"]>[1],
+  ): Promise<string> {
+    const archived = await super.archiveAgent(agentId, audit);
+    if (!this.interrupted) {
+      this.interrupted = true;
+      throw new Error("simulated process interruption after workspace archive");
+    }
+    return archived;
+  }
+}
+
+class RecoveryOrderWorkspaceManager extends WorkspaceManager {
+  readonly recoveryOrder: string[] = [];
+
+  override async archiveAgent(
+    agentId: string,
+    audit?: Parameters<WorkspaceManager["archiveAgent"]>[1],
+  ): Promise<string> {
+    this.recoveryOrder.push("agent-deletion");
+    return super.archiveAgent(agentId, audit);
+  }
+
+  override async recoverProviderRegistryTransitions(): Promise<void> {
+    this.recoveryOrder.push("registry-transition");
+    return super.recoverProviderRegistryTransitions();
   }
 }
 
@@ -73,8 +114,192 @@ describe("Agent lifecycle", () => {
       .toBe("Builds apps");
     expect((await service.stopAgent(agent.id)).status).toBe("stopped");
     expect((await service.startAgent(agent.id)).status).toBe("ready");
-    await service.deleteAgent(agent.id);
+    const deleted = await service.deleteAgent(agent.id);
     expect(service.listAgents()).toHaveLength(0);
+    const audit = JSON.parse(
+      await readFile(
+        path.join(deleted.archivedWorkspace, ".airlock-archive-audit.json"),
+        "utf8",
+      ),
+    ) as { schemaVersion: number; agentId: string };
+    expect(audit).toMatchObject({ schemaVersion: 2, agentId: agent.id });
+  });
+
+  it("completes an interrupted Agent deletion after restart", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-delete-recovery-"));
+    temporaryDirectories.push(root);
+    const dataDirectory = path.join(root, "data");
+    const workspaceRoot = path.join(root, "workspaces");
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: dataDirectory,
+      AGENT_WORKSPACE_ROOT: workspaceRoot,
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+    const databasePath = path.join(dataDirectory, "db.json");
+    const first = new AgentService(
+      config,
+      new JsonStore(databasePath),
+      new InterruptingArchiveWorkspaceManager(workspaceRoot),
+      new FakeRunner(),
+    );
+    await first.initialize();
+    const agent = await first.createAgent({ name: "Crash safe delete" });
+
+    await expect(first.deleteAgent(agent.id)).rejects.toThrow(
+      "simulated process interruption",
+    );
+    expect(first.getAgent(agent.id).id).toBe(agent.id);
+    expect(await readdir(path.join(dataDirectory, "agent-deletion-journal"))).toEqual([
+      agent.id + ".json",
+    ]);
+
+    const recoveryWorkspaces = new RecoveryOrderWorkspaceManager(workspaceRoot);
+    const restarted = new AgentService(
+      config,
+      new JsonStore(databasePath),
+      recoveryWorkspaces,
+      new FakeRunner(),
+    );
+    await restarted.initialize();
+
+    expect(restarted.listAgents()).toEqual([]);
+    expect(await readdir(path.join(dataDirectory, "agent-deletion-journal"))).toEqual(
+      [],
+    );
+    const archivedEntries = await readdir(path.join(workspaceRoot, ".deleted"));
+    expect(archivedEntries).toHaveLength(1);
+    const audit = JSON.parse(
+      await readFile(
+        path.join(
+          workspaceRoot,
+          ".deleted",
+          archivedEntries[0]!,
+          ".airlock-archive-audit.json",
+        ),
+        "utf8",
+      ),
+    ) as { schemaVersion: number; agentId: string };
+    expect(audit).toEqual(
+      expect.objectContaining({ schemaVersion: 2, agentId: agent.id }),
+    );
+    expect(recoveryWorkspaces.recoveryOrder).toEqual([
+      "agent-deletion",
+      "registry-transition",
+    ]);
+  });
+
+  it.each(["missing", "malformed", "changed"] as const)(
+    "fails closed when an archived deletion tombstone is %s",
+    async (mutation) => {
+      const root = await mkdtemp(path.join(tmpdir(), "launchpad-delete-tamper-"));
+      temporaryDirectories.push(root);
+      const dataDirectory = path.join(root, "data");
+      const workspaceRoot = path.join(root, "workspaces");
+      const config = loadConfig({
+        NODE_ENV: "test",
+        APP_DATA_DIR: dataDirectory,
+        AGENT_WORKSPACE_ROOT: workspaceRoot,
+        CODEX_HOME: path.join(root, "codex"),
+        ARK_API_KEY: "test-key",
+        ARK_MODEL: "ep-test",
+      });
+      const databasePath = path.join(dataDirectory, "db.json");
+      const first = new AgentService(
+        config,
+        new JsonStore(databasePath),
+        new InterruptingArchiveWorkspaceManager(workspaceRoot),
+        new FakeRunner(),
+      );
+      await first.initialize();
+      const agent = await first.createAgent({ name: "Tamper-safe delete" });
+      await expect(first.deleteAgent(agent.id)).rejects.toThrow(
+        "simulated process interruption",
+      );
+      const archivedEntry = (
+        await readdir(path.join(workspaceRoot, ".deleted"))
+      )[0]!;
+      const auditPath = path.join(
+        workspaceRoot,
+        ".deleted",
+        archivedEntry,
+        ".airlock-archive-audit.json",
+      );
+      if (mutation === "missing") {
+        await rm(auditPath);
+      } else if (mutation === "malformed") {
+        await writeFile(auditPath, "{not-json\n");
+      } else {
+        const audit = JSON.parse(await readFile(auditPath, "utf8")) as {
+          aggregate: { evidenceDigest: string };
+        };
+        audit.aggregate.evidenceDigest = "sha256:" + "f".repeat(64);
+        await writeFile(auditPath, JSON.stringify(audit, null, 2) + "\n");
+      }
+
+      const restarted = new AgentService(
+        config,
+        new JsonStore(databasePath),
+        new WorkspaceManager(workspaceRoot),
+        new FakeRunner(),
+      );
+      await expect(restarted.initialize()).rejects.toThrow();
+      expect(restarted.getAgent(agent.id).id).toBe(agent.id);
+      expect(
+        await readdir(path.join(dataDirectory, "agent-deletion-journal")),
+      ).toEqual([agent.id + ".json"]);
+    },
+  );
+
+  it("fails deletion closed when the active Agent workspace is a symlink", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-delete-symlink-"));
+    temporaryDirectories.push(root);
+    const dataDirectory = path.join(root, "data");
+    const workspaceRoot = path.join(root, "workspaces");
+    const config = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: dataDirectory,
+      AGENT_WORKSPACE_ROOT: workspaceRoot,
+      CODEX_HOME: path.join(root, "codex"),
+      ARK_API_KEY: "test-key",
+      ARK_MODEL: "ep-test",
+    });
+    const service = new AgentService(
+      config,
+      new JsonStore(path.join(dataDirectory, "db.json")),
+      new WorkspaceManager(workspaceRoot),
+      new FakeRunner(),
+    );
+    await service.initialize();
+    const agent = await service.createAgent({ name: "Symlink-safe delete" });
+    const external = path.join(root, "external-host-state");
+    await mkdir(external);
+    await rm(path.join(workspaceRoot, agent.id), { recursive: true });
+    await symlink(external, path.join(workspaceRoot, agent.id));
+
+    await expect(service.deleteAgent(agent.id)).rejects.toThrow(
+      "Active Agent workspace is not a regular directory",
+    );
+    expect(service.getAgent(agent.id).id).toBe(agent.id);
+    await expect(
+      service.updateOutcomeContract(agent.id, {
+        requiredPaths: agent.outcomeContract.requiredPaths,
+        protectedPaths: agent.outcomeContract.protectedPaths,
+        maxChangedFiles: agent.outcomeContract.maxChangedFiles,
+        maxAddedBytes: agent.outcomeContract.maxAddedBytes,
+        secretPatterns: agent.outcomeContract.secretPatterns,
+        validationCommands: agent.outcomeContract.validationCommands,
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(service.getAgent(agent.id).outcomeContract.version).toBe(1);
+    await expect(
+      readFile(path.join(external, ".airlock-archive-audit.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(path.join(dataDirectory, "agent-deletion-journal"))).toEqual([
+      agent.id + ".json",
+    ]);
   });
 
   it("persists a playground conversation", async () => {
@@ -86,6 +311,60 @@ describe("Agent lifecycle", () => {
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(messages[1]?.content).toContain("write hello world");
     expect(service.getAgent(agent.id).codexThreadId).toBe("fake-thread");
+  });
+
+  it("persists a safe actionable error when ModelArk free capacity is exhausted", async () => {
+    const service = await makeService({
+      run: async () => {
+        throw new Error(
+          "429 Too Many Requests: account 3003612015 reached its inference limit; request id: req-secret-123; Bearer ark-secret-live-key",
+        );
+      },
+      cancel: async () => false,
+      isAvailable: async () => true,
+    });
+    const agent = await service.createAgent({ name: "Private failure" });
+    const { run } = await service.sendMessage(agent.id, "exercise the live model");
+
+    await expect.poll(() => service.getRun(run.id).status).toBe("failed");
+    const failedRun = service.getRun(run.id);
+    const failedAgent = service.getAgent(agent.id);
+    expect(failedRun.error).toContain(
+      "ModelArk temporarily unavailable because its configured inference limit",
+    );
+    expect(failedRun.error).toContain("Canonical State remains unchanged");
+    expect(failedAgent.lastError).toBe(failedRun.error);
+    expect(JSON.stringify({ failedRun, failedAgent })).not.toMatch(
+      /3003612015|req-secret-123|ark-secret-live-key/,
+    );
+
+    const store = (
+      service as unknown as {
+        store: JsonStore;
+      }
+    ).store;
+    await store.mutate((database) => {
+      const storedRun = database.runs.find((candidate) => candidate.id === run.id);
+      const storedAgent = database.agents.find(
+        (candidate) => candidate.id === agent.id,
+      );
+      if (storedRun) {
+        storedRun.error =
+          "HTTP 429: account 3003612015; request id: req-secret-123";
+      }
+      if (storedAgent) {
+        storedAgent.lastError =
+          "HTTP 429: account 3003612015; request id: req-secret-123";
+      }
+    });
+
+    await service.initialize();
+    expect(JSON.stringify(service.getRun(run.id))).not.toMatch(
+      /3003612015|req-secret-123/,
+    );
+    expect(JSON.stringify(service.getAgent(agent.id))).not.toMatch(
+      /3003612015|req-secret-123/,
+    );
   });
 
   it("atomically accepts only one concurrent run per Agent", async () => {

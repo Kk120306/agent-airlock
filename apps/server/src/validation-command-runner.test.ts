@@ -1,6 +1,7 @@
-import { access, chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 import {
@@ -10,6 +11,9 @@ import {
 import type { ValidationCommand } from "./types.js";
 
 const temporaryDirectories: string[] = [];
+const sharedContainerTestRoot = fileURLToPath(
+  new URL("../../../.local/container-tests/", import.meta.url),
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -101,7 +105,10 @@ describe("Validation command container", () => {
   it.runIf(process.env.AIRLOCK_TEST_CONTAINER === "1")(
     "executes a real isolated Runtime command without host credentials",
     async () => {
-      const workspace = await mkdtemp(path.join(tmpdir(), "airlock-real-container-"));
+      await mkdir(sharedContainerTestRoot, { recursive: true });
+      const workspace = await mkdtemp(
+        path.join(sharedContainerTestRoot, "airlock-real-container-"),
+      );
       temporaryDirectories.push(workspace);
       const config = loadConfig({
         NODE_ENV: "test",

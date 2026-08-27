@@ -5,11 +5,17 @@ import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
+import { createDefaultSelectionContract } from "./candidate-selection.js";
+import { DEFAULT_CANDIDATE_SET_BUDGET } from "./candidate-set.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
+const candidateSetIdParams = z.object({ id: z.string().uuid() });
+const assuranceProposalIdParams = z.object({
+  id: z.string().regex(/^[a-f0-9]{64}$/),
+});
 const createAgentBody = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().max(500).optional(),
@@ -25,6 +31,73 @@ const messageBody = z.object({
 const repairBody = z.object({
   objective: z.string().trim().min(1).max(2_000).optional(),
 });
+const portableReceiptBody = z
+  .object({
+    disclosureIdentities: z
+      .array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/))
+      .max(256)
+      .default([]),
+    includeAncestry: z.boolean().default(true),
+    localAnchor: z.boolean().default(false),
+    evmPayload: z.boolean().default(false),
+  })
+  .strict();
+const selectionCriterionBody = z
+  .object({
+    kind: z.enum([
+      "quality-assertion",
+      "changed-files",
+      "added-bytes",
+      "latency-ms",
+      "total-tokens",
+    ]),
+    source: z.enum([
+      "trusted-validation-evaluator",
+      "workspace-change-evidence",
+      "monotonic-execution-measurement",
+      "runtime-usage-response",
+    ]),
+    direction: z.enum(["maximize", "minimize"]),
+    maximum: z.number().int().nonnegative(),
+    evaluatorVersion: z.string().min(1).max(80),
+  })
+  .strict();
+const candidateSetBody = z
+  .object({
+    objective: z.string().trim().min(1).max(50_000),
+    competitors: z
+      .array(
+        z
+          .object({
+            id: z
+              .string()
+              .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/),
+            executorProfileId: z.literal("standard-v1"),
+            strategyInstruction: z.string().trim().min(1).max(4_000),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(8),
+    selectionContract: z
+      .object({
+        schemaVersion: z.literal(1),
+        criteria: z.array(selectionCriterionBody).min(1).max(5),
+      })
+      .strict()
+      .default(createDefaultSelectionContract()),
+    maxConcurrency: z.number().int().min(1).max(4).default(2),
+    budget: z
+      .object({
+        maxDurationMsPerCompetitor: z.number().int().min(1_000).max(3_600_000),
+        maxTotalTokens: z.number().int().min(1).max(10_000_000),
+        maxTotalChangedBytes: z.number().int().min(0).max(800_000_000),
+      })
+      .strict()
+      .default(DEFAULT_CANDIDATE_SET_BUDGET),
+    loserPolicy: z.enum(["retain", "discard"]).default("retain"),
+  })
+  .strict();
 const contractName = z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.-]+$/);
 const outcomeContractBody = z.object({
   requiredPaths: z.array(z.string().trim().min(1).max(240)).max(100),
@@ -50,6 +123,17 @@ const outcomeContractBody = z.object({
     )
     .max(20),
 });
+const assuranceDecisionBody = z
+  .object({
+    reason: z.string().trim().max(500).default(""),
+  })
+  .strict();
+const outcomeContractRollbackBody = z
+  .object({
+    targetVersion: z.number().int().min(1),
+    expectedCurrentVersion: z.number().int().min(1),
+  })
+  .strict();
 
 export async function createApp(
   config: AppConfig,
@@ -131,6 +215,45 @@ export async function createApp(
     };
   });
 
+  app.get("/api/agents/:id/outcome-contract/versions", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { versions: service.listOutcomeContractVersions(id) };
+  });
+
+  app.post("/api/agents/:id/outcome-contract/rollback", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    const body = outcomeContractRollbackBody.parse(request.body);
+    return {
+      outcomeContract: await service.rollbackOutcomeContract(
+        id,
+        body.targetVersion,
+        body.expectedCurrentVersion,
+      ),
+    };
+  });
+
+  app.get("/api/agents/:id/assurance-proposals", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { proposals: service.listAssuranceProposals(id) };
+  });
+
+  app.post("/api/agents/:id/assurance-proposals/derive", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { proposal: await service.deriveAssuranceProposal(id) };
+  });
+
+  app.post("/api/assurance-proposals/:id/accept", async (request) => {
+    const { id } = assuranceProposalIdParams.parse(request.params);
+    const body = assuranceDecisionBody.parse(request.body ?? {});
+    return service.acceptAssuranceProposal(id, body.reason);
+  });
+
+  app.post("/api/assurance-proposals/:id/reject", async (request) => {
+    const { id } = assuranceProposalIdParams.parse(request.params);
+    const body = assuranceDecisionBody.parse(request.body ?? {});
+    return { proposal: await service.rejectAssuranceProposal(id, body.reason) };
+  });
+
   app.delete("/api/agents/:id", async (request) => {
     const { id } = agentIdParams.parse(request.params);
     return service.deleteAgent(id);
@@ -156,6 +279,17 @@ export async function createApp(
     return { runs: service.getRuns(id) };
   });
 
+  app.get("/api/agents/:id/candidate-sets", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    return { candidateSets: service.getCandidateSets(id) };
+  });
+
+  app.post("/api/agents/:id/candidate-sets", async (request, reply) => {
+    const { id } = agentIdParams.parse(request.params);
+    const body = candidateSetBody.parse(request.body);
+    return reply.code(202).send(await service.createCandidateSet(id, body));
+  });
+
   app.post("/api/agents/:id/messages", async (request, reply) => {
     const { id } = agentIdParams.parse(request.params);
     const body = messageBody.parse(request.body);
@@ -166,6 +300,22 @@ export async function createApp(
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id) };
+  });
+
+  app.post("/api/runs/:id/portable-receipt", async (request) => {
+    const { id } = runIdParams.parse(request.params);
+    const body = portableReceiptBody.parse(request.body ?? {});
+    return service.exportPortableReceipt(id, body);
+  });
+
+  app.get("/api/candidate-sets/:id", async (request) => {
+    const { id } = candidateSetIdParams.parse(request.params);
+    return { candidateSet: service.getCandidateSet(id) };
+  });
+
+  app.post("/api/candidate-sets/:id/cancel", async (request) => {
+    const { id } = candidateSetIdParams.parse(request.params);
+    return { candidateSet: await service.cancelCandidateSet(id) };
   });
 
   app.post("/api/runs/:id/repair", async (request, reply) => {

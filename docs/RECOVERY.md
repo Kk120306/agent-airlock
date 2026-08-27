@@ -12,11 +12,26 @@ A Run without that durable decision never becomes Canonical State during recover
 | Promotion journal | A validated Candidate received an approved promotion decision. |
 | Immutable version directory | The planned physical Whole-Agent state was installed. |
 | `canonical.json` | The currently accepted Whole-Agent state. |
+| Immutable historical Canonical manifest | The complete workspace, Codex home, SQLite, outbox, thread, provider, and composite reference for one exact accepted state identifier. |
 | Atomic mock-delivery store | The supported local external effect was claimed. |
-| JSON control-plane store | Operator-facing Agent, Run, message, and receipt metadata. |
+| Resource Provider immutable version | The exact provider target in the durable Promotion plan was installed. |
+| Resource Registry generation | The exact additive provider contracts accepted by this deployment. |
+| Registry Transition journal | A provider addition was verified and planned for one Agent before canonical advancement. |
+| Candidate Set aggregate | One exact shared source, sealed competitor evidence, deterministic Selection Decision, and loser cleanup progress. |
+| Agent deletion journal | A bounded archive audit was prepared before an Agent workspace rename or control-plane deletion. |
+| JSON control-plane store | Operator-facing Agent, Run, Candidate Set, Assurance Proposal, Outcome Contract history, message, and Promotion Receipt metadata. |
+| Portable Decision Authority journal | An append-only terminal Run Transaction commitment with frozen Repair-parent and Candidate Set authority used only for receipt export. |
+| Portable signing key and identity marker | The private Ed25519 signer and its non-secret expected public-key fingerprint. |
+| Local transparency log | An optional append-only digest sequence, signed checkpoints, and prior-checkpoint chain for shared observation. |
 
 Recovery verifies the physical sources first and repairs control-plane metadata last.
 It never rolls `canonical.json` backward.
+Portable Decision Authority is captured before terminal Run metadata is committed, but it does not authorize Promotion recovery and is never recreated from mutable control-plane metadata.
+Restart-created terminal decisions are written to Decision Authority before the recovered mutable database state is committed.
+Normal execution also withholds a terminal Run Transaction from the control-plane store until its enclosing Run and Agent lifecycle update can be committed together.
+Candidate Set cancellation, winner completion, and loser retention or Discard each publish their own authority before their terminal mutable projection, and Candidate Set completion never backfills missing authority.
+Decision Authority and historical Canonical manifests use synchronized temporary files and non-replacing atomic publication, so a process interruption can leave only a removable temporary remnant or a complete deterministic target.
+Historical Canonical manifests use the originating Candidate or Registry Transition timestamp instead of recovery time, so a retry after history publication derives byte-identical immutable content.
 
 ## Journal phases
 
@@ -32,11 +47,21 @@ The journal contains bounded redacted evidence and a neutral recovery message, n
 ## Startup order
 
 1. Load and migrate the control-plane store.
-2. Scan and reconcile Promotion journals.
-3. Retain a valid interrupted pre-decision Candidate in Quarantine or cancel the Run when no Candidate exists.
-4. Reconcile each Agent's canonical reference from `canonical.json`.
-5. Remove expired unprotected Candidate or Quarantine directories.
-6. Persist recovered Runs, receipts, assistant messages, Agent states, and retention dispositions.
+2. Complete every prepared Agent deletion by verifying its exact bounded audit, idempotently locating or archiving the workspace, removing its control-plane aggregates, and completing the deletion journal.
+3. Scan and reconcile Promotion journals and exact Resource Provider target fingerprints.
+4. Retain a valid interrupted pre-decision Candidate in Quarantine or cancel the Run when no Candidate exists.
+5. Normalize every interrupted Candidate Set evaluation without replaying Runtime and preserve every complete sealed Candidate.
+6. Recompute a missing Selection Decision from persisted bounded evidence, resume only its exact winner, and reconcile loser dispositions.
+7. Verify configured provider additions against their exact immutable source versions.
+8. Reconcile each Agent's additive Registry Transition journal and canonical reference from `canonical.json`.
+9. Commit the new Resource Registry generation only after every Agent converges.
+10. Ask every configured Resource Provider to discard expired remote Candidate or Quarantine state before removing local mutable state.
+11. Persist recovered Runs, Candidate Sets, receipts, assistant messages, Agent states, and retention dispositions.
+
+Promotion recovery and retained Quarantine cleanup use the provider vector persisted with that historical transaction.
+The current configured registry may contain additive providers, but a provider added later is not part of earlier recovery work.
+Any unresolved prior-generation Promotion recovery defers Registry Transitions and the registry-generation commit.
+Candidate Set recovery also uses each competitor's persisted historical provider subset and finishes before a newly configured provider can enter Canonical State.
 
 ## Fault outcomes
 
@@ -50,6 +75,43 @@ The journal contains bounded redacted evidence and a neutral recovery message, n
 | After `canonical-advanced` | Supported intents are parsed from the immutable accepted outbox and claimed idempotently. |
 | After physical effect dispatch | The same idempotency keys return the existing receipts before completion. |
 | After `effects-delivered` or `completed` | Final Run and Agent metadata is reconstructed without another version, effect, or assistant message. |
+| During provider preparation cleanup | Runtime does not start, Canonical State stays unchanged, and failed cleanup retains a retryable composite Quarantine. |
+| During cancellation while provider cleanup is unavailable | Canonical State stays unchanged, the complete Candidate becomes cleanup-only Quarantine, and Discard remains retryable. |
+| After provider Discard but before local Quarantine removal | Repeated Discard is idempotent, and local removal continues only after all providers pass. |
+| After local Quarantine removal but before final metadata | Persisted provider Discard evidence lets startup complete the disposition without recreating mutable state. |
+| Local Quarantine missing without complete provider Discard evidence | The Run enters `recovery-error`, and Airlock does not claim remote cleanup. |
+| Before a Registry Transition journal exists | The prior canonical manifest and registry generation remain authoritative. |
+| After a Registry Transition plan is durable | An unaccepted target is removed and the verified transition is retried. |
+| After a Registry Transition target is installed | Its exact local and provider fingerprints are checked, its journal timestamp is reused, and recovery advances that installed target instead of deleting and recreating it. |
+| After immutable Registry Transition history is published but before `canonical.json` replacement | Recovery derives the same byte-identical manifest from the installed target and durable journal, verifies the existing history, and advances `canonical.json` once. |
+| After canonical advancement but before Registry Transition cleanup | The exact accepted target is recognized, the journal is removed, and no second state is installed. |
+| A Registry Transition journal has altered identifiers, fingerprints, fields, or verifications | Recovery rejects it before the target path can authorize deletion or canonical rewriting. |
+| One Agent fails provider onboarding | The prior Resource Registry generation remains authoritative, successful Agent transitions remain recoverable, and no unverifiable source becomes accepted. |
+| A Resource Registry generation remains uncommitted | Agent creation and ordinary or Repair Run execution remain unavailable until every Agent converges. |
+| A prior-generation Promotion remains unresolved after a provider is added | Recovery uses the Promotion plan's historical provider subset, defers onboarding, and leaves the new generation uncommitted. |
+| A retained historical Quarantine is discarded after a provider is added | Only the providers recorded by that Quarantine receive idempotent Discard; the later provider is not invoked. |
+| Before a Candidate Set Selection Decision exists | Complete seals remain eligible, partial evaluations become explicitly ineligible without Runtime replay, and Selection is recomputed from persisted evidence. |
+| After a Candidate Set Selection Decision exists | Recovery may promote only the named winner and may never fall through to a runner-up. |
+| During Candidate Set winner Promotion | The existing Promotion journal reconciles the exact selected Run, canonical version, and supported effects. |
+| During Candidate Set loser cleanup | Completed dispositions remain durable, unresolved retain or Discard work is retried idempotently, and no loser can change the winner. |
+| Candidate Set cleanup fails before every disposition is durable | The Candidate Set enters `recovery-error`, the Agent remains admission-locked across restart, and no new Run starts over unresolved mutable state. |
+| After physical loser Quarantine or removal but before terminal metadata | Recovery verifies the exact local state and complete provider cleanup evidence, then records the already completed disposition without recreating Candidate State. |
+| Selected Candidate seal or physical resource state contradicts persisted evidence | The Candidate Set enters `recovery-error`, Canonical State is preserved, and no losing effect is claimed. |
+| An older-generation Candidate Set remains unresolved when a provider is added | Winner Promotion and loser cleanup use only the historical provider subset, and onboarding waits until the set reaches a safe terminal state. |
+| Before an Agent deletion journal exists | The Agent, workspace, Runs, Candidate Sets, Assurance Proposals, and Outcome Contract history remain live. |
+| After deletion evidence is prepared but before workspace archival | Startup verifies the unchanged bounded audit and archives the workspace exactly once. |
+| After workspace archival but before control-plane deletion | Startup requires a regular deterministic archive directory and an exactly matching bounded tombstone before removing the exact Agent aggregates. |
+| After control-plane deletion but before journal completion | Startup verifies the existing archive destination and removes the already completed journal without recreating the Agent. |
+| Agent deletion audit or physical archive state contradicts the journal | Startup fails closed before Promotion or Resource Registry transition recovery begins. |
+| Receipt export stops before its response | Canonical State and Run evidence remain unchanged, and a retry derives and signs the same receipt content. |
+| A historical Canonical manifest is missing or contradicts its physical state | Receipt export fails closed without changing Canonical State or signing the contradictory projection. |
+| Mutable Run, Promotion Receipt, Candidate Set, Selection, or winner-seal metadata contradicts Portable Decision Authority | Receipt export fails closed even when the mutable records were changed consistently with one another. |
+| A completed legacy decision has no Portable Decision Authority record | Receipt export fails closed because Airlock cannot safely infer historical authority from mutable metadata. |
+| A portable signing key is missing or substituted while its identity marker remains | Export fails closed without silently rotating the signing identity, and existing envelopes remain independently verifiable. |
+| A transparency append completes but its response is lost | A retry recognizes the existing receipt digest and returns the same tree position without appending a duplicate. |
+| The optional local transparency log or checkpoint chain is malformed | Anchored export fails closed, while signature-only export remains available when the operator disables anchoring. |
+| A transparency writer or stale-lock reclaimer exits | A live writer remains protected, nonce-bound recovery claims elect one reclaimer, concurrent lock-release identity changes retry as contention, and dead claims cannot strand later appenders. |
+| Provider removal or contract replacement is configured | Startup fails that Registry evolution closed until an explicit export-and-retire migration is supplied. |
 | Any physical contradiction | The Run and Agent enter `recovery-error`, Canonical State is not rewritten, and no new effect is claimed. |
 
 ## Retention
@@ -58,9 +120,12 @@ The journal contains bounded redacted evidence and a neutral recovery message, n
 `AIRLOCK_QUARANTINE_RETENTION_HOURS` defaults to 168 hours.
 Both settings accept positive values up to 8,760 hours.
 
-Active or unresolved journal Run identifiers are protected from cleanup.
+Active or unresolved journal and Candidate Set Run identifiers are protected from cleanup.
 Cleanup accepts no caller-supplied path, rejects unsafe identifiers, does not traverse symbolic links, and scans only `.candidates` and `.quarantine`.
 Expired Quarantine loses mutable files but retains output, Validation evidence, hashes, lineage, timeline, and its Promotion Receipt.
+Provider Discard evidence is persisted before the local Quarantine directory is removed.
+If a provider is unavailable, cleanup retains the complete local Quarantine and retries on the next startup.
+Every provider-controlled lifecycle string is bounded and credential-checked before it can enter durable evidence or an operator response.
 
 ## Operator response
 
@@ -90,3 +155,41 @@ npm run demo -- --reset
 Complete the four guided steps, stop the process with `Ctrl+C`, and restart with `npm run demo` without `--reset`.
 The same Agent identifier, messages, immutable versions, canonical manifest, Promotion evidence, and mock effect receipts must reappear.
 Use `npm run test:demo` for the automated launcher restart assertion and `npm run check:phase7` for the complete recovery and release gate.
+
+Run the provider recovery and crash matrix with:
+
+```bash
+npm run test -w @launchpad/server -- --run src/phase-eight-resource-acceptance.test.ts
+npm run check:phase8:provider
+```
+
+These tests cover deployment onboarding, unverifiable-source rejection, Registry Transition crash recovery, prepare abort, provider-only rejection, idempotent Promotion, cancellation cleanup outage, post-Runtime symbolic-link substitution, Quarantine and Discard, missing-state contradiction, cleanup retry, and restart at every provider Promotion seam without paid inference.
+
+Run the Competing Futures recovery and decision matrix with:
+
+```bash
+npm run check:phase9:selection
+npm run check:phase9:boundaries
+```
+
+These tests cover strict database parsing, deterministic replay, sibling isolation, aggregate token reservation, scoped over-budget Runtime cancellation, terminal pre-decision cancellation, all-invalid completion, selected-winner seal tampering, Candidate Set versus Promotion-journal authority contradiction, exact-winner restart recovery, idempotent loser cleanup, older-generation provider recovery, Registry Transition blocking, and exactly one supported winner effect without a ModelArk credential or paid request.
+Agent deletion refuses unresolved Promotion recovery or retained Quarantine, while successful archival writes only bounded lifecycle identifiers, dispositions, and cryptographic evidence digests to its tombstone.
+
+Run the Adaptive Assurance and Agent deletion recovery matrix with:
+
+```bash
+npm run check:phase10:assurance
+```
+
+These tests cover deterministic proposal replay, lineage deduplication, unknown historical inputs, stale contracts, tampering, strict HTTP review, rejection restart, immutable rollback, nested parser rejection, and interruption immediately after the physical workspace archive.
+The archived schema 2 tombstone contains only bounded identifiers, lifecycle states, provenance, and cryptographic digests for Runs, Candidate Sets, Assurance Proposals, Outcome Contract versions, and Promotion Receipts.
+
+Run the Portable Trust protocol, signing-key, transparency-log, and HTTP export matrix with:
+
+```bash
+npm run check:phase11:protocol
+npm run test -w @launchpad/server -- --run src/phase-eleven-acceptance.test.ts
+```
+
+These tests verify strict offline parsing, cross-process signature verification, one-bit tamper rejection, key loss and substitution detection, historical key rotation, Merkle disclosures, local transparency inclusion and split-view detection, zero-network EVM payload generation, exact Candidate Selection and Assurance provenance, Repair ancestry, retryable incomplete evidence, and no paid provider access.
+Follow the [portable receipt key runbook](operations/PORTABLE_RECEIPT_KEYS.md) before rotating, retiring, restoring, or investigating a signing key.

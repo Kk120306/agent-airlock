@@ -2,7 +2,7 @@
 
 ## Free deterministic demo
 
-Use this path for development, judging rehearsal, and automated evidence while organizer credentials are pending.
+Use this path for development, judging rehearsal, and deterministic automated evidence.
 It builds the production application, binds Fastify to `127.0.0.1:3199`, seeds one `Airlock Demo` Agent, and runs a deterministic local Codex protocol fixture.
 It does not require Docker, a ModelArk key, or paid inference.
 
@@ -51,10 +51,22 @@ Requirements:
 ```bash
 cp .env.example .env
 # Fill ARK_API_KEY, ARK_MODEL, and the region-matching ARK_BASE_URL.
+# Optionally list activated free-quota fallbacks in ARK_MODEL_FALLBACKS.
+npm run check:modelark
+npm run poc:doctor
 npm run poc
 ```
 
 `npm run poc` loads `.env` automatically.
+`npm run poc:doctor` proves each live prerequisite, Candidate session copy isolation, and a real two-turn Codex tool call against a local Responses fixture without printing configured values, model output, provider request identifiers, or account metadata.
+Use its result before the live demo to distinguish a ModelArk capacity failure from a container or application failure.
+Before building the Runtime, it performs a minimal Responses API request and prints neither the credential nor model output.
+`ARK_MODEL_FALLBACKS` accepts a comma-separated list of operator-approved models and is bounded to four unique models including `ARK_MODEL`.
+Only HTTP 404 and 429 advance to the next model.
+Authentication, network, timeout, malformed-response, and all other failures stop immediately.
+The model that completes preflight becomes the Runtime's `ARK_MODEL`.
+Keep Free Credits Only Mode enabled for every activated model because the launcher does not change or verify account billing settings.
+Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass that fail-fast provider check explicitly.
 Explicit process environment variables take precedence.
 Keep the Beijing default for mainland Volcengine credentials.
 For BytePlus Asia Pacific credentials, use:
@@ -181,6 +193,7 @@ ModelArk credentials and endpoints are isolated by provider and region.
 A `401` response saying that the API key does not exist usually means the key is invalid or `ARK_BASE_URL` points to the wrong provider or region.
 A `404` response saying that a model or endpoint does not exist usually means `ARK_MODEL` is incorrect, unavailable to the API key, not activated, or belongs to another region.
 Confirm all three Ark values together before retrying.
+The live preflight and a complete browser-to-container Promotion passed against the BytePlus Asia Pacific Responses API on 2026-08-27.
 
 Check Runtime readiness:
 

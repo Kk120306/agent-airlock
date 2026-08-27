@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 
 const envSchema = z.object({
-  HOST: z.string().default("0.0.0.0"),
+  HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.string().default("info"),
   APP_DATA_DIR: z.string().default(path.resolve(".data")),
@@ -26,10 +26,23 @@ const envSchema = z.object({
     .positive()
     .max(8_760)
     .default(168),
+  AIRLOCK_PORTABLE_SIGNING_KEY_PATH: z.string().min(1).max(4_096).optional(),
+  AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH: z.string().min(1).max(4_096).optional(),
+  AIRLOCK_TRANSPARENCY_LOG_PATH: z.string().min(1).max(4_096).optional(),
   AIRLOCK_DEMO_MODE: z
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  AIRLOCK_HTTP_OBJECT_URL: z.string().url().optional(),
+  AIRLOCK_HTTP_OBJECT_SOCKET: z.string().min(1).optional(),
+  AIRLOCK_HTTP_OBJECT_VERSION_ID: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/)
+    .optional(),
+  AIRLOCK_HTTP_OBJECT_FINGERPRINT: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   RUNTIME_PROVIDER: z.enum(["local-process", "container"]).default("local-process"),
   CONTAINER_ENGINE: z.string().min(1).default("docker"),
   CONTAINER_RUNTIME_IMAGE: z.string().min(1).default("volc-agent-runtime:local"),
@@ -40,6 +53,10 @@ const envSchema = z.object({
     .default("2g"),
   CONTAINER_PIDS_LIMIT: z.coerce.number().int().positive().default(256),
   CONTAINER_USER: z.string().optional(),
+  CONTAINER_HOST_GATEWAY: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   RUNTIME_INSTANCE_ID: z
     .string()
     .trim()
@@ -83,10 +100,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
-  if (env.NODE_ENV === "production" && !loopbackHosts.has(env.HOST)) {
+  if (!loopbackHosts.has(env.HOST)) {
     if (authToken.length < 24 || authToken.startsWith("replace-")) {
       throw new Error(
-        "APP_AUTH_TOKEN must contain at least 24 characters for a non-loopback production server",
+        "APP_AUTH_TOKEN must contain at least 24 characters for a non-loopback server",
       );
     }
   }
@@ -94,6 +111,50 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     typeof process.getuid === "function" && typeof process.getgid === "function"
       ? process.getuid() + ":" + process.getgid()
       : "1000:1000";
+  const httpObjectValues = [
+    env.AIRLOCK_HTTP_OBJECT_URL,
+    env.AIRLOCK_HTTP_OBJECT_VERSION_ID,
+    env.AIRLOCK_HTTP_OBJECT_FINGERPRINT,
+  ];
+  if (httpObjectValues.some(Boolean) && !httpObjectValues.every(Boolean)) {
+    throw new Error(
+      "AIRLOCK_HTTP_OBJECT_URL, AIRLOCK_HTTP_OBJECT_VERSION_ID, and AIRLOCK_HTTP_OBJECT_FINGERPRINT must be configured together",
+    );
+  }
+  if (env.AIRLOCK_HTTP_OBJECT_SOCKET && !env.AIRLOCK_HTTP_OBJECT_URL) {
+    throw new Error(
+      "AIRLOCK_HTTP_OBJECT_SOCKET requires AIRLOCK_HTTP_OBJECT_URL and an initial version",
+    );
+  }
+  const portableSigningKeyPath = path.resolve(
+    env.AIRLOCK_PORTABLE_SIGNING_KEY_PATH ??
+      path.join(env.APP_DATA_DIR, "keys", "portable-receipt-ed25519.pem"),
+  );
+  const transparencySigningKeyPath = path.resolve(
+    env.AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH ??
+      path.join(env.APP_DATA_DIR, "keys", "portable-transparency-ed25519.pem"),
+  );
+  const transparencyLogPath = path.resolve(
+    env.AIRLOCK_TRANSPARENCY_LOG_PATH ??
+      path.join(
+        env.APP_DATA_DIR,
+        "transparency",
+        "portable-transparency-log.json",
+      ),
+  );
+  const trustCustodyPaths = [
+    portableSigningKeyPath,
+    portableSigningKeyPath + ".key-id.json",
+    transparencySigningKeyPath,
+    transparencySigningKeyPath + ".key-id.json",
+    transparencyLogPath,
+    transparencyLogPath + ".lock",
+  ];
+  if (new Set(trustCustodyPaths).size !== trustCustodyPaths.length) {
+    throw new Error(
+      "Portable receipt keys, identity markers, and transparency storage must use distinct paths",
+    );
+  }
   return {
     host: env.HOST,
     port: env.PORT,
@@ -109,7 +170,23 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     candidateRetentionMs: env.AIRLOCK_CANDIDATE_RETENTION_HOURS * 60 * 60 * 1_000,
     quarantineRetentionMs:
       env.AIRLOCK_QUARANTINE_RETENTION_HOURS * 60 * 60 * 1_000,
+    portableSigningKeyPath,
+    transparencySigningKeyPath,
+    transparencyLogPath,
     demoMode: env.AIRLOCK_DEMO_MODE,
+    httpObjectResource:
+      env.AIRLOCK_HTTP_OBJECT_URL &&
+      env.AIRLOCK_HTTP_OBJECT_VERSION_ID &&
+      env.AIRLOCK_HTTP_OBJECT_FINGERPRINT
+        ? {
+            baseUrl: env.AIRLOCK_HTTP_OBJECT_URL,
+            socketPath: env.AIRLOCK_HTTP_OBJECT_SOCKET
+              ? path.resolve(env.AIRLOCK_HTTP_OBJECT_SOCKET)
+              : null,
+            initialVersionId: env.AIRLOCK_HTTP_OBJECT_VERSION_ID,
+            initialFingerprint: env.AIRLOCK_HTTP_OBJECT_FINGERPRINT,
+          }
+        : null,
     runtimeProvider: env.RUNTIME_PROVIDER,
     containerEngine: env.CONTAINER_ENGINE,
     containerRuntimeImage: env.CONTAINER_RUNTIME_IMAGE,
@@ -117,6 +194,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     containerMemoryLimit: env.CONTAINER_MEMORY_LIMIT,
     containerPidsLimit: env.CONTAINER_PIDS_LIMIT,
     containerUser: env.CONTAINER_USER?.trim() || defaultContainerUser,
+    containerHostGateway: env.CONTAINER_HOST_GATEWAY,
     runtimeInstanceId: env.RUNTIME_INSTANCE_ID,
     authToken,
     arkApiKey: env.ARK_API_KEY?.trim() ?? "",

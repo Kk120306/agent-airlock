@@ -19,7 +19,7 @@ The launcher seeds `Airlock Demo`, and the `Judge path` strip stages every requi
 
 The launcher binds only to loopback and configures an unreachable loopback model URL.
 No ModelArk request or paid inference occurs in this path.
-Organizer-provided credentials remain a separate live conformance gate and must never appear in the repository, terminal capture, browser, screenshots, or Promotion Receipt evidence.
+ModelArk credentials remain confined to the separate live conformance path and must never appear in the repository, terminal capture, browser, screenshots, or Promotion Receipt evidence.
 
 ## Timeline
 
@@ -69,6 +69,14 @@ Close with the product line:
 
 > Agents may explore many futures, but only validated futures become reality.
 
+## Optional 60-second trust encore
+
+Open Portable Trust on the repaired Run, select the local transparency proof and offline EVM payload, and generate the receipt.
+Download the single `agent-airlock-decision-chain-*.json` file.
+Open `Verify a receipt` and import that chain.
+Point to `0 API calls`, `2 signed decisions linked`, and the independent PASS results for every receipt, parent digest, Canonical State handoff, transparency proof, and digest-only EVM payload.
+Explain that the chain intentionally excludes organizational trust policy and trust roots, so producer evidence cannot authorize its own signer.
+
 ## Required visible proof
 
 - The starter-kit frontend selects and invokes a runnable Agent.
@@ -87,10 +95,13 @@ Close with the product line:
 npm run test:demo
 npm run test:demo:e2e
 npm run check:phase7
+npm run check:phase11:protocol
+npm run test:phase11:ui
 ```
 
 The browser test asserts the complete story through production Chrome in under 180 seconds and checks the 390-pixel layout for page overflow.
 The full Phase 7 gate also runs prior server, browser, container, crash-recovery, retention, path-safety, dependency, and release-audit evidence.
+The Phase 11 gates exercise the one-file packet across a separate CLI process and a real zero-upload browser, including altered optional-proof rejection.
 
 ## Honest scope boundary
 
@@ -98,11 +109,20 @@ Exactly-once delivery is claimed only inside the atomic local mock consumer.
 Unrestricted Runtime networking can bypass the typed outbox.
 The Promotion journal is designed for one local control-plane process and does not claim distributed coordination or power-loss durability.
 Ordinary containers are not hardened multi-tenant sandboxes.
-The deterministic fixture is valid controlled demo evidence under the track brief, but live ModelArk conformance remains pending until organizer credentials arrive.
+The deterministic fixture remains the reproducible judging proof.
+Live ModelArk conformance must be proven again at judging time because free provider capacity is external and time-varying.
 
-## Live ModelArk conformance after credentials arrive
+## Live ModelArk conformance
 
 Configure `ARK_API_KEY`, `ARK_MODEL`, and the region-matching `ARK_BASE_URL` only in the local `.env` file.
+Optionally configure up to three activated free-quota models in `ARK_MODEL_FALLBACKS`.
+Run `npm run check:modelark` to fail fast with minimal credential-safe Responses API requests.
+Run `npm run poc:doctor` to prove provider and container readiness as independent checks.
+The doctor also drives the pinned real Codex CLI through a local two-turn Responses tool-call fixture, but that protocol proof never substitutes for the separate live ModelArk check.
+Run `npm run test:container-transaction` to extend that proof through the production CodeJam HTTP control plane, required Validation, Promotion, independent receipt verification, restart, and accepted-session continuation.
+Run `npm run test:container-browser` to prove the same real Codex Candidate and Promotion path through Chrome.
+Only HTTP 404 and 429 advance through the operator-approved list, and the first successful model becomes the Runtime's `ARK_MODEL`.
+Keep Free Credits Only Mode enabled for every configured model.
 Run `npm run poc`, select an Agent, and execute one short safe Promotion through the same Playground.
 Confirm that model output, Candidate State, Validation, Promotion, and follow-up continuity use the same middleware boundary.
 Do not change the deterministic release gate or commit any credential-bearing output.

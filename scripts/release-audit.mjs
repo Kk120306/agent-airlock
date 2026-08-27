@@ -20,6 +20,18 @@ const trackedFiles = stdout
   .filter(Boolean);
 const failures = [];
 
+const modelArkStatusFiles = [
+  "README.md",
+  "docs/demo/JUDGE_CHECKLIST.md",
+  "docs/demo/three-minute-demo.md",
+  "docs/product/OUTCOME_ROADMAP.md",
+  "docs/product/PRD.md",
+];
+const staleModelArkSuccessClaims = [
+  /credentialed ModelArk acceptance journey passed/i,
+  /live ModelArk (?:acceptance|conformance|promotion)[^.\n]*(?:passed|complete|verified|successful)/i,
+];
+
 for (const file of trackedFiles) {
   if (/^\.env(?:\.|$)/.test(path.basename(file)) && file !== ".env.example") {
     failures.push("Tracked environment file: " + file);
@@ -31,7 +43,10 @@ const highConfidenceSecrets = [
   { name: "Volcengine access key", pattern: /\bAKLT[A-Za-z0-9]{16,}\b/g },
   {
     name: "private key block",
-    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    pattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{16,}\r?\n)+-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    historyPattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n(?:[ +\-][A-Za-z0-9+/=]{16,}\r?\n)+[ +\-]-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
   },
 ];
 
@@ -46,8 +61,9 @@ const { stdout: history } = await execFile(
 );
 const historyText = history.toString("utf8");
 for (const scanner of highConfidenceSecrets) {
-  scanner.pattern.lastIndex = 0;
-  if (scanner.pattern.test(historyText)) {
+  const historyPattern = scanner.historyPattern ?? scanner.pattern;
+  historyPattern.lastIndex = 0;
+  if (historyPattern.test(historyText)) {
     failures.push(scanner.name + " in Git history");
   }
 }
@@ -94,6 +110,25 @@ for (const markdownFile of trackedFiles.filter((file) => file.endsWith(".md"))) 
       failures.push("Broken Markdown target in " + markdownFile + ": " + target);
     }
   }
+}
+
+for (const statusFile of modelArkStatusFiles) {
+  if (!trackedFiles.includes(statusFile)) {
+    failures.push("Missing ModelArk status document: " + statusFile);
+    continue;
+  }
+  const content = await readFile(path.join(projectRoot, statusFile), "utf8");
+  for (const pattern of staleModelArkSuccessClaims) {
+    if (pattern.test(content)) {
+      failures.push("Stale live ModelArk success claim: " + statusFile);
+      break;
+    }
+  }
+}
+
+const readme = await readFile(path.join(projectRoot, "README.md"), "utf8");
+if (!readme.includes("must be rerun at judging time")) {
+  failures.push("README must disclose that live ModelArk conformance is rerun at judging time");
 }
 
 if (failures.length > 0) {

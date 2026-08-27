@@ -1,4 +1,15 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import {
+  verifyPortableEvidencePacketJson,
+  verifyPortableDecisionChainJson,
+  verifyPortablePromotionEnvelope,
+} from "@agent-airlock/portable-promotion-receipt";
+import type {
+  PortableEvidencePacket,
+  PortableDecisionChain,
+  PortablePromotionEnvelope,
+} from "@agent-airlock/portable-promotion-receipt";
 
 interface AgentSummary {
   id: string;
@@ -22,6 +33,11 @@ interface TransactionSummary {
     parentRunId: string | null;
     depth: number;
   };
+}
+
+interface RunSummary {
+  id: string;
+  transaction: TransactionSummary | null;
 }
 
 test("the free judge demo proves promotion, quarantine, repair, and continuity", async ({
@@ -120,8 +136,10 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   const runsAfterChallenge = (
     await (
       await request.get("/api/agents/" + (initialAgent?.id ?? "") + "/runs")
-    ).json() as { runs: Array<{ transaction: TransactionSummary | null }> }
+    ).json() as { runs: RunSummary[] }
   ).runs;
+  const quarantinedRunId = runsAfterChallenge[0]?.id;
+  expect(quarantinedRunId).toBeTruthy();
   const quarantined = runsAfterChallenge[0]?.transaction;
   expect(quarantined).toMatchObject({
     disposition: "quarantined",
@@ -160,12 +178,118 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   const repairedRuns = (
     await (
       await request.get("/api/agents/" + (initialAgent?.id ?? "") + "/runs")
-    ).json() as { runs: Array<{ transaction: TransactionSummary | null }> }
+    ).json() as { runs: RunSummary[] }
   ).runs;
+  const repairedRunId = repairedRuns[0]?.id;
+  expect(repairedRunId).toBeTruthy();
   expect(repairedRuns[0]?.transaction?.lineage).toMatchObject({
-    parentRunId: expect.any(String),
+    parentRunId: quarantinedRunId,
     depth: 1,
   });
+
+  const portablePanel = page.getByRole("region", { name: "Portable trust receipt" });
+  await portablePanel.getByRole("checkbox", {
+    name: /Append to local transparency log/,
+  }).check();
+  await portablePanel.getByRole("checkbox", {
+    name: /Prepare digest-only EVM calldata/,
+  }).check();
+  await portablePanel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(portablePanel.getByText("Self-check passed")).toBeVisible();
+  const packetDownloadPromise = page.waitForEvent("download");
+  await portablePanel.getByRole("button", { name: "Download evidence packet" }).click();
+  const packetDownload = await packetDownloadPromise;
+  expect(packetDownload.suggestedFilename()).toBe(
+    `agent-airlock-evidence-${repairedRunId}.json`,
+  );
+  const packetPath = await packetDownload.path();
+  expect(packetPath).not.toBeNull();
+  const packetSource = await readFile(packetPath!, "utf8");
+  const packet = JSON.parse(packetSource) as PortableEvidencePacket;
+  expect(verifyPortableEvidencePacketJson(packetSource)).toMatchObject({
+    valid: true,
+    anchor: { valid: true },
+    evmPayload: { valid: true },
+  });
+  expect(packet.envelope.receipt.ancestry).toMatchObject({
+    parentRunId: quarantinedRunId,
+    depth: 1,
+    previousReceiptDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+  });
+  const chainDownloadPromise = page.waitForEvent("download");
+  await portablePanel.getByRole("button", {
+    name: "Download complete decision chain",
+  }).click();
+  const chainDownload = await chainDownloadPromise;
+  expect(chainDownload.suggestedFilename()).toBe(
+    `agent-airlock-decision-chain-${repairedRunId}.json`,
+  );
+  const chainPath = await chainDownload.path();
+  expect(chainPath).not.toBeNull();
+  const chainSource = await readFile(chainPath!, "utf8");
+  const chain = JSON.parse(chainSource) as PortableDecisionChain;
+  expect(verifyPortableDecisionChainJson(chainSource)).toMatchObject({
+    valid: true,
+    packets: [{ valid: true }, { valid: true }],
+  });
+  expect(chain.packets[0]!.envelope.receipt.decision).toMatchObject({
+    runId: quarantinedRunId,
+    disposition: "quarantined",
+  });
+  expect(chain.packets[1]!.envelope.receipt.decision.runId).toBe(repairedRunId);
+
+  const parentExport = await request.post(
+    `/api/runs/${quarantinedRunId}/portable-receipt`,
+    {
+      data: {
+        disclosureIdentities: [],
+        includeAncestry: true,
+        localAnchor: false,
+        evmPayload: false,
+      },
+    },
+  );
+  expect(parentExport.ok()).toBe(true);
+  const parentEnvelope = (
+    await parentExport.json() as { envelope: PortablePromotionEnvelope }
+  ).envelope;
+  expect(verifyPortablePromotionEnvelope(parentEnvelope).valid).toBe(true);
+  expect(parentEnvelope.receipt.decision.disposition).toBe("quarantined");
+  expect(parentEnvelope.receipt.state.after.compositeHash).toBe(
+    parentEnvelope.receipt.state.before.compositeHash,
+  );
+  expect(packet.envelope.receipt.ancestry.previousReceiptDigest).toBe(
+    parentEnvelope.receiptDigest,
+  );
+
+  const localVerificationRequests: string[] = [];
+  const recordVerificationRequest = (requestEvent: { url(): string }) => {
+    if (requestEvent.url().includes("/api/")) {
+      localVerificationRequests.push(requestEvent.url());
+    }
+  };
+  page.on("request", recordVerificationRequest);
+  await page.getByRole("button", { name: "Verify a receipt" }).click();
+  const verifier = page.getByRole("dialog", {
+    name: "Verify trust without trusting this server",
+  });
+  await verifier.locator('.receipt-dropzone input[type="file"]').setInputFiles(chainPath!);
+  await expect(verifier.getByText("Every included proof matches")).toBeVisible();
+  await expect(verifier.getByText("2 signed decisions linked")).toBeVisible();
+  const ancestryCommitment = verifier.getByRole("region", {
+    name: "Signed ancestry commitment",
+  });
+  await expect(ancestryCommitment.getByText("Repair lineage committed"))
+    .toBeVisible();
+  await expect(ancestryCommitment.getByText(quarantinedRunId!)).toBeVisible();
+  await expect(
+    ancestryCommitment.getByText(parentEnvelope.receiptDigest),
+  ).toBeVisible();
+  await expect(verifier.getByText("0 API calls · 0 uploads · 4 MB hard limit"))
+    .toBeVisible();
+  expect(localVerificationRequests).toEqual([]);
+  await verifier.getByRole("button", { name: "Close receipt verifier" }).click();
+  page.off("request", recordVerificationRequest);
 
   await page.getByRole("button", { name: "Demo step 4: Prove continuity" }).click();
   await expect(composer).toHaveValue(

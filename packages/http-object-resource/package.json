@@ -1,0 +1,39 @@
+{
+  "name": "@agent-airlock/http-object-resource",
+  "version": "0.1.0",
+  "description": "Credential-free HTTP versioned-object Transactional Resource Provider for Agent Airlock.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./fixture-server": {
+      "types": "./dist/fixture-server.d.ts",
+      "import": "./dist/fixture-server.js"
+    },
+    "./conformance-fixture": {
+      "types": "./dist/conformance-fixture.d.ts",
+      "import": "./dist/conformance-fixture.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && vitest run"
+  },
+  "dependencies": {
+    "@agent-airlock/transactional-resource-sdk": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

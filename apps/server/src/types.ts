@@ -1,3 +1,15 @@
+import type {
+  ResourceCandidateHandle,
+  ResourceCapabilityClaim,
+  ResourceChangeEvidence,
+  ResourceLifecycleStage,
+  ResourcePromotionPlan,
+  ResourceQuarantineHandle,
+  ResourceRuntimeBinding,
+  ResourceValidationEvidence,
+  ResourceVersionReference,
+} from "@agent-airlock/transactional-resource-sdk";
+
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type MessageRole = "user" | "assistant";
@@ -5,6 +17,7 @@ export type RunTransactionStatus =
   | "preparing"
   | "executing"
   | "validating"
+  | "sealed"
   | "promoting"
   | "promoted"
   | "quarantined"
@@ -33,6 +46,7 @@ export interface CanonicalStateReference {
   sessionContentHash: string;
   sqliteContentHash: string;
   outboxContentHash: string;
+  providerVersions: ResourceVersionReference[];
   contentHash: string;
 }
 
@@ -64,6 +78,100 @@ export type OutcomeContractInput = Omit<
   OutcomeContract,
   "schemaVersion" | "version" | "createdAt"
 >;
+
+export type AssuranceProposalState =
+  | "draft"
+  | "ready"
+  | "accepted"
+  | "rejected"
+  | "superseded"
+  | "stale";
+
+export type AssuranceDerivationRule =
+  | "deleted-path-recurrence-v1"
+  | "changed-file-limit-recurrence-v1"
+  | "added-byte-limit-recurrence-v1"
+  | "catalog-secret-recurrence-v1"
+  | "optional-command-failure-recurrence-v1";
+
+export type AssuranceOperation =
+  | { kind: "add-required-path"; path: string }
+  | { kind: "add-protected-path"; path: string }
+  | { kind: "lower-max-changed-files"; maximum: number }
+  | { kind: "lower-max-added-bytes"; maximum: number }
+  | {
+      kind: "add-catalog-secret";
+      catalogId: string;
+      catalogVersion: number;
+      name: string;
+      pattern: string;
+    }
+  | {
+      kind: "make-command-required";
+      name: string;
+      commandHash: string;
+      timeoutMs: number;
+    };
+
+export interface AssuranceCitation {
+  operationKey: string;
+  runId: string;
+  rootRunId: string;
+  evidenceSelector: string;
+  evidenceHash: string;
+  derivationRule: AssuranceDerivationRule;
+}
+
+export interface AssuranceSimulationResult {
+  operationKey: string;
+  runId: string;
+  classification: "exact" | "conservative" | "unknown";
+  priorDisposition: RunTransactionDisposition | null;
+  counterfactualDisposition: RunTransactionDisposition | null;
+  missingInputs: string[];
+  resultHash: string;
+}
+
+export interface AssuranceSimulation {
+  engineId: "agent-airlock-historical-simulator";
+  engineVersion: 1;
+  results: AssuranceSimulationResult[];
+  digest: string;
+}
+
+export interface AssuranceDecision {
+  action: "accepted" | "rejected";
+  reason: string;
+  decidedAt: string;
+  resultingContractVersion: number | null;
+}
+
+export interface AssuranceProposal {
+  schemaVersion: 1;
+  id: string;
+  agentId: string;
+  state: AssuranceProposalState;
+  baseContractVersion: number;
+  baseContractHash: string;
+  generatorId: "agent-airlock-deterministic-detector";
+  generatorVersion: 1;
+  operations: AssuranceOperation[];
+  citations: AssuranceCitation[];
+  simulation: AssuranceSimulation;
+  proposalDigest: string;
+  decision: AssuranceDecision | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutcomeContractVersionRecord {
+  schemaVersion: 1;
+  agentId: string;
+  contract: OutcomeContract;
+  provenance: "created" | "manual" | "assurance-proposal" | "rollback" | "migration";
+  sourceProposalId: string | null;
+  rollbackFromVersion: number | null;
+}
 
 export interface RunTransactionEvent {
   status: RunTransactionStatus;
@@ -135,6 +243,35 @@ export interface TransactionResourceEvidence {
   summary: string;
 }
 
+export interface ProviderResourceEvidence {
+  schemaVersion: 1;
+  providerId: string;
+  resourceKind: string;
+  label: string;
+  required: boolean;
+  capabilities: ResourceCapabilityClaim;
+  source: ResourceVersionReference;
+  candidate: ResourceCandidateHandle;
+  runtimeBinding: ResourceRuntimeBinding | null;
+  change: ResourceChangeEvidence | null;
+  validations: ResourceValidationEvidence[];
+  promotionPlan: ResourcePromotionPlan | null;
+  installedVersion: ResourceVersionReference | null;
+  quarantine: ResourceQuarantineHandle | null;
+  disposition: RunTransactionDisposition | null;
+  summary: string;
+}
+
+export interface ProviderResourceLifecycleEvent {
+  schemaVersion: 1;
+  providerId: string;
+  resourceKind: string;
+  stage: ResourceLifecycleStage;
+  status: "passed" | "failed";
+  summary: string;
+  at: string;
+}
+
 export interface SqliteSnapshot {
   contentHash: string;
   rowCount: number;
@@ -178,6 +315,12 @@ export interface ExternalActionEvidence {
 
 export interface RunTransaction {
   id: string;
+  /**
+   * Present only when the complete Phase 10 evidence envelope was produced by
+   * a trusted Airlock Runtime or validated during the version 9 migration.
+   * Older unversioned evidence remains inspectable but cannot steer assurance.
+   */
+  assuranceEvidenceVersion?: 1;
   status: RunTransactionStatus;
   disposition: RunTransactionDisposition | null;
   candidateStateId: string | null;
@@ -188,6 +331,8 @@ export interface RunTransaction {
   outcomeContractVersion: number;
   outcomeContract: OutcomeContract;
   resources: TransactionResourceEvidence[];
+  providerResources: ProviderResourceEvidence[];
+  providerResourceEvents: ProviderResourceLifecycleEvent[];
   sqlite: SqliteResourceEvidence | null;
   externalActions: ExternalActionEvidence;
   changes: WorkspaceChangeSummary | null;
@@ -234,6 +379,8 @@ export interface RunUsage {
 export interface AgentRun {
   id: string;
   agentId: string;
+  candidateSetId: string | null;
+  competitorId: string | null;
   status: RunStatus;
   prompt: string;
   output: string | null;
@@ -245,11 +392,182 @@ export interface AgentRun {
   createdAt: string;
 }
 
+export type CandidateSetPhase =
+  | "admitted"
+  | "evaluating"
+  | "evaluated"
+  | "selected"
+  | "promoting"
+  | "promoted"
+  | "cleaning-losers"
+  | "completed"
+  | "no-winner"
+  | "stale"
+  | "recovery-error";
+
+export type CandidateCompetitorStatus =
+  | "pending"
+  | "running"
+  | "eligible"
+  | "ineligible"
+  | "failed"
+  | "selected"
+  | "promoted"
+  | "retained"
+  | "discarded"
+  | "cancelled";
+
+export type SelectionCriterionKind =
+  | "quality-assertion"
+  | "changed-files"
+  | "added-bytes"
+  | "latency-ms"
+  | "total-tokens";
+
+export type SelectionCriterionSource =
+  | "trusted-validation-evaluator"
+  | "workspace-change-evidence"
+  | "monotonic-execution-measurement"
+  | "runtime-usage-response";
+
+export interface SelectionCriterion {
+  kind: SelectionCriterionKind;
+  source: SelectionCriterionSource;
+  direction: "maximize" | "minimize";
+  maximum: number;
+  evaluatorVersion: string;
+}
+
+export interface SelectionContract {
+  schemaVersion: 1;
+  criteria: SelectionCriterion[];
+}
+
+export interface CandidateSetBudget {
+  maxDurationMsPerCompetitor: number;
+  maxTotalTokens: number;
+  maxTotalChangedBytes: number;
+}
+
+export interface CandidateSetSource {
+  stateId: string;
+  contentHash: string;
+  workspaceContentHash: string;
+  sessionContentHash: string;
+  sqliteContentHash: string;
+  outboxContentHash: string;
+  codexThreadId: string | null;
+  providerVersions: ResourceVersionReference[];
+}
+
+export interface SealedCandidateReference {
+  schemaVersion: 1;
+  candidateSetId: string;
+  competitorId: string;
+  runId: string;
+  candidateStateId: string;
+  sourceStateId: string;
+  sourceContentHash: string;
+  outcomeContractVersion: number;
+  transactionEvidenceHash: string;
+  runtimeResultHash: string;
+  sealDigest: string;
+  sealedAt: string;
+}
+
+export interface CandidateScoreComponent {
+  kind: SelectionCriterionKind;
+  source: SelectionCriterionSource;
+  evaluatorVersion: string;
+  direction: "maximize" | "minimize";
+  maximum: number;
+  rawValue: number;
+  normalizedValue: number;
+}
+
+export interface CandidateScorecardEntry {
+  competitorId: string;
+  eligible: boolean;
+  exclusions: string[];
+  components: CandidateScoreComponent[];
+  rank: number | null;
+}
+
+export interface CandidateSelectionDecision {
+  schemaVersion: 1;
+  candidateSetId: string;
+  sourceStateId: string;
+  orderedCompetitorIds: string[];
+  winnerCompetitorId: string | null;
+  scorecard: CandidateScorecardEntry[];
+  tieBreak: "competitor-id-ascending-byte-order";
+  decisionDigest: string;
+}
+
+export interface CandidateSetCompetitor {
+  id: string;
+  runId: string;
+  executorProfileId: string;
+  strategyInstruction: string;
+  status: CandidateCompetitorStatus;
+  criterionValues: Partial<Record<SelectionCriterionKind, number>>;
+  exclusions: string[];
+  evaluationDurationMs: number | null;
+  resultThreadId: string | null;
+  seal: SealedCandidateReference | null;
+  loserDisposition: "pending" | "retained" | "discarded" | "winner";
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface CandidateSet {
+  schemaVersion: 1;
+  id: string;
+  agentId: string;
+  objective: string;
+  source: CandidateSetSource;
+  outcomeContract: OutcomeContract;
+  selectionContract: SelectionContract;
+  competitors: CandidateSetCompetitor[];
+  maxConcurrency: number;
+  budget: CandidateSetBudget;
+  loserPolicy: "retain" | "discard";
+  phase: CandidateSetPhase;
+  selectionDecision: CandidateSelectionDecision | null;
+  selectedCompetitorId: string | null;
+  winnerRunId: string | null;
+  cancellationRequested: boolean;
+  recoveryError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  decidedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface CandidateSetCompetitorInput {
+  id: string;
+  executorProfileId: string;
+  strategyInstruction: string;
+}
+
+export interface CreateCandidateSetInput {
+  objective: string;
+  competitors: CandidateSetCompetitorInput[];
+  selectionContract: SelectionContract;
+  maxConcurrency: number;
+  budget: CandidateSetBudget;
+  loserPolicy: "retain" | "discard";
+}
+
 export interface Database {
-  version: 7;
+  version: 10;
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
+  candidateSets: CandidateSet[];
+  assuranceProposals: AssuranceProposal[];
+  outcomeContractVersions: OutcomeContractVersionRecord[];
 }
 
 export interface CreateAgentInput {
@@ -272,16 +590,42 @@ export interface RunnerResult {
 
 export interface RunnerRequest {
   agentId: string;
+  executionId?: string;
   workspacePath: string;
   codexHomePath: string;
   outboxPath: string;
   repairReferencePath?: string | null;
+  resourceBindings?: RunnerResourceBinding[];
+  tokenBudget?: RunnerTokenBudget;
   prompt: string;
   threadId: string | null;
 }
 
+export interface RunnerTokenBudget {
+  schemaVersion: 1;
+  /**
+   * Hard upper bound owned by the trusted Runner.
+   * The Runner must enforce this at its model-provider boundary rather than
+   * relying only on Airlock's post-execution usage audit.
+   */
+  maximumTotalTokens: number;
+}
+
+export interface RunnerResourceBinding {
+  providerId: string;
+  hostPath: string;
+  runtimePath: string;
+  access: "read-only" | "read-write";
+}
+
 export interface AgentRunner {
+  /**
+   * Declares whether token allowances are rejected before or at the model
+   * provider boundary. Omission means the Runner cannot safely execute a
+   * Candidate Set with an aggregate token budget.
+   */
+  readonly tokenBudgetEnforcement?: "provider-boundary" | undefined;
   run(request: RunnerRequest): Promise<RunnerResult>;
-  cancel(agentId: string): Promise<boolean>;
+  cancel(agentId: string, executionId?: string): Promise<boolean>;
   isAvailable(): Promise<boolean>;
 }

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/portable-evidence-packet-v1.json",
+  "title": "Agent Airlock Portable Evidence Packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "envelope", "anchor", "evmPayload"],
+  "properties": {
+    "schema": { "const": "agent-airlock/portable-evidence-packet" },
+    "schemaVersion": { "const": 1 },
+    "envelope": {
+      "$ref": "portable-promotion-receipt.schema.json"
+    },
+    "anchor": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checkpoint", "inclusionProof"],
+          "properties": {
+            "checkpoint": { "$ref": "#/$defs/signedCheckpoint" },
+            "inclusionProof": { "$ref": "#/$defs/inclusionProof" }
+          }
+        }
+      ]
+    },
+    "evmPayload": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/evmPayload" }
+      ]
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "base64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "publicJwk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["crv", "kty", "x"],
+      "properties": {
+        "crv": { "const": "Ed25519" },
+        "kty": { "const": "OKP" },
+        "x": { "$ref": "#/$defs/base64url" }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "schemaVersion", "treeSize", "root", "priorCheckpointDigest", "createdAt", "keyId"],
+      "properties": {
+        "schema": { "const": "agent-airlock/portable-transparency-checkpoint" },
+        "schemaVersion": { "const": 1 },
+        "treeSize": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "root": { "$ref": "#/$defs/digest" },
+        "priorCheckpointDigest": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "keyId": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "signedCheckpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint", "checkpointDigest", "signatureAlgorithm", "signature", "publicJwk"],
+      "properties": {
+        "checkpoint": { "$ref": "#/$defs/checkpoint" },
+        "checkpointDigest": { "$ref": "#/$defs/digest" },
+        "signatureAlgorithm": { "const": "Ed25519" },
+        "signature": { "$ref": "#/$defs/base64url" },
+        "publicJwk": { "$ref": "#/$defs/publicJwk" }
+      }
+    },
+    "sibling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "hash"],
+      "properties": {
+        "direction": { "enum": ["left", "right"] },
+        "hash": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "inclusionProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receiptDigest", "leafIndex", "treeSize", "siblings"],
+      "properties": {
+        "receiptDigest": { "$ref": "#/$defs/digest" },
+        "leafIndex": { "type": "integer", "minimum": 0 },
+        "treeSize": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "siblings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/sibling" }
+        }
+      }
+    },
+    "evmPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "schemaVersion", "methodSignature", "functionSelector", "receiptDigest", "calldata", "privacyClaim", "networkCalls", "fundsSpent"],
+      "properties": {
+        "schema": { "const": "agent-airlock/offline-evm-anchor-payload" },
+        "schemaVersion": { "const": 1 },
+        "methodSignature": { "const": "anchor(bytes32)" },
+        "functionSelector": { "const": "0xeecdf927" },
+        "receiptDigest": { "$ref": "#/$defs/digest" },
+        "calldata": { "type": "string", "pattern": "^0x[a-f0-9]{72}$" },
+        "privacyClaim": { "const": "receipt-digest-only" },
+        "networkCalls": { "const": 0 },
+        "fundsSpent": { "const": 0 }
+      }
+    }
+  }
+}

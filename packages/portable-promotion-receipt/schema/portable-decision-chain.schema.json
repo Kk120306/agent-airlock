@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/portable-decision-chain-v1.json",
+  "title": "Agent Airlock Portable Decision Chain",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "packets"],
+  "properties": {
+    "schema": { "const": "agent-airlock/portable-decision-chain" },
+    "schemaVersion": { "const": 1 },
+    "packets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "portable-evidence-packet.schema.json" }
+    }
+  }
+}

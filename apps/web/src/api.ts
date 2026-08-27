@@ -1,8 +1,12 @@
 import type {
   Agent,
   AgentRun,
+  AssuranceProposal,
+  CandidateSet,
   Message,
   OutcomeContract,
+  OutcomeContractVersionRecord,
+  PortableReceiptExport,
   SystemInfo,
 } from "./types";
 
@@ -70,6 +74,41 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
+  outcomeContractVersions: (id: string) =>
+    request<{ versions: OutcomeContractVersionRecord[] }>(
+      "/api/agents/" + id + "/outcome-contract/versions",
+    ),
+  rollbackOutcomeContract: (
+    id: string,
+    targetVersion: number,
+    expectedCurrentVersion: number,
+  ) =>
+    request<{ outcomeContract: OutcomeContract }>(
+      "/api/agents/" + id + "/outcome-contract/rollback",
+      {
+        method: "POST",
+        body: JSON.stringify({ targetVersion, expectedCurrentVersion }),
+      },
+    ),
+  assuranceProposals: (id: string) =>
+    request<{ proposals: AssuranceProposal[] }>(
+      "/api/agents/" + id + "/assurance-proposals",
+    ),
+  deriveAssuranceProposal: (id: string) =>
+    request<{ proposal: AssuranceProposal | null }>(
+      "/api/agents/" + id + "/assurance-proposals/derive",
+      { method: "POST" },
+    ),
+  acceptAssuranceProposal: (id: string, reason: string) =>
+    request<{ proposal: AssuranceProposal; outcomeContract: OutcomeContract }>(
+      "/api/assurance-proposals/" + id + "/accept",
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+  rejectAssuranceProposal: (id: string, reason: string) =>
+    request<{ proposal: AssuranceProposal }>(
+      "/api/assurance-proposals/" + id + "/reject",
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
   deleteAgent: (id: string) =>
     request<{ archivedWorkspace: string }>("/api/agents/" + id, {
       method: "DELETE",
@@ -86,6 +125,34 @@ export const api = {
     request<{ messages: Message[] }>("/api/agents/" + id + "/messages"),
   runs: (id: string) =>
     request<{ runs: AgentRun[] }>("/api/agents/" + id + "/runs"),
+  candidateSets: (id: string) =>
+    request<{ candidateSets: CandidateSet[] }>(
+      "/api/agents/" + id + "/candidate-sets",
+    ),
+  createCandidateSet: (
+    id: string,
+    body: {
+      objective: string;
+      competitors: Array<{
+        id: string;
+        executorProfileId: "standard-v1";
+        strategyInstruction: string;
+      }>;
+      maxConcurrency: number;
+      loserPolicy: "retain" | "discard";
+    },
+  ) =>
+    request<{ candidateSet: CandidateSet; runs: AgentRun[] }>(
+      "/api/agents/" + id + "/candidate-sets",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  candidateSet: (id: string) =>
+    request<{ candidateSet: CandidateSet }>("/api/candidate-sets/" + id),
+  cancelCandidateSet: (id: string) =>
+    request<{ candidateSet: CandidateSet }>(
+      "/api/candidate-sets/" + id + "/cancel",
+      { method: "POST" },
+    ),
   sendMessage: (id: string, content: string) =>
     request<{ run: AgentRun; message: Message }>(
       "/api/agents/" + id + "/messages",
@@ -95,6 +162,19 @@ export const api = {
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  exportPortableReceipt: (
+    id: string,
+    body: {
+      disclosureIdentities: string[];
+      includeAncestry: boolean;
+      localAnchor: boolean;
+      evmPayload: boolean;
+    },
+  ) =>
+    request<PortableReceiptExport>("/api/runs/" + id + "/portable-receipt", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   repairRun: (id: string, objective?: string) =>
     request<{ run: AgentRun; message: Message }>("/api/runs/" + id + "/repair", {
       method: "POST",

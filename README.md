@@ -6,7 +6,7 @@ Rejected work remains inspectable and can be repaired without contaminating acce
 
 > Agents may explore many futures, but only validated futures become reality.
 
-Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), and [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md) before extending Airlock.
+Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
 ## Free one-command demo
@@ -31,6 +31,133 @@ The project will not silently switch the deterministic demo to paid inference.
 > Do not use production data or credentials.
 > See [SECURITY.md](SECURITY.md).
 
+## Phase 8 provider extension demo
+
+Phase 8 adds a capability-checked Transactional Resource SDK and a credential-free remote versioned-object provider without changing the frozen Phase 7 judge path.
+The provider runs as a separate local HTTP process and its Candidate-only `object.json` binding participates in the same Promotion, Quarantine, Discard, Repair, journal, and canonical fingerprint decision as the four built-in resources.
+When a provider is added to an existing deployment, Airlock verifies its exact immutable source and completes a crash-recoverable additive Registry Transition for every Agent before accepting the next registry generation.
+Interrupted older Promotions and retained Quarantines continue through their persisted historical provider subset before onboarding can advance.
+Strict journal admission prevents a malformed transition record from authorizing state deletion, and every provider-controlled evidence string is bounded and credential-checked before persistence or display.
+
+```bash
+npm run demo:phase8 -- --reset
+```
+
+Open <http://127.0.0.1:3199> and complete the first two guided steps.
+The `Transactional Resources` panel shows the provider identity, immutable source and target fingerprints, disposition, Capability Claim, bounded Validation evidence, and lifecycle evidence.
+No ModelArk key, provider credential, blockchain transaction, or paid request is used.
+
+Provider authors can execute the shared contract directly:
+
+```bash
+npm run check:phase8:conformance
+```
+
+The command emits readable case results and a schema-versioned JSON conformance report.
+
+## Phase 9 Competing Futures demo
+
+Phase 9 lets one operator objective explore three isolated Candidate States from the same exact Canonical State and Outcome Contract.
+Required Validation is an absolute eligibility boundary, so a fast unsafe future cannot win regardless of its score.
+Airlock persists a deterministic integer scorecard and exact winner before the existing Promotion journal begins, then promotes only that sealed winner and retains or discards every loser according to the operator's snapshotted policy.
+Admission reserves the aggregate token budget across every trusted Runtime before execution, requires a Runner capability that enforces each allowance before or at inference, and rejects unsupported production Runners before any competitor starts.
+The bundled zero-cost demo fixture enforces the transported allowance before simulated execution, while the ordinary Codex and container Runners remain unavailable for Competing Futures until their provider path supplies an equivalent hard total-token control.
+The Playground reads that capability from `/api/system`, disables Explore futures when unavailable, and explains the provider-boundary requirement inline instead of offering an action that can only fail.
+The versioned Promotion journal binds the Candidate Set, decision digest, winner Run, seal digest, and source, so restart recovery cannot reinterpret the selected future.
+If the selected winner changes after sealing, Airlock fails recovery closed and never falls through to a runner-up.
+
+```bash
+npm run demo:phase9 -- --reset
+```
+
+Open <http://127.0.0.1:3199>, select an Agent, and choose `Explore futures`.
+The deterministic local fixture compares `unsafe-fast`, `broad-valid`, and `focused-valid`, explains every exclusion and normalized score, and promotes `focused-valid` with exactly one supported effect.
+The launcher includes the Phase 8 remote-object fixture and makes no ModelArk request, paid inference call, provider purchase, or public blockchain transaction.
+
+Run the focused no-cost contract with:
+
+```bash
+npm run check:phase9:selection
+npm run check:phase9:boundaries
+```
+
+## Phase 10 Adaptive Assurance demo
+
+Phase 10 turns recurring bounded Run evidence into deterministic Outcome Contract advice without giving the detector authority to change policy.
+Every suggestion identifies its exact base contract, cites distinct root Run lineages and evidence hashes, and simulates every bounded historical result as exact, conservative, or unknown.
+Missing evidence is never guessed, arbitrary commands and regular expressions cannot enter generated advice, and a stale proposal cannot be silently rebased.
+Only an explicit operator acceptance can atomically create the next contract version.
+Rejection leaves policy unchanged, and rollback creates another immutable version while preserving every historical Run, contract, proposal, decision, and receipt.
+
+```bash
+npm run demo:phase10 -- --reset
+```
+
+Open <http://127.0.0.1:3199>, send `Delete README.md and record why.` three times, then open `Assurance` and select `Scan retained evidence`.
+Inspect the proposed protection, three independent supporting lineages, exact historical impact, unknown inputs, and simulation digest before accepting or rejecting it.
+The deterministic detector and simulator run in the trusted local control plane and make no ModelArk request, paid inference call, provider purchase, or public blockchain transaction.
+
+Run the focused no-cost contract with:
+
+```bash
+npm run check:phase10:assurance
+```
+
+## Phase 11 Portable Trust demo
+
+Phase 11 turns complete durable Run evidence into a strict Portable Promotion Envelope that can be verified without the Airlock server or database.
+The envelope signs canonical receipt content with an operator-held Ed25519 key and can disclose selected redacted evidence through Merkle proofs without including unselected leaves.
+Promoted Runs, retained or discarded Quarantines, Repair ancestry, exact Candidate Selection, and accepted Assurance provenance use the same bounded protocol.
+The verification report separates mathematical integrity from unsupported claims about Runtime isolation, Validation correctness, signer trust, or policy sufficiency.
+A valid signature proves that the included public key matches the signature over the exact receipt content.
+It proves key possession, not the human or organization behind the key, and it does not make an incorrect statement true.
+
+Every receipt necessarily includes stable Run and Agent identifiers, decision timestamps, state and resource fingerprints, and evidence commitments.
+It never includes prompts, Runtime output, raw Validation output, file contents, environment values, credentials, local paths, or provider-private metadata.
+Individual bounded redacted evidence leaves are additional opt-in disclosures.
+
+```bash
+npm run demo:phase11 -- --reset
+```
+
+Open <http://127.0.0.1:3199>, complete a guided Run, and use its `Portable Trust` panel.
+The panel starts with no evidence disclosed, previews safe evidence identities, and regenerates after privacy choices change.
+Its primary download is one Portable Evidence Packet containing the independently verifiable envelope and any selected local anchor proof or offline EVM payload.
+For a repaired Run, the panel also downloads one complete Portable Decision Chain containing the quarantined root and repaired child in signed root-to-leaf order.
+The component artifacts remain separately downloadable for protocol inspection.
+Select `Verify a receipt` in the sidebar and load an envelope, packet, or complete decision chain to check it again with browser Web Crypto.
+The verifier performs zero API calls and uploads, enforces strict 1 MB envelope, 2 MB packet, and 4 MB chain boundaries, rejects mismatched optional proofs or broken lineage links, and explains each supported and unsupported claim.
+Pin an independently distributed policy-authority fingerprint and import its separately signed signing-key trust policy for an organizational verdict over exact key, signing-window, Agent, and disposition scope.
+Unknown, compromised, not-yet-effective, expired, out-of-window, and out-of-scope trust decisions fail closed without changing the cryptographic verdict.
+Optional local transparency adds a signed checkpoint and inclusion proof over the receipt digest.
+Optional EVM output only encodes `anchor(bytes32)` calldata offline and performs no network request, wallet operation, transaction, or spend.
+Use the signature alone for ordinary offline exchange with a known key.
+Use independently retained local checkpoints when cooperating observers need evidence that one operator did not silently rewrite its published sequence.
+Publish the digest to a shared public ledger only when mutually distrusting organizations need common publication evidence.
+Neither a local checkpoint nor a blockchain publication becomes Promotion authority or proves that the Agent result is correct.
+
+Install dependencies with Node.js 22+ and npm 10+.
+The core browser gate also requires installed Google Chrome.
+The complete release gate requires a Docker-compatible `docker` CLI, as provided by Docker Desktop, Docker Engine, or Colima.
+Podman users must enable Docker CLI and Compose compatibility before running the aggregate gate.
+
+Run the focused no-cost protocol, server, browser, and container contracts with:
+
+```bash
+npm run check:phase11:protocol
+npm run test -w @launchpad/server -- --run src/phase-eleven-acceptance.test.ts
+npm run test:phase11:ui
+npm run check:phase11:docker
+```
+
+Run the inherited Phase 0 through Phase 11 core, production-image, and clean-clone release gate with:
+
+```bash
+npm run check:phase11
+```
+
+These commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
+
 ## Screenshots
 
 ### Four-step judge path
@@ -54,6 +181,22 @@ The project will not silently switch the deterministic demo to paid inference.
 - Bounded Repair Runs that preserve useful quarantined work, resume rejected Agent memory, and use a fresh outbox
 - Canonical freshness checks, receipt lineage, and idempotent Quarantine discard with retained evidence
 - Durable five-phase Promotion journal with forward startup reconciliation and visible fail-closed errors
+- Provider-neutral Transactional Resource SDK with strict Capability Claims and executable conformance
+- Credential-free remote versioned-object provider with bounded HTTP, immutable versions, and forward reconciliation
+- Compact provider registry evidence with explicit unsupported distributed-atomicity claims
+- Additive provider onboarding with immutable-source verification, crash journaling, and generation-wide convergence
+- Durable Candidate Sets with bounded sibling isolation, shared-source enforcement, and snapshotted Outcome Contracts
+- Reversible sealed-Candidate evaluation before deterministic one-winner Selection and irreversible Promotion
+- Explainable integer scorecards, absolute Validation eligibility, stable byte-order tie-breaking, and no automatic runner-up fallback
+- Restart-safe winner Promotion and idempotent loser retention or Discard across historical provider generations
+- Deterministic Assurance Proposals with lineage-deduplicated citations and exact, conservative, or unknown historical simulation
+- Explicit operator acceptance, durable rejection, stale-base protection, immutable Outcome Contract history, and version-creating rollback
+- Crash-recoverable Agent deletion with credential-free Run, Candidate Set, Assurance, contract-history, and receipt digests
+- Strict canonical Portable Promotion Envelopes with Ed25519 signatures and independent offline verification
+- Browser-local Web Crypto receipt verification with zero API calls, explicit tamper failure, and responsive proof reporting
+- Private-by-default Merkle evidence disclosure with exact Candidate Selection, accepted Assurance, and Repair ancestry commitments
+- Fail-closed signing-key identity markers, historical rotation verification, and an operator rotation and compromise runbook
+- Optional signed local transparency proofs and zero-network EVM calldata over receipt digests only
 - Root-confined Candidate and Quarantine retention with active-Run protection
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
@@ -61,15 +204,20 @@ The project will not silently switch the deterministic demo to paid inference.
 ## Requirements
 
 - Free demo: Node.js 22+, npm 10+, and installed Google Chrome for browser verification.
-- Live ModelArk POC: the free-demo requirements plus Docker, Colima, or Podman and organizer-provided ModelArk credentials.
+- Live ModelArk POC: the free-demo requirements plus Docker, Colima, or Podman and a ModelArk API key for an activated Responses-compatible model.
 
 Codex CLI is included in the Runtime image and is not required on the host for the credentialed container path.
 The deterministic demo uses the checked-in protocol fixture and does not require a container engine.
 
+Run `npm run test:container-transaction` when a container engine is available.
+This zero-cost production-server proof drives the pinned real Codex CLI through the CodeJam HTTP seam, real Candidate workspace, isolated Validation container, Promotion journal, signed receipt, restart, and resumed accepted session.
+It uses a local Responses fixture and therefore proves the integration path, not live ModelArk availability or model quality.
+Run `npm run test:container-browser` for the corresponding real Chrome-to-Codex container Promotion proof.
+
 ## Credentialed ModelArk browser SOP
 
-Use this path only after organizer credentials arrive.
-The free demo above is the default development and judging rehearsal path.
+Use this path for the final live provider conformance journey.
+The deterministic demo above remains the reproducible judging and regression path.
 
 - Node.js 22+
 - npm 10+
@@ -78,7 +226,7 @@ The free demo above is the default development and judging rehearsal path.
 
 The automated proof does not require ModelArk credentials or paid inference.
 Run `npm run test:demo:e2e` to exercise the exact four-step production browser story locally.
-Organizer-provided credentials are needed only for the final live ModelArk conformance journey.
+ModelArk credentials are needed only for the final live conformance journey.
 
 ### 1. Check the local tools
 
@@ -91,8 +239,8 @@ docker --version        # Docker Desktop, Docker Engine, or Colima
 podman --version        # Use this instead when running Podman
 ```
 
-Only one container engine is required. Codex CLI is already included in the
-Runtime image.
+Only one container engine is required.
+Codex CLI is already included in the Runtime image.
 
 ### 2. Clone the repository
 
@@ -108,10 +256,22 @@ Skip this step when already working from the repository root.
 ```bash
 cp .env.example .env
 # Fill ARK_API_KEY, ARK_MODEL, and the region-matching ARK_BASE_URL.
+# Optionally list activated free-quota fallbacks in ARK_MODEL_FALLBACKS.
+npm run check:modelark
+npm run poc:doctor
 npm run poc
 ```
 
-The first run loads `.env`, installs Node.js dependencies, and builds the Runtime image.
+`check:modelark` performs a minimal Responses API request and prints neither the credential nor model output.
+If `ARK_MODEL_FALLBACKS` is set, it may try up to three additional operator-approved models only after HTTP 404 or 429 responses.
+It stops immediately on authentication, network, timeout, malformed-response, and other provider failures.
+Keep Free Credits Only Mode enabled for every configured model because the launcher does not change or verify account billing settings.
+`poc:doctor` checks Node.js, hidden credential presence, one live Responses request, the container engine, the Runtime image, a hardened in-container Codex launch, Candidate session copy isolation, and a real two-turn Codex tool-call protocol probe.
+It reports those checks independently, so provider HTTP 429 capacity failures cannot be confused with an application or Runtime failure.
+`npm run poc` repeats that fail-fast preflight before installing dependencies or building the Runtime image.
+The model that passes preflight is exported as `ARK_MODEL` for the actual Runtime.
+Set `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only when the provider was already verified and a temporary provider outage must not block local startup.
+The first successful run loads `.env`, installs Node.js dependencies, and builds the Runtime image.
 Explicit process environment variables take precedence over `.env`.
 The script automatically selects Docker, Colima, or Podman.
 
@@ -248,6 +408,13 @@ cp deploy/volcengine/terraform.tfvars.example \
 | `AIRLOCK_MAX_REPAIR_DEPTH` | `2` | Maximum bounded Repair Runs in one Quarantine lineage. |
 | `AIRLOCK_CANDIDATE_RETENTION_HOURS` | `24` | Mutable Candidate retention window in positive hours. |
 | `AIRLOCK_QUARANTINE_RETENTION_HOURS` | `168` | Mutable Quarantine retention window in positive hours while bounded evidence remains. |
+| `AIRLOCK_HTTP_OBJECT_URL` | Unset | Base URL for the optional credential-free versioned-object provider. |
+| `AIRLOCK_HTTP_OBJECT_VERSION_ID` | Unset | Trusted immutable source version registered with the HTTP object provider. |
+| `AIRLOCK_HTTP_OBJECT_FINGERPRINT` | Unset | Exact 64-character lowercase SHA-256 fingerprint of the registered source. |
+| `AIRLOCK_HTTP_OBJECT_SOCKET` | Unset | Optional local Unix socket for the HTTP object provider. |
+| `AIRLOCK_PORTABLE_SIGNING_KEY_PATH` | Under `APP_DATA_DIR/keys` | Owner-readable Ed25519 private key used only for portable receipt signatures. |
+| `AIRLOCK_TRANSPARENCY_SIGNING_KEY_PATH` | Under `APP_DATA_DIR/keys` | Separate owner-readable Ed25519 private key used only for optional local checkpoints. |
+| `AIRLOCK_TRANSPARENCY_LOG_PATH` | Under `APP_DATA_DIR/transparency` | Optional local append-only receipt-digest log. |
 | `AIRLOCK_DEMO_MODE` | `false` | Internal fixture-mode marker set by `npm run demo`; do not enable it for a credentialed POC. |
 | `AIRLOCK_DEMO_PORT` | `3199` | Loopback port used by the deterministic demo launcher. |
 | `AIRLOCK_DEMO_DATA_ROOT` | `.local/airlock-demo` | Persistent isolated state used by the deterministic demo launcher. |
@@ -264,6 +431,11 @@ flowchart LR
     Airlock --> Journal["Durable Promotion journal"]
     Airlock --> Store["Candidate and Canonical workspace, session, and SQLite"]
     Airlock --> Effects["Deferred post-Promotion mock effects"]
+    Airlock --> Registry["Capability-checked Resource Registry"]
+    Airlock --> Receipt["Portable receipt signer"]
+    Receipt --> Verifier["Offline verifier"]
+    Receipt -. optional digest only .-> Transparency["Local transparency or EVM calldata"]
+    Registry --> Provider["Remote immutable resource versions"]
     Airlock --> Runtime{"Runtime provider"}
     Runtime -->|Local POC| Container["Disposable Docker / Colima / Podman container"]
     Runtime -->|ECS profile| Codex["Codex CLI in application container"]
@@ -272,13 +444,15 @@ flowchart LR
     Decision -->|Rejected| Repair["Bounded Repair or Discard"]
     Journal -->|Verified startup replay| Store
     Journal -->|After canonical advance| Effects
+    Journal -->|Exact plan and fingerprint replay| Provider
     Repair -->|Fresh candidate and outbox| Airlock
     Container --> Ark["ModelArk Responses API"]
     Codex --> Ark
 ```
 
 The first turn uses `codex exec`; later turns resume the stored Codex thread.
-Deleting an Agent archives its workspace under `workspaces/.deleted/`.
+Deleting an Agent archives its workspace under `workspaces/.deleted/` with a credential-free lifecycle evidence tombstone.
+Deletion is refused while Promotion recovery or retained Quarantine remains unresolved.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
 boundaries.
@@ -305,10 +479,18 @@ Use `npm run check:phase4` for the complete no-cost four-resource proof.
 Use `npm run check:phase5` for the complete no-cost Quarantine, Repair, lineage, and discard proof.
 Use `npm run check:phase6` to add all eight Promotion interruption seams, repeated restart convergence, retention, and path-abuse proof.
 Use `npm run check:phase7` for the complete prior suite, launcher lifecycle proof, four-step production demo, mobile layout check, and release audit.
+Use `npm run check:phase8:provider` and `npm run check:phase8:conformance` for capability-checked Resource Provider lifecycle and contract proof.
+Use `npm run check:phase9:selection` and `npm run check:phase9:boundaries` for deterministic Candidate Selection and historical recovery proof.
+Use `npm run check:phase10:assurance` for evidence-backed proposal, operator authority, rollback, and deletion recovery proof.
+Use `npm run check:phase11:protocol` for cross-process signature, tamper, transparency, and zero-network EVM proof.
+Use `npm run test:phase11:ui` for complete desktop and 390-pixel mobile export, download, and independent verification journeys.
+Use `npm run check:phase11:docker` for the production image, non-root UID, writable-data, package-resolution, and live-health proof.
+Use `npm run check:phase11` for the complete inherited core, Docker, and exact clean-clone release gate.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.
-The credentialed ModelArk acceptance journey remains the browser SOP documented above.
+The credentialed ModelArk journey must be rerun at judging time because free provider capacity and model availability are external and time-varying.
+The browser SOP above is the repeatable live conformance path and does not store credentials or model output as release evidence.
 
 ## Documentation
 
@@ -321,6 +503,8 @@ The credentialed ModelArk acceptance journey remains the browser SOP documented 
 - [Outcome roadmap](docs/product/OUTCOME_ROADMAP.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Recovery guide](docs/RECOVERY.md)
+- [Portable Trust architecture](docs/architecture/portable-trust.md)
+- [Portable receipt key runbook](docs/operations/PORTABLE_RECEIPT_KEYS.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)
 - [Security policy](SECURITY.md)

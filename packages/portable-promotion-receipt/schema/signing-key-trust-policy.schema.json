@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/signing-key-trust-policy-v1.json",
+  "title": "Agent Airlock Signing-Key Trust Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "policyId", "issuedAt", "expiresAt", "keys"],
+  "properties": {
+    "schema": { "const": "agent-airlock/signing-key-trust-policy" },
+    "schemaVersion": { "const": 1 },
+    "policyId": { "$ref": "#/$defs/identifier" },
+    "issuedAt": { "$ref": "#/$defs/timestamp" },
+    "expiresAt": {
+      "oneOf": [
+        { "$ref": "#/$defs/timestamp" },
+        { "type": "null" }
+      ]
+    },
+    "keys": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/keyRule" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "keyRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "keyId",
+        "status",
+        "validFrom",
+        "validUntil",
+        "agentIds",
+        "dispositions",
+        "note"
+      ],
+      "properties": {
+        "keyId": { "$ref": "#/$defs/digest" },
+        "status": { "enum": ["active", "retired", "compromised"] },
+        "validFrom": { "$ref": "#/$defs/timestamp" },
+        "validUntil": {
+          "oneOf": [
+            { "$ref": "#/$defs/timestamp" },
+            { "type": "null" }
+          ]
+        },
+        "agentIds": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "dispositions": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "enum": ["promoted", "quarantined", "discarded", "cancelled"]
+          }
+        },
+        "note": {
+          "oneOf": [
+            { "type": "string", "maxLength": 500 },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}

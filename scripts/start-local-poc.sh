@@ -80,6 +80,17 @@ if (( node_major < 22 )); then
   exit 2
 fi
 
+if [[ "${AIRLOCK_SKIP_MODELARK_PREFLIGHT:-false}" == "true" ]]; then
+  log "Skipping the live ModelArk preflight by explicit request."
+else
+  log "Checking the live ModelArk Responses API before building the Runtime."
+  selected_model="$(node scripts/check-modelark-live.mjs --selected-model-only)"
+  if [[ "$selected_model" != "$ARK_MODEL" ]]; then
+    log "Using the operator-approved ModelArk fallback that passed the live preflight."
+  fi
+  export ARK_MODEL="$selected_model"
+fi
+
 engine="$(detect_engine)"
 log "Using $engine as the Agent Runtime engine."
 

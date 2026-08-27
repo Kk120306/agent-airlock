@@ -42,6 +42,10 @@ describe("Phase 4 canonical migration", () => {
     const created = await manager.create(agent);
     agent.workspacePath = created.workspacePath;
     agent.canonicalStateId = created.stateId;
+    await rm(
+      path.join(root, agent.id, ".canonical-history", created.stateId + ".json"),
+      { force: true },
+    );
     await rm(path.join(created.workspacePath, ".airlock"), {
       recursive: true,
       force: true,
@@ -86,7 +90,20 @@ describe("Phase 4 canonical migration", () => {
       schemaVersion: number;
     };
 
-    expect(manifest.schemaVersion).toBe(3);
+    expect(manifest.schemaVersion).toBe(4);
+    expect(manifest.providerVersions).toEqual([]);
+    const historicalManifest = JSON.parse(
+      await readFile(
+        path.join(
+          root,
+          agent.id,
+          ".canonical-history",
+          created.stateId + ".json",
+        ),
+        "utf8",
+      ),
+    ) as { schemaVersion: number };
+    expect(historicalManifest.schemaVersion).toBe(4);
     expect((await new SqliteResource().inspect(migrated.workspacePath)).rowCount).toBe(1);
     await expect(manager.ensureCanonical(agent)).resolves.toEqual(migrated);
   });

@@ -11,6 +11,7 @@ import {
   rm,
 } from "node:fs/promises";
 import path from "node:path";
+import { ASSURANCE_SECRET_CATALOG } from "./assurance.js";
 import { SQLITE_RELATIVE_PATH } from "./sqlite-resource.js";
 import type {
   OutcomeContract,
@@ -23,6 +24,8 @@ import type { ValidationCommandExecutor } from "./validation-command-runner.js";
 const MAX_INVENTORY_ENTRIES = 10_000;
 const MAX_EVIDENCE_CHANGES = 200;
 const MAX_SECRET_SCAN_FILE_BYTES = 1_048_576;
+const MAX_ASSURANCE_CATALOG_SCAN_FILES = 100;
+const MAX_ASSURANCE_CATALOG_SCAN_BYTES = 4_194_304;
 const MAX_PERSISTED_COMMAND_OUTPUT_BYTES = 16_384;
 
 interface InventoryEntry {
@@ -191,6 +194,27 @@ export class OutcomeValidator {
       );
     }
 
+    try {
+      validations.push(
+        ...(await this.observeAssuranceCatalogSecrets(
+          candidateWorkspacePath,
+          candidateInventory,
+          describedChanges.all,
+        )),
+      );
+    } catch {
+      validations.push(
+        ...ASSURANCE_SECRET_CATALOG.rules.map((rule) => ({
+          name: "assurance-catalog-rule:" + rule.name + ":v1",
+          status: "error" as const,
+          required: false,
+          summary: "Trusted catalog secret observation could not complete safely",
+          durationMs: 0,
+          output: null,
+        })),
+      );
+    }
+
     for (const command of contract.validationCommands) {
       const commandStarted = Date.now();
       let validationRoot: string | null = null;
@@ -288,6 +312,63 @@ export class OutcomeValidator {
         : "Secret-pattern findings: " + findings.slice(0, 10).join(", "),
       startedAt,
     );
+  }
+
+  private async observeAssuranceCatalogSecrets(
+    candidateWorkspacePath: string,
+    candidateInventory: Map<string, InventoryEntry>,
+    changes: WorkspaceChange[],
+  ): Promise<ValidationEvidence[]> {
+    const startedAt = Date.now();
+    const matches = new Map(
+      ASSURANCE_SECRET_CATALOG.rules.map((rule) => [rule.name, 0]),
+    );
+    let incomplete = false;
+    let scannedFiles = 0;
+    let scannedBytes = 0;
+    for (const change of changes) {
+      if (change.kind === "deleted" || change.path === SQLITE_RELATIVE_PATH) continue;
+      const entry = candidateInventory.get(change.path);
+      if (!entry || entry.kind !== "file") continue;
+      if (entry.size > MAX_SECRET_SCAN_FILE_BYTES) {
+        incomplete = true;
+        continue;
+      }
+      if (
+        scannedFiles >= MAX_ASSURANCE_CATALOG_SCAN_FILES ||
+        scannedBytes + entry.size > MAX_ASSURANCE_CATALOG_SCAN_BYTES
+      ) {
+        incomplete = true;
+        continue;
+      }
+      const content = await readFile(
+        path.join(candidateWorkspacePath, change.path),
+        "utf8",
+      );
+      scannedFiles += 1;
+      scannedBytes += entry.size;
+      for (const rule of ASSURANCE_SECRET_CATALOG.rules) {
+        if (new RegExp(rule.pattern, "gi").test(content)) {
+          matches.set(rule.name, (matches.get(rule.name) ?? 0) + 1);
+        }
+      }
+    }
+    return ASSURANCE_SECRET_CATALOG.rules.map((rule) => {
+      const matchCount = matches.get(rule.name) ?? 0;
+      return {
+        name: "assurance-catalog-rule:" + rule.name + ":v1",
+        status: matchCount > 0 ? "failed" : incomplete ? "error" : "passed",
+        required: false,
+        summary:
+          matchCount > 0
+            ? "Trusted catalog detector matched in " + matchCount + " changed file(s)"
+            : incomplete
+              ? "Trusted catalog detector lacks complete bounded file evidence"
+              : "Trusted catalog detector found no match in changed files",
+        durationMs: Date.now() - startedAt,
+        output: null,
+      };
+    });
   }
 
   private async inventory(workspacePath: string): Promise<Map<string, InventoryEntry>> {

@@ -4,13 +4,16 @@ set -euo pipefail
 
 runtime_engine="${CONTAINER_ENGINE:-docker}"
 runtime_image="${CONTAINER_RUNTIME_IMAGE:-volc-agent-runtime:local}"
-probe_root="$(mktemp -d /tmp/airlock-codex-session.XXXXXX)"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+probe_parent="$repo_dir/.local/probes"
+mkdir -p "$probe_parent"
+probe_root="$(mktemp -d "$probe_parent/airlock-codex-session.XXXXXX")"
 probe_uid="$(id -u)"
 probe_gid="$(id -g)"
 
 cleanup() {
   case "$probe_root" in
-    /tmp/airlock-codex-session.*) rm -rf -- "$probe_root" ;;
+    "$probe_parent"/airlock-codex-session.*) rm -rf -- "$probe_root" ;;
   esac
 }
 trap cleanup EXIT
