@@ -117,6 +117,7 @@ const run = {
 const system: SystemInfo = {
   demoMode: false,
   protocolFixtureMode: false,
+  modelArkDemoMode: false,
   inferenceMode: "modelark",
   arkConfigured: false,
   arkBaseUrl: "https://ark.example.invalid",
@@ -285,6 +286,30 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   );
 });
 
+test("presents the live ModelArk judge path as provider-backed and falsifiable", async ({
+  page,
+}) => {
+  const liveSystem: SystemInfo = {
+    ...system,
+    modelArkDemoMode: true,
+    arkConfigured: true,
+    arkModel: "ep-live-model",
+    runtimeProvider: "container",
+    containerEngine: "docker",
+    runtime: "Codex CLI in docker Runtime",
+  };
+  await serveProductionBundle(page, [], { current: run }, undefined, liveSystem);
+  await page.goto("http://airlock.local/");
+
+  await expect(page.getByText("LIVE MODELARK PROOF", { exact: true })).toBeVisible();
+  const guide = page.getByRole("region", { name: "Live ModelArk proof" });
+  await expect(guide.getByText("Model decides. Contract verifies.")).toBeVisible();
+  await expect(guide.getByRole("button", { name: /Run another live Candidate/ }))
+    .toBeVisible();
+  await expect(guide.getByText("Provider-backed Promotion proven")).toBeVisible();
+  await expect(page.getByText("Independent proof")).toBeVisible();
+});
+
 test("invalidates a generated receipt when the Run decision changes", async ({
   page,
 }) => {
@@ -375,6 +400,7 @@ async function serveProductionBundle(
   requests: Array<Record<string, unknown>>,
   runState: { current: AgentRun } = { current: run },
   exportGate?: Promise<void>,
+  systemState: SystemInfo = system,
 ): Promise<void> {
   await page.route("http://airlock.local/**", async (route) => {
     const url = new URL(route.request().url());
@@ -424,7 +450,7 @@ async function serveProductionBundle(
       });
       return;
     }
-    const response = apiResponse(url.pathname, runState.current);
+    const response = apiResponse(url.pathname, runState.current, systemState);
     if (response) {
       await route.fulfill({
         status: 200,
@@ -437,9 +463,13 @@ async function serveProductionBundle(
   });
 }
 
-function apiResponse(pathname: string, activeRun: AgentRun): unknown {
+function apiResponse(
+  pathname: string,
+  activeRun: AgentRun,
+  systemState: SystemInfo,
+): unknown {
   if (pathname === "/api/auth") return { required: false };
-  if (pathname === "/api/system") return system;
+  if (pathname === "/api/system") return systemState;
   if (pathname === "/api/agents") return { agents: [agent] };
   if (pathname.endsWith("/messages")) return { messages: [] };
   if (pathname.endsWith("/runs")) return { runs: [activeRun] };

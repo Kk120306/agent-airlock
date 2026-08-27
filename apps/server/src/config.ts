@@ -37,6 +37,10 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  AIRLOCK_MODELARK_DEMO_MODE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   AIRLOCK_HTTP_OBJECT_URL: z.string().url().optional(),
   AIRLOCK_HTTP_OBJECT_SOCKET: z.string().min(1).optional(),
   AIRLOCK_HTTP_OBJECT_VERSION_ID: z
@@ -89,9 +93,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
   const env = envSchema.parse(environment);
   const authToken = env.APP_AUTH_TOKEN?.trim() ?? "";
   const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
-  if (env.AIRLOCK_DEMO_MODE && env.AIRLOCK_PROTOCOL_FIXTURE_MODE) {
+  const activeDemoModes = [
+    env.AIRLOCK_DEMO_MODE,
+    env.AIRLOCK_PROTOCOL_FIXTURE_MODE,
+    env.AIRLOCK_MODELARK_DEMO_MODE,
+  ].filter(Boolean).length;
+  if (activeDemoModes > 1) {
     throw new Error(
-      "AIRLOCK_DEMO_MODE and AIRLOCK_PROTOCOL_FIXTURE_MODE are mutually exclusive",
+      "Airlock demo modes are mutually exclusive",
     );
   }
   if (env.AIRLOCK_DEMO_MODE) {
@@ -127,6 +136,24 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     if (!protocolFixtureProfileValid) {
       throw new Error(
         "AIRLOCK_PROTOCOL_FIXTURE_MODE requires the loopback-only real-Codex protocol fixture profile",
+      );
+    }
+  }
+  if (env.AIRLOCK_MODELARK_DEMO_MODE) {
+    const arkUrl = new URL(env.ARK_BASE_URL);
+    const liveDemoProfileValid =
+      loopbackHosts.has(env.HOST) &&
+      arkUrl.protocol === "https:" &&
+      !loopbackHosts.has(arkUrl.hostname) &&
+      env.RUNTIME_PROVIDER === "container" &&
+      env.CODEX_BIN === "codex" &&
+      Boolean(env.ARK_API_KEY?.trim()) &&
+      !env.ARK_API_KEY?.trim().startsWith("replace-") &&
+      Boolean(env.ARK_MODEL?.trim()) &&
+      !env.ARK_MODEL?.trim().includes("replace-");
+    if (!liveDemoProfileValid) {
+      throw new Error(
+        "AIRLOCK_MODELARK_DEMO_MODE requires the loopback-only live ModelArk container profile",
       );
     }
   }
@@ -205,6 +232,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     transparencyLogPath,
     demoMode: env.AIRLOCK_DEMO_MODE,
     protocolFixtureMode: env.AIRLOCK_PROTOCOL_FIXTURE_MODE,
+    modelArkDemoMode: env.AIRLOCK_MODELARK_DEMO_MODE,
     httpObjectResource:
       env.AIRLOCK_HTTP_OBJECT_URL &&
       env.AIRLOCK_HTTP_OBJECT_VERSION_ID &&

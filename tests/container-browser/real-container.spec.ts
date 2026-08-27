@@ -54,6 +54,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(await systemResponse.json()).toMatchObject({
     demoMode: false,
     protocolFixtureMode: true,
+    modelArkDemoMode: false,
     inferenceMode: "local-responses-protocol-fixture",
     runtimeProvider: "container",
   });

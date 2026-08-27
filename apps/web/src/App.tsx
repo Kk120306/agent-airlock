@@ -43,6 +43,9 @@ const protocolFixturePrompts = {
   challenge: "Attempt an unsafe protocol change for the rejection proof.",
 } as const;
 
+const liveModelArkPrompt =
+  "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Use no dependencies. Verify the file content before finishing.";
+
 const demoHeroPrompts = {
   promote: "Prepare the multi-resource release.",
   challenge: "Delete AGENTS.md and create damage.txt.",
@@ -311,6 +314,61 @@ function ProtocolScenarioGuide({
           <code>
             {shortHash(quarantined.transaction!.canonicalContentHashBefore)} = {shortHash(quarantined.transaction!.canonicalContentHashAfter)}
           </code>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LiveModelArkGuide({
+  runs,
+  busy,
+  onRun,
+}: {
+  runs: AgentRun[];
+  busy: boolean;
+  onRun: (prompt: string) => void;
+}) {
+  const promoted = runs.find(
+    (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
+  );
+  const completed = Boolean(promoted?.transaction);
+
+  return (
+    <section className="protocol-scenario-guide modelark-live-guide" aria-label="Live ModelArk proof">
+      <header>
+        <div>
+          <span className="eyebrow">Provider proof</span>
+          <strong>Model decides. Contract verifies.</strong>
+        </div>
+        <span>{completed ? "Live proof complete" : "One judge action"}</span>
+      </header>
+      <div className="protocol-scenario-actions">
+        <button
+          type="button"
+          data-complete={completed}
+          onClick={() => onRun(liveModelArkPrompt)}
+          disabled={busy}
+        >
+          <span>{completed ? "✓" : "1"}</span>
+          <div>
+            <strong>{completed ? "Run another live Candidate" : "Run live Candidate"}</strong>
+            <small>
+              ModelArk must create the exact artifact before Canonical State can advance.
+            </small>
+          </div>
+        </button>
+      </div>
+      {promoted?.transaction && (
+        <div className="protocol-paired-verdict" role="status">
+          <span aria-hidden="true">✓</span>
+          <div>
+            <strong>Provider-backed Promotion proven</strong>
+            <small>
+              Isolated Candidate passed the required content check and advanced Canonical State.
+            </small>
+          </div>
+          <code>{shortHash(promoted.transaction.canonicalContentHashAfter)}</code>
         </div>
       )}
     </section>
@@ -2784,6 +2842,8 @@ export default function App() {
                 ? "Free local proof · no network model"
                 : system?.protocolFixtureMode
                   ? "Real Runtime proof · local inference"
+                  : system?.modelArkDemoMode
+                    ? "Live ModelArk proof · isolated Runtime"
                 : system?.runtimeProvider === "container"
                   ? "Local container · Codex CLI"
                   : "ECS / Docker · Codex CLI"}
@@ -2836,6 +2896,8 @@ export default function App() {
               ? "No paid inference"
               : system?.protocolFixtureMode
                 ? "Local Responses fixture · " + (system.containerEngine ?? "container")
+                : system?.modelArkDemoMode
+                  ? "Provider-backed ModelArk · " + (system.containerEngine ?? "container")
               : (system?.arkModel ?? "Ark model not configured") +
                 (system?.containerEngine ? " · " + system.containerEngine : "")}
           </span>
@@ -2873,8 +2935,19 @@ export default function App() {
           </div>
         ) : null}
 
+        {system?.modelArkDemoMode ? (
+          <div className="live-mode-banner" role="status">
+            <span>LIVE MODELARK PROOF</span>
+            <div>
+              <strong>Provider-backed inference in a disposable container</strong>
+              <p>The exact file content is validated before Canonical State can advance.</p>
+            </div>
+          </div>
+        ) : null}
+
         {!system?.demoMode &&
         !system?.protocolFixtureMode &&
+        !system?.modelArkDemoMode &&
         system?.arkConfigured &&
         system?.codexAvailable ? (
           <div className="live-mode-banner" role="status">
@@ -3072,14 +3145,18 @@ export default function App() {
             <section
               className={
                 "playground" +
-                (system?.protocolFixtureMode ? " protocol-proof-playground" : "")
+                (system?.protocolFixtureMode || system?.modelArkDemoMode
+                  ? " protocol-proof-playground"
+                  : "")
               }
             >
               <div className="playground-header">
                 <div
                   className={
                     "playground-topbar" +
-                    (system?.protocolFixtureMode ? " protocol-proof-topbar" : "")
+                    (system?.protocolFixtureMode || system?.modelArkDemoMode
+                      ? " protocol-proof-topbar"
+                      : "")
                   }
                 >
                   <div>
@@ -3089,11 +3166,13 @@ export default function App() {
                         ? "Prove one Agent future is safe"
                         : system?.protocolFixtureMode
                           ? "Prove a real Agent change is safe"
+                          : system?.modelArkDemoMode
+                            ? "Prove a live ModelArk change is safe"
                         : "Build something with your Agent"}
                     </h2>
                   </div>
                   <div className="playground-state">
-                    {system?.protocolFixtureMode ? (
+                    {system?.protocolFixtureMode || system?.modelArkDemoMode ? (
                       <div className="proof-route" aria-label="Judge proof path">
                         <span>Run</span>
                         <i aria-hidden="true">→</i>
@@ -3297,6 +3376,13 @@ export default function App() {
                     onRepair={(runId) => void repairActiveRun(runId)}
                   />
                 ) : null}
+                {system?.modelArkDemoMode ? (
+                  <LiveModelArkGuide
+                    runs={runs}
+                    busy={demoActionBusy}
+                    onRun={(content) => void runPrompt(content)}
+                  />
+                ) : null}
               </div>
 
               <div className="messages">
@@ -3310,6 +3396,8 @@ export default function App() {
                         ? "Start with the safe multi-resource release"
                         : system?.protocolFixtureMode
                           ? "Run the real container transaction"
+                          : system?.modelArkDemoMode
+                            ? "Run the live provider proof"
                         : `What should ${selected.name} build?`}
                     </h3>
                     <p>
@@ -3317,6 +3405,8 @@ export default function App() {
                         ? "This local fixture demonstrates transactional Promotion, Quarantine, Repair, and session continuity without calling a network model."
                         : system?.protocolFixtureMode
                           ? "Real Codex will make a tool call inside an isolated Candidate workspace. Airlock validates the result before it can replace Canonical State."
+                          : system?.modelArkDemoMode
+                            ? "ModelArk directs real Codex tools inside an isolated Candidate. The exact output is checked independently before Promotion."
                         : "Live ModelArk inference can inspect files, write code, and run commands, while Airlock keeps every change isolated until Validation and Promotion."}
                     </p>
                     <div className="prompt-grid">
@@ -3324,6 +3414,8 @@ export default function App() {
                         ? Object.values(demoHeroPrompts)
                         : system?.protocolFixtureMode
                           ? Object.values(protocolFixturePrompts)
+                          : system?.modelArkDemoMode
+                            ? [liveModelArkPrompt]
                           : starterPrompts
                       ).map((item) => (
                           <button key={item} onClick={() => setPrompt(item)}>
@@ -3369,7 +3461,10 @@ export default function App() {
                     onRepair={() => void repairActiveRun()}
                     onDiscard={() => void discardActiveRun()}
                     portableTrustAvailable={system?.portableTrust.available === true}
-                    judgeProofMode={system?.protocolFixtureMode === true}
+                    judgeProofMode={
+                      system?.protocolFixtureMode === true ||
+                      system?.modelArkDemoMode === true
+                    }
                     onPortableError={setError}
                   />
                 )}

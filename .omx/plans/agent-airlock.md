@@ -318,6 +318,15 @@ The implemented Phase 10 separation between evidence-backed assurance advice and
 The implemented Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](../../docs/architecture/portable-trust.md) and ADR 0013.
 The authority-first Selection, terminal replay, and append-only transparency lock-turn decisions are documented in [ADR 0014](../../docs/adr/0014-publish-selection-and-terminal-authority-before-mutable-projections.md).
 
+## Live ModelArk judge conformance
+
+- [x] Add a mutually exclusive live ModelArk demo profile that requires loopback control-plane binding, HTTPS provider inference, real Codex, and a container Runtime.
+- [x] Add a persistent one-command launcher with a marker-protected reset root and fail-fast provider preflight.
+- [x] Seed one `Live ModelArk Proof` Agent with an exact file-content Outcome Contract.
+- [x] Add a one-action judge guide and reuse the compact independent proof surface after a terminal decision.
+- [x] Keep deterministic fixture proof and live provider proof visibly separate.
+- [ ] Rerun the complete provider-backed browser transaction when free ModelArk capacity is available.
+
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.

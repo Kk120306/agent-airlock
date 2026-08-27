@@ -905,6 +905,15 @@ textarea:focus {
   gap: 7px;
 }
 
+.modelark-live-guide .protocol-scenario-actions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.modelark-live-guide .protocol-scenario-actions button {
+  border-color: #cfc7f3;
+  background: linear-gradient(135deg, #ffffff, #f5f2ff);
+}
+
 .protocol-scenario-actions button {
   min-width: 0;
   min-height: 56px;

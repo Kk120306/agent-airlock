@@ -2967,6 +2967,7 @@ export class AgentService {
     return {
       demoMode: this.config.demoMode,
       protocolFixtureMode: this.config.protocolFixtureMode,
+      modelArkDemoMode: this.config.modelArkDemoMode,
       inferenceMode: this.config.demoMode
         ? "deterministic-local-fixture"
         : this.config.protocolFixtureMode

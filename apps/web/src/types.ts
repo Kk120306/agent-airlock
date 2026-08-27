@@ -427,6 +427,7 @@ export interface CandidateSet {
 export interface SystemInfo {
   demoMode: boolean;
   protocolFixtureMode: boolean;
+  modelArkDemoMode: boolean;
   inferenceMode:
     | "deterministic-local-fixture"
     | "local-responses-protocol-fixture"

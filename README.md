@@ -240,6 +240,20 @@ Run `npm run test:container-browser` for the corresponding real Chrome-to-Codex 
 Use this path for the final live provider conformance journey.
 The deterministic demo above remains the reproducible judging and regression path.
 
+For the guided judge flow, run:
+
+```bash
+npm run demo:modelark -- --reset
+```
+
+The launcher checks the live Responses API before building or starting the application, binds the control plane to loopback, uses a disposable container Runtime, and seeds one `Live ModelArk Proof` Agent.
+Open <http://127.0.0.1:3201> and select `Run live Candidate`.
+ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`.
+Airlock validates the actual Candidate file independently of the model response and advances Canonical State only when every required check passes.
+The resulting judge view exposes Candidate isolation, Validation evidence, canonical fingerprints, and a signed portable receipt.
+Run `npm run demo:modelark` without `--reset` to preserve the proof across restart.
+If provider quota, capacity, authentication, or the selected model is unavailable, the launcher stops before showing a live-proof UI.
+
 - Node.js 22+
 - npm 10+
 - Docker, Colima, or Podman
@@ -280,7 +294,7 @@ cp .env.example .env
 # Optionally list activated free-quota fallbacks in ARK_MODEL_FALLBACKS.
 npm run check:modelark
 npm run poc:doctor
-npm run poc
+npm run demo:modelark -- --reset
 ```
 
 `check:modelark` performs a minimal Responses API request and prints neither the credential nor model output.
@@ -291,7 +305,7 @@ Keep Free Credits Only Mode enabled for every configured model because the launc
 Confirm that each configured model is activated and visibly has remaining free quota in Model activation before the demo.
 `poc:doctor` checks Node.js, hidden credential presence, one live Responses request, the container engine, the Runtime image, a hardened in-container Codex launch, Candidate session copy isolation, and a real two-turn Codex tool-call protocol probe.
 It reports those checks independently, so provider HTTP 429 capacity failures cannot be confused with an application or Runtime failure.
-`npm run poc` repeats that fail-fast preflight before installing dependencies or building the Runtime image.
+`npm run demo:modelark` and `npm run poc` repeat that fail-fast preflight before installing dependencies or building the Runtime image.
 The model that passes preflight is exported as `ARK_MODEL` for the actual Runtime.
 Set `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only when the provider was already verified and a temporary provider outage must not block local startup.
 The first successful run loads `.env`, installs Node.js dependencies, and builds the Runtime image.
@@ -300,14 +314,23 @@ The script automatically selects Docker, Colima, or Podman.
 
 ### 4. Open the browser
 
-Visit <http://localhost:3000>, or open it from the terminal:
+The guided judge flow is available at <http://127.0.0.1:3201>.
+The generic POC remains available at <http://localhost:3000> when started with `npm run poc`.
+Open either URL from the terminal:
 
 ```bash
-open http://localhost:3000       # macOS
-xdg-open http://localhost:3000   # Linux desktop
+open http://127.0.0.1:3201       # macOS guided proof
+xdg-open http://127.0.0.1:3201   # Linux guided proof
 ```
 
-In the Web UI:
+In the guided Web UI:
+
+1. Select `Run live Candidate`.
+2. Watch the Candidate execute and the required content Validation complete.
+3. Confirm that the canonical fingerprint advances only for a promoted result.
+4. Select `Generate and verify proof` to verify the signed decision locally.
+
+In the generic `npm run poc` Web UI:
 
 1. Select **Create Agent**.
 2. Enter a name, description, and workspace instructions.

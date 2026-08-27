@@ -23,6 +23,17 @@ const protocolFixtureEnvironment = {
   ARK_BASE_URL: "http://host.docker.internal:43994/v1",
 } as const;
 
+const liveModelArkDemoEnvironment = {
+  NODE_ENV: "production",
+  HOST: "127.0.0.1",
+  AIRLOCK_MODELARK_DEMO_MODE: "true",
+  RUNTIME_PROVIDER: "container",
+  CODEX_BIN: "codex",
+  ARK_API_KEY: "ark-live-test-key",
+  ARK_MODEL: "ep-live-model",
+  ARK_BASE_URL: "https://ark.ap-southeast.bytepluses.com/api/v3",
+} as const;
+
 describe("deterministic demo configuration", () => {
   it("accepts only the complete loopback fixture profile", () => {
     expect(loadConfig(deterministicDemoEnvironment).demoMode).toBe(true);
@@ -77,6 +88,38 @@ describe("real Codex protocol fixture configuration", () => {
       loadConfig({
         ...protocolFixtureEnvironment,
         AIRLOCK_DEMO_MODE: "true",
+      }),
+    ).toThrow(/mutually exclusive/);
+  });
+});
+
+describe("live ModelArk judge demo configuration", () => {
+  it("accepts the strict loopback control plane and external provider profile", () => {
+    const config = loadConfig(liveModelArkDemoEnvironment);
+    expect(config.modelArkDemoMode).toBe(true);
+    expect(config.demoMode).toBe(false);
+    expect(config.protocolFixtureMode).toBe(false);
+  });
+
+  it.each([
+    ["remote app host", { HOST: "0.0.0.0" }],
+    ["loopback inference URL", { ARK_BASE_URL: "https://localhost/api/v3" }],
+    ["insecure inference URL", { ARK_BASE_URL: "http://ark.example.com/api/v3" }],
+    ["local-process Runtime", { RUNTIME_PROVIDER: "local-process" }],
+    ["fixture Codex binary", { CODEX_BIN: "/tmp/fake-codex.mjs" }],
+    ["placeholder key", { ARK_API_KEY: "replace-with-key" }],
+    ["placeholder model", { ARK_MODEL: "replace-with-endpoint" }],
+  ])("rejects a %s", (_name, override) => {
+    expect(() =>
+      loadConfig({ ...liveModelArkDemoEnvironment, ...override }),
+    ).toThrow(/loopback-only live ModelArk container profile/);
+  });
+
+  it("cannot be combined with a fixture demo", () => {
+    expect(() =>
+      loadConfig({
+        ...liveModelArkDemoEnvironment,
+        AIRLOCK_PROTOCOL_FIXTURE_MODE: "true",
       }),
     ).toThrow(/mutually exclusive/);
   });
