@@ -27,7 +27,7 @@ A platform-owned Promotion journal now reconciles every approved decision forwar
 Positive Candidate and Quarantine retention windows remove only expired mutable state while preserving bounded decision evidence.
 The judge-ready release adds a loopback-only deterministic launcher, one seeded hero Agent, a four-step guided Playground story, restart-safe fixture state, a dedicated production Chrome acceptance path, and an automated release audit.
 The deterministic fixture replaces only paid model inference and is disclosed in the terminal, system API, sidebar, and main UI.
-The real Runtime proof presents a compact evidence-derived verdict before the complete transaction record and ends with one locally verified signed evidence packet.
+The real Runtime proof presents a compact evidence-derived verdict before the complete transaction record and ends with a locally verified signed decision chain from quarantined parent to promoted repair child.
 The Phase 8 release candidate adds a provider-neutral SDK, strict Capability Claims, a shared executable conformance suite, and a credential-free remote versioned-object provider.
 Registered provider state now participates in the same Candidate preparation, required Validation, Promotion journal, Quarantine, Discard, Repair, canonical fingerprint, and restart-reconciliation decision as built-in resources.
 Existing deployments add providers through a verified, additive, crash-recoverable Registry Transition, and Airlock commits a registry generation only after every Agent converges.
@@ -280,8 +280,9 @@ This journey describes the complete product direction, including later roadmap p
 - A successful Run promotes a valid workspace and the next Playground message continues from that promoted state.
 - A destructive Run that deletes required files is quarantined and leaves the Canonical State content hash unchanged.
 - The complete success and rejection story fits in a three-minute live demonstration.
-- The no-cost real Runtime proof presents paired one-click Promotion and Quarantine runs against the same Agent and Outcome Contract.
+- The no-cost real Runtime proof presents one-click Promotion, Quarantine, and Repair runs against the same Agent and Outcome Contract.
 - Its rejection proof retains the invalid Candidate, shows the failed required command, and proves the canonical content hash and accepted file are unchanged.
+- Its recovery proof links the rejected parent to a promoted repair child and exports both signed decisions as one independently verifiable chain.
 - `npm run check` passes.
 - A rejected SQLite mutation leaves canonical query results unchanged.
 - A deferred mock external action executes once after promotion and zero times after rejection.

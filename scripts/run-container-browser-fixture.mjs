@@ -291,6 +291,8 @@ try {
     console.log("Expected: Validation passes and Promotion advances Canonical State.");
     console.log("Proof 2: Run failing Candidate.");
     console.log("Expected: Validation fails, Candidate enters Quarantine, and Canonical State is unchanged.");
+    console.log("Proof 3: Repair retained Candidate.");
+    console.log("Expected: bounded Repair passes, promotes, and exports a signed two-decision chain.");
     console.log(
       ephemeralRequested
         ? "State: ephemeral automated proof."

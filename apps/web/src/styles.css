@@ -901,7 +901,7 @@ textarea:focus {
 
 .protocol-scenario-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -4316,6 +4316,13 @@ textarea:focus {
   .agent-card {
     flex: 0 0 46px;
     width: 46px;
+  }
+
+  .verify-receipt-button {
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    margin-top: 0;
   }
 
   .main {

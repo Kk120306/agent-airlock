@@ -4,7 +4,7 @@ const host = process.env.AIRLOCK_PROTOCOL_FIXTURE_HOST ?? "0.0.0.0";
 const port = Number(process.env.AIRLOCK_PROTOCOL_FIXTURE_PORT ?? "43991");
 const maximumRequestBytes = 2 * 1024 * 1024;
 let responseSequence = 0;
-const unsafeToolCalls = new Set();
+const toolCallModes = new Map();
 
 function eventStream(events) {
   return events
@@ -76,9 +76,17 @@ const server = createServer(async (request, response) => {
     latestInput?.type === "custom_tool_call_output";
   const toolCallId =
     typeof latestInput?.call_id === "string" ? latestInput.call_id : null;
-  const unsafeRequest = hasToolResult
-    ? toolCallId !== null && unsafeToolCalls.delete(toolCallId)
-    : /unsafe protocol change|rejection proof/i.test(JSON.stringify(input));
+  const requestText = JSON.stringify(input);
+  const mode = hasToolResult
+    ? toolCallId !== null
+      ? toolCallModes.get(toolCallId) ?? "safe"
+      : "safe"
+    : /Agent Airlock Repair Run for quarantined transaction/i.test(requestText)
+      ? "repair"
+      : /unsafe protocol change|rejection proof/i.test(requestText)
+        ? "unsafe"
+        : "safe";
+  if (hasToolResult && toolCallId !== null) toolCallModes.delete(toolCallId);
   responseSequence += 1;
   const responseId = `resp-fixture-${responseSequence}`;
   const events = [
@@ -94,16 +102,19 @@ const server = createServer(async (request, response) => {
         content: [
           {
             type: "output_text",
-            text: unsafeRequest
-              ? "Protocol fixture completed the deliberately invalid Candidate edit."
-              : "Protocol fixture completed the requested Candidate edit.",
+            text:
+              mode === "unsafe"
+                ? "Protocol fixture completed the deliberately invalid Candidate edit."
+                : mode === "repair"
+                  ? "Protocol fixture repaired the retained Candidate from bounded failure evidence."
+                  : "Protocol fixture completed the requested Candidate edit.",
           },
         ],
       },
     });
   } else {
     const callId = `call-fixture-write-${responseSequence}`;
-    if (unsafeRequest) unsafeToolCalls.add(callId);
+    toolCallModes.set(callId, mode);
     events.push({
       type: "response.output_item.done",
       item: {
@@ -111,7 +122,7 @@ const server = createServer(async (request, response) => {
         call_id: callId,
         name: "exec_command",
         arguments: JSON.stringify({
-          cmd: unsafeRequest
+          cmd: mode === "unsafe"
             ? "printf 'unsafe-candidate\\n' > protocol-proof.txt"
             : "printf 'candidate-only\\n' > protocol-proof.txt",
         }),

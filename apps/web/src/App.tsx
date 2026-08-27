@@ -142,6 +142,7 @@ function JudgeProofSummary({
   ].includes(disposition);
   const promoted = disposition === "promoted";
   const quarantined = disposition === "quarantined";
+  const repaired = promoted && transaction.lineage.depth > 0;
   const candidatePrepared = transaction.events.some(
     (event) => event.status === "executing" || event.status === "validating",
   );
@@ -152,7 +153,9 @@ function JudgeProofSummary({
         <div>
           <span className="eyebrow">End-to-end proof</span>
           <h4>
-            {promoted
+            {repaired
+              ? "Recovery complete: retained work became a validated future"
+              : promoted
               ? "Proof complete: only the validated future became reality"
               : quarantined
                 ? "Unsafe future blocked: accepted reality did not move"
@@ -169,8 +172,12 @@ function JudgeProofSummary({
         <li data-state={candidatePrepared || terminal ? "passed" : "active"}>
           <span>{candidatePrepared || terminal ? "✓" : "1"}</span>
           <div>
-            <strong>Candidate isolated</strong>
-            <small>Real Codex received Candidate State, never mutable Canonical State.</small>
+            <strong>{repaired ? "Quarantine lineage retained" : "Candidate isolated"}</strong>
+            <small>
+              {repaired
+                ? `Repair ${transaction.lineage.depth} is linked to rejected Run ${transaction.lineage.parentRunId?.slice(0, 8)}.`
+                : "Real Codex received Candidate State, never mutable Canonical State."}
+            </small>
           </div>
         </li>
         <li data-state={promoted ? "passed" : terminal ? "blocked" : "active"}>
@@ -216,27 +223,39 @@ function ProtocolScenarioGuide({
   runs,
   busy,
   onRun,
+  onRepair,
 }: {
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => void;
+  onRepair: (runId: string) => void;
 }) {
   const promoted = runs.find(
-    (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
+    (run) =>
+      !run.candidateSetId &&
+      run.transaction?.disposition === "promoted" &&
+      run.transaction.lineage.depth === 0,
   );
   const quarantined = runs.find(
     (run) => !run.candidateSetId && run.transaction?.disposition === "quarantined",
   );
-  const complete = promoted?.transaction && quarantined?.transaction;
+  const repaired = runs.find(
+    (run) =>
+      !run.candidateSetId &&
+      run.transaction?.disposition === "promoted" &&
+      run.transaction.lineage.depth > 0,
+  );
+  const pairedComplete = promoted?.transaction && quarantined?.transaction;
+  const complete = pairedComplete && repaired?.transaction;
 
   return (
-    <section className="protocol-scenario-guide" aria-label="Paired safety proof">
+    <section className="protocol-scenario-guide" aria-label="Full safety loop">
       <header>
         <div>
-          <span className="eyebrow">Paired proof</span>
-          <strong>Same Agent. Same contract. Two isolated futures.</strong>
+          <span className="eyebrow">Full safety loop</span>
+          <strong>Promote. Reject. Repair. Verify.</strong>
         </div>
-        <span>{complete ? "Both outcomes proven" : "Run both outcomes"}</span>
+        <span>{complete ? "Recovery proven" : "Run all three stages"}</span>
       </header>
       <div className="protocol-scenario-actions">
         <button
@@ -265,15 +284,28 @@ function ProtocolScenarioGuide({
             <small>One required Validation fails and accepted reality does not move.</small>
           </div>
         </button>
+        <button
+          type="button"
+          data-complete={Boolean(repaired)}
+          onClick={() => quarantined && onRepair(quarantined.id)}
+          disabled={busy || !quarantined || Boolean(repaired)}
+        >
+          <span>{repaired ? "✓" : "3"}</span>
+          <div>
+            <strong>{repaired ? "Rejected future safely repaired" : "Repair retained Candidate"}</strong>
+            <small>Bounded failure evidence guides a fresh isolated Repair Run.</small>
+          </div>
+        </button>
       </div>
-      {complete && (
+      {pairedComplete && (
         <div className="protocol-paired-verdict" role="status">
           <span aria-hidden="true">✓</span>
           <div>
-            <strong>Airlock controlled both outcomes</strong>
+            <strong>{complete ? "Full recovery loop proven" : "Airlock controlled both outcomes"}</strong>
             <small>
-              The valid Candidate advanced Canonical State. The invalid Candidate left its
-              fingerprint unchanged.
+              {complete
+                ? "The rejected parent and promoted repair child now form one signed, independently verifiable decision chain."
+                : "The valid Candidate advanced Canonical State. The invalid Candidate left its fingerprint unchanged."}
             </small>
           </div>
           <code>
@@ -2632,15 +2664,16 @@ export default function App() {
     await runPrompt(prompt.trim());
   };
 
-  const repairActiveRun = async () => {
-    if (!selected || !activeRun) return;
+  const repairActiveRun = async (sourceRunId = activeRun?.id) => {
+    if (!selected || !sourceRunId) return;
     setAirlockActionBusy(true);
     setError(null);
     try {
-      const result = await api.repairRun(activeRun.id);
+      const result = await api.repairRun(sourceRunId);
       if (selectedIdRef.current === selected.id) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
+        setRuns((current) => [result.run, ...current]);
       }
       setAgents((current) =>
         current.map((agent) =>
@@ -3261,6 +3294,7 @@ export default function App() {
                     runs={runs}
                     busy={demoActionBusy}
                     onRun={(content) => void runPrompt(content)}
+                    onRepair={(runId) => void repairActiveRun(runId)}
                   />
                 ) : null}
               </div>

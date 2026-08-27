@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-test("the browser proves real Codex Promotion and Quarantine against one Canonical State", async ({
+test("the browser proves real Codex Promotion, Quarantine, and Repair against one Canonical State", async ({
   page,
   request,
 }) => {
@@ -58,9 +58,9 @@ test("the browser proves real Codex Promotion and Quarantine against one Canonic
     runtimeProvider: "container",
   });
 
-  const pairedProof = page.getByRole("region", { name: "Paired safety proof" });
+  const pairedProof = page.getByRole("region", { name: "Full safety loop" });
   await expect(
-    pairedProof.getByText("Same Agent. Same contract. Two isolated futures."),
+    pairedProof.getByText("Promote. Reject. Repair. Verify."),
   ).toBeVisible();
   await pairedProof.getByRole("button", { name: /Run passing Candidate/ }).click();
 
@@ -120,7 +120,7 @@ test("the browser proves real Codex Promotion and Quarantine against one Canonic
   await expect(
     rejectedProof.getByText("Canonical State unchanged", { exact: true }),
   ).toBeVisible();
-  await expect(pairedProof.getByText("Both outcomes proven", { exact: true }))
+  await expect(pairedProof.getByText("Run all three stages", { exact: true }))
     .toBeVisible();
   await expect(
     pairedProof.getByText("Airlock controlled both outcomes", { exact: true }),
@@ -139,14 +139,87 @@ test("the browser proves real Codex Promotion and Quarantine against one Canonic
     rejectedEvidence.getByText("Signed proof verified locally", { exact: true }),
   ).toBeVisible();
 
+  const rejectedRunsResponse = await request.get(`/api/agents/${agentId}/runs`);
+  const rejectedRuns = (await rejectedRunsResponse.json()) as {
+    runs: Array<{
+      id: string;
+      transaction: {
+        disposition: string;
+        canonicalStateIdAfter: string;
+        canonicalContentHashAfter: string;
+      };
+    }>;
+  };
+  const rejectedParent = rejectedRuns.runs.find(
+    (run) => run.transaction.disposition === "quarantined",
+  );
+  expect(rejectedParent).toBeDefined();
+
+  await pairedProof.getByRole("button", { name: /Repair retained Candidate/ }).click();
+  await expect(
+    page.getByText(
+      "Protocol fixture repaired the retained Candidate from bounded failure evidence.",
+    ),
+  ).toBeVisible({ timeout: 45_000 });
+
+  const repairedEvidence = page.getByRole("article", {
+    name: "Agent Airlock evidence",
+  });
+  await expect(
+    repairedEvidence.getByRole("heading", { name: "Promoted" }),
+  ).toBeVisible();
+  const repairedProof = repairedEvidence.getByRole("region", {
+    name: "Judge proof summary",
+  });
+  await expect(
+    repairedProof.getByRole("heading", {
+      name: "Recovery complete: retained work became a validated future",
+    }),
+  ).toBeVisible();
+  await expect(
+    repairedProof.getByText("Quarantine lineage retained", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    repairedProof.getByText(`rejected Run ${rejectedParent!.id.slice(0, 8)}`, {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(repairedProof.getByText("9/9 required Validations passed."))
+    .toBeVisible();
+  await expect(
+    pairedProof.getByText("Recovery proven", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    pairedProof.getByText("Full recovery loop proven", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    pairedProof.getByText("Rejected future safely repaired", { exact: true }),
+  ).toBeVisible();
+
+  await repairedEvidence
+    .getByRole("button", { name: "Generate and verify proof" })
+    .click();
+  await expect(
+    repairedEvidence.getByText(
+      "One complete chain proves all 2 signed decisions and their Canonical State handoffs.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    repairedEvidence.getByRole("button", {
+      name: "Download complete decision chain",
+    }),
+  ).toBeEnabled();
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(rejectedProof).toBeVisible();
+  await expect(repairedProof).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
 
   const runsResponse = await request.get(`/api/agents/${agentId}/runs`);
   const runs = (await runsResponse.json()) as {
     runs: Array<{
+      id: string;
       status: string;
       transaction: {
         disposition: string;
@@ -155,12 +228,15 @@ test("the browser proves real Codex Promotion and Quarantine against one Canonic
         canonicalContentHashBefore: string;
         canonicalContentHashAfter: string;
         quarantinePath: string | null;
+        lineage: { depth: number; parentRunId: string | null };
         validations: Array<{ name: string; status: string; required: boolean }>;
       };
     }>;
   };
   const promotedRun = runs.runs.find(
-    (run) => run.transaction.disposition === "promoted",
+    (run) =>
+      run.transaction.disposition === "promoted" &&
+      run.transaction.lineage.depth === 0,
   );
   const quarantinedRun = runs.runs.find(
     (run) => run.transaction.disposition === "quarantined",
@@ -206,6 +282,54 @@ test("the browser proves real Codex Promotion and Quarantine against one Canonic
       }),
     ]),
   );
+  const repairedRun = runs.runs.find(
+    (run) =>
+      run.transaction.disposition === "promoted" &&
+      run.transaction.lineage.depth === 1,
+  );
+  expect(repairedRun).toMatchObject({
+    status: "completed",
+    transaction: {
+      disposition: "promoted",
+      canonicalStateIdBefore: quarantinedRun?.transaction.canonicalStateIdAfter,
+      lineage: {
+        depth: 1,
+        parentRunId: quarantinedRun?.id,
+      },
+    },
+  });
+  expect(repairedRun?.transaction.canonicalStateIdAfter).not.toBe(
+    repairedRun?.transaction.canonicalStateIdBefore,
+  );
+  expect(repairedRun?.transaction.validations).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: "command:protocol-content",
+        status: "passed",
+        required: true,
+      }),
+    ]),
+  );
+
+  const chainResponse = await request.post(
+    `/api/runs/${repairedRun!.id}/portable-receipt`,
+    { data: { includeAncestry: true } },
+  );
+  expect(chainResponse.ok()).toBe(true);
+  const chainExport = (await chainResponse.json()) as {
+    verification: { valid: boolean };
+    decisionChain: {
+      packets: Array<{
+        envelope: { receipt: { decision: { disposition: string } } };
+      }>;
+    };
+  };
+  expect(chainExport.verification.valid).toBe(true);
+  expect(
+    chainExport.decisionChain.packets.map(
+      (packet) => packet.envelope.receipt.decision.disposition,
+    ),
+  ).toEqual(["quarantined", "promoted"]);
 
   const agentResponse = await request.get(`/api/agents/${agentId}`);
   const promoted = (await agentResponse.json()) as {
