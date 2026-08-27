@@ -39,6 +39,16 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
   await expect(
     page.getByText("Real Runtime proof · local inference", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Prove a real Agent change is safe" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Judge proof path")).toContainText(
+    "Run→Validate→Promote→Verify",
+  );
+  await expect(page.getByText(/cannot enforce total-token allowances/))
+    .not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Explore futures" }))
+    .not.toBeVisible();
 
   const systemResponse = await request.get("/api/system");
   expect(await systemResponse.json()).toMatchObject({
@@ -57,9 +67,34 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
   ).toBeVisible({ timeout: 45_000 });
   const evidence = page.getByRole("article", { name: "Agent Airlock evidence" });
   await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
+  const judgeProof = evidence.getByRole("region", { name: "Judge proof summary" });
+  await expect(
+    judgeProof.getByRole("heading", {
+      name: "Proof complete: only the validated future became reality",
+    }),
+  ).toBeVisible();
+  await expect(judgeProof.getByText("Candidate isolated", { exact: true })).toBeVisible();
+  await expect(judgeProof.getByText("8/8 required Validations passed.")).toBeVisible();
+  await expect(judgeProof.getByText("Canonical State advanced", { exact: true }))
+    .toBeVisible();
+
+  await evidence.getByText("Inspect complete transaction evidence", { exact: true })
+    .click();
   await expect(evidence.getByText("Journal completed", { exact: true })).toBeVisible();
   await expect(evidence.getByText("command:protocol-content", { exact: true }))
     .toBeVisible();
+
+  await evidence.getByRole("button", { name: "Generate and verify proof" }).click();
+  await expect(evidence.getByText("Signed proof verified locally", { exact: true }))
+    .toBeVisible();
+  await expect(
+    evidence.getByRole("button", { name: "Download evidence packet" }),
+  ).toBeEnabled();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(judgeProof).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
 
   const runsResponse = await request.get(`/api/agents/${agentId}/runs`);
   const runs = (await runsResponse.json()) as {

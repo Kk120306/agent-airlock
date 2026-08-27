@@ -27,6 +27,7 @@ A platform-owned Promotion journal now reconciles every approved decision forwar
 Positive Candidate and Quarantine retention windows remove only expired mutable state while preserving bounded decision evidence.
 The judge-ready release adds a loopback-only deterministic launcher, one seeded hero Agent, a four-step guided Playground story, restart-safe fixture state, a dedicated production Chrome acceptance path, and an automated release audit.
 The deterministic fixture replaces only paid model inference and is disclosed in the terminal, system API, sidebar, and main UI.
+The real Runtime proof presents a compact evidence-derived verdict before the complete transaction record and ends with one locally verified signed evidence packet.
 The Phase 8 release candidate adds a provider-neutral SDK, strict Capability Claims, a shared executable conformance suite, and a credential-free remote versioned-object provider.
 Registered provider state now participates in the same Candidate preparation, required Validation, Promotion journal, Quarantine, Discard, Repair, canonical fingerprint, and restart-reconciliation decision as built-in resources.
 Existing deployments add providers through a verified, additive, crash-recoverable Registry Transition, and Airlock commits a registry generation only after every Agent converges.
@@ -247,6 +248,7 @@ This journey describes the complete product direction, including later roadmap p
 - A zero-cost integration gate must drive pinned real Codex from Chrome through the production HTTP seam, isolated Candidate State, required Validation, and Promotion without being presented as live ModelArk conformance.
 - The zero-cost real-Codex gate must also be launchable as a persistent interactive judge demo with strict loopback, managed-state, and local-inference configuration.
 - The terminal, system API, and browser must distinguish fake deterministic execution, real Codex with local deterministic Responses, and live ModelArk inference.
+- The real-Codex judge path must prioritize its four proof stages, hide incompatible advanced controls, summarize only persisted Run evidence, and keep the complete evidence available for inspection.
 - A reviewer must be able to distinguish reproducible middleware proof from completed local live ModelArk conformance.
 
 ## Reliability requirements

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   evaluateSigningKeyTrust,
   verifyPortableDecisionChainJsonInBrowser,
@@ -115,6 +116,122 @@ function StatusPill({ status }: { status: Agent["status"] }) {
 
 function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
+}
+
+function JudgeProofSummary({
+  transaction,
+}: {
+  transaction: NonNullable<AgentRun["transaction"]>;
+}) {
+  const disposition = transaction.disposition ?? transaction.status;
+  const requiredValidations = transaction.validations.filter(
+    (validation) => validation.required,
+  );
+  const passedRequired = requiredValidations.filter(
+    (validation) => validation.status === "passed",
+  ).length;
+  const terminal = [
+    "promoted",
+    "quarantined",
+    "discarded",
+    "cancelled",
+    "recovery-error",
+  ].includes(disposition);
+  const promoted = disposition === "promoted";
+  const candidatePrepared = transaction.events.some(
+    (event) => event.status === "executing" || event.status === "validating",
+  );
+
+  return (
+    <section className="judge-proof-summary" aria-label="Judge proof summary">
+      <header>
+        <div>
+          <span className="eyebrow">End-to-end proof</span>
+          <h4>
+            {promoted
+              ? "Proof complete: only the validated future became reality"
+              : terminal
+                ? "Promotion blocked: Canonical State stayed protected"
+                : "Real transaction in progress"}
+          </h4>
+        </div>
+        <span className={promoted ? "proof-verdict passed" : "proof-verdict"}>
+          {promoted ? "Verified" : terminal ? "Protected" : "Running"}
+        </span>
+      </header>
+      <ol>
+        <li data-state={candidatePrepared || terminal ? "passed" : "active"}>
+          <span>{candidatePrepared || terminal ? "✓" : "1"}</span>
+          <div>
+            <strong>Candidate isolated</strong>
+            <small>Real Codex received Candidate State, never mutable Canonical State.</small>
+          </div>
+        </li>
+        <li data-state={promoted ? "passed" : terminal ? "blocked" : "active"}>
+          <span>{promoted ? "✓" : "2"}</span>
+          <div>
+            <strong>Outcome Contract enforced</strong>
+            <small>
+              {requiredValidations.length === 0
+                ? "Required Validation evidence is pending."
+                : `${passedRequired}/${requiredValidations.length} required Validations passed.`}
+            </small>
+          </div>
+        </li>
+        <li data-state={promoted ? "passed" : terminal ? "blocked" : "pending"}>
+          <span>{promoted ? "✓" : "3"}</span>
+          <div>
+            <strong>{promoted ? "Canonical State advanced" : "Promotion decision"}</strong>
+            <small>
+              {promoted
+                ? `${shortHash(transaction.canonicalContentHashBefore)} to ${shortHash(transaction.canonicalContentHashAfter)}.`
+                : terminal
+                  ? "The prior Canonical fingerprint remains authoritative."
+                  : "Promotion remains impossible until every required Validation passes."}
+            </small>
+          </div>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
+function EvidenceDetails({
+  compact,
+  children,
+}: {
+  compact: boolean;
+  children: ReactNode;
+}) {
+  if (!compact) return <>{children}</>;
+  return (
+    <details className="judge-evidence-details">
+      <summary>
+        <span>
+          <strong>Inspect complete transaction evidence</strong>
+          <small>Resources, timeline, Validations, and workspace changes</small>
+        </span>
+        <span aria-hidden="true">＋</span>
+      </summary>
+      <div>{children}</div>
+    </details>
+  );
+}
+
+function PortableProofDetails({
+  compact,
+  children,
+}: {
+  compact: boolean;
+  children: ReactNode;
+}) {
+  if (!compact) return <>{children}</>;
+  return (
+    <details className="portable-proof-details">
+      <summary>Inspect cryptographic claims and identifiers</summary>
+      <div>{children}</div>
+    </details>
+  );
 }
 
 function ReceiptVerifier({ onClose }: { onClose: () => void }) {
@@ -725,10 +842,12 @@ function ReceiptVerifier({ onClose }: { onClose: () => void }) {
 function PortableTrustExport({
   runId,
   evidenceRevision,
+  judgeProofMode = false,
   onError,
 }: {
   runId: string;
   evidenceRevision: string;
+  judgeProofMode?: boolean;
   onError: (message: string) => void;
 }) {
   const [result, setResult] = useState<PortableReceiptExport | null>(null);
@@ -807,33 +926,8 @@ function PortableTrustExport({
     invalidatePendingExport();
   };
 
-  return (
-    <section className="portable-trust" aria-label="Portable trust receipt">
-      <header className="portable-trust-heading">
-        <div>
-          <span className="eyebrow">Portable Trust</span>
-          <h4>Export a signed decision statement</h4>
-          <p>
-            Offline verification proves that the included Ed25519 key signed the canonical
-            content. It proves key possession, not that the reported state existed or was
-            reported truthfully.
-          </p>
-          <p>
-            Always included: stable Run and Agent identifiers, timestamps, state and resource
-            fingerprints, and evidence hashes. Raw prompts, outputs, credentials, and local
-            paths always stay out. Only bounded redacted Validation leaves are opt-in.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="button button-primary"
-          onClick={() => void generate()}
-          disabled={busy}
-        >
-          {busy ? <Spinner /> : result ? "Regenerate receipt" : "Generate receipt"}
-        </button>
-      </header>
-
+  const optionalPublicationControls = (
+    <>
       <div className="portable-options">
         <label>
           <input
@@ -875,6 +969,58 @@ function PortableTrustExport({
         adds rewrite detection, while a public anchor only adds shared publication evidence.
         Neither makes a false statement true or grants the signer authority.
       </p>
+    </>
+  );
+
+  return (
+    <section className="portable-trust" aria-label="Portable trust receipt">
+      <header className="portable-trust-heading">
+        <div>
+          <span className="eyebrow">
+            {judgeProofMode ? "Independent proof" : "Portable Trust"}
+          </span>
+          <h4>
+            {judgeProofMode
+              ? "Make this decision independently verifiable"
+              : "Export a signed decision statement"}
+          </h4>
+          <p>
+            {judgeProofMode
+              ? "Generate a private-by-default evidence packet and verify its signature locally before download."
+              : "Offline verification proves that the included Ed25519 key signed the canonical content. It proves key possession, not that the reported state existed or was reported truthfully."}
+          </p>
+          {!judgeProofMode && (
+            <p>
+              Always included: stable Run and Agent identifiers, timestamps, state and resource
+              fingerprints, and evidence hashes. Raw prompts, outputs, credentials, and local
+              paths always stay out. Only bounded redacted Validation leaves are opt-in.
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={() => void generate()}
+          disabled={busy}
+        >
+          {busy
+            ? <Spinner />
+            : result
+              ? judgeProofMode
+                ? "Regenerate proof"
+                : "Regenerate receipt"
+              : judgeProofMode
+                ? "Generate and verify proof"
+                : "Generate receipt"}
+        </button>
+      </header>
+
+      {judgeProofMode ? (
+        <details className="portable-advanced-options">
+          <summary>Add transparency or blockchain publication evidence</summary>
+          {optionalPublicationControls}
+        </details>
+      ) : optionalPublicationControls}
 
       {availableDisclosures.length > 0 && (
         <details className="portable-disclosures">
@@ -915,7 +1061,9 @@ function PortableTrustExport({
             <div>
               <strong>
                 {result.verification.valid
-                  ? "Self-check passed"
+                  ? judgeProofMode
+                    ? "Signed proof verified locally"
+                    : "Self-check passed"
                   : "Receipt verification failed"}
               </strong>
               <small>
@@ -974,6 +1122,7 @@ function PortableTrustExport({
               </button>
             )}
           </div>
+          <PortableProofDetails compact={judgeProofMode}>
           <div className="portable-identities">
             <div>
               <span>Receipt digest</span>
@@ -1049,6 +1198,7 @@ function PortableTrustExport({
               )}
             </div>
           )}
+          </PortableProofDetails>
         </div>
       )}
     </section>
@@ -1379,6 +1529,7 @@ function AirlockEvidence({
   onRepair,
   onDiscard,
   portableTrustAvailable,
+  judgeProofMode,
   onPortableError,
 }: {
   run: AgentRun;
@@ -1386,6 +1537,7 @@ function AirlockEvidence({
   onRepair: () => void;
   onDiscard: () => void;
   portableTrustAvailable: boolean;
+  judgeProofMode: boolean;
   onPortableError: (message: string) => void;
 }) {
   const transaction = run.transaction;
@@ -1403,6 +1555,7 @@ function AirlockEvidence({
     providerPreparationFailed ||
     (transaction.providerResources.length > 0 &&
       transaction.providerResources.some((resource) => !resource.quarantine));
+  const compactJudgeEvidence = judgeProofMode && disposition === "promoted";
   const title =
     recoveryFailed
       ? "Recovery needs attention"
@@ -1430,7 +1583,11 @@ function AirlockEvidence({
 
   return (
     <article
-      className={"airlock-card airlock-" + visualDisposition}
+      className={
+        "airlock-card airlock-" +
+        visualDisposition +
+        (judgeProofMode ? " airlock-judge-proof" : "")
+      }
       aria-label="Agent Airlock evidence"
       data-disposition={visualDisposition}
     >
@@ -1458,6 +1615,9 @@ function AirlockEvidence({
         </span>
       </header>
 
+      {judgeProofMode && <JudgeProofSummary transaction={transaction} />}
+
+      <EvidenceDetails compact={compactJudgeEvidence}>
       <section className="repair-lineage" aria-label="Recovery evidence">
         <div>
           <span className="eyebrow">Recovery lineage</span>
@@ -1827,6 +1987,7 @@ function AirlockEvidence({
           )}
         </details>
       )}
+      </EvidenceDetails>
 
       {transaction.promotionReceipt && (
         <>
@@ -1843,6 +2004,7 @@ function AirlockEvidence({
                 transaction.promotionReceipt.createdAt,
                 transaction.promotionReceipt.validationEvidenceHash,
               ].join(":")}
+              judgeProofMode={judgeProofMode}
               onError={onPortableError}
             />
           )}
@@ -2772,54 +2934,80 @@ export default function App() {
               </form>
             )}
 
-            <section className="playground">
+            <section
+              className={
+                "playground" +
+                (system?.protocolFixtureMode ? " protocol-proof-playground" : "")
+              }
+            >
               <div className="playground-header">
-                <div className="playground-topbar">
+                <div
+                  className={
+                    "playground-topbar" +
+                    (system?.protocolFixtureMode ? " protocol-proof-topbar" : "")
+                  }
+                >
                   <div>
                     <span className="eyebrow">Playground</span>
                     <h2>
                       {system?.demoMode
                         ? "Prove one Agent future is safe"
+                        : system?.protocolFixtureMode
+                          ? "Prove a real Agent change is safe"
                         : "Build something with your Agent"}
                     </h2>
                   </div>
                   <div className="playground-state">
-                    <button
-                      type="button"
-                      className="assurance-toggle"
-                      onClick={() => setShowAssurance((current) => !current)}
-                      aria-expanded={showAssurance}
-                      aria-controls="assurance-inbox"
-                    >
-                      <span aria-hidden="true">⌁</span>
-                      Assurance
-                      {assuranceProposals.filter((proposal) => proposal.state === "ready").length > 0 && (
-                        <strong>
-                          {assuranceProposals.filter((proposal) => proposal.state === "ready").length}
-                        </strong>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="explore-button"
-                      onClick={() => setShowExplore((current) => !current)}
-                      disabled={
-                        selected.status === "stopped" ||
-                        demoActionBusy ||
-                        candidateSetInProgress ||
-                        system?.competingFutures.available === false
-                      }
-                      title={system?.competingFutures.reason ?? undefined}
-                      aria-expanded={showExplore}
-                      aria-controls="competing-futures-panel"
-                    >
-                      <span aria-hidden="true">◇</span>
-                      Explore futures
-                    </button>
-                    {system?.competingFutures.available === false && (
-                      <small className="capability-reason" role="status">
-                        {system.competingFutures.reason}
-                      </small>
+                    {system?.protocolFixtureMode ? (
+                      <div className="proof-route" aria-label="Judge proof path">
+                        <span>Run</span>
+                        <i aria-hidden="true">→</i>
+                        <span>Validate</span>
+                        <i aria-hidden="true">→</i>
+                        <span>Promote</span>
+                        <i aria-hidden="true">→</i>
+                        <span>Verify</span>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="assurance-toggle"
+                          onClick={() => setShowAssurance((current) => !current)}
+                          aria-expanded={showAssurance}
+                          aria-controls="assurance-inbox"
+                        >
+                          <span aria-hidden="true">⌁</span>
+                          Assurance
+                          {assuranceProposals.filter((proposal) => proposal.state === "ready").length > 0 && (
+                            <strong>
+                              {assuranceProposals.filter((proposal) => proposal.state === "ready").length}
+                            </strong>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="explore-button"
+                          onClick={() => setShowExplore((current) => !current)}
+                          disabled={
+                            selected.status === "stopped" ||
+                            demoActionBusy ||
+                            candidateSetInProgress ||
+                            system?.competingFutures.available === false
+                          }
+                          title={system?.competingFutures.reason ?? undefined}
+                          aria-expanded={showExplore}
+                          aria-controls="competing-futures-panel"
+                        >
+                          <span aria-hidden="true">◇</span>
+                          Explore futures
+                        </button>
+                        {system?.competingFutures.available === false && (
+                          <small className="capability-reason" role="status">
+                            {system.competingFutures.reason}
+                          </small>
+                        )}
+                      </>
                     )}
                     <span className="contract-badge">
                       Outcome Contract v{selected.outcomeContract.version}
@@ -3038,6 +3226,7 @@ export default function App() {
                     onRepair={() => void repairActiveRun()}
                     onDiscard={() => void discardActiveRun()}
                     portableTrustAvailable={system?.portableTrust.available === true}
+                    judgeProofMode={system?.protocolFixtureMode === true}
                     onPortableError={setError}
                   />
                 )}

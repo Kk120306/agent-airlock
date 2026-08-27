@@ -44,7 +44,9 @@ Open <http://127.0.0.1:3200>, select `Create protocol-proof.txt.`, and send it.
 The production control plane launches the pinned real Codex CLI in a disposable container and serves deterministic Responses tool-call events from a host-local fixture.
 Codex executes the requested write only inside Candidate State.
 Airlock requires `AGENTS.md` and `protocol-proof.txt`, protects `AGENTS.md`, caps the change, and runs `test "$(cat protocol-proof.txt)" = candidate-only` before Promotion.
-The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, `Promoted`, `Journal completed`, and `command:protocol-content`.
+The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, the `Run` to `Validate` to `Promote` to `Verify` path, and a compact evidence-backed Promotion verdict.
+Open `Inspect complete transaction evidence` to show `Journal completed` and `command:protocol-content` without crowding the primary judge story.
+Select `Generate and verify proof` to create a private-by-default evidence packet and confirm its signature locally.
 State persists under the dedicated `.local/airlock-container-demo` root unless `--reset` is supplied.
 If the seeded Outcome Contract is edited, restart with `--reset` to restore the guaranteed judge path instead of silently overwriting operator policy.
 The launcher never reads `.env`, never calls ModelArk, and refuses any alternate state root.

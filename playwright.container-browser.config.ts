@@ -19,7 +19,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "AIRLOCK_CONTAINER_DEMO_PORT=3221 AIRLOCK_CONTAINER_DEMO_FIXTURE_PORT=43994 node scripts/run-container-browser-fixture.mjs --demo --ephemeral",
+      "AIRLOCK_CONTAINER_DEMO_PORT=3221 AIRLOCK_CONTAINER_DEMO_FIXTURE_PORT=43995 node scripts/run-container-browser-fixture.mjs --demo --ephemeral",
     url: `${baseURL}/api/health`,
     timeout: 30_000,
     reuseExistingServer: false,

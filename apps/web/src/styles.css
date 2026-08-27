@@ -912,6 +912,26 @@ textarea:focus {
   gap: 8px;
 }
 
+.proof-route {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid #cfe3da;
+  border-radius: 999px;
+  color: #356a57;
+  background: #f2f8f5;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.proof-route i {
+  color: #8ca99d;
+  font-style: normal;
+}
+
 .capability-reason {
   max-width: 190px;
   color: #8b4b36;
@@ -1678,6 +1698,174 @@ textarea:focus {
   background: #e4f4eb;
 }
 
+.judge-proof-summary {
+  margin: 14px 16px 0;
+  overflow: hidden;
+  border: 1px solid #b9ddcd;
+  border-radius: 13px;
+  background: #f5fbf8;
+}
+
+.judge-proof-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 14px;
+  border-bottom: 1px solid #d7e9e1;
+  background:
+    radial-gradient(circle at 100% 0, rgba(49, 151, 113, 0.12), transparent 48%),
+    #ffffff;
+}
+
+.judge-proof-summary h4 {
+  margin: 3px 0 0;
+  color: #24483a;
+  font-size: 14px;
+  letter-spacing: -0.015em;
+}
+
+.proof-verdict {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid #e3d3c4;
+  border-radius: 999px;
+  color: #88604d;
+  background: #fff8f3;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.proof-verdict.passed {
+  border-color: #b9ddcd;
+  color: #276c51;
+  background: #eaf7f1;
+}
+
+.judge-proof-summary ol {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+}
+
+.judge-proof-summary li {
+  min-width: 0;
+  display: flex;
+  gap: 9px;
+  padding: 12px 13px;
+  border-right: 1px solid #d7e9e1;
+}
+
+.judge-proof-summary li:last-child {
+  border-right: 0;
+}
+
+.judge-proof-summary li > span {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #796f67;
+  background: #ece9e5;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.judge-proof-summary li[data-state="passed"] > span {
+  color: #ffffff;
+  background: #34926e;
+}
+
+.judge-proof-summary li[data-state="active"] > span {
+  color: #5946b6;
+  background: #ebe7fb;
+}
+
+.judge-proof-summary li[data-state="blocked"] > span {
+  color: #ffffff;
+  background: #b4664f;
+}
+
+.judge-proof-summary strong,
+.judge-proof-summary small {
+  display: block;
+}
+
+.judge-proof-summary strong {
+  color: #354b42;
+  font-size: 10px;
+}
+
+.judge-proof-summary small {
+  margin-top: 3px;
+  color: #74827c;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.judge-evidence-details {
+  margin: 12px 16px 0;
+  overflow: hidden;
+  border: 1px solid #deddd7;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.judge-evidence-details > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  color: #555650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.judge-evidence-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.judge-evidence-details > summary strong,
+.judge-evidence-details > summary small {
+  display: block;
+}
+
+.judge-evidence-details > summary strong {
+  font-size: 10px;
+}
+
+.judge-evidence-details > summary small {
+  margin-top: 2px;
+  color: #8b8c86;
+  font-size: 8px;
+}
+
+.judge-evidence-details > summary > span:last-child {
+  color: #6854c7;
+  font-size: 16px;
+  transition: transform 150ms ease;
+}
+
+.judge-evidence-details[open] > summary > span:last-child {
+  transform: rotate(45deg);
+}
+
+.judge-evidence-details > div {
+  border-top: 1px solid #e5e3dc;
+}
+
+.judge-evidence-details .repair-lineage {
+  margin-top: 14px;
+}
+
 .airlock-quarantined .airlock-shield,
 .airlock-discarded .airlock-shield,
 .airlock-recovery-error .airlock-shield,
@@ -2431,6 +2619,23 @@ textarea:focus {
   border-bottom: 1px solid #dfe8e4;
 }
 
+.portable-advanced-options {
+  border-bottom: 1px solid #dfe8e4;
+}
+
+.portable-advanced-options > summary {
+  padding: 11px 14px;
+  color: #53635c;
+  background: #f7faf8;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.portable-advanced-options .portable-trust-levels {
+  border-bottom: 0;
+}
+
 .portable-options label,
 .portable-disclosures label {
   display: flex;
@@ -2568,6 +2773,31 @@ textarea:focus {
   margin-top: 2px;
   color: #75827c;
   font-size: 12px;
+}
+
+.portable-proof-details {
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid #dce7e2;
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.portable-proof-details > summary {
+  padding: 10px 11px;
+  color: #496056;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.portable-proof-details > div {
+  padding: 0 10px 10px;
+  border-top: 1px solid #e4ece8;
+}
+
+.portable-proof-details .portable-identities {
+  margin-top: 10px;
 }
 
 .portable-identities {
@@ -3932,9 +4162,34 @@ textarea:focus {
     gap: 10px;
   }
 
+  .protocol-proof-topbar {
+    flex-direction: column;
+  }
+
+  .protocol-proof-topbar .playground-state {
+    width: 100%;
+    align-items: center;
+    flex-direction: row;
+  }
+
   .playground-state {
     align-items: flex-end;
     flex-direction: column-reverse;
+  }
+
+  .proof-route {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .protocol-proof-playground .composer {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+
+  .protocol-proof-playground .composer textarea {
+    height: 44px;
+    min-height: 44px;
   }
 
   .contract-badge {
@@ -4052,6 +4307,24 @@ textarea:focus {
   .airlock-title-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .judge-proof-summary > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .judge-proof-summary ol {
+    grid-template-columns: 1fr;
+  }
+
+  .judge-proof-summary li {
+    border-right: 0;
+    border-bottom: 1px solid #d7e9e1;
+  }
+
+  .judge-proof-summary li:last-child {
+    border-bottom: 0;
   }
 
   .repair-lineage,
