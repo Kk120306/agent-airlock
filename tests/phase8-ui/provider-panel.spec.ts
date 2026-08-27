@@ -39,6 +39,7 @@ const agent: Agent = {
 };
 const system: SystemInfo = {
   demoMode: false,
+  protocolFixtureMode: false,
   inferenceMode: "modelark",
   arkConfigured: true,
   arkBaseUrl: "http://127.0.0.1:1/api/v3",

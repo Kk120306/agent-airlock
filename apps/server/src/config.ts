@@ -33,6 +33,10 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  AIRLOCK_PROTOCOL_FIXTURE_MODE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   AIRLOCK_HTTP_OBJECT_URL: z.string().url().optional(),
   AIRLOCK_HTTP_OBJECT_SOCKET: z.string().min(1).optional(),
   AIRLOCK_HTTP_OBJECT_VERSION_ID: z
@@ -85,6 +89,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
   const env = envSchema.parse(environment);
   const authToken = env.APP_AUTH_TOKEN?.trim() ?? "";
   const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
+  if (env.AIRLOCK_DEMO_MODE && env.AIRLOCK_PROTOCOL_FIXTURE_MODE) {
+    throw new Error(
+      "AIRLOCK_DEMO_MODE and AIRLOCK_PROTOCOL_FIXTURE_MODE are mutually exclusive",
+    );
+  }
   if (env.AIRLOCK_DEMO_MODE) {
     const arkHostname = new URL(env.ARK_BASE_URL).hostname;
     const demoProfileValid =
@@ -97,6 +106,27 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     if (!demoProfileValid) {
       throw new Error(
         "AIRLOCK_DEMO_MODE requires the loopback-only deterministic fixture profile from npm run demo",
+      );
+    }
+  }
+  if (env.AIRLOCK_PROTOCOL_FIXTURE_MODE) {
+    const arkUrl = new URL(env.ARK_BASE_URL);
+    const fixtureHosts = new Set([
+      "host.docker.internal",
+      "host.containers.internal",
+    ]);
+    const protocolFixtureProfileValid =
+      loopbackHosts.has(env.HOST) &&
+      fixtureHosts.has(arkUrl.hostname) &&
+      arkUrl.protocol === "http:" &&
+      arkUrl.pathname.replace(/\/+$/, "") === "/v1" &&
+      env.RUNTIME_PROVIDER === "container" &&
+      env.CODEX_BIN === "codex" &&
+      env.ARK_API_KEY?.trim() === "deterministic-protocol-fixture" &&
+      env.ARK_MODEL?.trim() === "protocol-fixture";
+    if (!protocolFixtureProfileValid) {
+      throw new Error(
+        "AIRLOCK_PROTOCOL_FIXTURE_MODE requires the loopback-only real-Codex protocol fixture profile",
       );
     }
   }
@@ -174,6 +204,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     transparencySigningKeyPath,
     transparencyLogPath,
     demoMode: env.AIRLOCK_DEMO_MODE,
+    protocolFixtureMode: env.AIRLOCK_PROTOCOL_FIXTURE_MODE,
     httpObjectResource:
       env.AIRLOCK_HTTP_OBJECT_URL &&
       env.AIRLOCK_HTTP_OBJECT_VERSION_ID &&

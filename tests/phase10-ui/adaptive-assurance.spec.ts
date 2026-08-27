@@ -115,6 +115,7 @@ const versions: OutcomeContractVersionRecord[] = [
 
 const system: SystemInfo = {
   demoMode: false,
+  protocolFixtureMode: false,
   inferenceMode: "modelark",
   arkConfigured: false,
   arkBaseUrl: "https://ark.example.invalid",

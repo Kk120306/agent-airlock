@@ -2966,9 +2966,12 @@ export class AgentService {
   async systemInfo(): Promise<Record<string, unknown>> {
     return {
       demoMode: this.config.demoMode,
+      protocolFixtureMode: this.config.protocolFixtureMode,
       inferenceMode: this.config.demoMode
         ? "deterministic-local-fixture"
-        : "modelark",
+        : this.config.protocolFixtureMode
+          ? "local-responses-protocol-fixture"
+          : "modelark",
       arkConfigured: isArkConfigured(this.config),
       arkBaseUrl: this.config.arkBaseUrl,
       arkModel: this.config.arkModel || null,
@@ -3000,6 +3003,8 @@ export class AgentService {
           : null,
       runtime: this.config.demoMode
         ? "Deterministic Codex protocol fixture"
+        : this.config.protocolFixtureMode
+          ? "Real Codex CLI in disposable " + this.config.containerEngine + " Runtime"
         : this.config.runtimeProvider === "container"
           ? "Codex CLI in " + this.config.containerEngine + " Runtime"
           : "Codex CLI in application container",

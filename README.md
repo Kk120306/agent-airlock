@@ -26,6 +26,20 @@ Restart with `npm run demo` to preserve the story, or use `npm run demo -- --res
 ModelArk credentials are needed only for the separate live conformance path described below.
 The project will not silently switch the deterministic demo to paid inference.
 
+## Real Runtime no-cost proof
+
+Use the second judge path when Docker, Colima, or Podman is available and you want to prove the actual pinned Codex CLI and Responses tool protocol without spending ModelArk quota.
+
+```bash
+npm run demo:runtime -- --reset
+```
+
+Open <http://127.0.0.1:3200>, select `Create protocol-proof.txt.`, and send it.
+Real Codex runs inside a disposable container against isolated Candidate State, calls the execution tool, and writes `protocol-proof.txt` only in that Candidate.
+Airlock then runs the required content command, protects `AGENTS.md`, promotes the validated Candidate, and displays the resulting evidence.
+The UI and terminal explicitly identify the local deterministic Responses fixture and state that no ModelArk request or paid inference occurs.
+Run `npm run demo:runtime` without `--reset` to prove restart persistence.
+
 > [!WARNING]
 > This is a single-user proof of concept, not a production multi-tenant sandbox.
 > Do not use production data or credentials.

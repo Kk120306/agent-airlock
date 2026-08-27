@@ -70,6 +70,7 @@
     "poc:doctor": "node --env-file-if-exists=.env scripts/poc-doctor.mjs",
     "poc": "node --env-file-if-exists=.env scripts/run-local-poc.mjs",
     "demo": "npm run build && node scripts/run-demo.mjs",
+    "demo:runtime": "npm run build && node scripts/run-container-browser-fixture.mjs --demo",
     "demo:phase8": "npm run build && node scripts/run-phase-eight-demo.mjs",
     "demo:phase9": "npm run build && node scripts/run-phase-nine-demo.mjs",
     "demo:phase10": "npm run build && node scripts/run-phase-ten-demo.mjs",

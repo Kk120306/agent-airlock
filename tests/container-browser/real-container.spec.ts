@@ -6,51 +6,47 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
   page,
   request,
 }) => {
-  const createdResponse = await request.post("/api/agents", {
-    data: {
-      name: "Browser Container Proof",
-      description: "Real Codex, isolated Candidate, validated Promotion",
-      instructions: "Keep every change inside isolated Candidate State.",
-    },
-  });
-  expect(createdResponse.status()).toBe(201);
-  const created = (await createdResponse.json()) as {
-    agent: {
+  const seededResponse = await request.get("/api/agents");
+  const seeded = (await seededResponse.json()) as {
+    agents: Array<{
       id: string;
+      name: string;
       canonicalStateId: string;
       workspacePath: string;
-    };
+    }>;
   };
+  expect(seeded.agents).toHaveLength(1);
+  const created = { agent: seeded.agents[0] };
+  expect(created.agent.name).toBe("Real Runtime Proof");
   const agentId = created.agent.id;
 
-  const contractResponse = await request.put(
-    `/api/agents/${agentId}/outcome-contract`,
-    {
-      data: {
-        requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
-        protectedPaths: ["AGENTS.md"],
-        maxChangedFiles: 4,
-        maxAddedBytes: 4_096,
-        secretPatterns: [],
-        validationCommands: [
-          {
-            name: "protocol-content",
-            command: "test \"$(cat protocol-proof.txt)\" = candidate-only",
-            required: true,
-            timeoutMs: 10_000,
-          },
-        ],
-      },
-    },
-  );
-  expect(contractResponse.ok()).toBe(true);
-
   await page.goto("/");
+  await expect(page.getByText("REAL RUNTIME PROOF", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Browser Container Proof", exact: true }),
+    page.getByText("Real Codex CLI in a disposable container", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Local deterministic Responses fixture. No ModelArk request or paid inference.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Real Runtime Proof", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Local container · Codex CLI", { exact: true }))
-    .toBeVisible();
+    .not.toBeVisible();
+  await expect(
+    page.getByText("Real Runtime proof · local inference", { exact: true }),
+  ).toBeVisible();
+
+  const systemResponse = await request.get("/api/system");
+  expect(await systemResponse.json()).toMatchObject({
+    demoMode: false,
+    protocolFixtureMode: true,
+    inferenceMode: "local-responses-protocol-fixture",
+    runtimeProvider: "container",
+  });
 
   const composer = page.getByPlaceholder("Describe what you want the Agent to do…");
   await composer.fill("Create protocol-proof.txt.");

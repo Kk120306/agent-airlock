@@ -37,6 +37,8 @@ const starterPrompts = [
   "Demonstrate Airlock rejection by creating damage.txt and deleting the protected AGENTS.md file.",
 ];
 
+const protocolFixturePrompts = ["Create protocol-proof.txt."];
+
 const demoHeroPrompts = {
   promote: "Prepare the multi-resource release.",
   challenge: "Delete AGENTS.md and create damage.txt.",
@@ -2483,6 +2485,8 @@ export default function App() {
             <span>
               {system?.demoMode
                 ? "Free local proof · no network model"
+                : system?.protocolFixtureMode
+                  ? "Real Runtime proof · local inference"
                 : system?.runtimeProvider === "container"
                   ? "Local container · Codex CLI"
                   : "ECS / Docker · Codex CLI"}
@@ -2533,6 +2537,8 @@ export default function App() {
           <span>
             {system?.demoMode
               ? "No paid inference"
+              : system?.protocolFixtureMode
+                ? "Local Responses fixture · " + (system.containerEngine ?? "container")
               : (system?.arkModel ?? "Ark model not configured") +
                 (system?.containerEngine ? " · " + system.containerEngine : "")}
           </span>
@@ -2560,7 +2566,20 @@ export default function App() {
           </div>
         ) : null}
 
-        {!system?.demoMode && system?.arkConfigured && system?.codexAvailable ? (
+        {system?.protocolFixtureMode ? (
+          <div className="protocol-mode-banner" role="status">
+            <span>REAL RUNTIME PROOF</span>
+            <div>
+              <strong>Real Codex CLI in a disposable container</strong>
+              <p>Local deterministic Responses fixture. No ModelArk request or paid inference.</p>
+            </div>
+          </div>
+        ) : null}
+
+        {!system?.demoMode &&
+        !system?.protocolFixtureMode &&
+        system?.arkConfigured &&
+        system?.codexAvailable ? (
           <div className="live-mode-banner" role="status">
             <span>LIVE MODELARK</span>
             <div>
@@ -2958,22 +2977,29 @@ export default function App() {
                     <h3>
                       {system?.demoMode
                         ? "Start with the safe multi-resource release"
+                        : system?.protocolFixtureMode
+                          ? "Run the real container transaction"
                         : `What should ${selected.name} build?`}
                     </h3>
                     <p>
                       {system?.demoMode
                         ? "This local fixture demonstrates transactional Promotion, Quarantine, Repair, and session continuity without calling a network model."
+                        : system?.protocolFixtureMode
+                          ? "Real Codex will make a tool call inside an isolated Candidate workspace. Airlock validates the result before it can replace Canonical State."
                         : "Live ModelArk inference can inspect files, write code, and run commands, while Airlock keeps every change isolated until Validation and Promotion."}
                     </p>
                     <div className="prompt-grid">
-                      {(system?.demoMode ? Object.values(demoHeroPrompts) : starterPrompts).map(
-                        (item) => (
+                      {(system?.demoMode
+                        ? Object.values(demoHeroPrompts)
+                        : system?.protocolFixtureMode
+                          ? protocolFixturePrompts
+                          : starterPrompts
+                      ).map((item) => (
                           <button key={item} onClick={() => setPrompt(item)}>
                             <span>↗</span>
                             {item}
                           </button>
-                        ),
-                      )}
+                        ))}
                     </div>
                   </div>
                 ) : (

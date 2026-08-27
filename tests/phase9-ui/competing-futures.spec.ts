@@ -39,6 +39,7 @@ const agent: Agent = {
 };
 const system: SystemInfo = {
   demoMode: true,
+  protocolFixtureMode: false,
   inferenceMode: "deterministic-local-fixture",
   arkConfigured: true,
   arkBaseUrl: "http://127.0.0.1:1/api/v3",

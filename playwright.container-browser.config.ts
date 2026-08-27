@@ -5,6 +5,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./tests/container-browser",
+  globalTeardown: "./tests/container-browser/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -18,7 +19,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "AIRLOCK_CONTAINER_BROWSER_PORT=3221 node scripts/run-container-browser-fixture.mjs",
+      "AIRLOCK_CONTAINER_DEMO_PORT=3221 AIRLOCK_CONTAINER_DEMO_FIXTURE_PORT=43994 node scripts/run-container-browser-fixture.mjs --demo --ephemeral",
     url: `${baseURL}/api/health`,
     timeout: 30_000,
     reuseExistingServer: false,

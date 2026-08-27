@@ -31,6 +31,30 @@ npm run test:demo:e2e
 `test:demo` verifies port conflicts, clean reset, process shutdown, seeding, and restart persistence.
 `test:demo:e2e` verifies Promotion, destructive Quarantine, unchanged Canonical State, Repair lineage, two accepted mock effects, session continuity, reload persistence, and a 390-pixel layout.
 
+## Real Codex container proof
+
+Use this path to turn the automated Chrome-to-container acceptance gate into an interactive judge demo.
+It requires Docker, Colima, or Podman but no ModelArk credential or paid inference.
+
+```bash
+npm run demo:runtime -- --reset
+```
+
+Open <http://127.0.0.1:3200>, select `Create protocol-proof.txt.`, and send it.
+The production control plane launches the pinned real Codex CLI in a disposable container and serves deterministic Responses tool-call events from a host-local fixture.
+Codex executes the requested write only inside Candidate State.
+Airlock requires `AGENTS.md` and `protocol-proof.txt`, protects `AGENTS.md`, caps the change, and runs `test "$(cat protocol-proof.txt)" = candidate-only` before Promotion.
+The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, `Promoted`, `Journal completed`, and `command:protocol-content`.
+State persists under the dedicated `.local/airlock-container-demo` root unless `--reset` is supplied.
+If the seeded Outcome Contract is edited, restart with `--reset` to restore the guaranteed judge path instead of silently overwriting operator policy.
+The launcher never reads `.env`, never calls ModelArk, and refuses any alternate state root.
+
+Run the same journey as an automated Chrome assertion with:
+
+```bash
+npm run test:container-browser
+```
+
 ## Credentialed ModelArk POC
 
 The local profile runs the React/Fastify control plane on macOS or Linux and

@@ -373,6 +373,7 @@ button {
 
 .config-banner,
 .demo-mode-banner,
+.protocol-mode-banner,
 .live-mode-banner,
 .error-banner {
   max-width: 1180px;
@@ -406,6 +407,36 @@ button {
 .live-mode-banner p {
   display: block;
   margin: 0;
+}
+
+.protocol-mode-banner {
+  gap: 11px;
+  color: #174f68;
+  background: #e8f5fa;
+  border: 1px solid #b9deeb;
+}
+
+.protocol-mode-banner > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #ffffff;
+  background: #16769a;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.protocol-mode-banner strong,
+.protocol-mode-banner p {
+  display: block;
+  margin: 0;
+}
+
+.protocol-mode-banner p {
+  margin-top: 2px;
+  font-size: 10px;
+  opacity: 0.78;
 }
 
 .live-mode-banner p {

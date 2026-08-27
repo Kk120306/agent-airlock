@@ -16,6 +16,15 @@ npm run demo -- --reset
 Open <http://127.0.0.1:3199> and follow the four numbered `Judge path` controls.
 This is a production-build, deterministic local fixture with no ModelArk request or paid inference.
 
+When a container engine is available, also run the real Runtime proof:
+
+```bash
+npm run demo:runtime -- --reset
+```
+
+Open <http://127.0.0.1:3200>, send `Create protocol-proof.txt.`, and show that real Codex made the Candidate-only tool call before required Validation and Promotion.
+This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
+
 ## Rubric evidence
 
 | Category | Weight | Live evidence | Automated evidence |
@@ -41,6 +50,7 @@ This is a production-build, deterministic local fixture with no ModelArk request
 - [ ] `npm run check:phase11:protocol` and `npm run test:phase11:ui` pass without ModelArk credentials, a wallet, RPC, or funds.
 - [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
 - [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
+- [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and promotes `protocol-proof.txt` only after `command:protocol-content` passes.
 
 ## Falsifiable claims
 

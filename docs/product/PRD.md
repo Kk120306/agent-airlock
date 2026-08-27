@@ -245,6 +245,8 @@ This journey describes the complete product direction, including later roadmap p
 - The credentialed `npm run poc` path must remain separate and include a credential-safe fail-fast ModelArk preflight with bounded operator-approved fallback selection for model-specific unavailability.
 - The live path must include a single readiness diagnostic that distinguishes ModelArk availability, local container readiness, and Codex Runtime launch without exposing configured values or provider metadata.
 - A zero-cost integration gate must drive pinned real Codex from Chrome through the production HTTP seam, isolated Candidate State, required Validation, and Promotion without being presented as live ModelArk conformance.
+- The zero-cost real-Codex gate must also be launchable as a persistent interactive judge demo with strict loopback, managed-state, and local-inference configuration.
+- The terminal, system API, and browser must distinguish fake deterministic execution, real Codex with local deterministic Responses, and live ModelArk inference.
 - A reviewer must be able to distinguish reproducible middleware proof from completed local live ModelArk conformance.
 
 ## Reliability requirements

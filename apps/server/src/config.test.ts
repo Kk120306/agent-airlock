@@ -12,6 +12,17 @@ const deterministicDemoEnvironment = {
   ARK_BASE_URL: "http://127.0.0.1:1/api/v3",
 } as const;
 
+const protocolFixtureEnvironment = {
+  NODE_ENV: "production",
+  HOST: "127.0.0.1",
+  AIRLOCK_PROTOCOL_FIXTURE_MODE: "true",
+  RUNTIME_PROVIDER: "container",
+  CODEX_BIN: "codex",
+  ARK_API_KEY: "deterministic-protocol-fixture",
+  ARK_MODEL: "protocol-fixture",
+  ARK_BASE_URL: "http://host.docker.internal:43994/v1",
+} as const;
+
 describe("deterministic demo configuration", () => {
   it("accepts only the complete loopback fixture profile", () => {
     expect(loadConfig(deterministicDemoEnvironment).demoMode).toBe(true);
@@ -28,6 +39,46 @@ describe("deterministic demo configuration", () => {
     expect(() =>
       loadConfig({ ...deterministicDemoEnvironment, ...override }),
     ).toThrow(/loopback-only deterministic fixture profile/);
+  });
+});
+
+describe("real Codex protocol fixture configuration", () => {
+  it("accepts only the complete loopback container profile", () => {
+    const config = loadConfig(protocolFixtureEnvironment);
+    expect(config.protocolFixtureMode).toBe(true);
+    expect(config.demoMode).toBe(false);
+  });
+
+  it("accepts the Podman host gateway", () => {
+    expect(
+      loadConfig({
+        ...protocolFixtureEnvironment,
+        ARK_BASE_URL: "http://host.containers.internal:43994/v1/",
+      }).protocolFixtureMode,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["remote app host", { HOST: "0.0.0.0" }],
+    ["external inference URL", { ARK_BASE_URL: "https://ark.example.com/v1" }],
+    ["wrong fixture path", { ARK_BASE_URL: "http://host.docker.internal:43994/v2" }],
+    ["local-process Runtime", { RUNTIME_PROVIDER: "local-process" }],
+    ["fixture Codex binary", { CODEX_BIN: "/tmp/fake-codex.mjs" }],
+    ["non-fixture key", { ARK_API_KEY: "organizer-key" }],
+    ["non-fixture model", { ARK_MODEL: "ep-live-model" }],
+  ])("rejects a %s", (_name, override) => {
+    expect(() =>
+      loadConfig({ ...protocolFixtureEnvironment, ...override }),
+    ).toThrow(/loopback-only real-Codex protocol fixture profile/);
+  });
+
+  it("cannot be combined with the fake deterministic demo", () => {
+    expect(() =>
+      loadConfig({
+        ...protocolFixtureEnvironment,
+        AIRLOCK_DEMO_MODE: "true",
+      }),
+    ).toThrow(/mutually exclusive/);
   });
 });
 

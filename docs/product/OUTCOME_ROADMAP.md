@@ -318,8 +318,10 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - The four-step guide stages the complete Promotion, Quarantine, Repair, and continuity story through real backend behavior.
 - The dedicated production Chrome path completed in 6.3 seconds and asserted the 390-pixel viewport without document overflow.
 - Launcher integration proves port conflicts, reset, graceful stop, restart persistence, and deterministic seeding.
+- `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required content Validation and explicit local Responses fixture disclosure.
 - ADR 0009 freezes P0 scope and separates the deterministic release proof from credentialed ModelArk conformance.
-- The credential-safe browser-to-container path reaches the BytePlus Asia Pacific Responses API, while live conformance must be rerun at judging time because provider capacity is external and time-varying.
+- The credential-safe live preflight currently reaches the BytePlus Asia Pacific Responses API but receives HTTP 429 because configured free quota or the inference limit is unavailable.
+- Live ModelArk conformance must be rerun at judging time because provider quota, capacity, and model availability are external and time-varying.
 
 ## Post-hackathon phases
 

@@ -426,7 +426,11 @@ export interface CandidateSet {
 
 export interface SystemInfo {
   demoMode: boolean;
-  inferenceMode: "deterministic-local-fixture" | "modelark";
+  protocolFixtureMode: boolean;
+  inferenceMode:
+    | "deterministic-local-fixture"
+    | "local-responses-protocol-fixture"
+    | "modelark";
   arkConfigured: boolean;
   arkBaseUrl: string;
   arkModel: string | null;
