@@ -22,15 +22,16 @@ When a container engine is available, also run the real Runtime proof:
 npm run demo:runtime -- --reset
 ```
 
-Open <http://127.0.0.1:3200>, send `Create protocol-proof.txt.`, and show the compact proof that real Codex used isolated Candidate State, every required Validation passed, and Canonical State advanced.
-Open the complete transaction evidence for the journal and command result, then select `Generate and verify proof` to finish with a locally verified signed packet.
+Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the compact proof that real Codex used isolated Candidate State, every required Validation passed, and Canonical State advanced.
+Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
+Show the paired verdict, open the decisive failed command evidence, then select `Generate and verify proof` to finish with a locally verified signed rejection packet.
 This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
 
 ## Rubric evidence
 
 | Category | Weight | Live evidence | Automated evidence |
 | --- | ---: | --- | --- |
-| End-to-end middleware behavior | 40% | The starter Playground invokes a Run that mutates four Candidate resources, promotes a valid future, quarantines a destructive future, repairs it, and resumes the repaired Agent session. | `npm run test:demo:e2e` asserts the four-step browser story, `npm run test:container-browser` proves a real Chrome-to-Codex container Promotion, and `npm run test:container-transaction` adds signed receipt, restart, and continuity evidence. |
+| End-to-end middleware behavior | 40% | The starter Playground invokes a Run that mutates four Candidate resources, promotes a valid future, quarantines a destructive future, repairs it, and resumes the repaired Agent session. | `npm run test:demo:e2e` asserts the four-step browser story, `npm run test:container-browser` proves paired real Chrome-to-Codex container Promotion and Quarantine, and `npm run test:container-transaction` adds restart and continuity evidence. |
 | Technical design and integration | 25% | The one-page architecture identifies the untrusted Runtime, trusted Airlock decision boundary, versioned Outcome Contract, monotonic journal, atomic canonical manifest, bounded Repair lineage, and post-Promotion dispatcher. | Server tests exercise the `AgentRunner`, `WorkspaceManager`, journal, validator, outbox, JSON store, HTTP API, and startup reconciliation seams. |
 | Verification and robustness | 20% | The destructive attempt visibly leaves Canonical State unchanged, Repair reuses failure evidence, and one evidence packet verifies the receipt plus every selected optional proof locally. | `npm run check:phase7` covers transactional failure seams, while `npm run check:phase11:protocol` and `npm run test:phase11:ui` cover cross-process and zero-upload browser verification, tampering, trust roots, and optional-proof binding. |
 | Demo and reproducibility | 15% | One command seeds the Agent, prints the URL and disclosure, preserves restart state, and gives the judge a four-step guided story. | Launcher integration verifies reset, restart, shutdown, port conflicts, and seeding; the release audit checks tracked and untracked release files for high-confidence secrets, merge conflicts, and broken relative Markdown targets. |

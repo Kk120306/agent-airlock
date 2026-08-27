@@ -868,6 +868,163 @@ textarea:focus {
   background: #3d997a;
 }
 
+.protocol-scenario-guide {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 9px 14px;
+  align-items: stretch;
+  padding: 0 22px 14px;
+}
+
+.protocol-scenario-guide > header {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.protocol-scenario-guide > header strong,
+.protocol-scenario-guide > header span {
+  display: block;
+}
+
+.protocol-scenario-guide > header strong {
+  color: #42433e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.protocol-scenario-guide > header > span {
+  color: #777870;
+  font-size: 8px;
+}
+
+.protocol-scenario-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.protocol-scenario-actions button {
+  min-width: 0;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid #dedbe8;
+  border-radius: 11px;
+  color: #51524e;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.protocol-scenario-actions button:hover:not(:disabled) {
+  border-color: #9b8ce2;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px rgba(57, 48, 103, 0.08);
+}
+
+.protocol-scenario-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.protocol-scenario-actions button[data-complete="true"] {
+  border-color: #b9ddcd;
+  background: #f2faf6;
+  opacity: 1;
+}
+
+.protocol-scenario-actions button > span {
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #6753c7;
+  background: #efecfb;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.protocol-scenario-actions button[data-complete="true"] > span {
+  color: #ffffff;
+  background: #34926e;
+}
+
+.protocol-scenario-actions button div {
+  min-width: 0;
+}
+
+.protocol-scenario-actions strong,
+.protocol-scenario-actions small {
+  display: block;
+}
+
+.protocol-scenario-actions strong {
+  color: #42433e;
+  font-size: 10px;
+}
+
+.protocol-scenario-actions small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #85857e;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.protocol-paired-verdict {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #b9ddcd;
+  border-radius: 10px;
+  background: #eef8f3;
+}
+
+.protocol-paired-verdict > span {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #34926e;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.protocol-paired-verdict strong,
+.protocol-paired-verdict small {
+  display: block;
+}
+
+.protocol-paired-verdict strong {
+  color: #2e5948;
+  font-size: 10px;
+}
+
+.protocol-paired-verdict small {
+  margin-top: 2px;
+  color: #668173;
+  font-size: 8px;
+}
+
+.protocol-paired-verdict code {
+  color: #2f7056;
+  font-size: 9px;
+}
+
 .demo-step > span:last-child {
   min-width: 0;
 }
@@ -1742,6 +1899,26 @@ textarea:focus {
   border-color: #b9ddcd;
   color: #276c51;
   background: #eaf7f1;
+}
+
+.airlock-quarantined .judge-proof-summary {
+  border-color: #e4c8ba;
+  background: #fff9f6;
+}
+
+.airlock-quarantined .judge-proof-summary > header {
+  border-color: #ecdacf;
+  background:
+    radial-gradient(circle at 100% 0, rgba(180, 102, 79, 0.12), transparent 48%),
+    #ffffff;
+}
+
+.airlock-quarantined .judge-proof-summary h4 {
+  color: #6f4134;
+}
+
+.airlock-quarantined .judge-proof-summary li {
+  border-color: #ecdacf;
 }
 
 .judge-proof-summary ol {
@@ -3997,6 +4174,16 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .protocol-scenario-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .protocol-scenario-guide > header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
   .demo-guide-heading p {
     display: none;
   }
@@ -4242,6 +4429,31 @@ textarea:focus {
   .demo-guide {
     gap: 7px;
     padding: 0 14px 12px;
+  }
+
+  .protocol-scenario-guide {
+    gap: 7px;
+    padding: 0 14px 12px;
+  }
+
+  .protocol-scenario-guide > header strong {
+    font-size: 10px;
+  }
+
+  .protocol-scenario-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .protocol-scenario-actions button {
+    width: 100%;
+  }
+
+  .protocol-paired-verdict {
+    grid-template-columns: 27px minmax(0, 1fr);
+  }
+
+  .protocol-paired-verdict code {
+    grid-column: 2;
   }
 
   .demo-step-list {

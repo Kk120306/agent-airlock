@@ -319,6 +319,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - The dedicated production Chrome path completed in 6.3 seconds and asserted the 390-pixel viewport without document overflow.
 - Launcher integration proves port conflicts, reset, graceful stop, restart persistence, and deterministic seeding.
 - `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required content Validation and explicit local Responses fixture disclosure.
+- Its paired controls run both a valid and deliberately invalid Candidate through that same real Runtime, then compare Canonical State advancement with an unchanged rejection fingerprint.
 - The real Runtime UI now reduces the transaction to an evidence-backed `Run`, `Validate`, `Promote`, and `Verify` judge path, while retaining the complete resource, journal, Validation, and change record behind one inspection control.
 - Its final action generates a private-by-default signed evidence packet and verifies the signature locally before download.
 - ADR 0009 freezes P0 scope and separates the deterministic release proof from credentialed ModelArk conformance.

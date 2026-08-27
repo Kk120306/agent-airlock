@@ -4,6 +4,7 @@ const host = process.env.AIRLOCK_PROTOCOL_FIXTURE_HOST ?? "0.0.0.0";
 const port = Number(process.env.AIRLOCK_PROTOCOL_FIXTURE_PORT ?? "43991");
 const maximumRequestBytes = 2 * 1024 * 1024;
 let responseSequence = 0;
+const unsafeToolCalls = new Set();
 
 function eventStream(events) {
   return events
@@ -73,6 +74,11 @@ const server = createServer(async (request, response) => {
   const hasToolResult =
     latestInput?.type === "function_call_output" ||
     latestInput?.type === "custom_tool_call_output";
+  const toolCallId =
+    typeof latestInput?.call_id === "string" ? latestInput.call_id : null;
+  const unsafeRequest = hasToolResult
+    ? toolCallId !== null && unsafeToolCalls.delete(toolCallId)
+    : /unsafe protocol change|rejection proof/i.test(JSON.stringify(input));
   responseSequence += 1;
   const responseId = `resp-fixture-${responseSequence}`;
   const events = [
@@ -88,20 +94,26 @@ const server = createServer(async (request, response) => {
         content: [
           {
             type: "output_text",
-            text: "Protocol fixture completed the requested Candidate edit.",
+            text: unsafeRequest
+              ? "Protocol fixture completed the deliberately invalid Candidate edit."
+              : "Protocol fixture completed the requested Candidate edit.",
           },
         ],
       },
     });
   } else {
+    const callId = `call-fixture-write-${responseSequence}`;
+    if (unsafeRequest) unsafeToolCalls.add(callId);
     events.push({
       type: "response.output_item.done",
       item: {
         type: "function_call",
-        call_id: `call-fixture-write-${responseSequence}`,
+        call_id: callId,
         name: "exec_command",
         arguments: JSON.stringify({
-          cmd: "printf 'candidate-only\\n' > protocol-proof.txt",
+          cmd: unsafeRequest
+            ? "printf 'unsafe-candidate\\n' > protocol-proof.txt"
+            : "printf 'candidate-only\\n' > protocol-proof.txt",
         }),
       },
     });

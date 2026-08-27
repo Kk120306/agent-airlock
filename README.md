@@ -34,10 +34,12 @@ Use the second judge path when Docker, Colima, or Podman is available and you wa
 npm run demo:runtime -- --reset
 ```
 
-Open <http://127.0.0.1:3200>, select `Create protocol-proof.txt.`, and send it.
+Open <http://127.0.0.1:3200> and use the two `Paired proof` controls.
 Real Codex runs inside a disposable container against isolated Candidate State, calls the execution tool, and writes `protocol-proof.txt` only in that Candidate.
-Airlock then runs the required content command, protects `AGENTS.md`, promotes the validated Candidate, and displays the resulting evidence.
-The focused judge view summarizes Candidate isolation, required Validation, and Canonical State advancement from the persisted Run before offering the complete forensic evidence.
+The passing Candidate satisfies the required content command and advances Canonical State.
+The failing Candidate writes deliberately invalid content, fails that same command, remains inspectable in Quarantine, and leaves the canonical fingerprint and accepted file unchanged.
+The focused judge view summarizes Candidate isolation, the decisive Validation, and the actual canonical fingerprint result before offering the complete forensic evidence.
+After both controls complete, the paired verdict proves that the same Agent and Outcome Contract controlled both outcomes.
 Select `Generate and verify proof` to produce a private-by-default signed evidence packet and verify it locally before download.
 The UI and terminal explicitly identify the local deterministic Responses fixture and state that no ModelArk request or paid inference occurs.
 Run `npm run demo:runtime` without `--reset` to prove restart persistence.

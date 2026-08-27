@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-test("the browser drives a real Codex Candidate through Validation and Promotion", async ({
+test("the browser proves real Codex Promotion and Quarantine against one Canonical State", async ({
   page,
   request,
 }) => {
@@ -58,9 +58,11 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
     runtimeProvider: "container",
   });
 
-  const composer = page.getByPlaceholder("Describe what you want the Agent to do…");
-  await composer.fill("Create protocol-proof.txt.");
-  await page.getByRole("button", { name: "Send message" }).click();
+  const pairedProof = page.getByRole("region", { name: "Paired safety proof" });
+  await expect(
+    pairedProof.getByText("Same Agent. Same contract. Two isolated futures."),
+  ).toBeVisible();
+  await pairedProof.getByRole("button", { name: /Run passing Candidate/ }).click();
 
   await expect(
     page.getByText("Protocol fixture completed the requested Candidate edit."),
@@ -91,8 +93,54 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
     evidence.getByRole("button", { name: "Download evidence packet" }),
   ).toBeEnabled();
 
+  await expect(
+    pairedProof.getByRole("button", { name: /Safe future promoted/ }),
+  ).toBeVisible();
+  await pairedProof.getByRole("button", { name: /Run failing Candidate/ }).click();
+  await expect(
+    page.getByText("Protocol fixture completed the deliberately invalid Candidate edit."),
+  ).toBeVisible({ timeout: 45_000 });
+
+  const rejectedEvidence = page.getByRole("article", {
+    name: "Agent Airlock evidence",
+  });
+  await expect(
+    rejectedEvidence.getByRole("heading", { name: "Quarantined" }),
+  ).toBeVisible();
+  const rejectedProof = rejectedEvidence.getByRole("region", {
+    name: "Judge proof summary",
+  });
+  await expect(
+    rejectedProof.getByRole("heading", {
+      name: "Unsafe future blocked: accepted reality did not move",
+    }),
+  ).toBeVisible();
+  await expect(rejectedProof.getByText("7/8 required Validations passed."))
+    .toBeVisible();
+  await expect(
+    rejectedProof.getByText("Canonical State unchanged", { exact: true }),
+  ).toBeVisible();
+  await expect(pairedProof.getByText("Both outcomes proven", { exact: true }))
+    .toBeVisible();
+  await expect(
+    pairedProof.getByText("Airlock controlled both outcomes", { exact: true }),
+  ).toBeVisible();
+
+  await rejectedEvidence
+    .getByText("Inspect complete transaction evidence", { exact: true })
+    .click();
+  await expect(
+    rejectedEvidence.getByText("command:protocol-content", { exact: true }).first(),
+  ).toBeVisible();
+  await rejectedEvidence
+    .getByRole("button", { name: "Generate and verify proof" })
+    .click();
+  await expect(
+    rejectedEvidence.getByText("Signed proof verified locally", { exact: true }),
+  ).toBeVisible();
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(judgeProof).toBeVisible();
+  await expect(rejectedProof).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
 
@@ -104,12 +152,20 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
         disposition: string;
         canonicalStateIdBefore: string;
         canonicalStateIdAfter: string;
+        canonicalContentHashBefore: string;
+        canonicalContentHashAfter: string;
+        quarantinePath: string | null;
         validations: Array<{ name: string; status: string; required: boolean }>;
       };
     }>;
   };
-  const run = runs.runs[0];
-  expect(run).toMatchObject({
+  const promotedRun = runs.runs.find(
+    (run) => run.transaction.disposition === "promoted",
+  );
+  const quarantinedRun = runs.runs.find(
+    (run) => run.transaction.disposition === "quarantined",
+  );
+  expect(promotedRun).toMatchObject({
     status: "completed",
     transaction: {
       disposition: "promoted",
@@ -117,14 +173,35 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
       canonicalStateIdAfter: expect.any(String),
     },
   });
-  expect(run?.transaction.canonicalStateIdAfter).not.toBe(
-    run?.transaction.canonicalStateIdBefore,
+  expect(promotedRun?.transaction.canonicalStateIdAfter).not.toBe(
+    promotedRun?.transaction.canonicalStateIdBefore,
   );
-  expect(run?.transaction.validations).toEqual(
+  expect(promotedRun?.transaction.validations).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
         name: "command:protocol-content",
         status: "passed",
+        required: true,
+      }),
+    ]),
+  );
+  expect(quarantinedRun).toMatchObject({
+    status: "completed",
+    transaction: {
+      disposition: "quarantined",
+      canonicalStateIdBefore: promotedRun?.transaction.canonicalStateIdAfter,
+      canonicalStateIdAfter: promotedRun?.transaction.canonicalStateIdAfter,
+      quarantinePath: expect.any(String),
+    },
+  });
+  expect(quarantinedRun?.transaction.canonicalContentHashAfter).toBe(
+    quarantinedRun?.transaction.canonicalContentHashBefore,
+  );
+  expect(quarantinedRun?.transaction.validations).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: "command:protocol-content",
+        status: "failed",
         required: true,
       }),
     ]),
@@ -141,4 +218,14 @@ test("the browser drives a real Codex Candidate through Validation and Promotion
       "utf8",
     ),
   ).toBe("candidate-only\n");
+  expect(
+    await readFile(
+      path.join(
+        quarantinedRun!.transaction.quarantinePath!,
+        "workspace",
+        "protocol-proof.txt",
+      ),
+      "utf8",
+    ),
+  ).toBe("unsafe-candidate\n");
 });

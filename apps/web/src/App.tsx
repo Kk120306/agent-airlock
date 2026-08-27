@@ -38,7 +38,10 @@ const starterPrompts = [
   "Demonstrate Airlock rejection by creating damage.txt and deleting the protected AGENTS.md file.",
 ];
 
-const protocolFixturePrompts = ["Create protocol-proof.txt."];
+const protocolFixturePrompts = {
+  promote: "Create protocol-proof.txt.",
+  challenge: "Attempt an unsafe protocol change for the rejection proof.",
+} as const;
 
 const demoHeroPrompts = {
   promote: "Prepare the multi-resource release.",
@@ -138,6 +141,7 @@ function JudgeProofSummary({
     "recovery-error",
   ].includes(disposition);
   const promoted = disposition === "promoted";
+  const quarantined = disposition === "quarantined";
   const candidatePrepared = transaction.events.some(
     (event) => event.status === "executing" || event.status === "validating",
   );
@@ -150,6 +154,8 @@ function JudgeProofSummary({
           <h4>
             {promoted
               ? "Proof complete: only the validated future became reality"
+              : quarantined
+                ? "Unsafe future blocked: accepted reality did not move"
               : terminal
                 ? "Promotion blocked: Canonical State stayed protected"
                 : "Real transaction in progress"}
@@ -168,7 +174,7 @@ function JudgeProofSummary({
           </div>
         </li>
         <li data-state={promoted ? "passed" : terminal ? "blocked" : "active"}>
-          <span>{promoted ? "✓" : "2"}</span>
+          <span>{promoted ? "✓" : terminal ? "!" : "2"}</span>
           <div>
             <strong>Outcome Contract enforced</strong>
             <small>
@@ -178,20 +184,103 @@ function JudgeProofSummary({
             </small>
           </div>
         </li>
-        <li data-state={promoted ? "passed" : terminal ? "blocked" : "pending"}>
-          <span>{promoted ? "✓" : "3"}</span>
+        <li
+          data-state={
+            promoted || quarantined ? "passed" : terminal ? "blocked" : "pending"
+          }
+        >
+          <span>{promoted ? "✓" : terminal ? "✓" : "3"}</span>
           <div>
-            <strong>{promoted ? "Canonical State advanced" : "Promotion decision"}</strong>
+            <strong>
+              {promoted
+                ? "Canonical State advanced"
+                : terminal
+                  ? "Canonical State unchanged"
+                  : "Promotion decision"}
+            </strong>
             <small>
               {promoted
                 ? `${shortHash(transaction.canonicalContentHashBefore)} to ${shortHash(transaction.canonicalContentHashAfter)}.`
                 : terminal
-                  ? "The prior Canonical fingerprint remains authoritative."
+                  ? `${shortHash(transaction.canonicalContentHashBefore)} remained ${shortHash(transaction.canonicalContentHashAfter)}.`
                   : "Promotion remains impossible until every required Validation passes."}
             </small>
           </div>
         </li>
       </ol>
+    </section>
+  );
+}
+
+function ProtocolScenarioGuide({
+  runs,
+  busy,
+  onRun,
+}: {
+  runs: AgentRun[];
+  busy: boolean;
+  onRun: (prompt: string) => void;
+}) {
+  const promoted = runs.find(
+    (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
+  );
+  const quarantined = runs.find(
+    (run) => !run.candidateSetId && run.transaction?.disposition === "quarantined",
+  );
+  const complete = promoted?.transaction && quarantined?.transaction;
+
+  return (
+    <section className="protocol-scenario-guide" aria-label="Paired safety proof">
+      <header>
+        <div>
+          <span className="eyebrow">Paired proof</span>
+          <strong>Same Agent. Same contract. Two isolated futures.</strong>
+        </div>
+        <span>{complete ? "Both outcomes proven" : "Run both outcomes"}</span>
+      </header>
+      <div className="protocol-scenario-actions">
+        <button
+          type="button"
+          data-complete={Boolean(promoted)}
+          onClick={() => onRun(protocolFixturePrompts.promote)}
+          disabled={busy}
+        >
+          <span>{promoted ? "✓" : "1"}</span>
+          <div>
+            <strong>{promoted ? "Safe future promoted" : "Run passing Candidate"}</strong>
+            <small>Required Validations pass and Canonical State advances.</small>
+          </div>
+        </button>
+        <button
+          type="button"
+          data-complete={Boolean(quarantined)}
+          onClick={() => onRun(protocolFixturePrompts.challenge)}
+          disabled={busy || !promoted}
+        >
+          <span>{quarantined ? "✓" : "2"}</span>
+          <div>
+            <strong>
+              {quarantined ? "Unsafe future quarantined" : "Run failing Candidate"}
+            </strong>
+            <small>One required Validation fails and accepted reality does not move.</small>
+          </div>
+        </button>
+      </div>
+      {complete && (
+        <div className="protocol-paired-verdict" role="status">
+          <span aria-hidden="true">✓</span>
+          <div>
+            <strong>Airlock controlled both outcomes</strong>
+            <small>
+              The valid Candidate advanced Canonical State. The invalid Candidate left its
+              fingerprint unchanged.
+            </small>
+          </div>
+          <code>
+            {shortHash(quarantined.transaction!.canonicalContentHashBefore)} = {shortHash(quarantined.transaction!.canonicalContentHashAfter)}
+          </code>
+        </div>
+      )}
     </section>
   );
 }
@@ -1555,7 +1644,8 @@ function AirlockEvidence({
     providerPreparationFailed ||
     (transaction.providerResources.length > 0 &&
       transaction.providerResources.some((resource) => !resource.quarantine));
-  const compactJudgeEvidence = judgeProofMode && disposition === "promoted";
+  const compactJudgeEvidence =
+    judgeProofMode && ["promoted", "quarantined"].includes(disposition);
   const title =
     recoveryFailed
       ? "Recovery needs attention"
@@ -2025,6 +2115,7 @@ export default function App() {
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [runs, setRuns] = useState<AgentRun[]>([]);
   const [activeCandidateSet, setActiveCandidateSet] = useState<CandidateSet | null>(null);
   const [assuranceProposals, setAssuranceProposals] = useState<AssuranceProposal[]>([]);
   const [contractVersions, setContractVersions] = useState<
@@ -2135,6 +2226,7 @@ export default function App() {
     setShowSettings(false);
     if (!selectedId) {
       setMessages([]);
+      setRuns([]);
       setAssuranceProposals([]);
       setContractVersions([]);
       return;
@@ -2149,6 +2241,7 @@ export default function App() {
       .then(([, result, candidateSetsResult, assuranceResult, versionsResult]) => {
         if (selectedIdRef.current !== selectedId) return;
         const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
+        setRuns(result.runs);
         setActiveRun(latest);
         const latestCandidateSet = candidateSetsResult.candidateSets[0] ?? null;
         setActiveCandidateSet(latestCandidateSet);
@@ -2269,7 +2362,12 @@ export default function App() {
         const result = await api.run(runId);
         if (selectedIdRef.current === agentId) setActiveRun(result.run);
         if (!["queued", "running"].includes(result.run.status)) {
-          await Promise.all([refreshMessages(agentId), refreshAgents()]);
+          const [, , runResult] = await Promise.all([
+            refreshMessages(agentId),
+            refreshAgents(),
+            api.runs(agentId),
+          ]);
+          if (selectedIdRef.current === agentId) setRuns(runResult.runs);
           return;
         }
       }
@@ -2505,10 +2603,8 @@ export default function App() {
     }
   };
 
-  const sendMessage = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!selected || !prompt.trim()) return;
-    const content = prompt.trim();
+  const runPrompt = async (content: string) => {
+    if (!selected || !content.trim()) return;
     setPrompt("");
     setError(null);
     try {
@@ -2516,6 +2612,7 @@ export default function App() {
       if (selectedIdRef.current === selected.id) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
+        setRuns((current) => [result.run, ...current]);
       }
       setAgents((current) =>
         current.map((agent) =>
@@ -2528,6 +2625,11 @@ export default function App() {
       setActiveRun(null);
       await refreshAgents();
     }
+  };
+
+  const sendMessage = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await runPrompt(prompt.trim());
   };
 
   const repairActiveRun = async () => {
@@ -3154,6 +3256,13 @@ export default function App() {
                     </div>
                   </section>
                 ) : null}
+                {system?.protocolFixtureMode ? (
+                  <ProtocolScenarioGuide
+                    runs={runs}
+                    busy={demoActionBusy}
+                    onRun={(content) => void runPrompt(content)}
+                  />
+                ) : null}
               </div>
 
               <div className="messages">
@@ -3180,7 +3289,7 @@ export default function App() {
                       {(system?.demoMode
                         ? Object.values(demoHeroPrompts)
                         : system?.protocolFixtureMode
-                          ? protocolFixturePrompts
+                          ? Object.values(protocolFixturePrompts)
                           : starterPrompts
                       ).map((item) => (
                           <button key={item} onClick={() => setPrompt(item)}>

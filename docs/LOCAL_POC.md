@@ -40,12 +40,14 @@ It requires Docker, Colima, or Podman but no ModelArk credential or paid inferen
 npm run demo:runtime -- --reset
 ```
 
-Open <http://127.0.0.1:3200>, select `Create protocol-proof.txt.`, and send it.
+Open <http://127.0.0.1:3200> and select `Run passing Candidate` under `Paired proof`.
 The production control plane launches the pinned real Codex CLI in a disposable container and serves deterministic Responses tool-call events from a host-local fixture.
 Codex executes the requested write only inside Candidate State.
 Airlock requires `AGENTS.md` and `protocol-proof.txt`, protects `AGENTS.md`, caps the change, and runs `test "$(cat protocol-proof.txt)" = candidate-only` before Promotion.
-The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, the `Run` to `Validate` to `Promote` to `Verify` path, and a compact evidence-backed Promotion verdict.
-Open `Inspect complete transaction evidence` to show `Journal completed` and `command:protocol-content` without crowding the primary judge story.
+Then select `Run failing Candidate` to make real Codex write deliberately invalid content in a second isolated Candidate.
+The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, the `Run` to `Validate` to `Promote` to `Verify` path, a compact evidence-backed Quarantine verdict, and an unchanged canonical fingerprint.
+The canonical workspace must still contain `candidate-only`, while the retained Quarantine contains `unsafe-candidate`.
+Open the complete success evidence to show `Journal completed`, then open the rejection evidence to show the decisive `command:protocol-content` failure without crowding the primary judge story.
 Select `Generate and verify proof` to create a private-by-default evidence packet and confirm its signature locally.
 State persists under the dedicated `.local/airlock-container-demo` root unless `--reset` is supplied.
 If the seeded Outcome Contract is edited, restart with `--reset` to restore the guaranteed judge path instead of silently overwriting operator policy.

@@ -287,8 +287,10 @@ try {
     console.log("Runtime: real pinned Codex CLI in a disposable container.");
     console.log("Inference: local deterministic Responses fixture.");
     console.log("Cost: no ModelArk request or paid inference.");
-    console.log("Prompt: Create protocol-proof.txt.");
-    console.log("Expected: Candidate validation passes and Promotion advances Canonical State.");
+    console.log("Proof 1: Run passing Candidate.");
+    console.log("Expected: Validation passes and Promotion advances Canonical State.");
+    console.log("Proof 2: Run failing Candidate.");
+    console.log("Expected: Validation fails, Candidate enters Quarantine, and Canonical State is unchanged.");
     console.log(
       ephemeralRequested
         ? "State: ephemeral automated proof."

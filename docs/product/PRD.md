@@ -280,6 +280,8 @@ This journey describes the complete product direction, including later roadmap p
 - A successful Run promotes a valid workspace and the next Playground message continues from that promoted state.
 - A destructive Run that deletes required files is quarantined and leaves the Canonical State content hash unchanged.
 - The complete success and rejection story fits in a three-minute live demonstration.
+- The no-cost real Runtime proof presents paired one-click Promotion and Quarantine runs against the same Agent and Outcome Contract.
+- Its rejection proof retains the invalid Candidate, shows the failed required command, and proves the canonical content hash and accepted file are unchanged.
 - `npm run check` passes.
 - A rejected SQLite mutation leaves canonical query results unchanged.
 - A deferred mock external action executes once after promotion and zero times after rejection.
