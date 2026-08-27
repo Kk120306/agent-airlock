@@ -5,6 +5,7 @@ import {
   verifySignedTransparencyCheckpoint,
   verifyTransparencyInclusion,
   type PortablePromotionEnvelope,
+  type PortableDecisionChain,
   type SignedTransparencyCheckpoint,
   type TransparencyInclusionProof,
 } from "@agent-airlock/portable-promotion-receipt";
@@ -2000,5 +2001,5 @@ interface PortableExportResponse {
     fundsSpent: number;
   } | null;
   packet: Parameters<typeof verifyPortableEvidencePacket>[0];
-  decisionChain: Parameters<typeof verifyPortableDecisionChain>[0] | null;
+  decisionChain: PortableDecisionChain | null;
 }
