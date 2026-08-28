@@ -266,6 +266,29 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     repairedEvidence.getByText(/Evidence commitment [a-f0-9]{8} · passed required/).first(),
   ).toBeVisible();
   await expect(
+    repairedEvidence.getByText("0/10 required selected", { exact: true }),
+  ).toBeVisible();
+  await repairedEvidence.getByRole("button", { name: "Select all required" }).click();
+  await expect(
+    repairedEvidence.getByText("Disclose signed evidence (10/11 selected)"),
+  ).toBeVisible();
+  await expect(
+    repairedEvidence.getByText("10/10 required selected", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    repairedEvidence.getByRole("button", { name: "Download verified decision chain" }),
+  ).toBeDisabled();
+  await expect(
+    repairedEvidence.getByRole("button", { name: "Inspect in zero-upload verifier" }),
+  ).toBeDisabled();
+  await repairedEvidence.getByRole("button", { name: "Regenerate proof" }).click();
+  await expect(
+    repairedEvidence.getByText(
+      "2 signed decisions verified locally with every Canonical State handoff intact.",
+      { exact: true },
+    ),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
     repairedEvidence.getByRole("button", { name: "Download verified evidence packet" }),
   ).not.toBeVisible();
   await repairedEvidence

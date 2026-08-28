@@ -1411,11 +1411,31 @@ function PortableTrustExport({
   ).length;
   const optionalDisclosureCount =
     availableDisclosures.length - requiredDisclosureCount;
+  const requiredDisclosureIdentities = availableDisclosures
+    .filter((disclosure) => disclosure.required)
+    .map((disclosure) => disclosure.identity);
+  const selectedRequiredCount = requiredDisclosureIdentities.filter((identity) =>
+    selectedDisclosures.includes(identity),
+  ).length;
+  const allRequiredSelected =
+    requiredDisclosureCount > 0 && selectedRequiredCount === requiredDisclosureCount;
 
   const evidenceCommitmentLabel = (identity: string) => {
     const separator = identity.lastIndexOf(":");
     const commitment = identity.slice(separator + 1, separator + 9);
     return `Evidence commitment ${commitment}`;
+  };
+
+  const selectAllRequiredDisclosures = () => {
+    setSelectedDisclosures((current) =>
+      [...new Set([...current, ...requiredDisclosureIdentities])].sort(),
+    );
+    invalidatePendingExport();
+  };
+
+  const clearDisclosures = () => {
+    setSelectedDisclosures([]);
+    invalidatePendingExport();
   };
 
   return (
@@ -1490,7 +1510,33 @@ function PortableTrustExport({
             {" required and "}{optionalDisclosureCount} optional. Only selected redacted
             leaves and their inclusion proofs enter the downloaded envelope.
           </p>
-          <div>
+          <div className="portable-disclosure-actions">
+            <span>
+              <strong>
+                {selectedRequiredCount}/{requiredDisclosureCount} required selected
+              </strong>
+              <small>Nothing is disclosed unless you deliberately select and regenerate it.</small>
+            </span>
+            <div>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={selectAllRequiredDisclosures}
+                disabled={allRequiredSelected}
+              >
+                Select all required
+              </button>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={clearDisclosures}
+                disabled={selectedDisclosures.length === 0}
+              >
+                Clear selection
+              </button>
+            </div>
+          </div>
+          <div className="portable-disclosure-grid">
             {availableDisclosures.map((disclosure) => (
               <label key={disclosure.identity}>
                 <input

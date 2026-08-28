@@ -192,7 +192,21 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
     .toBeVisible();
   await expect(panel.getByText("Evidence commitment optional · passed optional"))
     .toBeVisible();
-  await panel.getByRole("checkbox", { name: /required · passed required/ }).check();
+  await expect(panel.getByText("0/1 required selected", { exact: true })).toBeVisible();
+  await expect(panel.getByText(/Nothing is disclosed unless you deliberately select/))
+    .toBeVisible();
+  await panel.getByRole("button", { name: "Select all required" }).click();
+  await expect(panel.getByText("Disclose signed evidence (1/2 selected)")).toBeVisible();
+  await expect(panel.getByText("1/1 required selected", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("checkbox", { name: /required · passed required/ }))
+    .toBeChecked();
+  await expect(panel.getByRole("checkbox", { name: /optional · passed optional/ }))
+    .not.toBeChecked();
+  await panel.getByRole("button", { name: "Clear selection" }).click();
+  await expect(panel.getByText("Disclose signed evidence (0/2 selected)")).toBeVisible();
+  await expect(panel.getByRole("checkbox", { name: /required · passed required/ }))
+    .not.toBeChecked();
+  await panel.getByRole("button", { name: "Select all required" }).click();
   await panel.getByRole("checkbox", { name: /Append to local transparency log/ }).check();
   await panel.getByRole("checkbox", { name: /Prepare digest-only EVM calldata/ }).check();
   await expect(
@@ -280,7 +294,8 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   await mobilePanel.getByRole("button", { name: "Generate receipt" }).click();
   await expect(mobilePanel.getByText("Self-check passed")).toBeVisible();
   await mobilePanel.getByText(/Disclose signed evidence/).click();
-  await mobilePanel.getByRole("checkbox", { name: /required · passed required/ }).check();
+  await mobilePanel.getByRole("button", { name: "Select all required" }).click();
+  await expect(mobilePanel.getByText("1/1 required selected", { exact: true })).toBeVisible();
   await mobilePanel.getByRole("checkbox", {
     name: /Append to local transparency log/,
   }).check();

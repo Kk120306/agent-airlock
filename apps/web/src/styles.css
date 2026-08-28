@@ -2982,10 +2982,34 @@ textarea:focus {
   line-height: 1.45;
 }
 
-.portable-disclosures > div {
+.portable-disclosure-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+}
+
+.portable-disclosure-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 9px;
+  padding: 8px;
+  border: 1px solid #dce7e2;
+  border-radius: 8px;
+  background: #f7faf8;
+}
+
+.portable-disclosure-actions > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.portable-disclosure-actions .button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 11px;
 }
 
 .portable-disclosures label {
@@ -4616,10 +4640,20 @@ textarea:focus {
   }
 
   .portable-options,
-  .portable-disclosures > div,
+  .portable-disclosure-grid,
   .portable-identities,
   .portable-claims {
     grid-template-columns: 1fr;
+  }
+
+  .portable-disclosure-actions,
+  .portable-disclosure-actions > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .portable-disclosure-actions .button {
+    width: 100%;
   }
 
   .portable-optional-proof,
