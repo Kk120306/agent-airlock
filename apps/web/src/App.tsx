@@ -276,9 +276,13 @@ function ProtocolScenarioGuide({
 }: {
   runs: AgentRun[];
   busy: boolean;
-  onRun: (prompt: string) => void;
-  onRepair: (runId: string) => void;
+  onRun: (prompt: string) => Promise<AgentRun | null>;
+  onRepair: (runId: string) => Promise<AgentRun | null>;
 }) {
+  const [automationStage, setAutomationStage] = useState<
+    "promote" | "quarantine" | "repair" | null
+  >(null);
+  const [automationError, setAutomationError] = useState<string | null>(null);
   const promoted = runs.find(
     (run) =>
       !run.candidateSetId &&
@@ -297,6 +301,50 @@ function ProtocolScenarioGuide({
   );
   const pairedComplete = promoted?.transaction && quarantined?.transaction;
   const complete = pairedComplete && repaired?.transaction;
+  const runCompleteLoop = async () => {
+    setAutomationError(null);
+    setAutomationStage("promote");
+    try {
+      const safeRun = promoted ?? await onRun(protocolFixturePrompts.promote);
+      if (!safeRun || !provesWholeAgentPromotion(safeRun, "candidate-only")) {
+        setAutomationError(
+          "Safety loop stopped: the passing Candidate did not produce the required Whole-Agent Promotion.",
+        );
+        return;
+      }
+
+      setAutomationStage("quarantine");
+      const rejectedRun = quarantined ?? await onRun(protocolFixturePrompts.challenge);
+      if (rejectedRun?.transaction?.disposition !== "quarantined") {
+        setAutomationError(
+          "Safety loop stopped: the invalid Candidate did not produce the required Quarantine decision.",
+        );
+        return;
+      }
+
+      if (!repaired) {
+        setAutomationStage("repair");
+        const repairRun = await onRepair(rejectedRun.id);
+        if (
+          repairRun?.transaction?.disposition !== "promoted" ||
+          repairRun.transaction.lineage.depth < 1
+        ) {
+          setAutomationError(
+            "Safety loop stopped: the retained Candidate did not produce a promoted Repair lineage.",
+          );
+        }
+      }
+    } finally {
+      setAutomationStage(null);
+    }
+  };
+  const automationLabel = automationStage === "promote"
+    ? "Running safe Candidate"
+    : automationStage === "quarantine"
+      ? "Proving rejection"
+      : automationStage === "repair"
+        ? "Repairing retained Candidate"
+        : "Run complete safety loop";
 
   return (
     <section className="protocol-scenario-guide" aria-label="Full safety loop">
@@ -305,14 +353,29 @@ function ProtocolScenarioGuide({
           <span className="eyebrow">Full safety loop</span>
           <strong>Promote. Reject. Repair. Verify.</strong>
         </div>
-        <span>{complete ? "Recovery proven" : "Run all three stages"}</span>
+        {complete ? (
+          <span>Recovery proven</span>
+        ) : (
+          <button
+            type="button"
+            className="button button-primary protocol-run-all"
+            onClick={() => void runCompleteLoop()}
+            disabled={busy || automationStage !== null}
+          >
+            {automationStage ? <Spinner /> : <span aria-hidden="true">▶</span>}
+            {automationLabel}
+          </button>
+        )}
       </header>
       <div className="protocol-scenario-actions">
         <button
           type="button"
           data-complete={Boolean(promoted)}
-          onClick={() => onRun(protocolFixturePrompts.promote)}
-          disabled={busy}
+          onClick={() => {
+            setAutomationError(null);
+            void onRun(protocolFixturePrompts.promote);
+          }}
+          disabled={busy || automationStage !== null}
         >
           <span>{promoted ? "✓" : "1"}</span>
           <div>
@@ -323,8 +386,11 @@ function ProtocolScenarioGuide({
         <button
           type="button"
           data-complete={Boolean(quarantined)}
-          onClick={() => onRun(protocolFixturePrompts.challenge)}
-          disabled={busy || !promoted}
+          onClick={() => {
+            setAutomationError(null);
+            void onRun(protocolFixturePrompts.challenge);
+          }}
+          disabled={busy || automationStage !== null || !promoted}
         >
           <span>{quarantined ? "✓" : "2"}</span>
           <div>
@@ -337,8 +403,11 @@ function ProtocolScenarioGuide({
         <button
           type="button"
           data-complete={Boolean(repaired)}
-          onClick={() => quarantined && onRepair(quarantined.id)}
-          disabled={busy || !quarantined || Boolean(repaired)}
+          onClick={() => {
+            setAutomationError(null);
+            if (quarantined) void onRepair(quarantined.id);
+          }}
+          disabled={busy || automationStage !== null || !quarantined || Boolean(repaired)}
         >
           <span>{repaired ? "✓" : "3"}</span>
           <div>
@@ -347,6 +416,12 @@ function ProtocolScenarioGuide({
           </div>
         </button>
       </div>
+      {automationError && (
+        <div className="protocol-automation-error" role="alert">
+          <strong>Automatic proof stopped safely</strong>
+          <span>{automationError}</span>
+        </div>
+      )}
       {pairedComplete && (
         <div className="protocol-paired-verdict" role="status">
           <span aria-hidden="true">✓</span>
@@ -2564,13 +2639,13 @@ export default function App() {
     }
   };
 
-  const pollRun = async (runId: string, agentId: string) => {
-    if (pollingRunIds.current.has(runId)) return;
+  const pollRun = async (runId: string, agentId: string): Promise<AgentRun | null> => {
+    if (pollingRunIds.current.has(runId)) return null;
     pollingRunIds.current.add(runId);
     try {
       while (mountedRef.current) {
         await new Promise((resolve) => window.setTimeout(resolve, 900));
-        if (!mountedRef.current) return;
+        if (!mountedRef.current) return null;
         const result = await api.run(runId);
         if (selectedIdRef.current === agentId) setActiveRun(result.run);
         if (!["queued", "running"].includes(result.run.status)) {
@@ -2580,9 +2655,10 @@ export default function App() {
             api.runs(agentId),
           ]);
           if (selectedIdRef.current === agentId) setRuns(runResult.runs);
-          return;
+          return result.run;
         }
       }
+      return null;
     } finally {
       pollingRunIds.current.delete(runId);
     }
@@ -2815,8 +2891,8 @@ export default function App() {
     }
   };
 
-  const runPrompt = async (content: string) => {
-    if (!selected || !content.trim()) return;
+  const runPrompt = async (content: string): Promise<AgentRun | null> => {
+    if (!selected || !content.trim()) return null;
     setPrompt("");
     setError(null);
     try {
@@ -2831,11 +2907,12 @@ export default function App() {
           agent.id === selected.id ? { ...agent, status: "busy" } : agent,
         ),
       );
-      await pollRun(result.run.id, selected.id);
+      return await pollRun(result.run.id, selected.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setActiveRun(null);
       await refreshAgents();
+      return null;
     }
   };
 
@@ -2844,8 +2921,10 @@ export default function App() {
     await runPrompt(prompt.trim());
   };
 
-  const repairActiveRun = async (sourceRunId = activeRun?.id) => {
-    if (!selected || !sourceRunId) return;
+  const repairActiveRun = async (
+    sourceRunId = activeRun?.id,
+  ): Promise<AgentRun | null> => {
+    if (!selected || !sourceRunId) return null;
     setAirlockActionBusy(true);
     setError(null);
     try {
@@ -2860,10 +2939,11 @@ export default function App() {
           agent.id === selected.id ? { ...agent, status: "busy" } : agent,
         ),
       );
-      await pollRun(result.run.id, selected.id);
+      return await pollRun(result.run.id, selected.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       await refreshAgents();
+      return null;
     } finally {
       setAirlockActionBusy(false);
     }
@@ -3497,8 +3577,8 @@ export default function App() {
                   <ProtocolScenarioGuide
                     runs={runs}
                     busy={demoActionBusy}
-                    onRun={(content) => void runPrompt(content)}
-                    onRepair={(runId) => void repairActiveRun(runId)}
+                    onRun={runPrompt}
+                    onRepair={repairActiveRun}
                   />
                 ) : null}
                 {system?.modelArkDemoMode ? (

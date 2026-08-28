@@ -23,6 +23,7 @@ npm run demo:runtime -- --reset
 ```
 
 Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the four-stage compact proof that real Codex used isolated Candidate State, passed every required Validation, promoted all four resources together, and released exactly one effect afterward.
+Alternatively, select `Run complete safety loop` to execute Promotion, rejection, and Repair in order with live stage status, then inspect the same final evidence.
 Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
 Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all nine required Validations, and advances Canonical State only after validation.
 Show the full recovery verdict, then select `Generate and verify proof` to finish with two locally verified signed decisions and their intact Canonical State handoff.
@@ -69,6 +70,7 @@ Explain that the execution profile is a trusted Airlock control-plane attestatio
 - [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
 - [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
 - [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and presents an evidence-backed Candidate, Validation, Promotion, and independent-verification path.
+- [ ] `Run complete safety loop` executes the three real-Runtime stages in order and stops immediately if an expected disposition is not produced.
 - [ ] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.
 - [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
 - [ ] The live UI shows `LIVE MODELARK PROOF`, one seeded Agent, and one `Run live Candidate` action.

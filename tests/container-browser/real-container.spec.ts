@@ -63,6 +63,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(
     pairedProof.getByText("Promote. Reject. Repair. Verify."),
   ).toBeVisible();
+  await expect(
+    pairedProof.getByRole("button", { name: "Run complete safety loop" }),
+  ).toBeEnabled();
   await pairedProof.getByRole("button", { name: /Run passing Candidate/ }).click();
 
   await expect(
@@ -135,8 +138,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .toBeVisible();
   await expect(rejectedProof.getByText("0 effects delivered from this rejected future."))
     .toBeVisible();
-  await expect(pairedProof.getByText("Run all three stages", { exact: true }))
-    .toBeVisible();
+  await expect(
+    pairedProof.getByRole("button", { name: "Run complete safety loop" }),
+  ).toBeEnabled();
   await expect(
     pairedProof.getByText("Airlock controlled both outcomes", { exact: true }),
   ).toBeVisible();
@@ -452,4 +456,86 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       "utf8",
     ),
   ).toBe("unsafe-candidate\n");
+
+  const automatedAgentResponse = await request.post("/api/agents", {
+    data: {
+      name: "Automated Loop Proof",
+      description: "One action proves Promotion, Quarantine, and Repair",
+      instructions:
+        "Keep every change inside isolated Candidate State and complete the requested Whole-Agent protocol proof.",
+    },
+  });
+  expect(automatedAgentResponse.ok()).toBe(true);
+  const automatedAgent = (await automatedAgentResponse.json()) as {
+    agent: { id: string };
+  };
+  const automatedContractResponse = await request.put(
+    `/api/agents/${automatedAgent.agent.id}/outcome-contract`,
+    {
+      data: {
+        requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
+        protectedPaths: ["AGENTS.md"],
+        maxChangedFiles: 4,
+        maxAddedBytes: 65_536,
+        secretPatterns: [],
+        validationCommands: [
+          {
+            name: "protocol-content",
+            command: [
+              'test "$(cat protocol-proof.txt)" = candidate-only',
+              "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"candidate-only\") process.exit(1);'",
+            ].join(" && "),
+            required: true,
+            timeoutMs: 10_000,
+          },
+        ],
+      },
+    },
+  );
+  expect(automatedContractResponse.ok()).toBe(true);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Automated Loop Proof", exact: true }),
+  ).toBeVisible();
+  const automatedGuide = page.getByRole("region", { name: "Full safety loop" });
+  await automatedGuide
+    .getByRole("button", { name: "Run complete safety loop" })
+    .click();
+  await expect(
+    automatedGuide.getByText("Full recovery loop proven", { exact: true }),
+  ).toBeVisible({ timeout: 45_000 });
+  await expect(
+    automatedGuide.getByText("Safe future promoted", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    automatedGuide.getByText("Unsafe future quarantined", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    automatedGuide.getByText("Rejected future safely repaired", { exact: true }),
+  ).toBeVisible();
+
+  const automatedRunsResponse = await request.get(
+    `/api/agents/${automatedAgent.agent.id}/runs`,
+  );
+  const automatedRuns = (await automatedRunsResponse.json()) as {
+    runs: Array<{
+      transaction: {
+        disposition: string;
+        lineage: { depth: number };
+      };
+    }>;
+  };
+  expect(automatedRuns.runs).toHaveLength(3);
+  expect(
+    automatedRuns.runs.map((run) => [
+      run.transaction.disposition,
+      run.transaction.lineage.depth,
+    ]),
+  ).toEqual([
+    ["promoted", 1],
+    ["quarantined", 0],
+    ["promoted", 0],
+  ]);
 });

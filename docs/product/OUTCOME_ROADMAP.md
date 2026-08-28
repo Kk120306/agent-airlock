@@ -320,6 +320,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - Launcher integration proves port conflicts, reset, graceful stop, restart persistence, and deterministic seeding.
 - `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required file-and-database Validation, four-resource Promotion, one post-Promotion effect, and explicit local Responses fixture disclosure.
 - Its guided controls run a valid Candidate, a deliberately invalid Candidate, and a bounded Repair Run through that same real Runtime.
+- A single `Run complete safety loop` action sequences those three real Runtime decisions, exposes its current stage, and fails closed instead of attempting Repair after an unexpected disposition.
 - The proof compares Canonical State advancement with an unchanged rejection fingerprint, then links the quarantined parent to the promoted repair child in one signed decision chain.
 - The real Runtime UI now reduces the transaction to an evidence-backed `Run`, `Validate`, `Promote`, and `Verify` judge path, while retaining the complete resource, journal, Validation, and change record behind one inspection control.
 - Its final action generates a private-by-default two-decision chain and verifies both signatures and the Canonical State handoff locally before download.

@@ -899,9 +899,25 @@ textarea:focus {
   font-size: 8px;
 }
 
+.protocol-run-all {
+  width: fit-content;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.protocol-run-all .spinner {
+  width: 11px;
+  height: 11px;
+}
+
 .protocol-scenario-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -986,6 +1002,24 @@ textarea:focus {
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.protocol-automation-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e4bbb5;
+  border-radius: 10px;
+  color: #8b3f38;
+  background: #fbefed;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.protocol-automation-error strong {
+  flex: 0 0 auto;
 }
 
 .protocol-paired-verdict {
