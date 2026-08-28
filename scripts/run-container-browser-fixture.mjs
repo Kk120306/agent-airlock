@@ -143,12 +143,15 @@ async function seedProtocolDemo(baseUrl) {
     requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
     protectedPaths: ["AGENTS.md"],
     maxChangedFiles: 4,
-    maxAddedBytes: 4_096,
+    maxAddedBytes: 65_536,
     secretPatterns: [],
     validationCommands: [
       {
         name: "protocol-content",
-        command: 'test "$(cat protocol-proof.txt)" = candidate-only',
+        command: [
+          'test "$(cat protocol-proof.txt)" = candidate-only',
+          "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"candidate-only\") process.exit(1);'",
+        ].join(" && "),
         required: true,
         timeoutMs: 10_000,
       },
@@ -162,7 +165,7 @@ async function seedProtocolDemo(baseUrl) {
         name: "Real Runtime Proof",
         description: "Real Codex, isolated Candidate, validated Promotion",
         instructions:
-          "Keep every change inside isolated Candidate State and complete the requested protocol proof.",
+          "Keep every workspace, SQLite, and deferred-action change inside isolated Candidate State and complete the requested Whole-Agent protocol proof.",
       }),
     }));
     await requestJson(baseUrl, `/api/agents/${agent.id}/outcome-contract`, {
@@ -288,11 +291,17 @@ try {
     console.log("Inference: local deterministic Responses fixture.");
     console.log("Cost: no ModelArk request or paid inference.");
     console.log("Proof 1: Run passing Candidate.");
-    console.log("Expected: Validation passes and Promotion advances Canonical State.");
+    console.log(
+      "Expected: exact file and database Validation passes, all four resources promote, and one deferred effect delivers after Promotion.",
+    );
     console.log("Proof 2: Run failing Candidate.");
-    console.log("Expected: Validation fails, Candidate enters Quarantine, and Canonical State is unchanged.");
+    console.log(
+      "Expected: Candidate file, database, session, and intent enter Quarantine; Canonical State and delivery count stay unchanged.",
+    );
     console.log("Proof 3: Repair retained Candidate.");
-    console.log("Expected: bounded Repair passes, promotes, and exports a signed two-decision chain.");
+    console.log(
+      "Expected: bounded Repair promotes all four resources, delivers one fresh effect, and exports a signed two-decision chain.",
+    );
     console.log(
       ephemeralRequested
         ? "State: ephemeral automated proof."

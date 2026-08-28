@@ -322,11 +322,12 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 
 - [x] Add a mutually exclusive live ModelArk demo profile that requires loopback control-plane binding, HTTPS provider inference, real Codex, and a container Runtime.
 - [x] Add a persistent one-command launcher with a marker-protected reset root and fail-fast provider preflight.
-- [x] Seed one `Live ModelArk Proof` Agent with an exact file-content Outcome Contract.
+- [x] Seed one `Live ModelArk Proof` Agent with an exact file-and-database Outcome Contract plus one typed deferred effect.
 - [x] Add a one-action judge guide and reuse the compact independent proof surface after a terminal decision.
 - [x] Keep deterministic fixture proof and live provider proof visibly separate.
 - [x] Force the guided provider preflight even when the generic POC skip flag is present.
 - [x] Test exact Agent seeding, exact Outcome Contract installation, restart reuse, policy-drift refusal, and the one-click browser request.
+- [x] Require the reproducible real-Codex and credentialed ModelArk judge paths to prove workspace, Codex session, SQLite, and external actions under one Promotion decision.
 - [ ] Rerun the complete provider-backed browser transaction when free ModelArk capacity is available.
 
 ## Trust boundaries

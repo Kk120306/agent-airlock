@@ -251,7 +251,8 @@ This journey describes the complete product direction, including later roadmap p
 - The real-Codex judge path must prioritize its four proof stages, hide incompatible advanced controls, summarize only persisted Run evidence, and keep the complete evidence available for inspection.
 - A reviewer must be able to distinguish reproducible middleware proof from completed local live ModelArk conformance.
 - The guided live ModelArk judge launcher must force a successful provider preflight, must not inherit the generic preflight-skip escape hatch, and must not display live-proof mode before that preflight succeeds.
-- The guided live ModelArk judge launcher must seed exactly one Agent with a falsifiable required artifact and Validation command, preserve an exact persisted contract across restart, and refuse policy drift without an explicit reset.
+- The guided live ModelArk judge launcher must seed exactly one Agent whose Outcome Contract independently checks an exact artifact and SQLite value, preserve that exact persisted contract across restart, and refuse policy drift without an explicit reset.
+- The live judge UI must report Whole-Agent proof complete only when workspace, Codex session, SQLite, and external actions are promoted together and exactly one typed effect is delivered after Promotion.
 - Every completed Runtime execution must add a required trusted execution-profile Validation before the Promotion decision.
 - Live ModelArk execution-profile evidence must commit to the configured model identity with SHA-256, identify the Codex CLI, Responses protocol, and Runtime class, and exclude credentials, raw endpoint identifiers, base URLs, and environment values.
 - The signed portable receipt must commit to execution-profile evidence through its Validation Merkle root and permit bounded selective disclosure of the safe attestation summary.

@@ -308,10 +308,58 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     containerEngine: "docker",
     runtime: "Codex CLI in docker Runtime",
   };
+  const liveRun = structuredClone(run) as AgentRun;
+  liveRun.transaction!.resources = [
+    "workspace",
+    "codex-session",
+    "sqlite",
+    "external-actions",
+  ].map((kind) => ({
+    kind: kind as NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
+    label: kind,
+    disposition: "promoted" as const,
+    fingerprintBefore: "a".repeat(64),
+    fingerprintAfter: "b".repeat(64),
+    summary: kind + " promoted",
+  }));
+  const liveSnapshot = {
+    contentHash: "c".repeat(64),
+    rowCount: 1,
+    rows: [
+      {
+        id: "demo",
+        value: "modelark-live",
+        updatedAt: "2026-08-28T00:00:00.000Z",
+      },
+    ],
+  };
+  liveRun.transaction!.sqlite = {
+    databasePath: ".airlock/demo.sqlite",
+    integrity: "passed",
+    before: { ...liveSnapshot, contentHash: "d".repeat(64) },
+    candidate: liveSnapshot,
+    after: liveSnapshot,
+  };
+  liveRun.transaction!.externalActions = {
+    outboxPath: "outbox/intents.jsonl",
+    intents: [
+      {
+        id: "modelark-live-ready",
+        type: "demo.notification.requested",
+        destination: "demo-console",
+        subject: "ModelArk release ready",
+        idempotencyKey: "e".repeat(64),
+        status: "delivered",
+        deliveredAt: timestamp,
+      },
+    ],
+    deliveredCount: 1,
+    bypassDisclosure: "No effect bypass is available.",
+  };
   await serveProductionBundle(
     page,
     liveRequests,
-    { current: run },
+    { current: liveRun },
     undefined,
     liveSystem,
   );
@@ -329,8 +377,7 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   await guide.getByRole("button", { name: /Run another live Candidate/ }).click();
   await expect.poll(() => liveRequests.length).toBe(1);
   expect(liveRequests[0]).toEqual({
-    content:
-      "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Use no dependencies. Verify the file content before finishing.",
+    content: "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.",
   });
 });
 

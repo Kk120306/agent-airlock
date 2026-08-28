@@ -29,6 +29,7 @@ import type {
   Message,
   OutcomeContractVersionRecord,
   PortableReceiptExport,
+  RunTransaction,
   SystemInfo,
 } from "./types";
 
@@ -39,12 +40,34 @@ const starterPrompts = [
 ];
 
 const protocolFixturePrompts = {
-  promote: "Create protocol-proof.txt.",
+  promote: "Prepare the passing Whole-Agent protocol Candidate.",
   challenge: "Attempt an unsafe protocol change for the rejection proof.",
 } as const;
 
 const liveModelArkPrompt =
-  "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Use no dependencies. Verify the file content before finishing.";
+  "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.";
+
+function provesWholeAgentPromotion(run: AgentRun, expectedDatabaseValue: string) {
+  const transaction = run.transaction;
+  if (!transaction || transaction.disposition !== "promoted") return false;
+  const databaseValue = transaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  )?.value;
+  const resourceKinds = new Set(
+    transaction.resources
+      .filter((resource) => resource.disposition === "promoted")
+      .map((resource) => resource.kind),
+  );
+  return (
+    databaseValue === expectedDatabaseValue &&
+    transaction.externalActions.deliveredCount === 1 &&
+    transaction.externalActions.intents.length === 1 &&
+    transaction.externalActions.intents[0]?.status === "delivered" &&
+    ["workspace", "codex-session", "sqlite", "external-actions"].every((kind) =>
+      resourceKinds.has(kind as RunTransaction["resources"][number]["kind"]),
+    )
+  );
+}
 
 const demoHeroPrompts = {
   promote: "Prepare the multi-resource release.",
@@ -237,7 +260,8 @@ function ProtocolScenarioGuide({
     (run) =>
       !run.candidateSetId &&
       run.transaction?.disposition === "promoted" &&
-      run.transaction.lineage.depth === 0,
+      run.transaction.lineage.depth === 0 &&
+      provesWholeAgentPromotion(run, "candidate-only"),
   );
   const quarantined = runs.find(
     (run) => !run.candidateSetId && run.transaction?.disposition === "quarantined",
@@ -270,7 +294,7 @@ function ProtocolScenarioGuide({
           <span>{promoted ? "✓" : "1"}</span>
           <div>
             <strong>{promoted ? "Safe future promoted" : "Run passing Candidate"}</strong>
-            <small>Required Validations pass and Canonical State advances.</small>
+            <small>Code, memory, SQLite, and one deferred effect promote together.</small>
           </div>
         </button>
         <button
@@ -330,6 +354,11 @@ function LiveModelArkGuide({
   onRun: (prompt: string) => void;
 }) {
   const promoted = runs.find(
+    (run) =>
+      !run.candidateSetId &&
+      provesWholeAgentPromotion(run, "modelark-live"),
+  );
+  const partialPromotion = runs.find(
     (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
   );
   const completed = Boolean(promoted?.transaction);
@@ -348,8 +377,8 @@ function LiveModelArkGuide({
         <span>
           {providerAttested
             ? "Live profile attested"
-            : completed
-              ? "Live proof complete"
+            : partialPromotion
+              ? "Whole-Agent proof incomplete"
               : "One judge action"}
         </span>
       </header>
@@ -363,9 +392,7 @@ function LiveModelArkGuide({
           <span>{completed ? "✓" : "1"}</span>
           <div>
             <strong>{completed ? "Run another live Candidate" : "Run live Candidate"}</strong>
-            <small>
-              ModelArk must create the exact artifact before Canonical State can advance.
-            </small>
+            <small>ModelArk must prepare code, data, memory, and one deferred effect.</small>
           </div>
         </button>
       </div>
@@ -380,8 +407,8 @@ function LiveModelArkGuide({
             </strong>
             <small>
               {providerAttested
-                ? "The signed evidence commits to the private model identity and the validated Canonical State transition."
-                : "Isolated Candidate passed the required content check and advanced Canonical State."}
+                ? "The signed evidence binds the private model identity to four promoted resources and one post-Promotion effect."
+                : "Isolated Candidate passed the required state check and advanced Canonical State."}
             </small>
           </div>
           <code>{shortHash(promoted.transaction.canonicalContentHashAfter)}</code>

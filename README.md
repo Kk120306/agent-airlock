@@ -35,11 +35,11 @@ npm run demo:runtime -- --reset
 ```
 
 Open <http://127.0.0.1:3200> and use the three `Full safety loop` controls.
-Real Codex runs inside a disposable container against isolated Candidate State, calls the execution tool, and writes `protocol-proof.txt` only in that Candidate.
-The passing Candidate satisfies the required content command and advances Canonical State.
-The failing Candidate writes deliberately invalid content, fails that same command, remains inspectable in Quarantine, and leaves the canonical fingerprint and accepted file unchanged.
+Real Codex runs inside a disposable container against isolated Candidate State, calls the execution tool, and changes an exact file, SQLite row, and typed outbox intent only in that Candidate.
+The passing Candidate satisfies the required file-and-database command, promotes all four resources, advances Canonical State, and delivers exactly one effect afterward.
+The failing Candidate writes deliberately invalid file and database values plus an unsafe intent, fails that same command, remains inspectable in Quarantine, and leaves the canonical fingerprint, accepted database, and delivery count unchanged.
 The third control starts a real Repair Run from the retained Quarantine, uses bounded failed-Validation evidence, and promotes only after every required check passes.
-The focused judge view summarizes Candidate isolation, the decisive Validation, Quarantine ancestry, and the actual canonical fingerprint result before offering the complete forensic evidence.
+The focused judge view summarizes Candidate isolation, Whole-Agent Promotion, the decisive Validation, Quarantine ancestry, and the actual canonical fingerprint result before offering the complete forensic evidence.
 After all three controls complete, the recovery verdict proves that the same Agent and Outcome Contract controlled Promotion, rejection, and repair.
 Select `Generate and verify proof` on the repaired Run to produce and locally verify a complete two-decision chain containing the quarantined parent and promoted repair child.
 The UI and terminal explicitly identify the local deterministic Responses fixture and state that no ModelArk request or paid inference occurs.
@@ -249,9 +249,9 @@ npm run demo:modelark -- --reset
 The launcher forces the live Responses API check before building or starting the application, binds the control plane to loopback, uses a disposable container Runtime, and seeds one `Live ModelArk Proof` Agent.
 It does not honor the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
-ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`.
-Airlock validates the actual Candidate file independently of the model response and advances Canonical State only when every required check passes.
-The resulting judge view exposes Candidate isolation, Validation evidence, canonical fingerprints, and a signed portable receipt.
+ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`, update the Candidate SQLite row to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
+Airlock validates the actual Candidate file and database independently of the model response, promotes workspace, Codex session, SQLite, and outbox under one decision, and dispatches the intent only after Canonical State advances.
+The resulting judge view reports conformance complete only when all four resources are promoted and exactly one deferred effect is delivered, then exposes the signed portable receipt.
 Run `npm run demo:modelark` without `--reset` to preserve the proof across restart.
 If provider quota, capacity, authentication, or the selected model is unavailable, the launcher stops before showing a live-proof UI.
 
@@ -327,10 +327,11 @@ xdg-open http://127.0.0.1:3201   # Linux guided proof
 In the guided Web UI:
 
 1. Select `Run live Candidate`.
-2. Watch the Candidate execute and the required content Validation complete.
+2. Watch the Candidate create the exact artifact, update SQLite, and submit one deferred action before the required state Validation completes.
 3. Confirm that `execution-profile` attests the live ModelArk Responses profile through a private model commitment rather than a raw endpoint identifier.
-4. Confirm that the canonical fingerprint advances only for a promoted result.
-5. Select `Generate and verify proof` to verify the signed decision locally and selectively disclose the safe execution-profile leaf when requested.
+4. Confirm that workspace, Codex session, SQLite, and outbox all show `promoted`, the database value is `modelark-live`, and exactly one `modelark-live-ready` effect is delivered after Promotion.
+5. Confirm that the canonical fingerprint advances only for this complete promoted result.
+6. Select `Generate and verify proof` to verify the signed decision locally and selectively disclose the safe execution-profile leaf when requested.
 
 The execution-profile evidence is a trusted Airlock control-plane attestation, not an independent statement signed by BytePlus.
 It proves which configured profile completed the Run and binds that claim into the Promotion Receipt without exposing the API key, model endpoint identifier, base URL, or environment values.

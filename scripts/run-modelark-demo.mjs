@@ -108,7 +108,7 @@ try {
   console.log("Inference: provider-backed ModelArk Responses API.");
   console.log("Runtime: real Codex CLI in a disposable container.");
   console.log("Judge action: Run live Candidate.");
-  console.log("Falsifiable artifact: modelark-proof.txt must contain exactly modelark-live.");
+  console.log("Whole-Agent proof: exact artifact, SQLite value, deferred effect, and signed Promotion.");
   console.log("Prompt: " + liveModelArkPrompt);
   console.log("State persists across restart. Add --reset for a clean proof.");
   console.log("");

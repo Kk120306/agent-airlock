@@ -3,18 +3,23 @@ import path from "node:path";
 
 export const liveModelArkAgentName = "Live ModelArk Proof";
 export const liveModelArkPrompt =
-  "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Use no dependencies. Verify the file content before finishing.";
+  "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.";
+
+const liveStateValidationCommand = [
+  'test "$(cat modelark-proof.txt)" = modelark-live',
+  "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value, updated_at FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"modelark-live\" || row?.updated_at !== \"2026-08-28T00:00:00.000Z\") process.exit(1);'",
+].join(" && ");
 
 export const liveModelArkContract = Object.freeze({
   requiredPaths: ["AGENTS.md", "modelark-proof.txt"],
   protectedPaths: ["AGENTS.md"],
   maxChangedFiles: 4,
-  maxAddedBytes: 4_096,
+  maxAddedBytes: 65_536,
   secretPatterns: [],
   validationCommands: [
     {
-      name: "modelark-live-content",
-      command: 'test "$(cat modelark-proof.txt)" = modelark-live',
+      name: "modelark-live-state",
+      command: liveStateValidationCommand,
       required: true,
       timeoutMs: 10_000,
     },
@@ -92,7 +97,7 @@ export async function seedLiveModelArkDemo(baseUrl, fetchImpl = fetch) {
           name: liveModelArkAgentName,
           description: "Provider-backed inference, isolated Candidate, validated Promotion",
           instructions:
-            "Work only in isolated Candidate State. Create the requested proof artifact, run the required verification, and report the observed result.",
+            "Work only in isolated Candidate State. Complete the requested workspace, SQLite, and deferred-action changes, run the required verification, and report the observed result.",
         }),
       },
       fetchImpl,

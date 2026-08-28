@@ -37,6 +37,57 @@ function sendEvents(response, events) {
   response.end(eventStream(events));
 }
 
+function wholeAgentCommand(mode) {
+  const proofValue = mode === "unsafe" ? "unsafe-candidate" : "candidate-only";
+  const databaseValue = mode === "unsafe" ? "unsafe-candidate" : "candidate-only";
+  const timestamp =
+    mode === "repair"
+      ? "2026-08-28T00:02:00.000Z"
+      : mode === "unsafe"
+        ? "2026-08-28T00:01:00.000Z"
+        : "2026-08-28T00:00:00.000Z";
+  const intent = {
+    schemaVersion: 1,
+    id:
+      mode === "repair"
+        ? "protocol-repair-ready"
+        : mode === "unsafe"
+          ? "protocol-unsafe"
+          : "protocol-release-ready",
+    type: "demo.notification.requested",
+    payload: {
+      destination: "demo-console",
+      subject:
+        mode === "repair"
+          ? "Protocol repair ready"
+          : mode === "unsafe"
+            ? "Unsafe protocol Candidate"
+            : "Protocol release ready",
+      body:
+        mode === "unsafe"
+          ? "This Candidate effect must remain quarantined."
+          : "The Whole-Agent Candidate passed.",
+    },
+  };
+  const databaseScript = [
+    'import { DatabaseSync } from "node:sqlite";',
+    'const database = new DatabaseSync(".airlock/demo.sqlite");',
+    'database.prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?").run(',
+    JSON.stringify(databaseValue) + ",",
+    JSON.stringify(timestamp) + ",",
+    '"demo");',
+    "database.close();",
+  ].join(" ");
+  return [
+    "printf " + JSON.stringify(proofValue + "\\n") + " > protocol-proof.txt",
+    "node --no-warnings --experimental-sqlite --input-type=module -e " +
+      JSON.stringify(databaseScript),
+    "printf '%s\\n' " +
+      JSON.stringify(JSON.stringify(intent)) +
+      ' > "$AIRLOCK_OUTBOX_PATH"',
+  ].join(" && ");
+}
+
 const server = createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(204).end();
@@ -122,9 +173,7 @@ const server = createServer(async (request, response) => {
         call_id: callId,
         name: "exec_command",
         arguments: JSON.stringify({
-          cmd: mode === "unsafe"
-            ? "printf 'unsafe-candidate\\n' > protocol-proof.txt"
-            : "printf 'candidate-only\\n' > protocol-proof.txt",
+          cmd: wholeAgentCommand(mode),
         }),
       },
     });

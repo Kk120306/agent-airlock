@@ -22,7 +22,7 @@ When a container engine is available, also run the real Runtime proof:
 npm run demo:runtime -- --reset
 ```
 
-Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the compact proof that real Codex used isolated Candidate State, every required Validation passed, and Canonical State advanced.
+Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the compact proof that real Codex created the exact artifact, updated Candidate SQLite, submitted one deferred action, passed every required Validation, and promoted all four resources together.
 Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
 Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all nine required Validations, and advances Canonical State only after validation.
 Show the full recovery verdict, then select `Generate and verify proof` to finish with a locally verified chain containing both signed decisions and their Canonical State handoff.
@@ -37,8 +37,8 @@ npm run demo:modelark -- --reset
 The command cannot inherit the generic preflight-skip escape hatch.
 It must complete a credential-safe live Responses request before it can start the application or display `LIVE MODELARK PROOF`.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
-The seeded Outcome Contract requires `modelark-proof.txt` to contain exactly `modelark-live`, so the provider response cannot prove success by narration alone.
-Show the required `execution-profile` Validation, its private model commitment, the required content Validation, Canonical State fingerprint transition, and locally verified signed decision.
+The seeded Outcome Contract requires the exact `modelark-proof.txt` content and SQLite value, so the provider response cannot prove success by narration alone.
+Show the required `execution-profile` Validation, its private model commitment, the required state Validation, four promoted resources, one post-Promotion `modelark-live-ready` effect, the Canonical State fingerprint transition, and the locally verified signed decision.
 Explain that the execution profile is a trusted Airlock control-plane attestation committed by the signed receipt, not an independent BytePlus signature.
 
 ## Rubric evidence
@@ -69,7 +69,7 @@ Explain that the execution profile is a trusted Airlock control-plane attestatio
 - [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and presents an evidence-backed Candidate, Validation, Promotion, and independent-verification path.
 - [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
 - [ ] The live UI shows `LIVE MODELARK PROOF`, one seeded Agent, and one `Run live Candidate` action.
-- [ ] The live Candidate creates the exact required artifact, passes the required content Validation, advances Canonical State, and exports a locally verified signed decision.
+- [ ] The live Candidate creates the exact artifact, updates SQLite, submits one typed intent, passes the required state Validation, promotes all four resources, delivers exactly one effect after Promotion, and exports a locally verified signed decision.
 
 ## Falsifiable claims
 

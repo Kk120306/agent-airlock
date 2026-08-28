@@ -14,13 +14,19 @@ import {
 
 test("the live proof is observable and enforced independently of model narration", () => {
   assert.match(liveModelArkPrompt, /modelark-proof\.txt/);
+  assert.match(liveModelArkPrompt, /node:sqlite/);
+  assert.match(liveModelArkPrompt, /AIRLOCK_OUTBOX_PATH/);
+  assert.match(liveModelArkPrompt, /demo\.notification\.requested/);
   assert.deepEqual(liveModelArkContract.requiredPaths, [
     "AGENTS.md",
     "modelark-proof.txt",
   ]);
   assert.deepEqual(liveModelArkContract.protectedPaths, ["AGENTS.md"]);
   assert.equal(liveModelArkContract.validationCommands[0].required, true);
+  assert.equal(liveModelArkContract.validationCommands[0].name, "modelark-live-state");
   assert.match(liveModelArkContract.validationCommands[0].command, /modelark-live/);
+  assert.match(liveModelArkContract.validationCommands[0].command, /node:sqlite/);
+  assert.match(liveModelArkContract.validationCommands[0].command, /updated_at/);
   assert.deepEqual(comparableContract(liveModelArkContract), liveModelArkContract);
 });
 
@@ -67,7 +73,7 @@ test("seeding creates exactly one Agent and installs the exact Outcome Contract"
     name: liveModelArkAgentName,
     description: "Provider-backed inference, isolated Candidate, validated Promotion",
     instructions:
-      "Work only in isolated Candidate State. Create the requested proof artifact, run the required verification, and report the observed result.",
+      "Work only in isolated Candidate State. Complete the requested workspace, SQLite, and deferred-action changes, run the required verification, and report the observed result.",
   });
   assert.deepEqual(JSON.parse(requests[2].options.body), liveModelArkContract);
 });

@@ -77,7 +77,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     }),
   ).toBeVisible();
   await expect(judgeProof.getByText("Candidate isolated", { exact: true })).toBeVisible();
-  await expect(judgeProof.getByText("8/8 required Validations passed.")).toBeVisible();
+  await expect(judgeProof.getByText("9/9 required Validations passed.")).toBeVisible();
   await expect(judgeProof.getByText("Canonical State advanced", { exact: true }))
     .toBeVisible();
 
@@ -85,6 +85,10 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .click();
   await expect(evidence.getByText("Journal completed", { exact: true })).toBeVisible();
   await expect(evidence.getByText("command:protocol-content", { exact: true }))
+    .toBeVisible();
+  await expect(evidence.getByText("candidate-only", { exact: true })).toBeVisible();
+  await expect(evidence.getByText("1 delivered", { exact: true })).toBeVisible();
+  await expect(evidence.getByText("protocol-release-ready", { exact: true }))
     .toBeVisible();
 
   await evidence.getByRole("button", { name: "Generate and verify proof" }).click();
@@ -116,7 +120,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       name: "Unsafe future blocked: accepted reality did not move",
     }),
   ).toBeVisible();
-  await expect(rejectedProof.getByText("7/8 required Validations passed."))
+  await expect(rejectedProof.getByText("8/9 required Validations passed."))
     .toBeVisible();
   await expect(
     rejectedProof.getByText("Canonical State unchanged", { exact: true }),
@@ -185,7 +189,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       exact: false,
     }),
   ).toBeVisible();
-  await expect(repairedProof.getByText("9/9 required Validations passed."))
+  await expect(repairedProof.getByText("10/10 required Validations passed."))
     .toBeVisible();
   await expect(
     pairedProof.getByText("Recovery proven", { exact: true }),
@@ -231,6 +235,16 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
         quarantinePath: string | null;
         lineage: { depth: number; parentRunId: string | null };
         validations: Array<{ name: string; status: string; required: boolean }>;
+        resources: Array<{ kind: string; disposition: string }>;
+        sqlite: {
+          before: { rows: Array<{ id: string; value: string }> };
+          candidate: { rows: Array<{ id: string; value: string }> };
+          after: { rows: Array<{ id: string; value: string }> };
+        };
+        externalActions: {
+          deliveredCount: number;
+          intents: Array<{ id: string; status: string }>;
+        };
       };
     }>;
   };
@@ -262,6 +276,20 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       }),
     ]),
   );
+  expect(promotedRun?.transaction.sqlite.after.rows).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "demo", value: "candidate-only" })]),
+  );
+  expect(promotedRun?.transaction.externalActions).toMatchObject({
+    deliveredCount: 1,
+    intents: [{ id: "protocol-release-ready", status: "delivered" }],
+  });
+  expect(promotedRun?.transaction.resources).toEqual(
+    expect.arrayContaining(
+      ["workspace", "codex-session", "sqlite", "external-actions"].map((kind) =>
+        expect.objectContaining({ kind, disposition: "promoted" }),
+      ),
+    ),
+  );
   expect(quarantinedRun).toMatchObject({
     status: "completed",
     transaction: {
@@ -283,6 +311,18 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       }),
     ]),
   );
+  expect(quarantinedRun?.transaction.sqlite.candidate.rows).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "demo", value: "unsafe-candidate" }),
+    ]),
+  );
+  expect(quarantinedRun?.transaction.sqlite.after.rows).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "demo", value: "candidate-only" })]),
+  );
+  expect(quarantinedRun?.transaction.externalActions).toMatchObject({
+    deliveredCount: 0,
+    intents: [{ id: "protocol-unsafe", status: "rejected" }],
+  });
   const repairedRun = runs.runs.find(
     (run) =>
       run.transaction.disposition === "promoted" &&
@@ -311,6 +351,13 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       }),
     ]),
   );
+  expect(repairedRun?.transaction.sqlite.after.rows).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "demo", value: "candidate-only" })]),
+  );
+  expect(repairedRun?.transaction.externalActions).toMatchObject({
+    deliveredCount: 1,
+    intents: [{ id: "protocol-repair-ready", status: "delivered" }],
+  });
 
   const chainResponse = await request.post(
     `/api/runs/${repairedRun!.id}/portable-receipt`,

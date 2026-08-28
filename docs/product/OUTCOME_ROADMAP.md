@@ -318,13 +318,13 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - The four-step guide stages the complete Promotion, Quarantine, Repair, and continuity story through real backend behavior.
 - The dedicated production Chrome path completed in 6.3 seconds and asserted the 390-pixel viewport without document overflow.
 - Launcher integration proves port conflicts, reset, graceful stop, restart persistence, and deterministic seeding.
-- `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required content Validation and explicit local Responses fixture disclosure.
+- `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required file-and-database Validation, four-resource Promotion, one post-Promotion effect, and explicit local Responses fixture disclosure.
 - Its guided controls run a valid Candidate, a deliberately invalid Candidate, and a bounded Repair Run through that same real Runtime.
 - The proof compares Canonical State advancement with an unchanged rejection fingerprint, then links the quarantined parent to the promoted repair child in one signed decision chain.
 - The real Runtime UI now reduces the transaction to an evidence-backed `Run`, `Validate`, `Promote`, and `Verify` judge path, while retaining the complete resource, journal, Validation, and change record behind one inspection control.
 - Its final action generates a private-by-default two-decision chain and verifies both signatures and the Canonical State handoff locally before download.
-- `npm run demo:modelark -- --reset` adds a strict credentialed judge profile that preflights ModelArk, seeds one falsifiable file-content Outcome Contract, and refuses to start a live-proof UI when the provider is unavailable.
-- The live guide reduces provider conformance to one action and independently checks the resulting Candidate artifact before showing canonical advancement or signed proof.
+- `npm run demo:modelark -- --reset` adds a strict credentialed judge profile that preflights ModelArk, seeds one falsifiable file-and-database Outcome Contract, and refuses to start a live-proof UI when the provider is unavailable.
+- The live guide reduces provider conformance to one action and reports proof complete only after independently checking the Candidate artifact and database, promoting all four resources, and dispatching exactly one typed effect after canonical advancement.
 - Every successful Run now records a required execution-profile Validation before Promotion, commits only a SHA-256 model identity, and carries the safe profile claim into the signed Validation Merkle root.
 - The live judge view distinguishes this trusted Airlock control-plane attestation from independent BytePlus attestation and never reveals the API key, endpoint identifier, base URL, or environment values.
 - The guided launcher forces the live preflight even when the generic POC skip flag is present, and its tested seed contract rejects persisted policy drift until the operator explicitly resets the managed demo.
