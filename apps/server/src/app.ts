@@ -158,6 +158,7 @@ const federatedApprovalDecisionBody = z
   .object({
     choice: z.enum(["approve", "deny"]),
     reason: z.string().trim().min(1).max(512),
+    decisionContextDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   })
   .strict();
 
@@ -232,7 +233,10 @@ export async function createApp(
       const body = federatedApprovalDecisionBody.parse(request.body);
       const result = await service.decideFederatedAdmission(
         admissionId as ReceiptDigest,
-        body,
+        {
+          ...body,
+          decisionContextDigest: body.decisionContextDigest as ReceiptDigest,
+        },
       );
       return reply.code(result.run ? 201 : 200).send(result);
     },

@@ -153,7 +153,11 @@ export const api = {
     ),
   decideFederatedAdmission: (
     admissionId: string,
-    body: { choice: "approve" | "deny"; reason: string },
+    body: {
+      choice: "approve" | "deny";
+      reason: string;
+      decisionContextDigest: string;
+    },
   ) =>
     request<FederatedImportResult>(
       "/api/federation/admissions/" + admissionId + "/decision",

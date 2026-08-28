@@ -239,6 +239,7 @@ const approval = {
 const pendingReview: NonNullable<FederatedAdmissionInboxItem["review"]> = {
   schemaVersion: 1,
   authority: "producer-claim-non-authoritative",
+  decisionContextDigest: digest("9"),
   producerClaim: {
     runId: "producer-run-001",
     agentId: "producer-agent-001",
@@ -383,11 +384,26 @@ test("resumes a pending Admission through the visible append-only operator gate"
   page,
 }) => {
   const decisionRequests: unknown[] = [];
-  await serveProductionBundle(page, [], pending, {
-    admission: pending.admission,
-    approval,
-    run: importedRun,
-  }, decisionRequests);
+  await serveProductionBundle(
+    page,
+    [],
+    pending,
+    {
+      admission: pending.admission,
+      approval,
+      run: importedRun,
+    },
+    decisionRequests,
+    [
+      {
+        admission: pending.admission,
+        approval: null,
+        review: pendingReview,
+        run: null,
+        state: "pending",
+      },
+    ],
+  );
   await page.goto("http://airlock.local/");
   await page.getByRole("button", { name: "Federation" }).click();
   const panel = page.locator("#federation-airlock-panel");
@@ -414,7 +430,11 @@ test("resumes a pending Admission through the visible append-only operator gate"
   await expect(panel.getByText(approval.recordDigest)).toBeVisible();
   await expect(panel.getByText("Recorded by local-control-plane")).toBeVisible();
   expect(decisionRequests).toEqual([
-    { choice: "approve", reason: approval.reason },
+    {
+      choice: "approve",
+      reason: approval.reason,
+      decisionContextDigest: pendingReview.decisionContextDigest,
+    },
   ]);
 });
 
@@ -462,6 +482,10 @@ test("discovers and resolves a pending Admission after a full browser reload", a
     .toBeVisible();
   await expect(review.getByText(/Receiver Outcome Contract checks run only after approval/))
     .toBeVisible();
+  await expect(review.getByText("Decision bound to this exact review"))
+    .toBeVisible();
+  await expect(review.getByText(pendingReview.decisionContextDigest.slice(0, 19) + "..."))
+    .toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(review).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
@@ -473,7 +497,11 @@ test("discovers and resolves a pending Admission after a full browser reload", a
 
   await expect(panel.getByText("PROMOTED BY RECEIVER")).toBeVisible();
   expect(decisionRequests).toEqual([
-    { choice: "approve", reason: approval.reason },
+    {
+      choice: "approve",
+      reason: approval.reason,
+      decisionContextDigest: pendingReview.decisionContextDigest,
+    },
   ]);
 });
 
@@ -510,6 +538,67 @@ test("shows predicted receiver blockers without claiming authoritative validatio
   await expect(review).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
+});
+
+test("refreshes a stale review after receiver policy rotation without losing the reason", async ({
+  page,
+}) => {
+  const staleItem: FederatedAdmissionInboxItem = {
+    admission: pending.admission,
+    approval: null,
+    review: pendingReview,
+    run: null,
+    state: "pending",
+  };
+  const refreshedItem: FederatedAdmissionInboxItem = {
+    ...staleItem,
+    review: {
+      ...blockedPendingReview,
+      decisionContextDigest: digest("a"),
+      preflight: {
+        ...blockedPendingReview.preflight,
+        contractVersion: 5,
+      },
+    },
+  };
+  const decisionRequests: unknown[] = [];
+  await serveProductionBundle(
+    page,
+    [],
+    pending,
+    {
+      status: 409,
+      error:
+        "Receiver review context is stale; refresh the Admission before deciding",
+    },
+    decisionRequests,
+    [staleItem],
+    [refreshedItem],
+  );
+  await page.goto("http://airlock.local/");
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await panel
+    .locator(".federation-inbox-list button")
+    .filter({ hasText: "judge-transfer-001" })
+    .click();
+  const reason = "Reviewed exact producer scope before policy rotation";
+  await panel.getByLabel("Decision reason").fill(reason);
+  await panel.getByRole("button", { name: "Approve into Candidate State" }).click();
+
+  await expect(panel.getByRole("alert")).toContainText("review context is stale");
+  await expect(panel.getByLabel("Decision reason")).toHaveValue(reason);
+  const review = panel.getByRole("region", { name: "Pending Admission review" });
+  await expect(review.getByText(/Outcome Contract v5/)).toBeVisible();
+  await expect(review.getByText("1 predicted blocker")).toBeVisible();
+  await expect(panel.getByText("PROMOTED BY RECEIVER")).toHaveCount(0);
+  expect(decisionRequests).toEqual([
+    {
+      choice: "approve",
+      reason,
+      decisionContextDigest: pendingReview.decisionContextDigest,
+    },
+  ]);
 });
 
 test("fails closed when a stale operator contradicts an append-only decision", async ({
@@ -553,11 +642,26 @@ test("shows a durable denial while Canonical State remains unchanged", async ({ 
     choice: "deny" as const,
     reason: "Release scope exceeds receiver policy",
   };
-  await serveProductionBundle(page, [], pending, {
-    admission: pending.admission,
-    approval: deniedApproval,
-    run: null,
-  });
+  await serveProductionBundle(
+    page,
+    [],
+    pending,
+    {
+      admission: pending.admission,
+      approval: deniedApproval,
+      run: null,
+    },
+    [],
+    [
+      {
+        admission: pending.admission,
+        approval: null,
+        review: pendingReview,
+        run: null,
+        state: "pending",
+      },
+    ],
+  );
   await page.goto("http://airlock.local/");
   await page.getByRole("button", { name: "Federation" }).click();
   const panel = page.locator("#federation-airlock-panel");
@@ -726,6 +830,7 @@ async function serveProductionBundle(
   decisionResult?: FederatedDecisionResponse,
   decisionRequests: unknown[] = [],
   inboxItems: FederatedAdmissionInboxItem[] = [],
+  refreshedInboxItems: FederatedAdmissionInboxItem[] | null = null,
 ): Promise<void> {
   await page.route("http://airlock.local/**", async (route) => {
     const url = new URL(route.request().url());
@@ -780,6 +885,9 @@ async function serveProductionBundle(
     ) {
       decisionRequests.push(route.request().postDataJSON());
       if ("status" in decisionResult) {
+        if (refreshedInboxItems) {
+          inboxItems.splice(0, inboxItems.length, ...refreshedInboxItems);
+        }
         await route.fulfill({
           status: decisionResult.status,
           contentType: "application/json",

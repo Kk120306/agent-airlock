@@ -169,6 +169,7 @@ export interface FederatedAdmissionInboxItem {
 export interface FederatedAdmissionReview {
   schemaVersion: 1;
   authority: "producer-claim-non-authoritative";
+  decisionContextDigest: ReceiptDigest;
   producerClaim: {
     runId: string;
     agentId: string;
@@ -224,6 +225,10 @@ export class AgentService {
   private readonly configuringAgents = new Set<string>();
   private readonly deletingAgents = new Set<string>();
   private readonly quarantineOperations = new Set<string>();
+  private readonly federatedDecisionOperations = new Map<
+    string,
+    Promise<void>
+  >();
   private readonly runner: AirlockRunner;
   private readonly actionDispatcher: MockExternalActionDispatcher;
   private readonly promotionJournal: PromotionJournal;
@@ -1821,6 +1826,7 @@ export class AgentService {
     return (
       this.configuringAgents.has(agentId) ||
       this.deletingAgents.has(agentId) ||
+      this.federatedDecisionOperations.has(agentId) ||
       this.hasUnresolvedRunRecovery(agentId) ||
       this.hasUnresolvedCandidateDisposition(agentId)
     );
@@ -2805,7 +2811,11 @@ export class AgentService {
           );
         }
         const review = stagedBundle
-          ? buildFederatedAdmissionReview(stagedBundle, agent.outcomeContract)
+          ? buildFederatedAdmissionReview(
+              stagedBundle,
+              admission,
+              agent.outcomeContract,
+            )
           : null;
         const runRecord = admission.candidateRunId
           ? snapshot.runs.find((run) => run.id === admission.candidateRunId)
@@ -2927,7 +2937,11 @@ export class AgentService {
 
   async decideFederatedAdmission(
     admissionId: ReceiptDigest,
-    input: { choice: FederatedApprovalChoice; reason: string },
+    input: {
+      choice: FederatedApprovalChoice;
+      reason: string;
+      decisionContextDigest: ReceiptDigest;
+    },
   ): Promise<FederatedApprovalDecisionResult> {
     this.assertProviderRegistryReady();
     if (!/^sha256:[a-f0-9]{64}$/.test(admissionId)) {
@@ -2942,43 +2956,89 @@ export class AgentService {
     if (!admission) {
       throw new HttpError(404, "Federated Admission not found");
     }
-    this.getAgent(admission.localAgentId);
-    let decision;
-    try {
-      decision = await this.federatedApprovalCoordinator.decide({
-        pending: admission,
-        operatorId: this.config.operatorId,
-        choice: input.choice,
-        reason: input.reason,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/invalid|not awaiting|conflicts/.test(message)) {
-        throw new HttpError(409, message);
+    return this.withFederatedDecisionLock(admission.localAgentId, async () => {
+      const agent = this.getAgent(admission.localAgentId);
+      const existingDecision =
+        await this.federatedApprovalJournal.readResultByAdmissionId(admissionId);
+      const expectedDecisionContextDigest = federatedDecisionContextDigest(
+        admission,
+        agent.outcomeContract,
+      );
+      if (
+        !existingDecision &&
+        input.decisionContextDigest !== expectedDecisionContextDigest
+      ) {
+        throw new HttpError(
+          409,
+          "Receiver review context is stale; refresh the Admission before deciding",
+        );
       }
-      throw error;
-    }
-    if (decision.approval.choice === "deny") {
-      return { admission, approval: decision.approval, run: null };
-    }
-    if (!decision.plan.candidateRunId || !decision.plan.candidateStateId) {
-      throw new Error("Approved federated transfer has no prepared Candidate State");
-    }
-    const run = await this.executeFederatedCandidate({
-      admission,
-      candidateRunId: decision.plan.candidateRunId,
-      candidateStateId: decision.plan.candidateStateId,
-      authority: {
-        pendingRecordDigest: admission.recordDigest,
-        approvalDecisionDigest: decision.approval.recordDigest,
-      },
-      createdAt: decision.approval.decidedAt,
-      decisionSummary:
-        "Operator " +
-        decision.approval.operatorId +
-        " approved pending federated work after reviewing receiver evidence",
+      let decision;
+      try {
+        decision = await this.federatedApprovalCoordinator.decide({
+          pending: admission,
+          operatorId: this.config.operatorId,
+          choice: input.choice,
+          reason: input.reason,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/invalid|not awaiting|conflicts/.test(message)) {
+          throw new HttpError(409, message);
+        }
+        throw error;
+      }
+      if (decision.approval.choice === "deny") {
+        return { admission, approval: decision.approval, run: null };
+      }
+      if (!decision.plan.candidateRunId || !decision.plan.candidateStateId) {
+        throw new Error("Approved federated transfer has no prepared Candidate State");
+      }
+      const run = await this.executeFederatedCandidate({
+        admission,
+        candidateRunId: decision.plan.candidateRunId,
+        candidateStateId: decision.plan.candidateStateId,
+        authority: {
+          pendingRecordDigest: admission.recordDigest,
+          approvalDecisionDigest: decision.approval.recordDigest,
+        },
+        createdAt: decision.approval.decidedAt,
+        decisionSummary:
+          "Operator " +
+          decision.approval.operatorId +
+          " approved pending federated work after reviewing receiver evidence",
+      });
+      return { admission, approval: decision.approval, run };
     });
-    return { admission, approval: decision.approval, run };
+  }
+
+  private async withFederatedDecisionLock<T>(
+    agentId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.federatedDecisionOperations.get(agentId) ?? Promise.resolve();
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => turn);
+    this.federatedDecisionOperations.set(agentId, tail);
+    await previous;
+    try {
+      if (this.configuringAgents.has(agentId)) {
+        throw new HttpError(
+          409,
+          "Wait for the receiver Outcome Contract update to finish",
+        );
+      }
+      return await operation();
+    } finally {
+      release();
+      if (this.federatedDecisionOperations.get(agentId) === tail) {
+        this.federatedDecisionOperations.delete(agentId);
+      }
+    }
   }
 
   private async executeFederatedCandidate(input: {
@@ -5670,6 +5730,7 @@ function markTransactionCancelledBeforeStart(
 
 function buildFederatedAdmissionReview(
   bundle: FederatedWorkBundle,
+  admission: FederatedAdmissionRecord,
   contract: OutcomeContract,
 ): FederatedAdmissionReview {
   const operations = bundle.artifact.artifact.operations;
@@ -5789,6 +5850,7 @@ function buildFederatedAdmissionReview(
   return {
     schemaVersion: 1,
     authority: "producer-claim-non-authoritative",
+    decisionContextDigest: federatedDecisionContextDigest(admission, contract),
     producerClaim: {
       runId: receipt.decision.runId,
       agentId: receipt.decision.agentId,
@@ -5818,4 +5880,24 @@ function buildFederatedAdmissionReview(
       deferredChecks,
     },
   };
+}
+
+function federatedDecisionContextDigest(
+  admission: FederatedAdmissionRecord,
+  contract: OutcomeContract,
+): ReceiptDigest {
+  return (
+    "sha256:" +
+    createHash("sha256")
+      .update(
+        stableJson({
+          schema: "agent-airlock/federated-decision-context",
+          schemaVersion: 1,
+          admissionId: admission.admissionId,
+          pendingRecordDigest: admission.recordDigest,
+          outcomeContractDigest: outcomeContractHash(contract),
+        }),
+      )
+      .digest("hex")
+  ) as ReceiptDigest;
 }

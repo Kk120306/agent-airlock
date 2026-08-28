@@ -300,6 +300,11 @@ Phase 16 derives a deterministic preflight from that reverified operation metada
 It shares protected-path pattern semantics with authoritative Validation and can predict path-count, known-byte-count, protected-path, and literal required-path blockers without reading content or creating Candidate State.
 The preflight records the exact receiver contract version and names checks deferred to Candidate Validation.
 Its result is advisory evidence, not Admission authority, Approval authority, Validation, or Promotion authority.
+Phase 17 derives a decision-context digest from the immutable pending Admission record digest and the receiver's current canonical Outcome Contract digest.
+The decision API requires that opaque digest and compares it inside an Agent-scoped decision lock shared with Outcome Contract configuration before first-decision coordination or Candidate preparation.
+A mismatch returns a retryable conflict so the client can reload current review evidence while Canonical State and Run count remain unchanged.
+Once an immutable Approval Decision exists, exact retries continue through the original decision coordinator and are not invalidated by later contract rotation.
+The context digest is a freshness guard over explanatory review inputs, not a new authority record and not a substitute for the immutable Approval Decision.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -349,6 +354,7 @@ Schema evolution must increment the database version and include a tested migrat
 | A stale operator submits a decision after another operator committed a contradiction                               | Return a visible conflict, retain the first immutable decision, create no additional Candidate, and leave Canonical State unchanged.                                                                                                                             |
 | Staged evidence is missing or changes before an operator requests review                                            | Fail the complete inbox request closed, render no partial review, create no Candidate, and leave Canonical State unchanged.                                                                                                                                      |
 | Metadata preflight predicts a receiver Outcome Contract blocker                                                     | Show the bounded prediction and deferred checks, retain the normal append-only decision path, create no Candidate during review, and let authoritative Candidate Validation own the final disposition after approval.                                               |
+| Receiver Outcome Contract changes after review but before the first operator decision                              | Reject the stale decision context before Candidate preparation, refresh current review evidence, preserve the operator's draft reason, create no Run, and leave Canonical State unchanged.                                                                         |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 

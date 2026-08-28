@@ -685,6 +685,37 @@ Give operators an honest early warning without weakening the central trust bound
 Implementation is tracked by [Wayfinder issue 24](https://github.com/Kk120306/agent-airlock/issues/24).
 The API and production UI expose a bounded metadata-only preflight with explicit deferred checks and paired safe and protected-path proofs.
 
+### Phase 17: Fresh receiver review binding
+
+**Outcome**
+
+An operator decision can be recorded only for the exact pending Admission and receiver Outcome Contract review that the operator saw.
+
+**Build**
+
+- Derive an opaque decision-context digest from the immutable pending Admission digest and current receiver Outcome Contract digest.
+- Require that digest on every approval or denial request before Candidate preparation begins.
+- Reject a stale review after receiver policy rotation, refresh the inbox automatically, and preserve the operator's reason for re-review.
+- Preserve exact idempotent replay of a decision already committed even when the receiver contract changes later.
+- Show the review binding in the production interface without exposing staged content or mutable local paths.
+
+**Exit gate**
+
+- Rotating the receiver Outcome Contract changes the decision-context digest.
+- Submitting the old digest returns a visible conflict, creates no Run, and leaves Canonical State byte-for-byte unchanged.
+- The browser refreshes to the current review, preserves the reason, and displays the new contract version and blockers.
+- An exact retry of an already committed decision reuses its immutable record and creates no duplicate Run after policy rotation.
+- The real two-instance browser proof shows that the decision is bound to the exact review before receiver-owned Candidate materialization and Validation.
+
+**Beyond-expectations finish**
+
+Close the human time-of-check to time-of-use gap without turning a browser projection into authority or weakening immutable decision replay.
+
+**Current status**
+
+Implementation is tracked by [Wayfinder issue 25](https://github.com/Kk120306/agent-airlock/issues/25).
+The API freshness gate, automatic browser refresh, visible binding evidence, and stale-policy negative proof are implemented and awaiting hosted release verification.
+
 ## Hackathon cut lines
 
 ### Qualifying proof

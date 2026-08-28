@@ -178,6 +178,8 @@ for (const requiredProof of [
   "PRODUCER CLAIM · NOT RECEIVER AUTHORITY",
   "No predicted metadata blocker",
   "Approval never bypasses receiver Validation",
+  "refreshes a stale review after receiver policy rotation without losing the reason",
+  "Decision bound to this exact review",
 ]) {
   if (!federationUiProof.includes(requiredProof)) {
     failures.push("Federation operator continuity proof is missing: " + requiredProof);
@@ -192,7 +194,8 @@ if (
   !federationRealProof.includes("Federated approval inbox") ||
   !federationRealProof.includes("Pending Admission review") ||
   !federationRealProof.includes("No predicted metadata blocker") ||
-  !federationRealProof.includes("Approval never bypasses receiver Validation")
+  !federationRealProof.includes("Approval never bypasses receiver Validation") ||
+  !federationRealProof.includes("Decision bound to this exact review")
 ) {
   failures.push(
     "Two-instance federation proof must cross receiver reload and inspect the bounded Admission review and receiver preflight",
@@ -206,6 +209,8 @@ for (const requiredProof of [
   "predicts protected-path blockers from the exact staged metadata without creating a Run",
   'status: "predicted-blocker"',
   'code: "protected-path-change"',
+  "rejects a stale receiver review after Outcome Contract rotation before Candidate preparation",
+  "Receiver review context is stale; refresh the Admission before deciding",
 ]) {
   if (!federationHttpProof.includes(requiredProof)) {
     failures.push("Receiver metadata preflight proof is missing: " + requiredProof);

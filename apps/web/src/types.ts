@@ -624,6 +624,7 @@ export interface FederatedAdmissionInboxItem {
   review: {
     schemaVersion: 1;
     authority: "producer-claim-non-authoritative";
+    decisionContextDigest: string;
     producerClaim: {
       runId: string;
       agentId: string;

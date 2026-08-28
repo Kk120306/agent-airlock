@@ -1864,6 +1864,33 @@ textarea:focus {
   margin: 0;
 }
 
+.federation-review-binding {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  border-radius: 0.85rem;
+  background: rgba(74, 222, 128, 0.06);
+}
+
+.federation-review-binding > span {
+  color: var(--success);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.federation-review-binding code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.federation-review-binding small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .federation-pipeline {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

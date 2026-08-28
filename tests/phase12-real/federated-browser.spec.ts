@@ -182,6 +182,8 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
   ).toBeVisible();
   await expect(review.getByText(/Approval never bypasses receiver Validation/))
     .toBeVisible();
+  await expect(review.getByText("Decision bound to this exact review"))
+    .toBeVisible();
   await expect(
     review.getByText(/Receiver Outcome Contract checks run only after approval/),
   ).toBeVisible();

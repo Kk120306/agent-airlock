@@ -109,6 +109,16 @@ describe("federated HTTP execution", () => {
     await expect(readFile(path.join(after.workspacePath, "federated.txt"), "utf8"))
       .resolves.toBe("federated work\n");
 
+    const currentContract = fixture.service.getAgent(fixture.agentId).outcomeContract;
+    await fixture.service.updateOutcomeContract(fixture.agentId, {
+      requiredPaths: currentContract.requiredPaths,
+      protectedPaths: currentContract.protectedPaths,
+      maxChangedFiles: currentContract.maxChangedFiles - 1,
+      maxAddedBytes: currentContract.maxAddedBytes,
+      secretPatterns: currentContract.secretPatterns,
+      validationCommands: currentContract.validationCommands,
+    });
+
     const replay = await fixture.app.inject({
       method: "POST",
       url: `/api/agents/${fixture.agentId}/federated-imports`,
@@ -185,6 +195,11 @@ describe("federated HTTP execution", () => {
       run: null,
     });
     expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(before);
+    const decisionContextDigest = await readDecisionContextDigest(
+      fixture.app,
+      fixture.agentId,
+      imported.json().admission.admissionId,
+    );
 
     const approved = await fixture.app.inject({
       method: "POST",
@@ -192,7 +207,11 @@ describe("federated HTTP execution", () => {
         "/api/federation/admissions/" +
         imported.json().admission.admissionId +
         "/decision",
-      payload: { choice: "approve", reason: "Verified producer evidence" },
+      payload: {
+        choice: "approve",
+        reason: "Verified producer evidence",
+        decisionContextDigest,
+      },
     });
     expect(approved.statusCode).toBe(201);
     expect(approved.json()).toMatchObject({
@@ -216,7 +235,11 @@ describe("federated HTTP execution", () => {
         "/api/federation/admissions/" +
         imported.json().admission.admissionId +
         "/decision",
-      payload: { choice: "approve", reason: "Verified producer evidence" },
+      payload: {
+        choice: "approve",
+        reason: "Verified producer evidence",
+        decisionContextDigest,
+      },
     });
     expect(replay.statusCode).toBe(201);
     expect(replay.json().approval.recordDigest).toBe(
@@ -324,7 +347,8 @@ describe("federated HTTP execution", () => {
       method: "GET",
       url: `/api/agents/${fixture.agentId}/federated-admissions`,
     });
-    expect(afterRestart.json().admissions[0]).toMatchObject({
+    const afterRestartBody = afterRestart.json();
+    expect(afterRestartBody.admissions[0]).toMatchObject({
       state: "pending",
       admission: {
         admissionId: imported.json().admission.admissionId,
@@ -347,7 +371,12 @@ describe("federated HTTP execution", () => {
         "/api/federation/admissions/" +
         imported.json().admission.admissionId +
         "/decision",
-      payload: { choice: "approve", reason: "Reviewed after operator handoff" },
+      payload: {
+        choice: "approve",
+        reason: "Reviewed after operator handoff",
+        decisionContextDigest:
+          afterRestartBody.admissions[0].review.decisionContextDigest,
+      },
     });
     expect(approved.statusCode).toBe(201);
     const terminal = await restartedApp.inject({
@@ -469,6 +498,98 @@ describe("federated HTTP execution", () => {
     await fixture.app.close();
   });
 
+  it("rejects a stale receiver review after Outcome Contract rotation before Candidate preparation", async () => {
+    const fixture = await createFixture();
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const canonicalBefore = await fixture.workspaces.readCanonical(fixture.agentId);
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-stale-review",
+        producerId: "producer-one",
+        bundle: fixture.bundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    const staleContext = await readDecisionContextDigest(
+      fixture.app,
+      fixture.agentId,
+      imported.json().admission.admissionId,
+    );
+    const unboundDecision = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: {
+        choice: "approve",
+        reason: "This request is intentionally missing its review binding",
+      },
+    });
+    expect(unboundDecision.statusCode).toBe(400);
+    expect(fixture.service.getRuns(fixture.agentId)).toHaveLength(0);
+    const currentContract = fixture.service.getAgent(fixture.agentId).outcomeContract;
+    const rotated = await fixture.service.updateOutcomeContract(fixture.agentId, {
+      requiredPaths: currentContract.requiredPaths,
+      protectedPaths: currentContract.protectedPaths,
+      maxChangedFiles: currentContract.maxChangedFiles - 1,
+      maxAddedBytes: currentContract.maxAddedBytes,
+      secretPatterns: currentContract.secretPatterns,
+      validationCommands: currentContract.validationCommands,
+    });
+
+    const staleDecision = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: {
+        choice: "approve",
+        reason: "Reviewed under the previous receiver policy",
+        decisionContextDigest: staleContext,
+      },
+    });
+    expect(staleDecision.statusCode).toBe(409);
+    expect(staleDecision.json().error).toBe(
+      "Receiver review context is stale; refresh the Admission before deciding",
+    );
+    expect(fixture.service.getRuns(fixture.agentId)).toHaveLength(0);
+    expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(
+      canonicalBefore,
+    );
+
+    const refreshedInbox = await fixture.app.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions`,
+    });
+    const refreshedReview = refreshedInbox.json().admissions[0].review;
+    expect(refreshedReview.preflight.contractVersion).toBe(rotated.version);
+    expect(refreshedReview.decisionContextDigest).not.toBe(staleContext);
+    const denied = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: {
+        choice: "deny",
+        reason: "Re-reviewed under the current receiver policy",
+        decisionContextDigest: refreshedReview.decisionContextDigest,
+      },
+    });
+    expect(denied.statusCode).toBe(200);
+    expect(denied.json()).toMatchObject({
+      approval: { choice: "deny" },
+      run: null,
+    });
+    await fixture.app.close();
+  });
+
   it("fails the review closed when staged evidence changes by one bit", async () => {
     const fixture = await createFixture();
     fixture.policy.producers[0]!.requireLocalApproval = true;
@@ -530,7 +651,15 @@ describe("federated HTTP execution", () => {
         "/api/federation/admissions/" +
         imported.json().admission.admissionId +
         "/decision",
-      payload: { choice: "deny", reason: "Unexpected release scope" },
+      payload: {
+        choice: "deny",
+        reason: "Unexpected release scope",
+        decisionContextDigest: await readDecisionContextDigest(
+          fixture.app,
+          fixture.agentId,
+          imported.json().admission.admissionId,
+        ),
+      },
     });
     expect(denied.statusCode).toBe(200);
     expect(denied.json()).toMatchObject({
@@ -687,6 +816,11 @@ describe("federated HTTP execution", () => {
       },
     });
     expect(imported.statusCode).toBe(200);
+    const decisionContextDigest = await readDecisionContextDigest(
+      fixture.app,
+      fixture.agentId,
+      imported.json().admission.admissionId,
+    );
 
     const failed = await fixture.app.inject({
       method: "POST",
@@ -694,7 +828,11 @@ describe("federated HTTP execution", () => {
         "/api/federation/admissions/" +
         imported.json().admission.admissionId +
         "/decision",
-      payload: { choice: "approve", reason: "Recovery authority reviewed" },
+      payload: {
+        choice: "approve",
+        reason: "Recovery authority reviewed",
+        decisionContextDigest,
+      },
     });
     expect(failed.statusCode).toBe(500);
     expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(before);
@@ -915,4 +1053,24 @@ async function waitForCompletedRun(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Producer Run did not complete before the test deadline");
+}
+
+async function readDecisionContextDigest(
+  app: Awaited<ReturnType<typeof createApp>>,
+  agentId: string,
+  admissionId: string,
+): Promise<string> {
+  const inbox = await app.inject({
+    method: "GET",
+    url: `/api/agents/${agentId}/federated-admissions`,
+  });
+  expect(inbox.statusCode).toBe(200);
+  const item = inbox
+    .json()
+    .admissions.find(
+      (candidate: { admission: { admissionId: string } }) =>
+        candidate.admission.admissionId === admissionId,
+    );
+  expect(item?.review?.decisionContextDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+  return item.review.decisionContextDigest as string;
 }

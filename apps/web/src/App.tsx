@@ -2744,20 +2744,25 @@ function FederationAirlock({
   };
 
   const decidePendingAdmission = async (choice: "approve" | "deny") => {
-    if (!result?.admission || !approvalReason.trim()) return;
+    const decisionContextDigest = selectedInboxItem?.review?.decisionContextDigest;
+    if (!result?.admission || !approvalReason.trim() || !decisionContextDigest) return;
     setDecisionBusy(choice);
     setLocalError(null);
     try {
       const decided = await api.decideFederatedAdmission(
         result.admission.admissionId,
-        { choice, reason: approvalReason.trim() },
+        { choice, reason: approvalReason.trim(), decisionContextDigest },
       );
       setSelectedInboxItem(null);
       setResult(decided);
       await onImported(decided);
       await loadInbox();
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : String(reason));
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (message.includes("review context is stale")) {
+        await loadInbox().catch(() => undefined);
+      }
+      setLocalError(message);
     } finally {
       setDecisionBusy(null);
     }
@@ -3014,6 +3019,16 @@ function FederationAirlock({
               Approval never bypasses receiver Validation or grants Promotion.
             </p>
           </div>
+          <div className="federation-review-binding">
+            <span>Decision bound to this exact review</span>
+            <code>
+              {selectedInboxItem.review.decisionContextDigest.slice(0, 19)}...
+            </code>
+            <small>
+              If the Admission or receiver Outcome Contract changes, this screen must
+              refresh before a decision can be recorded.
+            </small>
+          </div>
           {selectedInboxItem.review.artifact.truncated && (
             <p>
               Showing {selectedInboxItem.review.artifact.displayedOperationCount} of {" "}
@@ -3182,7 +3197,11 @@ function FederationAirlock({
               <button
                 type="button"
                 className="button"
-                disabled={!approvalReason.trim() || decisionBusy !== null}
+                disabled={
+                  !approvalReason.trim() ||
+                  !selectedInboxItem?.review?.decisionContextDigest ||
+                  decisionBusy !== null
+                }
                 onClick={() => void decidePendingAdmission("deny")}
               >
                 {decisionBusy === "deny" ? <Spinner /> : "Deny and preserve Canonical"}
@@ -3191,7 +3210,11 @@ function FederationAirlock({
             <button
               type="button"
               className="button button-primary"
-              disabled={!approvalReason.trim() || decisionBusy !== null}
+              disabled={
+                !approvalReason.trim() ||
+                !selectedInboxItem?.review?.decisionContextDigest ||
+                decisionBusy !== null
+              }
               onClick={() => void decidePendingAdmission("approve")}
             >
               {decisionBusy === "approve" ? (
