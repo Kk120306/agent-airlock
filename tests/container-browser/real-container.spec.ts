@@ -100,8 +100,10 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(evidence.getByText("Signed proof verified locally", { exact: true }))
     .toBeVisible();
   await expect(
-    evidence.getByRole("button", { name: "Download evidence packet" }),
+    evidence.getByRole("button", { name: "Download verified evidence packet" }),
   ).toBeEnabled();
+  await expect(evidence.getByRole("button", { name: "Download receipt JSON" }))
+    .not.toBeVisible();
 
   await expect(
     pairedProof.getByRole("button", { name: /Safe future promoted/ }),
@@ -220,15 +222,18 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .click();
   await expect(
     repairedEvidence.getByText(
-      "One complete chain proves all 2 signed decisions and their Canonical State handoffs.",
+      "2 signed decisions verified locally with every Canonical State handoff intact.",
       { exact: true },
     ),
   ).toBeVisible();
   await expect(
     repairedEvidence.getByRole("button", {
-      name: "Download complete decision chain",
+      name: "Download verified decision chain",
     }),
   ).toBeEnabled();
+  await expect(
+    repairedEvidence.getByRole("button", { name: "Download verified evidence packet" }),
+  ).not.toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(repairedProof).toBeVisible();

@@ -43,6 +43,7 @@ The focused judge view presents four immediately visible proof stages: Candidate
 It keeps Quarantine ancestry, canonical fingerprints, and complete forensic evidence one inspection control away.
 After all three controls complete, the recovery verdict proves that the same Agent and Outcome Contract controlled Promotion, rejection, and repair.
 Select `Generate and verify proof` on the repaired Run to produce and locally verify a complete two-decision chain containing the quarantined parent and promoted repair child.
+The guided proof then offers one primary artifact, `Download verified decision chain`, instead of competing raw-receipt and packet downloads.
 The UI and terminal explicitly identify the local deterministic Responses fixture and state that no ModelArk request or paid inference occurs.
 Run `npm run demo:runtime` without `--reset` to prove restart persistence.
 

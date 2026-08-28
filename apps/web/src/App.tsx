@@ -354,7 +354,7 @@ function ProtocolScenarioGuide({
             <strong>{complete ? "Full recovery loop proven" : "Airlock controlled both outcomes"}</strong>
             <small>
               {complete
-                ? "The rejected parent and promoted repair child now form one signed, independently verifiable decision chain."
+                ? "The rejected parent and promoted repair child now form one decision lineage ready for signed, independent verification."
                 : "The valid Candidate advanced Canonical State. The invalid Candidate left its fingerprint unchanged."}
             </small>
           </div>
@@ -1216,6 +1216,7 @@ function PortableTrustExport({
       </p>
     </>
   );
+  const hasDecisionChain = (result?.decisionChain?.packets.length ?? 0) > 1;
 
   return (
     <section className="portable-trust" aria-label="Portable trust receipt">
@@ -1314,8 +1315,12 @@ function PortableTrustExport({
               <small>
                 {dirty
                   ? "Options changed. Regenerate before downloading."
-                  : result.decisionChain && result.decisionChain.packets.length > 1
-                    ? `One complete chain proves all ${result.decisionChain.packets.length} signed decisions and their Canonical State handoffs.`
+                  : hasDecisionChain
+                    ? judgeProofMode
+                      ? `${result.decisionChain!.packets.length} signed decisions verified locally with every Canonical State handoff intact.`
+                      : `One complete chain proves all ${result.decisionChain!.packets.length} signed decisions and their Canonical State handoffs.`
+                  : judgeProofMode
+                    ? "The signed decision and evidence packet verified locally for independent offline inspection."
                   : result.anchor && result.evmPayload
                     ? "One packet contains the signed receipt, checkpoint proof, and digest-only EVM calldata."
                     : result.anchor
@@ -1325,33 +1330,37 @@ function PortableTrustExport({
                         : "One packet contains the signed receipt for independent offline verification."}
               </small>
             </div>
-            <button
-              type="button"
-              className="button button-ghost"
-              onClick={() =>
-                downloadJson(
-                  result.envelope,
-                  `agent-airlock-receipt-${runId}.json`,
-                )
-              }
-              disabled={dirty || !result.verification.valid}
-            >
-              Download receipt JSON
-            </button>
-            <button
-              type="button"
-              className={`button ${result.decisionChain && result.decisionChain.packets.length > 1 ? "button-ghost" : "button-primary"}`}
-              onClick={() =>
-                downloadJson(
-                  result.packet,
-                  `agent-airlock-evidence-${runId}.json`,
-                )
-              }
-              disabled={dirty || !result.verification.valid}
-            >
-              Download evidence packet
-            </button>
-            {result.decisionChain && result.decisionChain.packets.length > 1 && (
+            {!judgeProofMode && (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() =>
+                  downloadJson(
+                    result.envelope,
+                    `agent-airlock-receipt-${runId}.json`,
+                  )
+                }
+                disabled={dirty || !result.verification.valid}
+              >
+                Download receipt JSON
+              </button>
+            )}
+            {(!judgeProofMode || !hasDecisionChain) && (
+              <button
+                type="button"
+                className={`button ${hasDecisionChain ? "button-ghost" : "button-primary"}`}
+                onClick={() =>
+                  downloadJson(
+                    result.packet,
+                    `agent-airlock-evidence-${runId}.json`,
+                  )
+                }
+                disabled={dirty || !result.verification.valid}
+              >
+                {judgeProofMode ? "Download verified evidence packet" : "Download evidence packet"}
+              </button>
+            )}
+            {hasDecisionChain && (
               <button
                 type="button"
                 className="button button-primary"
@@ -1363,7 +1372,7 @@ function PortableTrustExport({
                 }
                 disabled={dirty || !result.verification.valid}
               >
-                Download complete decision chain
+                {judgeProofMode ? "Download verified decision chain" : "Download complete decision chain"}
               </button>
             )}
           </div>

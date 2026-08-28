@@ -25,7 +25,8 @@ npm run demo:runtime -- --reset
 Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the four-stage compact proof that real Codex used isolated Candidate State, passed every required Validation, promoted all four resources together, and released exactly one effect afterward.
 Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
 Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all nine required Validations, and advances Canonical State only after validation.
-Show the full recovery verdict, then select `Generate and verify proof` to finish with a locally verified chain containing both signed decisions and their Canonical State handoff.
+Show the full recovery verdict, then select `Generate and verify proof` to finish with two locally verified signed decisions and their intact Canonical State handoff.
+The guided result exposes one primary `Download verified decision chain` action, while advanced export variants remain outside judge mode.
 This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
 
 When ModelArk free capacity is available, run the credentialed conformance proof:
