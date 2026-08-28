@@ -809,8 +809,8 @@ Let the judge attack a disposable proof copy and watch the exact trust boundary 
 
 The outcome is tracked by [Wayfinder: Make trust proof instantly understandable](https://github.com/Kk120306/agent-airlock/issues/29).
 The source-backed interaction and trust boundary are defined in [Offline receiver custody proof room](../research/offline-custody-proof-room.md).
-The local implementation now passes the backend-disconnected two-instance browser proof for both receiver Promotion and receiver Quarantine at 390 CSS pixels.
-Hosted release verification remains the final delivery gate.
+The delivered implementation passes the backend-disconnected two-instance browser proof for both receiver Promotion and receiver Quarantine at 390 CSS pixels.
+Hosted quality, dependency, release-boundary, real CodeJam Runtime, production-browser, Portable Trust, and two-instance federation gates pass on the delivered revision.
 
 ## Hackathon cut lines
 

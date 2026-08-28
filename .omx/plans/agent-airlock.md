@@ -366,7 +366,7 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Add receiver custody import and the five-node causal story to the independent verifier.
 - [x] Add separate producer and receiver evaluator trust controls.
 - [x] Add the bounded tamper lab with immutable-original reset behavior.
-- [ ] Prove backend-disconnected verification, mobile presentation, two-instance download reopening, and hosted release gates.
+- [x] Prove backend-disconnected verification, mobile presentation, two-instance download reopening, and hosted release gates.
 
 ## Trust boundaries
 
