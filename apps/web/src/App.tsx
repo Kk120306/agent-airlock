@@ -203,7 +203,7 @@ function JudgeProofSummary({
           </h4>
         </div>
         <span className={promoted ? "proof-verdict passed" : "proof-verdict"}>
-          {promoted ? "Verified" : terminal ? "Protected" : "Running"}
+          {promoted ? "Validated" : terminal ? "Protected" : "Running"}
         </span>
       </header>
       <ol>
@@ -1405,6 +1405,7 @@ function PortableTrustExport({
     </>
   );
   const hasDecisionChain = (result?.decisionChain?.packets.length ?? 0) > 1;
+  const proofVerified = result?.verification.valid === true && !dirty;
 
   return (
     <section className="portable-trust" aria-label="Portable trust receipt">
@@ -1415,12 +1416,20 @@ function PortableTrustExport({
           </span>
           <h4>
             {judgeProofMode
-              ? "Make this decision independently verifiable"
+              ? proofVerified
+                ? hasDecisionChain
+                  ? "Signed recovery independently verified"
+                  : "Signed decision independently verified"
+                : "Make this decision independently verifiable"
               : "Export a signed decision statement"}
           </h4>
           <p>
             {judgeProofMode
-              ? "Generate a private-by-default evidence packet and verify its signature locally before download."
+              ? proofVerified
+                ? hasDecisionChain
+                  ? "Two signed decisions, their parent link, and every Canonical State handoff verified locally."
+                  : "The signed decision and its private-by-default evidence packet verified locally."
+                : "Generate a private-by-default evidence packet and verify its signature locally before download."
               : "Offline verification proves that the included Ed25519 key signed the canonical content. It proves key possession, not that the reported state existed or was reported truthfully."}
           </p>
           {!judgeProofMode && (
@@ -1441,7 +1450,9 @@ function PortableTrustExport({
             ? <Spinner />
             : result
               ? judgeProofMode
-                ? "Regenerate proof"
+                ? proofVerified
+                  ? "Reverify proof"
+                  : "Regenerate proof"
                 : "Regenerate receipt"
               : judgeProofMode
                 ? "Generate and verify proof"

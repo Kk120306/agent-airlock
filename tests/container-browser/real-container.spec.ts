@@ -117,6 +117,13 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(evidence.getByText("Signed proof verified locally", { exact: true }))
     .toBeVisible();
   await expect(
+    evidence.getByRole("heading", {
+      name: "Signed decision independently verified",
+    }),
+  ).toBeVisible();
+  await expect(evidence.getByRole("button", { name: "Reverify proof" }))
+    .toBeEnabled();
+  await expect(
     evidence.getByRole("button", { name: "Download verified evidence packet" }),
   ).toBeEnabled();
   await expect(evidence.getByRole("button", { name: "Download receipt JSON" }))
@@ -247,6 +254,11 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     }),
   ).toBeEnabled();
   await expect(
+    repairedEvidence.getByRole("heading", {
+      name: "Signed recovery independently verified",
+    }),
+  ).toBeVisible();
+  await expect(
     repairedEvidence.getByRole("button", { name: "Download verified evidence packet" }),
   ).not.toBeVisible();
   await repairedEvidence
@@ -296,6 +308,16 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(
     reloadedEvidence.getByRole("button", { name: "Generate and verify proof" }),
+  ).not.toBeVisible();
+  await expect(
+    reloadedEvidence.getByRole("heading", {
+      name: "Signed recovery independently verified",
+    }),
+  ).toBeVisible();
+  await expect(
+    reloadedEvidence.getByText("Make this decision independently verifiable", {
+      exact: true,
+    }),
   ).not.toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
