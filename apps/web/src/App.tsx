@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  createReceiverCustodyTamperedCopy,
   evaluateSigningKeyTrust,
+  evaluateReceiverCustodyTrustInBrowser,
   verifyPortableDecisionChainJsonInBrowser,
   verifyPortableEvidencePacketJsonInBrowser,
   verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser,
@@ -18,7 +20,11 @@ import type {
   PolicyAuthorityRotationVerificationReport,
   PortableVerificationReport,
   ReceiptDigest,
+  ReceiverCustodyPacket,
+  ReceiverCustodyTamperAttack,
+  ReceiverCustodyTrustReport,
   ReceiverCustodyVerificationReport,
+  SigningKeyTrustPolicy,
   TrustPolicyVerificationReport,
 } from "@agent-airlock/portable-promotion-receipt";
 import { api, ApiError, setAuthToken } from "./api";
@@ -661,7 +667,417 @@ function PortableProofDetails({
 type PortableVerifierArtifact =
   | PortablePromotionEnvelope
   | PortableEvidencePacket
-  | PortableDecisionChain;
+  | PortableDecisionChain
+  | ReceiverCustodyPacket;
+
+const custodyNonClaims = [
+  "This proof does not establish that Runtime isolation was sufficient.",
+  "This proof does not establish that the receiver Outcome Contract was sufficient.",
+  "This proof does not establish that Validation commands were trustworthy.",
+  "This proof does not establish that either signer clock was externally synchronized.",
+  "A mathematically valid included key is not organizationally trusted by default.",
+  "Transparency or blockchain publication cannot grant Admission or Promotion authority.",
+];
+
+function compactProofId(value: string): string {
+  return value.length > 24 ? `${value.slice(0, 13)}…${value.slice(-8)}` : value;
+}
+
+function CustodyPolicyControl({
+  role,
+  onPolicy,
+}: {
+  role: "Producer" | "Receiver";
+  onPolicy: (policy: SigningKeyTrustPolicy | null) => void;
+}) {
+  const [authorityFingerprint, setAuthorityFingerprint] = useState("");
+  const [rotationSource, setRotationSource] = useState<string | null>(null);
+  const [rotationFilename, setRotationFilename] = useState<string | null>(null);
+  const [rotationReport, setRotationReport] =
+    useState<PolicyAuthorityRotationVerificationReport | null>(null);
+  const [policySource, setPolicySource] = useState<string | null>(null);
+  const [policyFilename, setPolicyFilename] = useState<string | null>(null);
+  const [policyReport, setPolicyReport] =
+    useState<TrustPolicyVerificationReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const trustedRoot = authorityFingerprint.trim();
+    if (rotationSource === null || !/^sha256:[a-f0-9]{64}$/.test(trustedRoot)) {
+      setRotationReport(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser(
+      rotationSource,
+      [trustedRoot as ReceiptDigest],
+    ).then((next) => {
+      if (!cancelled) setRotationReport(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authorityFingerprint, rotationSource]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const trustedRoot = authorityFingerprint.trim();
+    if (policySource === null || !/^sha256:[a-f0-9]{64}$/.test(trustedRoot)) {
+      setPolicyReport(null);
+      onPolicy(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const roots = [
+      trustedRoot as ReceiptDigest,
+      ...(rotationReport?.valid && rotationReport.nextAuthorityKeyId
+        ? [rotationReport.nextAuthorityKeyId]
+        : []),
+    ];
+    void verifySignedSigningKeyTrustPolicyEnvelopeJsonInBrowser(
+      policySource,
+      roots,
+    ).then((next) => {
+      if (cancelled) return;
+      setPolicyReport(next);
+      onPolicy(next.valid ? next.policy : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authorityFingerprint, onPolicy, policySource, rotationReport]);
+
+  const readArtifact = async (
+    file: File | undefined,
+    maximumBytes: number,
+    kind: "rotation" | "policy",
+  ) => {
+    if (!file) return;
+    setError(null);
+    if (file.size < 1 || file.size > maximumBytes) {
+      setError(`${role} ${kind} file is empty or exceeds its local byte limit.`);
+      return;
+    }
+    try {
+      const source = await file.text();
+      if (kind === "rotation") {
+        setRotationFilename(file.name);
+        setRotationSource(source);
+      } else {
+        setPolicyFilename(file.name);
+        setPolicySource(source);
+      }
+    } catch {
+      setError(`The browser could not read the ${role.toLowerCase()} ${kind} file.`);
+    }
+  };
+
+  return (
+    <section
+      className="custody-trust-domain"
+      aria-label={`${role} organizational trust policy`}
+      data-state={policyReport?.valid ? "verified" : policyReport ? "rejected" : "empty"}
+    >
+      <div className="custody-trust-domain-heading">
+        <span>{role}</span>
+        <strong>
+          {policyReport?.valid
+            ? "Policy authority verified"
+            : policyReport
+              ? "Policy authority rejected"
+              : "Trust not evaluated"}
+        </strong>
+      </div>
+      <label className="verifier-authority-root">
+        <span>{role} trusted policy authority</span>
+        <input
+          type="text"
+          value={authorityFingerprint}
+          onChange={(event) => setAuthorityFingerprint(event.target.value)}
+          placeholder="sha256: authority fingerprint"
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </label>
+      <div className="custody-trust-files">
+        <label className="verifier-policy-file" data-loaded={rotationSource !== null}>
+          <input
+            type="file"
+            aria-label={`Import ${role.toLowerCase()} authority rotation`}
+            accept="application/json,.json"
+            onChange={(event) =>
+              void readArtifact(event.target.files?.[0], 65_536, "rotation")}
+          />
+          <span>{rotationFilename ?? "Optional rotation"}</span>
+        </label>
+        <label className="verifier-policy-file" data-loaded={policySource !== null}>
+          <input
+            type="file"
+            aria-label={`Import ${role.toLowerCase()} signed policy`}
+            accept="application/json,.json"
+            onChange={(event) =>
+              void readArtifact(event.target.files?.[0], 131_072, "policy")}
+          />
+          <span>{policyFilename ?? "Import signed policy"}</span>
+        </label>
+      </div>
+      {rotationReport && (
+        <small>
+          {rotationReport.valid
+            ? "Authority continuity verified."
+            : rotationReport.checks.find((check) => !check.valid)?.detail}
+        </small>
+      )}
+      {policyReport && !policyReport.valid && (
+        <small>{policyReport.checks.find((check) => !check.valid)?.detail}</small>
+      )}
+      {error && <small role="alert">{error}</small>}
+    </section>
+  );
+}
+
+function CustodyProofRoom({
+  packet,
+  report,
+}: {
+  packet: ReceiverCustodyPacket;
+  report: ReceiverCustodyVerificationReport;
+}) {
+  const [producerPolicy, setProducerPolicy] =
+    useState<SigningKeyTrustPolicy | null>(null);
+  const [receiverPolicy, setReceiverPolicy] =
+    useState<SigningKeyTrustPolicy | null>(null);
+  const [trustReport, setTrustReport] =
+    useState<ReceiverCustodyTrustReport | null>(null);
+  const [tamperReport, setTamperReport] =
+    useState<ReceiverCustodyVerificationReport | null>(null);
+  const [tamperAttack, setTamperAttack] =
+    useState<ReceiverCustodyTamperAttack | null>(null);
+  const [tamperBusy, setTamperBusy] = useState(false);
+  const verdictRef = useRef<HTMLDivElement | null>(null);
+  const tamperRef = useRef<HTMLDivElement | null>(null);
+  const onProducerPolicy = useCallback(
+    (policy: SigningKeyTrustPolicy | null) => setProducerPolicy(policy),
+    [],
+  );
+  const onReceiverPolicy = useCallback(
+    (policy: SigningKeyTrustPolicy | null) => setReceiverPolicy(policy),
+    [],
+  );
+
+  useEffect(() => {
+    verdictRef.current?.focus();
+  }, [report]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!producerPolicy && !receiverPolicy) {
+      setTrustReport(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void evaluateReceiverCustodyTrustInBrowser(packet, {
+      producer: producerPolicy,
+      receiver: receiverPolicy,
+    }).then((next) => {
+      if (!cancelled) setTrustReport(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [packet, producerPolicy, receiverPolicy]);
+
+  const runAttack = async (attack: ReceiverCustodyTamperAttack) => {
+    setTamperBusy(true);
+    setTamperAttack(attack);
+    try {
+      const copy = createReceiverCustodyTamperedCopy(packet, attack);
+      setTamperReport(await verifyReceiverCustodyPacketJsonInBrowser(JSON.stringify(copy)));
+      window.setTimeout(() => tamperRef.current?.focus(), 0);
+    } finally {
+      setTamperBusy(false);
+    }
+  };
+
+  const story = report.story;
+  const failedCheck = tamperReport?.checks.find((check) => !check.valid) ?? null;
+  const trustComplete = trustReport?.policiesDistinct === true &&
+    trustReport.producer?.trusted === true && trustReport.receiver?.trusted === true;
+
+  if (!report.valid || !story) {
+    const failed = report.checks.find((check) => !check.valid);
+    return (
+      <div className="custody-proof-room" data-valid="false">
+        <div className="verifier-verdict" ref={verdictRef} tabIndex={-1} role="alert">
+          <span aria-hidden="true">!</span>
+          <div>
+            <strong>Custody proof rejected</strong>
+            <small>{failed?.detail ?? "Do not rely on this custody evidence."}</small>
+          </div>
+        </div>
+        <details className="custody-proof-details">
+          <summary>Inspect failed cryptographic checks</summary>
+          <div className="verifier-checks">
+            {report.checks.map((check) => (
+              <div key={check.name} data-valid={check.valid}>
+                <span>{check.valid ? "PASS" : "FAIL"}</span>
+                <div><strong>{check.name}</strong><small>{check.detail}</small></div>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+    );
+  }
+
+  const nodes = [
+    {
+      name: "Producer signed work",
+      detail: `${story.producer.producerId} · ${compactProofId(story.producer.receiptDigest)}`,
+    },
+    {
+      name: "Receiver admitted evidence",
+      detail: `Admission ${compactProofId(story.authority.admissionId)}`,
+    },
+    {
+      name: story.approval === "operator-approved" ? "Local operator approved" : "Local policy admitted automatically",
+      detail: story.authority.decisionContextDigest
+        ? `Review ${compactProofId(story.authority.decisionContextDigest)}`
+        : "No human Approval Decision was required",
+    },
+    {
+      name: "Receiver Validation and authority",
+      detail: `Evidence ${compactProofId(story.authority.validationEvidenceRoot)}`,
+    },
+    {
+      name: story.disposition === "promoted" ? "Canonical State advanced" : "Candidate quarantined",
+      detail: story.disposition === "promoted"
+        ? `Accepted ${story.state.afterStateId}`
+        : `Canonical State remained at ${story.state.beforeStateId}`,
+    },
+  ];
+
+  return (
+    <div className="custody-proof-room" data-valid="true">
+      <div className="custody-primary-verdict" ref={verdictRef} tabIndex={-1} role="status">
+        <span aria-hidden="true">✓</span>
+        <div>
+          <strong>
+            {story.disposition === "promoted"
+              ? "Receiver custody path complete"
+              : "Receiver containment path complete"}
+          </strong>
+          <small>
+            {story.disposition === "promoted"
+              ? "Canonical State advanced to the verified receiver state."
+              : "Canonical State remained at the verified before-state."}
+          </small>
+        </div>
+        <div className="custody-verdict-pills" aria-label="Independent verdicts">
+          <span data-state="valid">Cryptographically valid</span>
+          <span data-state={trustComplete ? "valid" : trustReport ? "failed" : "neutral"}>
+            {trustComplete
+              ? "Both trust domains authorized"
+              : trustReport && !trustReport.policiesDistinct
+                ? "Trust domains must differ"
+                : "Organizational trust not fully evaluated"}
+          </span>
+        </div>
+      </div>
+
+      <section className="custody-story" aria-label="Verified receiver custody path">
+        <div>
+          <span className="eyebrow">Verified causal path</span>
+          <strong>One signed handoff, five independently checked custody hops</strong>
+        </div>
+        <ol>
+          {nodes.map((node, index) => (
+            <li key={node.name}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <div><strong>{node.name}</strong><small>{node.detail}</small></div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <details className="custody-trust" open={false}>
+        <summary>Evaluate organizational trust</summary>
+        <p>
+          Supply producer and receiver policy roots separately. The packet cannot
+          authorize either signer or prefill either evaluator-controlled root.
+        </p>
+        <div className="custody-trust-grid">
+          <CustodyPolicyControl role="Producer" onPolicy={onProducerPolicy} />
+          <CustodyPolicyControl role="Receiver" onPolicy={onReceiverPolicy} />
+        </div>
+        <div className="custody-role-verdicts">
+          {(["producer", "receiver"] as const).map((role) => {
+            const result = trustReport?.[role] ?? null;
+            return (
+              <div key={role} data-state={result ? result.trusted ? "valid" : "failed" : "neutral"}>
+                <strong>{role === "producer" ? "Producer" : "Receiver"}</strong>
+                <small>{result?.detail ?? "Trust not evaluated"}</small>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+
+      <section className="custody-tamper-lab" aria-label="Disposable custody proof attacks">
+        <div>
+          <span className="eyebrow">Tamper lab</span>
+          <strong>Attack a disposable copy</strong>
+          <small>The imported original remains verified and unchanged in memory.</small>
+        </div>
+        <div className="custody-attack-actions">
+          <button type="button" disabled={tamperBusy} onClick={() => void runAttack("remove-admission")}>Remove Admission</button>
+          <button type="button" disabled={tamperBusy} onClick={() => void runAttack("alter-reviewed-evidence")}>Alter reviewed evidence</button>
+          <button type="button" disabled={tamperBusy} onClick={() => void runAttack("rewrite-disposition")}>Rewrite disposition</button>
+        </div>
+        {tamperReport && (
+          <div className="custody-attack-result" ref={tamperRef} tabIndex={-1} role="status">
+            <span aria-hidden="true">!</span>
+            <div>
+              <strong>Attack detected at {failedCheck?.name ?? "custody boundary"}</strong>
+              <small>{failedCheck?.detail ?? "The disposable copy was rejected."}</small>
+              <button type="button" onClick={() => { setTamperAttack(null); setTamperReport(null); }}>
+                Reset disposable copy
+              </button>
+            </div>
+          </div>
+        )}
+        {tamperAttack && !tamperReport && <small>Verifying disposable attack locally…</small>}
+      </section>
+
+      <details className="custody-proof-details">
+        <summary>Inspect cryptographic checks and commitments</summary>
+        <div className="verifier-checks">
+          {report.checks.map((check) => (
+            <div key={check.name} data-valid={check.valid}>
+              <span>PASS</span>
+              <div><strong>{check.name}</strong><small>{check.detail}</small></div>
+            </div>
+          ))}
+        </div>
+        <div className="verifier-identities">
+          <div><span>Producer receipt</span><code>{story.producer.receiptDigest}</code></div>
+          <div><span>Receiver receipt</span><code>{story.receiver.receiptDigest}</code></div>
+          <div><span>Before state</span><code>{story.state.beforeCompositeHash}</code></div>
+          <div><span>After state</span><code>{story.state.afterCompositeHash}</code></div>
+        </div>
+      </details>
+
+      <details className="verifier-limitations">
+        <summary>What this proof does not establish</summary>
+        <ul>{custodyNonClaims.map((claim) => <li key={claim}>{claim}</li>)}</ul>
+      </details>
+    </div>
+  );
+}
 
 function ReceiptVerifier({
   initialArtifact,
@@ -670,6 +1086,7 @@ function ReceiptVerifier({
   initialArtifact: PortableVerifierArtifact | null;
   onClose: () => void;
 }) {
+  const openerRef = useRef<HTMLElement | null>(null);
   const [report, setReport] = useState<PortableVerificationReport | null>(null);
   const [packetReport, setPacketReport] =
     useState<PortableEvidencePacketVerificationReport | null>(null);
@@ -678,6 +1095,10 @@ function ReceiptVerifier({
   const [decisionChain, setDecisionChain] =
     useState<PortableDecisionChain | null>(null);
   const [envelope, setEnvelope] = useState<PortablePromotionEnvelope | null>(null);
+  const [custodyPacket, setCustodyPacket] =
+    useState<ReceiverCustodyPacket | null>(null);
+  const [custodyReport, setCustodyReport] =
+    useState<ReceiverCustodyVerificationReport | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trustPolicySource, setTrustPolicySource] = useState<string | null>(null);
@@ -707,11 +1128,18 @@ function ReceiptVerifier({
     setChainReport(null);
     setDecisionChain(null);
     setEnvelope(null);
+    setCustodyPacket(null);
+    setCustodyReport(null);
     setError(null);
     setBusy(true);
     try {
       const parsed = JSON.parse(source) as PortableVerifierArtifact;
-      if (parsed.schema === "agent-airlock/portable-decision-chain") {
+      if (parsed.schema === "agent-airlock/portable-receiver-chain-of-custody") {
+        const nextCustodyReport =
+          await verifyReceiverCustodyPacketJsonInBrowser(source);
+        setCustodyPacket(parsed);
+        setCustodyReport(nextCustodyReport);
+      } else if (parsed.schema === "agent-airlock/portable-decision-chain") {
         const nextChainReport =
           await verifyPortableDecisionChainJsonInBrowser(source);
         const leafPacket = parsed.packets.at(-1);
@@ -743,6 +1171,9 @@ function ReceiptVerifier({
   }, []);
 
   useEffect(() => {
+    openerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
@@ -752,6 +1183,7 @@ function ReceiptVerifier({
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
+      openerRef.current?.focus();
     };
   }, [onClose]);
 
@@ -761,7 +1193,9 @@ function ReceiptVerifier({
       ? "Generated decision chain"
       : initialArtifact.schema === "agent-airlock/portable-evidence-packet"
         ? "Generated evidence packet"
-        : "Generated receipt";
+        : initialArtifact.schema === "agent-airlock/portable-receiver-chain-of-custody"
+          ? "Generated receiver custody proof"
+          : "Generated receipt";
     void verifySource(JSON.stringify(initialArtifact), sourceName);
   }, [initialArtifact, verifySource]);
 
@@ -820,8 +1254,8 @@ function ReceiptVerifier({
 
   const verifyFile = async (file: File | undefined) => {
     if (!file) return;
-    if (file.size < 1 || file.size > 4_194_304) {
-      setError("Choose a non-empty receipt, evidence packet, or decision chain no larger than 4 MB.");
+    if (file.size < 1 || file.size > 16 * 1_048_576) {
+      setError("Choose a non-empty receiver custody proof no larger than 16 MB, or another portable proof no larger than 4 MB.");
       return;
     }
     try {
@@ -925,7 +1359,7 @@ function ReceiptVerifier({
 
         <div className="verifier-boundary" role="note">
           <span>LOCAL ONLY</span>
-          <strong>0 API calls · 0 uploads · 4 MB hard limit</strong>
+          <strong>0 API calls · 0 uploads · 16 MB custody limit</strong>
         </div>
 
         <label className="receipt-dropzone" data-loaded={filename !== null}>
@@ -935,7 +1369,7 @@ function ReceiptVerifier({
             onChange={(event) => void verifyFile(event.target.files?.[0])}
           />
           <span aria-hidden="true">⌁</span>
-          <strong>{filename ?? "Choose a receipt, packet, or decision chain"}</strong>
+          <strong>{filename ?? "Choose a receipt, custody proof, packet, or decision chain"}</strong>
           <small>
             {busy
               ? "Verifying locally…"
@@ -946,6 +1380,10 @@ function ReceiptVerifier({
         </label>
 
         {error && <div className="verifier-error" role="alert">{error}</div>}
+
+        {custodyPacket && custodyReport && (
+          <CustodyProofRoom packet={custodyPacket} report={custodyReport} />
+        )}
 
         {report && (
           <div className="verifier-report" data-valid={evidenceValid}>
@@ -2648,10 +3086,12 @@ function FederationAirlock({
   agent,
   disabled,
   onImported,
+  onVerifyArtifact,
 }: {
   agent: Agent;
   disabled: boolean;
   onImported: (result: FederatedImportResult) => Promise<void>;
+  onVerifyArtifact: (artifact: ReceiverCustodyPacket) => void;
 }) {
   const [policy, setPolicy] = useState<Awaited<
     ReturnType<typeof api.activeFederatedAdmissionPolicy>
@@ -2678,6 +3118,8 @@ function FederationAirlock({
   const [custodyBusy, setCustodyBusy] = useState(false);
   const [custodyVerification, setCustodyVerification] =
     useState<ReceiverCustodyVerificationReport | null>(null);
+  const [custodyPacket, setCustodyPacket] =
+    useState<ReceiverCustodyPacket | null>(null);
 
   const loadInbox = useCallback(async () => {
     setInboxBusy(true);
@@ -2813,6 +3255,7 @@ function FederationAirlock({
 
   useEffect(() => {
     setCustodyVerification(null);
+    setCustodyPacket(null);
   }, [currentRunId]);
 
   const exportReceiverCustody = async () => {
@@ -2830,6 +3273,7 @@ function FederationAirlock({
       if (!browserReport.valid) {
         throw new Error("The browser independently rejected the custody closure.");
       }
+      setCustodyPacket(exported.packet);
       downloadJsonArtifact(
         exported.packet,
         `agent-airlock-receiver-custody-${currentRunId}.json`,
@@ -3254,6 +3698,15 @@ function FederationAirlock({
           >
             {custodyBusy ? <Spinner /> : custodyVerification?.valid ? "Verify and download again" : "Verify and download custody proof"}
           </button>
+          {custodyVerification?.valid && custodyPacket && (
+            <button
+              type="button"
+              className="button button-ghost"
+              onClick={() => onVerifyArtifact(custodyPacket)}
+            >
+              Open offline proof room
+            </button>
+          )}
         </section>
       )}
 
@@ -3360,6 +3813,10 @@ export default function App() {
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
   const [verifierArtifact, setVerifierArtifact] =
     useState<PortableVerifierArtifact | null>(null);
+  const closeReceiptVerifier = useCallback(() => {
+    setShowReceiptVerifier(false);
+    setVerifierArtifact(null);
+  }, []);
   const [automaticProof, setAutomaticProof] = useState<{
     runId: string;
     status: "requested" | "verified" | "failed";
@@ -4475,6 +4932,10 @@ export default function App() {
                         }
                         await refreshAgents();
                       }}
+                      onVerifyArtifact={(artifact) => {
+                        setVerifierArtifact(artifact);
+                        setShowReceiptVerifier(true);
+                      }}
                     />
                   </div>
                 )}
@@ -4889,10 +5350,7 @@ export default function App() {
       {showReceiptVerifier && (
         <ReceiptVerifier
           initialArtifact={verifierArtifact}
-          onClose={() => {
-            setShowReceiptVerifier(false);
-            setVerifierArtifact(null);
-          }}
+          onClose={closeReceiptVerifier}
         />
       )}
     </div>

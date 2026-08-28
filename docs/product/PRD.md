@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 11 delivered and regression-locked; later demo and Portable Trust refinements are under release verification
+**Status:** Phases 0 through 19 delivered and regression-locked; the Phase 20 offline custody proof room is under release verification
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -362,6 +362,8 @@ Phase 17 binds every new operator decision to the exact pending Admission and re
 Receiver policy rotation makes an old review stale, rejects it before Candidate preparation, refreshes the current evidence without losing the operator's reason, and preserves exact replay for decisions that were already committed.
 Phase 18 makes that exact reviewed context durable inside every new immutable Federated Approval Decision.
 The receiver exposes the committed digest after approval or denial, rejects contradictory retries and tampering, and preserves legacy decisions without claiming evidence they never recorded.
+Phase 19 closes the producer-to-receiver path in one receiver-signed custody packet that independently verifies the source work, Admission, optional Approval, receiver authority, terminal Validation commitment, and Canonical State disposition.
+Phase 20 turns that packet into a zero-upload proof room with a five-node verified story, separate producer and receiver trust roots, and disposable tamper attacks that never mutate the original evidence.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations

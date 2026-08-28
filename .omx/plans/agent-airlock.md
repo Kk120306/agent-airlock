@@ -362,10 +362,10 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Separate mathematical validity, evidence completeness, and evaluator-controlled producer and receiver trust in the interaction model.
 - [x] Define promoted, quarantined, invalid, tampered, trust-unevaluated, and role-trust screen states.
 - [x] Bound three disposable in-memory tamper demonstrations and their expected first failed commitments.
-- [ ] Extend the receiver custody browser report with the verified-story projection.
-- [ ] Add receiver custody import and the five-node causal story to the independent verifier.
-- [ ] Add separate producer and receiver evaluator trust controls.
-- [ ] Add the bounded tamper lab with immutable-original reset behavior.
+- [x] Extend the receiver custody browser report with the verified-story projection.
+- [x] Add receiver custody import and the five-node causal story to the independent verifier.
+- [x] Add separate producer and receiver evaluator trust controls.
+- [x] Add the bounded tamper lab with immutable-original reset behavior.
 - [ ] Prove backend-disconnected verification, mobile presentation, two-instance download reopening, and hosted release gates.
 
 ## Trust boundaries

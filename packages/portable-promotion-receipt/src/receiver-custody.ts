@@ -20,6 +20,7 @@ import type {
 import type {
   PortablePromotionEnvelope,
   PortablePublicJwk,
+  OrganizationalTrustReport,
   ReceiptDigest,
   SigningKeyTrustPolicy,
   VerificationCheck,
@@ -31,6 +32,7 @@ import {
 } from "./validation.js";
 import { verifyPortablePromotionEnvelope } from "./verifier.js";
 import { evaluateSigningKeyTrust } from "./trust-policy.js";
+import { buildReceiverCustodyVerifiedStory } from "./receiver-custody-story.js";
 
 const SIGNATURE_DOMAIN = Buffer.from(
   "agent-airlock-receiver-custody-manifest-v1\0",
@@ -150,8 +152,54 @@ export interface ReceiverCustodyVerificationReport {
   receiverKeyId: ReceiptDigest | null;
   producerReceiptDigest: ReceiptDigest | null;
   receiverReceiptDigest: ReceiptDigest | null;
+  story: ReceiverCustodyVerifiedStory | null;
   checks: VerificationCheck[];
 }
+
+export interface ReceiverCustodyVerifiedStory {
+  disposition: "promoted" | "quarantined";
+  approval: "automatic" | "operator-approved";
+  producer: {
+    producerId: string;
+    keyId: ReceiptDigest;
+    receiptDigest: ReceiptDigest;
+    artifactDigest: ReceiptDigest;
+  };
+  receiver: {
+    agentId: string;
+    runId: string;
+    keyId: ReceiptDigest;
+    receiptDigest: ReceiptDigest;
+  };
+  authority: {
+    admissionId: ReceiptDigest;
+    admissionRecordDigest: ReceiptDigest;
+    approvalDecisionDigest: ReceiptDigest | null;
+    decisionContextDigest: ReceiptDigest | null;
+    terminalAuthorityDigest: ReceiptDigest;
+    outcomeContractDigest: ReceiptDigest;
+    validationEvidenceRoot: ReceiptDigest;
+  };
+  state: {
+    canonicalAdvanced: boolean;
+    beforeStateId: string;
+    afterStateId: string;
+    beforeCompositeHash: ReceiptDigest;
+    afterCompositeHash: ReceiptDigest;
+  };
+}
+
+export interface ReceiverCustodyTrustReport {
+  cryptographicValid: boolean;
+  policiesDistinct: boolean;
+  producer: OrganizationalTrustReport | null;
+  receiver: OrganizationalTrustReport | null;
+}
+
+export type ReceiverCustodyTamperAttack =
+  | "remove-admission"
+  | "alter-reviewed-evidence"
+  | "rewrite-disposition";
 
 export function buildReceiverCustodyRecord(input: {
   recordId: string;
@@ -242,6 +290,7 @@ export function verifyReceiverCustodyPacket(
   } | null = null,
 ): ReceiverCustodyVerificationReport {
   const report = emptyReport();
+  let verifiedStory: ReceiverCustodyVerifiedStory | null = null;
   try {
     const packet = assertPacket(value);
     const envelope = packet.envelope;
@@ -270,6 +319,7 @@ export function verifyReceiverCustodyPacket(
     const decoded = decodeRecords(packet, report);
     verifyRequiredRoles(manifest, decoded, report);
     verifyBindings(manifest.bindings, decoded, report);
+    verifiedStory = buildReceiverCustodyVerifiedStory(manifest.bindings, decoded);
     if (trustPolicies) {
       verifyTrustDomains(decoded, trustPolicies, report);
     }
@@ -286,6 +336,7 @@ export function verifyReceiverCustodyPacket(
     );
   }
   report.valid = report.checks.length > 0 && report.checks.every((check) => check.valid);
+  report.story = report.valid ? verifiedStory : null;
   return report;
 }
 
@@ -624,6 +675,7 @@ function emptyReport(): ReceiverCustodyVerificationReport {
     receiverKeyId: null,
     producerReceiptDigest: null,
     receiverReceiptDigest: null,
+    story: null,
     checks: [],
   };
 }

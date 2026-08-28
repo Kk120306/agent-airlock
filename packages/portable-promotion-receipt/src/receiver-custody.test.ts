@@ -10,6 +10,11 @@ import {
   buildFederatedWorkBundle,
 } from "./federated-work-bundle.js";
 import {
+  createReceiverCustodyTamperedCopy,
+  evaluateReceiverCustodyTrustInBrowser,
+  verifyReceiverCustodyPacketInBrowser,
+} from "./browser-verifier.js";
+import {
   buildReceiverCustodyPacket,
   buildReceiverCustodyRecord,
   verifyReceiverCustodyPacket,
@@ -21,7 +26,6 @@ import type {
   SigningKeyTrustPolicy,
 } from "./types.js";
 import { buildWorkspaceChangeSetEnvelope } from "./workspace-change-set.js";
-import { verifyReceiverCustodyPacketInBrowser } from "./browser-verifier.js";
 
 function digest(value: unknown): ReceiptDigest {
   return sha256Digest(utf8Bytes(canonicalize(value)));
@@ -41,6 +45,7 @@ function receipt(input: {
   agentId: string;
   before: ReturnType<typeof state>;
   after: ReturnType<typeof state>;
+  disposition?: "promoted" | "quarantined";
 }): PortablePromotionReceipt {
   return {
     protocol: {
@@ -52,7 +57,7 @@ function receipt(input: {
     decision: {
       runId: input.runId,
       agentId: input.agentId,
-      disposition: "promoted",
+      disposition: input.disposition ?? "promoted",
       decidedAt: "2026-08-28T00:00:00.000Z",
       clockClaim: "signer-clock-not-external-timestamp",
     },
@@ -99,7 +104,12 @@ function trustPolicy(
   };
 }
 
-function fixture() {
+function fixture(options: {
+  disposition?: "promoted" | "quarantined";
+  approval?: boolean;
+} = {}) {
+  const disposition = options.disposition ?? "promoted";
+  const hasApproval = options.approval ?? true;
   const producerKey = generatePortableSigningKey();
   const receiverKey = generatePortableSigningKey();
   const producerReceipt = signPortableReceipt({
@@ -180,7 +190,10 @@ function fixture() {
       runId: "receiver-run",
       agentId: "receiver-agent",
       before: state("receiver-before"),
-      after: state("receiver-after"),
+      after: disposition === "promoted"
+        ? state("receiver-after")
+        : state("receiver-before"),
+      disposition,
     }),
     privateKey: receiverKey.privateKeyPem,
   });
@@ -192,7 +205,7 @@ function fixture() {
     candidateSetAuthorityDigest: null,
     runId: "receiver-run",
     agentId: "receiver-agent",
-    disposition: "promoted",
+    disposition,
     decidedAt: "2026-08-28T00:00:03.000Z",
   };
   const authority = {
@@ -202,7 +215,7 @@ function fixture() {
   const entries = [
     buildReceiverCustodyRecord({ recordId: "producer", role: "producer-work-bundle", trustDomain: "producer", schema: bundle.schema, schemaVersion: bundle.schemaVersion, signingRequirement: "nested-required", value: bundle }),
     buildReceiverCustodyRecord({ recordId: "admission", role: "receiver-admission", trustDomain: "receiver", schema: admission.schema, schemaVersion: admission.schemaVersion, signingRequirement: "manifest-covered", value: admission }),
-    buildReceiverCustodyRecord({ recordId: "approval", role: "receiver-approval", trustDomain: "receiver", schema: approval.schema, schemaVersion: approval.schemaVersion, signingRequirement: "manifest-covered", value: approval }),
+    ...(hasApproval ? [buildReceiverCustodyRecord({ recordId: "approval", role: "receiver-approval", trustDomain: "receiver", schema: approval.schema, schemaVersion: approval.schemaVersion, signingRequirement: "manifest-covered", value: approval })] : []),
     buildReceiverCustodyRecord({ recordId: "authority", role: "receiver-terminal-authority", trustDomain: "receiver", schema: "agent-airlock/portable-decision-authority-commitment", schemaVersion: 1, signingRequirement: "manifest-covered", value: authority }),
     buildReceiverCustodyRecord({ recordId: "receiver-receipt", role: "receiver-promotion-envelope", trustDomain: "receiver", schema: receiverReceipt.schema, schemaVersion: receiverReceipt.schemaVersion, signingRequirement: "nested-and-manifest", value: receiverReceipt }),
   ];
@@ -220,13 +233,13 @@ function fixture() {
       producerReceiptDigest: bundle.receipt.receiptDigest,
       artifactDigest: bundle.artifact.artifactDigest,
       admissionRecordDigest: admission.recordDigest,
-      approvalDecisionDigest: approval.recordDigest,
-      decisionContextDigest: context,
+      approvalDecisionDigest: hasApproval ? approval.recordDigest : null,
+      decisionContextDigest: hasApproval ? context : null,
       terminalAuthorityDigest: authority.authorityDigest,
       receiverReceiptDigest: receiverReceipt.receiptDigest,
       outcomeContractDigest: receiverReceipt.receipt.outcomeContract.digest,
       validationEvidenceRoot: receiverReceipt.receipt.validationEvidence.root,
-      disposition: "promoted",
+      disposition,
     },
   };
   return {
@@ -250,12 +263,33 @@ describe("receiver custody closure", () => {
     const browserReport = await verifyReceiverCustodyPacketInBrowser(packet);
     expect(browserReport.valid).toBe(true);
     expect(browserReport.checks.every((check) => check.valid)).toBe(true);
+    expect(browserReport.story).toMatchObject({
+      disposition: "promoted",
+      approval: "operator-approved",
+      state: { canonicalAdvanced: true },
+    });
+  });
+
+  it("returns a protocol-owned containment story for valid Quarantine", async () => {
+    const { packet } = fixture({ disposition: "quarantined", approval: false });
+    const nodeReport = verifyReceiverCustodyPacket(packet);
+    const browserReport = await verifyReceiverCustodyPacketInBrowser(packet);
+    expect(nodeReport.valid).toBe(true);
+    expect(browserReport.valid).toBe(true);
+    expect(browserReport.story).toMatchObject({
+      disposition: "quarantined",
+      approval: "automatic",
+      state: { canonicalAdvanced: false },
+    });
+    expect(browserReport.story?.state.beforeCompositeHash).toBe(
+      browserReport.story?.state.afterCompositeHash,
+    );
   });
 
   it("rejects omission, substituted approval, and changed terminal evidence", () => {
     const omitted = structuredClone(fixture().packet);
     omitted.records = omitted.records.filter((record) => record.recordId !== "admission");
-    expect(verifyReceiverCustodyPacket(omitted).valid).toBe(false);
+    expect(verifyReceiverCustodyPacket(omitted)).toMatchObject({ valid: false, story: null });
 
     const substituted = structuredClone(fixture().packet);
     const approval = substituted.records.find((record) => record.recordId === "approval")!;
@@ -289,8 +323,60 @@ describe("receiver custody closure", () => {
 
   it("rejects a tampered receiver signature in WebCrypto", async () => {
     const tampered = structuredClone(fixture().packet);
-    tampered.envelope.signature = `${tampered.envelope.signature.slice(0, -1)}A`;
-    expect((await verifyReceiverCustodyPacketInBrowser(tampered)).valid).toBe(false);
+    tampered.envelope.signature = `${tampered.envelope.signature[0] === "A" ? "B" : "A"}${tampered.envelope.signature.slice(1)}`;
+    expect(await verifyReceiverCustodyPacketInBrowser(tampered)).toMatchObject({
+      valid: false,
+      story: null,
+    });
+  });
+
+  it("evaluates partial and complete browser trust without conflating validity", async () => {
+    const { packet, producerReceipt, receiverReceipt } = fixture();
+    const producerPolicy = trustPolicy(
+      "browser-producer-policy",
+      producerReceipt.keyId,
+      "producer-agent",
+    );
+    const producerOnly = await evaluateReceiverCustodyTrustInBrowser(packet, {
+      producer: producerPolicy,
+    }, { evaluatedAt: "2026-08-28T00:00:04.000Z" });
+    expect(producerOnly).toMatchObject({
+      cryptographicValid: true,
+      policiesDistinct: true,
+      producer: { trusted: true },
+      receiver: null,
+    });
+    const complete = await evaluateReceiverCustodyTrustInBrowser(packet, {
+      producer: producerPolicy,
+      receiver: trustPolicy(
+        "browser-receiver-policy",
+        receiverReceipt.keyId,
+        "receiver-agent",
+      ),
+    }, { evaluatedAt: "2026-08-28T00:00:04.000Z" });
+    expect(complete).toMatchObject({
+      cryptographicValid: true,
+      policiesDistinct: true,
+      producer: { trusted: true },
+      receiver: { trusted: true },
+    });
+  });
+
+  it("creates three rejected disposable attacks while preserving the original", async () => {
+    const { packet } = fixture();
+    const original = JSON.stringify(packet);
+    for (const attack of [
+      "remove-admission",
+      "alter-reviewed-evidence",
+      "rewrite-disposition",
+    ] as const) {
+      const copy = createReceiverCustodyTamperedCopy(packet, attack);
+      const report = await verifyReceiverCustodyPacketInBrowser(copy);
+      expect(report.valid).toBe(false);
+      expect(report.story).toBeNull();
+      expect(report.checks.some((check) => !check.valid)).toBe(true);
+      expect(JSON.stringify(packet)).toBe(original);
+    }
   });
 
   it("evaluates producer and receiver identities under separate policies", () => {

@@ -12,6 +12,7 @@ import type {
   ReceiptDigest,
   SignedPolicyAuthorityRotationEnvelope,
   SignedSigningKeyTrustPolicyEnvelope,
+  SigningKeyTrustPolicy,
   TrustPolicyVerificationReport,
   VerificationCheck,
 } from "./types.js";
@@ -20,8 +21,11 @@ import type {
   ReceiverCustodyBindings,
   ReceiverCustodyPacket,
   ReceiverCustodyRecordRole,
+  ReceiverCustodyTamperAttack,
+  ReceiverCustodyTrustReport,
   ReceiverCustodyVerificationReport,
 } from "./receiver-custody.js";
+import { buildReceiverCustodyVerifiedStory } from "./receiver-custody-story.js";
 import {
   assertSignedPolicyAuthorityRotationEnvelope,
   MAXIMUM_SIGNED_AUTHORITY_ROTATION_BYTES,
@@ -35,6 +39,7 @@ import {
 } from "./validation.js";
 import {
   assertSignedSigningKeyTrustPolicyEnvelope,
+  evaluateSigningKeyTrust as evaluateSignerTrust,
   MAXIMUM_SIGNED_TRUST_POLICY_BYTES,
 } from "./trust-policy.js";
 
@@ -200,8 +205,10 @@ export async function verifyReceiverCustodyPacketInBrowser(
     receiverKeyId: null,
     producerReceiptDigest: null,
     receiverReceiptDigest: null,
+    story: null,
     checks: [],
   };
+  let verifiedRecords: Map<ReceiverCustodyRecordRole, unknown> | null = null;
   try {
     const packet = assertBrowserReceiverCustodyPacket(value);
     const { envelope } = packet;
@@ -236,6 +243,7 @@ export async function verifyReceiverCustodyPacketInBrowser(
       "The browser verified the receiver signature under the custody-specific domain.",
     );
     const records = await decodeBrowserCustodyRecords(packet);
+    verifiedRecords = records;
     addCheck(
       report.checks,
       "record-commitments",
@@ -257,6 +265,12 @@ export async function verifyReceiverCustodyPacketInBrowser(
   }
   report.valid =
     report.checks.length > 0 && report.checks.every((check) => check.valid);
+  report.story = report.valid && verifiedRecords
+    ? buildReceiverCustodyVerifiedStory(
+        (value as ReceiverCustodyPacket).envelope.manifest.bindings,
+        verifiedRecords,
+      )
+    : null;
   return report;
 }
 
@@ -274,6 +288,7 @@ export async function verifyReceiverCustodyPacketJsonInBrowser(
       receiverKeyId: null,
       producerReceiptDigest: null,
       receiverReceiptDigest: null,
+      story: null,
       checks: [{
         name: "packet-structure",
         valid: false,
@@ -281,6 +296,91 @@ export async function verifyReceiverCustodyPacketJsonInBrowser(
       }],
     };
   }
+}
+
+export async function evaluateReceiverCustodyTrustInBrowser(
+  value: unknown,
+  policies: {
+    producer?: SigningKeyTrustPolicy | null;
+    receiver?: SigningKeyTrustPolicy | null;
+  },
+  options: { evaluatedAt?: string } = {},
+): Promise<ReceiverCustodyTrustReport> {
+  const cryptographic = await verifyReceiverCustodyPacketInBrowser(value);
+  if (!cryptographic.valid) {
+    return {
+      cryptographicValid: false,
+      policiesDistinct: true,
+      producer: null,
+      receiver: null,
+    };
+  }
+  const packet = assertBrowserReceiverCustodyPacket(value);
+  const records = await decodeBrowserCustodyRecords(packet);
+  const bundle = records.get("producer-work-bundle") as FederatedWorkBundle;
+  const receiverEnvelope = records.get(
+    "receiver-promotion-envelope",
+  ) as PortablePromotionEnvelope;
+  const policiesDistinct = !(
+    policies.producer &&
+    policies.receiver &&
+    policies.producer.policyId === policies.receiver.policyId
+  );
+  const evaluationOptions = options.evaluatedAt
+    ? { cryptographicValid: true, evaluatedAt: options.evaluatedAt }
+    : { cryptographicValid: true };
+  return {
+    cryptographicValid: true,
+    policiesDistinct,
+    producer: policies.producer
+      ? evaluateSignerTrust(bundle.receipt, policies.producer, evaluationOptions)
+      : null,
+    receiver: policies.receiver
+      ? evaluateSignerTrust(receiverEnvelope, policies.receiver, evaluationOptions)
+      : null,
+  };
+}
+
+export function createReceiverCustodyTamperedCopy(
+  value: unknown,
+  attack: ReceiverCustodyTamperAttack,
+): ReceiverCustodyPacket {
+  const packet = structuredClone(assertBrowserReceiverCustodyPacket(value));
+  if (attack === "rewrite-disposition") {
+    packet.envelope.manifest.bindings.disposition =
+      packet.envelope.manifest.bindings.disposition === "promoted"
+        ? "quarantined"
+        : "promoted";
+    return packet;
+  }
+  const targetRole = attack === "remove-admission"
+    ? "receiver-admission"
+    : packet.envelope.manifest.records.some(
+        (descriptor) => descriptor.role === "receiver-approval",
+      )
+      ? "receiver-approval"
+      : "receiver-admission";
+  const descriptor = packet.envelope.manifest.records.find(
+    (candidate) => candidate.role === targetRole,
+  );
+  if (!descriptor) {
+    throw new Error("Receiver custody attack target is unavailable");
+  }
+  if (attack === "remove-admission") {
+    packet.records = packet.records.filter(
+      (record) => record.recordId !== descriptor.recordId,
+    );
+    return packet;
+  }
+  const record = packet.records.find(
+    (candidate) => candidate.recordId === descriptor.recordId,
+  );
+  if (!record || record.canonicalBytes.length === 0) {
+    throw new Error("Receiver custody attack target is unavailable");
+  }
+  const last = record.canonicalBytes.at(-1)!;
+  record.canonicalBytes = `${record.canonicalBytes.slice(0, -1)}${last === "A" ? "B" : "A"}`;
+  return packet;
 }
 
 export async function verifyPortableEvidencePacketInBrowser(
