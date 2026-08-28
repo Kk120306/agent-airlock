@@ -554,6 +554,7 @@ The receiver persists immutable digest-protected Admission Records before Candid
 Production WorkspaceManager materialization applies the verified artifact only inside isolated Candidate State.
 The receiver reruns its own Outcome Contract and uses the existing crash-recoverable Promotion path without invoking the producer model or treating the producer receipt as local authority.
 A real browser test downloads a self-verifying bundle from one independently configured Fastify instance, transfers it to another instance, and proves receiver-owned Promotion without ModelArk, a wallet, RPC, or paid inference.
+The hosted release workflow runs that same two-instance browser proof on every pull request after the full quality gate.
 
 ## Hackathon cut lines
 

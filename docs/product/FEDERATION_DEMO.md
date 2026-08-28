@@ -12,6 +12,7 @@ This command builds the production application, starts two independently configu
 The producer completes a local Promotion and downloads a self-verifying Federated Work Bundle.
 The receiver installs its own organizational trust policy, accepts the downloaded bundle through the visible Federation Airlock, materializes isolated Candidate State, reruns its own Outcome Contract, and performs its own Promotion.
 No ModelArk request, wallet, RPC call, blockchain transaction, or paid inference is used.
+The same command runs in the hosted `Release proof` workflow on every pull request, so the repository cannot merge a UI or HTTP change that silently breaks the federation journey.
 
 Run the same proof in a visible browser for a presentation:
 

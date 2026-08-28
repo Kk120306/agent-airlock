@@ -78,6 +78,9 @@ jobs:
       - name: Prove portable trust in the production UI
         run: npm run test:phase11:ui
 
+      - name: Prove two-instance federated admission
+        run: npm run test:phase12:real
+
       - name: Preserve browser failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
