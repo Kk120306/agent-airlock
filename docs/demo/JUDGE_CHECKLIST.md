@@ -22,7 +22,7 @@ When a container engine is available, also run the real Runtime proof:
 npm run demo:runtime -- --reset
 ```
 
-Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the compact proof that real Codex created the exact artifact, updated Candidate SQLite, submitted one deferred action, passed every required Validation, and promoted all four resources together.
+Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the four-stage compact proof that real Codex used isolated Candidate State, passed every required Validation, promoted all four resources together, and released exactly one effect afterward.
 Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
 Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all nine required Validations, and advances Canonical State only after validation.
 Show the full recovery verdict, then select `Generate and verify proof` to finish with a locally verified chain containing both signed decisions and their Canonical State handoff.

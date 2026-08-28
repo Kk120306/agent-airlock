@@ -73,12 +73,17 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   const judgeProof = evidence.getByRole("region", { name: "Judge proof summary" });
   await expect(
     judgeProof.getByRole("heading", {
-      name: "Proof complete: only the validated future became reality",
+      name: "Proof complete: one validated Whole-Agent future became reality",
     }),
   ).toBeVisible();
   await expect(judgeProof.getByText("Candidate isolated", { exact: true })).toBeVisible();
   await expect(judgeProof.getByText("9/9 required Validations passed.")).toBeVisible();
-  await expect(judgeProof.getByText("Canonical State advanced", { exact: true }))
+  await expect(judgeProof.getByText("4/4 resources promoted", { exact: true }))
+    .toBeVisible();
+  await expect(
+    judgeProof.getByText("Effect released after Promotion", { exact: true }),
+  ).toBeVisible();
+  await expect(judgeProof.getByText("1 typed effect delivered only after Canonical State advanced."))
     .toBeVisible();
 
   await evidence.getByText("Inspect complete transaction evidence", { exact: true })
@@ -122,9 +127,12 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(rejectedProof.getByText("8/9 required Validations passed."))
     .toBeVisible();
-  await expect(
-    rejectedProof.getByText("Canonical State unchanged", { exact: true }),
-  ).toBeVisible();
+  await expect(rejectedProof.getByText("4/4 resources quarantined", { exact: true }))
+    .toBeVisible();
+  await expect(rejectedProof.getByText("External effects held back", { exact: true }))
+    .toBeVisible();
+  await expect(rejectedProof.getByText("0 effects delivered from this rejected future."))
+    .toBeVisible();
   await expect(pairedProof.getByText("Run all three stages", { exact: true }))
     .toBeVisible();
   await expect(
@@ -190,6 +198,12 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     }),
   ).toBeVisible();
   await expect(repairedProof.getByText("10/10 required Validations passed."))
+    .toBeVisible();
+  await expect(repairedProof.getByText("4/4 resources promoted", { exact: true }))
+    .toBeVisible();
+  await expect(repairedProof.getByText("Effect released after Promotion", { exact: true }))
+    .toBeVisible();
+  await expect(repairedProof.getByText("1 typed effect delivered only after Canonical State advanced."))
     .toBeVisible();
   await expect(
     pairedProof.getByText("Recovery proven", { exact: true }),

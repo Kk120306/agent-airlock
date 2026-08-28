@@ -172,6 +172,18 @@ function JudgeProofSummary({
   const candidatePrepared = transaction.events.some(
     (event) => event.status === "executing" || event.status === "validating",
   );
+  const builtInResourceKinds: RunTransaction["resources"][number]["kind"][] = [
+    "workspace",
+    "codex-session",
+    "sqlite",
+    "external-actions",
+  ];
+  const coherentResourceCount = builtInResourceKinds.filter((kind) =>
+    transaction.resources.some(
+      (resource) => resource.kind === kind && resource.disposition === disposition,
+    ),
+  ).length;
+  const deliveredEffects = transaction.externalActions.deliveredCount;
 
   return (
     <section className="judge-proof-summary" aria-label="Judge proof summary">
@@ -182,7 +194,7 @@ function JudgeProofSummary({
             {repaired
               ? "Recovery complete: retained work became a validated future"
               : promoted
-              ? "Proof complete: only the validated future became reality"
+              ? "Proof complete: one validated Whole-Agent future became reality"
               : quarantined
                 ? "Unsafe future blocked: accepted reality did not move"
               : terminal
@@ -224,19 +236,30 @@ function JudgeProofSummary({
         >
           <span>{promoted ? "✓" : terminal ? "✓" : "3"}</span>
           <div>
-            <strong>
-              {promoted
-                ? "Canonical State advanced"
-                : terminal
-                  ? "Canonical State unchanged"
-                  : "Promotion decision"}
-            </strong>
+            <strong>{promoted || quarantined
+              ? `${coherentResourceCount}/4 resources ${promoted ? "promoted" : "quarantined"}`
+              : terminal
+                ? "Canonical State unchanged"
+                : "Promotion decision"}</strong>
             <small>
               {promoted
-                ? `${shortHash(transaction.canonicalContentHashBefore)} to ${shortHash(transaction.canonicalContentHashAfter)}.`
+                ? `Workspace, session, SQLite, and outbox advanced together. Canonical State ${shortHash(transaction.canonicalContentHashBefore)} to ${shortHash(transaction.canonicalContentHashAfter)}.`
                 : terminal
-                  ? `${shortHash(transaction.canonicalContentHashBefore)} remained ${shortHash(transaction.canonicalContentHashAfter)}.`
+                  ? `Canonical State ${shortHash(transaction.canonicalContentHashBefore)} remained ${shortHash(transaction.canonicalContentHashAfter)}.`
                   : "Promotion remains impossible until every required Validation passes."}
+            </small>
+          </div>
+        </li>
+        <li data-state={promoted || terminal ? "passed" : "pending"}>
+          <span>{promoted || terminal ? "✓" : "4"}</span>
+          <div>
+            <strong>{promoted ? "Effect released after Promotion" : "External effects held back"}</strong>
+            <small>
+              {promoted
+                ? `${deliveredEffects} typed effect${deliveredEffects === 1 ? "" : "s"} delivered only after Canonical State advanced.`
+                : terminal
+                  ? `${deliveredEffects} effects delivered from this rejected future.`
+                  : "Candidate intents remain deferred until Promotion completes."}
             </small>
           </div>
         </li>

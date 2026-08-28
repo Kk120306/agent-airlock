@@ -373,6 +373,13 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   await expect(guide.getByText("Live profile attested")).toBeVisible();
   await expect(guide.getByText("ModelArk profile and Promotion proven")).toBeVisible();
   await expect(page.getByText("Independent proof")).toBeVisible();
+  const liveProof = page.getByRole("region", { name: "Judge proof summary" });
+  await expect(liveProof.getByText("4/4 resources promoted", { exact: true }))
+    .toBeVisible();
+  await expect(liveProof.getByText("Effect released after Promotion", { exact: true }))
+    .toBeVisible();
+  await expect(liveProof.getByText("1 typed effect delivered only after Canonical State advanced."))
+    .toBeVisible();
 
   await guide.getByRole("button", { name: /Run another live Candidate/ }).click();
   await expect.poll(() => liveRequests.length).toBe(1);

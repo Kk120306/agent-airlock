@@ -39,7 +39,8 @@ Real Codex runs inside a disposable container against isolated Candidate State, 
 The passing Candidate satisfies the required file-and-database command, promotes all four resources, advances Canonical State, and delivers exactly one effect afterward.
 The failing Candidate writes deliberately invalid file and database values plus an unsafe intent, fails that same command, remains inspectable in Quarantine, and leaves the canonical fingerprint, accepted database, and delivery count unchanged.
 The third control starts a real Repair Run from the retained Quarantine, uses bounded failed-Validation evidence, and promotes only after every required check passes.
-The focused judge view summarizes Candidate isolation, Whole-Agent Promotion, the decisive Validation, Quarantine ancestry, and the actual canonical fingerprint result before offering the complete forensic evidence.
+The focused judge view presents four immediately visible proof stages: Candidate isolation, Outcome Contract enforcement, four-resource disposition, and post-Promotion effect gating.
+It keeps Quarantine ancestry, canonical fingerprints, and complete forensic evidence one inspection control away.
 After all three controls complete, the recovery verdict proves that the same Agent and Outcome Contract controlled Promotion, rejection, and repair.
 Select `Generate and verify proof` on the repaired Run to produce and locally verify a complete two-decision chain containing the quarantined parent and promoted repair child.
 The UI and terminal explicitly identify the local deterministic Responses fixture and state that no ModelArk request or paid inference occurs.
