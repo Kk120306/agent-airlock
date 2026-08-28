@@ -40,7 +40,7 @@ test("proves each live prerequisite without returning configured values", async 
   assert.equal(commands[0][0], "docker");
   assert.match(
     report.checks.find(({ id }) => id === "modelark")?.detail ?? "",
-    /1 bounded model attempt, 3 requests, and 4000 ms/,
+    /generated non-empty assistant output after 1 bounded model attempt, 3 requests, and 4000 ms/,
   );
   assert.match(commands.at(-3).join(" "), /--network none/);
   assert.match(commands.at(-2).join(" "), /probe-codex-session\.sh/);

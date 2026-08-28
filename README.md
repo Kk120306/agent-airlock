@@ -313,7 +313,8 @@ npm run demo:modelark -- --reset
 npm run verify:modelark-evidence
 ```
 
-`check:modelark` performs a minimal Responses API request and prints neither the credential nor model output.
+`check:modelark` performs a minimal Responses API request, requires a completed response with non-empty assistant `output_text`, and prints neither the credential nor model output.
+An HTTP success or `completed` status without generated assistant text fails the preflight.
 If `ARK_MODEL_FALLBACKS` is set, it may try up to three additional operator-approved models only after HTTP 404 or 429 responses.
 For allowlisted temporary capacity and burst-protection responses, it performs a bounded warm-up and honors numeric `Retry-After` guidance up to 10 seconds per wait and 15 seconds across the configured model list.
 It stops immediately on authentication, network, timeout, malformed-response, and other provider failures.

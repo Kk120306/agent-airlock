@@ -155,6 +155,22 @@ function safeProviderErrorCode(raw) {
   }
 }
 
+function hasGeneratedAssistantOutput(payload) {
+  if (!Array.isArray(payload?.output)) return false;
+  return payload.output.some(
+    (item) =>
+      item?.type === "message" &&
+      item?.role === "assistant" &&
+      Array.isArray(item.content) &&
+      item.content.some(
+        (content) =>
+          content?.type === "output_text" &&
+          typeof content.text === "string" &&
+          content.text.trim().length > 0,
+      ),
+  );
+}
+
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -229,6 +245,11 @@ export async function checkModelArkLive({
         `ModelArk preflight did not complete successfully (status: ${String(payload.status ?? "missing")})`,
       );
     }
+    if (!hasGeneratedAssistantOutput(payload)) {
+      throw new Error(
+        "ModelArk preflight completed without a non-empty assistant output. Verify that the configured model supports the Responses API.",
+      );
+    }
     return {
       origin: endpoint.origin,
       model,
@@ -251,7 +272,7 @@ async function main() {
     return;
   }
   console.log(
-    `[modelark-preflight] Ready: ${result.model} completed a Responses API request through ${result.origin}.`,
+    `[modelark-preflight] Ready: ${result.model} generated a non-empty Responses API assistant output through ${result.origin}.`,
   );
   if (result.attemptCount > 1) {
     console.log(

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { createServer } from "node:http";
 import test from "node:test";
+import { promisify } from "node:util";
 import { checkModelArkLive } from "./check-modelark-live.mjs";
+
+const execFile = promisify(execFileCallback);
 
 async function withServer(handler, run) {
   const server = createServer(handler);
@@ -17,13 +21,27 @@ async function withServer(handler, run) {
   }
 }
 
+function completedResponse(id, text = "OK") {
+  return {
+    id,
+    status: "completed",
+    output: [
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+      },
+    ],
+  };
+}
+
 test("proves a completed Responses API request without returning the key", async () => {
   await withServer(
     async (request, response) => {
       assert.equal(request.url, "/api/v3/responses");
       assert.equal(request.headers.authorization, "Bearer secret-live-key");
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ id: "response-1", status: "completed" }));
+      response.end(JSON.stringify(completedResponse("response-1")));
     },
     async (baseUrl) => {
       const result = await checkModelArkLive({
@@ -46,6 +64,115 @@ test("proves a completed Responses API request without returning the key", async
   );
 });
 
+test("rejects a completed response that did not generate assistant text", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: "response-without-output",
+          status: "completed",
+          output: [],
+          account: "private-account-metadata",
+        }),
+      );
+    },
+    async (baseUrl) => {
+      let message = "";
+      try {
+        await checkModelArkLive({
+          environment: {
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "dola-seed-test",
+            ARK_BASE_URL: baseUrl,
+          },
+        });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      assert.match(message, /without a non-empty assistant output/);
+      assert.doesNotMatch(
+        message,
+        /response-without-output|private-account-metadata|secret-live-key/,
+      );
+    },
+  );
+});
+
+test("rejects whitespace, reasoning, and non-assistant content as model output", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: "response-with-invalid-output",
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [
+                { type: "reasoning_text", text: "private reasoning" },
+                { type: "output_text", text: "   " },
+              ],
+            },
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "output_text", text: "not model output" }],
+            },
+          ],
+        }),
+      );
+    },
+    async (baseUrl) => {
+      await assert.rejects(
+        checkModelArkLive({
+          environment: {
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "dola-seed-test",
+            ARK_BASE_URL: baseUrl,
+          },
+        }),
+        /without a non-empty assistant output/,
+      );
+    },
+  );
+});
+
+test("the command exits non-zero when live output proof fails", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({ id: "private-response-id", status: "completed" }),
+      );
+    },
+    async (baseUrl) => {
+      let failure;
+      try {
+        await execFile(process.execPath, ["scripts/check-modelark-live.mjs"], {
+          cwd: new URL("..", import.meta.url),
+          env: {
+            ...process.env,
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "dola-seed-test",
+            ARK_BASE_URL: baseUrl,
+          },
+        });
+      } catch (error) {
+        failure = error;
+      }
+      assert.equal(failure?.code, 1);
+      assert.match(failure?.stderr ?? "", /without a non-empty assistant output/);
+      assert.doesNotMatch(
+        `${failure?.stdout ?? ""}${failure?.stderr ?? ""}`,
+        /private-response-id|secret-live-key/,
+      );
+    },
+  );
+});
+
 test("selects an operator-approved fallback after a model-specific failure", async () => {
   const attemptedModels = [];
   await withServer(
@@ -60,7 +187,7 @@ test("selects an operator-approved fallback after a model-specific failure", asy
         return;
       }
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ id: "fallback-response", status: "completed" }));
+      response.end(JSON.stringify(completedResponse("fallback-response")));
     },
     async (baseUrl) => {
       const result = await checkModelArkLive({
@@ -109,7 +236,7 @@ test("deduplicates configured models and rejects more than four", async () => {
   await withServer(
     (_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ id: "response-1", status: "completed" }));
+      response.end(JSON.stringify(completedResponse("response-1")));
     },
     async (baseUrl) => {
       const result = await checkModelArkLive({
@@ -211,7 +338,7 @@ test("retries only allowlisted transient ModelArk capacity errors", async () => 
                 message: "private request id and account metadata",
               },
             })
-          : JSON.stringify({ id: "response-after-capacity", status: "completed" }),
+          : JSON.stringify(completedResponse("response-after-capacity")),
       );
     },
     async (baseUrl) => {
@@ -247,7 +374,7 @@ test("honors numeric Retry-After guidance within a strict delay cap", async () =
       response.end(
         requestCount < 3
           ? JSON.stringify({ error: { code: "RequestBurstTooFast" } })
-          : JSON.stringify({ id: "response-after-burst", status: "completed" }),
+          : JSON.stringify(completedResponse("response-after-burst")),
       );
     },
     async (baseUrl) => {
@@ -335,7 +462,7 @@ test("preserves a fallback chance after the shared warm-up budget is exhausted",
         return;
       }
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ id: "fallback-ready", status: "completed" }));
+      response.end(JSON.stringify(completedResponse("fallback-ready")));
     },
     async (baseUrl) => {
       const result = await checkModelArkLive({

@@ -100,7 +100,9 @@ npm run poc
 `npm run poc` loads `.env` automatically.
 `npm run poc:doctor` proves each live prerequisite, Candidate session copy isolation, and a real two-turn Codex tool call against a local Responses fixture without printing configured values, model output, provider request identifiers, or account metadata.
 Use its result before the live demo to distinguish a ModelArk capacity failure from a container or application failure.
-Before building the Runtime, it performs a minimal Responses API request and prints neither the credential nor model output.
+Before building the Runtime, it performs a minimal Responses API request and requires a completed response with non-empty assistant `output_text`.
+An HTTP success or `completed` status without generated assistant text fails the preflight.
+The credential and model output are never printed.
 `ARK_MODEL_FALLBACKS` accepts a comma-separated list of operator-approved models and is bounded to four unique models including `ARK_MODEL`.
 Only HTTP 404 and 429 advance to the next model.
 Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.

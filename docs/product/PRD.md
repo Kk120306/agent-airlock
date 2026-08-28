@@ -244,6 +244,7 @@ This journey describes the complete product direction, including later roadmap p
 - Demo progress must be derived from persisted assistant messages and actual Run results.
 - Restart without reset must preserve the Agent identifier, conversation, Canonical State, and evidence.
 - The credentialed `npm run poc` path must remain separate and include a credential-safe fail-fast ModelArk preflight with bounded operator-approved fallback selection for model-specific unavailability.
+- The ModelArk preflight must prove non-empty assistant `output_text`, not merely an HTTP success or provider `completed` status, while withholding the generated content.
 - The live path must include a single readiness diagnostic that distinguishes ModelArk availability, local container readiness, and Codex Runtime launch without exposing configured values or provider metadata.
 - A zero-cost integration gate must drive pinned real Codex from Chrome through the production HTTP seam, isolated Candidate State, required Validation, and Promotion without being presented as live ModelArk conformance.
 - The zero-cost real-Codex gate must also be launchable as a persistent interactive judge demo with strict loopback, managed-state, and local-inference configuration.
