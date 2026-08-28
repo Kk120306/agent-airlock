@@ -202,6 +202,18 @@ The final receipt depth must prove that no ancestor was omitted from the bounded
 Reordering, truncation, unrelated valid receipts, broken digest links, or discontinuous Canonical State all reject the complete chain.
 The chain adds no signature or authority of its own and remains separate from evaluator-controlled trust policy.
 
+## Receiver custody closure
+
+ADR 0020 defines a separate receiver-signed closure for the complete federated path.
+It does not extend the producer receipt or transfer producer authority into the receiver trust domain.
+
+The closure manifest commits typed descriptors and explicit edges for the producer Federated Work Bundle, receiver Admission Record, optional Federated Approval Decision, receiver terminal Decision Authority, and receiver Portable Promotion Envelope.
+The transport carries exact bounded canonical records so an offline verifier can recompute every descriptor digest and run each native nested verifier.
+Producer and receiver signing identities are evaluated under separate evaluator-supplied policies that remain outside the packet.
+
+The closure signature proves only that the receiver signer committed the exact closed evidence set.
+It does not prove that previously unsigned records existed before export, that receiver Validation was sufficient, or that an optional transparency or blockchain inclusion granted Admission or Promotion authority.
+
 ## Optional transparency log
 
 The local reference anchor stores only ordered receipt digests and produces:

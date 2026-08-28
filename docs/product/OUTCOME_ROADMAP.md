@@ -747,6 +747,36 @@ Turn a time-of-check guard into durable, independently inspectable human-authori
 Implementation is tracked by [Wayfinder issue 26](https://github.com/Kk120306/agent-airlock/issues/26).
 The schema-version-2 record, legacy compatibility path, retry contradiction gate, operator-visible evidence, mobile proof, and real two-instance proof are delivered and hosted-release verified.
 
+### Phase 19: Portable receiver custody closure
+
+**Outcome**
+
+An independent verifier can inspect one receiver-signed packet that closes the real producer-to-receiver path without trusting either application database.
+
+**Build**
+
+- Add a strict full-audit closure manifest with typed record descriptors, required roles, and explicit transition edges.
+- Preserve the producer receipt, Federated Work Bundle, receiver Admission, optional human Approval, terminal Decision Authority, and receiver receipt as distinct evidence.
+- Verify nested signatures, record digests, reviewed-context binding, Outcome Contract and Validation commitments, terminal disposition, and state handoffs offline.
+- Evaluate producer and receiver signer roles under separate evaluator-controlled trust policies.
+- Expose additive export and browser verification without changing the normal import, Validation, Promotion, Quarantine, or judge paths.
+
+**Exit gate**
+
+- A promoted federated Run exports one valid closure after restart.
+- A quarantined federated Run exports one valid closure that proves Canonical State did not advance.
+- Missing Admission, substituted Approval, stale reviewed context, changed Validation evidence, conflicting terminal outcomes, and unsupported legacy versions fail closed.
+- The packet contains no credentials, raw prompt, Runtime output, mutable local path, or embedded trust root.
+- Local and hosted quality, production-browser, real two-instance, and real CodeJam Runtime proof pass on the final revision.
+
+**Beyond-expectations finish**
+
+Turn the complete bilateral decision path into a falsifiable offline proof while keeping every trust and Promotion decision local.
+
+**Current status**
+
+The source-backed boundary is accepted in ADR 0020 and implementation is tracked by [Export and verify a receiver custody closure](https://github.com/Kk120306/agent-airlock/issues/28).
+
 ## Hackathon cut lines
 
 ### Qualifying proof
