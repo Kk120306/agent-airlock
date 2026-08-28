@@ -10,6 +10,10 @@ import {
   seedLiveModelArkDemo,
 } from "./modelark-demo-profile.mjs";
 import { monitorLiveModelArkConformance } from "./modelark-conformance-evidence.mjs";
+import {
+  assertJudgeReadiness,
+  inspectJudgeReadiness,
+} from "./judge-readiness.mjs";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const argumentsList = process.argv.slice(2);
@@ -106,6 +110,13 @@ let captureController = null;
 let captureTask = Promise.resolve();
 try {
   const agent = await seedLiveModelArkDemo(baseUrl);
+  const readiness = assertJudgeReadiness(
+    await inspectJudgeReadiness({
+      baseUrl,
+      expectedMode: "modelark",
+      expectedAgentId: agent.id,
+    }),
+  );
   captureController = new AbortController();
   captureTask = monitorLiveModelArkConformance({
     baseUrl,
@@ -128,6 +139,9 @@ try {
   });
   console.log("");
   console.log("Agent Airlock live ModelArk proof is ready: " + baseUrl);
+  console.log(
+    `Readiness: ${readiness.checks.length}/${readiness.checks.length} checks passed (${readiness.evidenceDigest}).`,
+  );
   console.log("Inference: provider-backed ModelArk Responses API.");
   console.log("Runtime: real Codex CLI in a disposable container.");
   console.log("Judge action: Run live Candidate.");

@@ -40,6 +40,16 @@ It requires Docker, Colima, or Podman but no ModelArk credential or paid inferen
 npm run demo:runtime -- --reset
 ```
 
+The real Runtime launcher admits the judge path only after seven safe readiness checks pass.
+With the demo running, inspect the same checks independently:
+
+```bash
+npm run demo:readiness
+npm run demo:readiness -- --json
+```
+
+The report proves only local demo readiness and intentionally excludes configured provider values.
+The ModelArk launcher runs the same local checks only after its mandatory live provider preflight succeeds.
 Open <http://127.0.0.1:3200> and select `Run passing Candidate` under `Full safety loop`.
 The production control plane launches the pinned real Codex CLI in a disposable container and serves deterministic Responses tool-call events from a host-local fixture.
 Codex executes the requested write only inside Candidate State.

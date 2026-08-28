@@ -2976,8 +2976,7 @@ export class AgentService {
           ? "local-responses-protocol-fixture"
           : "modelark",
       arkConfigured: isArkConfigured(this.config),
-      arkBaseUrl: this.config.arkBaseUrl,
-      arkModel: this.config.arkModel || null,
+      modelProfileDisclosure: "configured-status-only",
       codexAvailable: await this.runner.isAvailable(),
       codexSandboxMode: this.config.codexSandboxMode,
       competingFutures: {

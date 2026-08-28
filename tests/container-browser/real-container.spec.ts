@@ -51,13 +51,17 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .not.toBeVisible();
 
   const systemResponse = await request.get("/api/system");
-  expect(await systemResponse.json()).toMatchObject({
+  const system = await systemResponse.json();
+  expect(system).toMatchObject({
     demoMode: false,
     protocolFixtureMode: true,
     modelArkDemoMode: false,
     inferenceMode: "local-responses-protocol-fixture",
+    modelProfileDisclosure: "configured-status-only",
     runtimeProvider: "container",
   });
+  expect(system).not.toHaveProperty("arkBaseUrl");
+  expect(system).not.toHaveProperty("arkModel");
 
   const pairedProof = page.getByRole("region", { name: "Full safety loop" });
   await expect(

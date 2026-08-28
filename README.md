@@ -34,6 +34,9 @@ Use the second judge path when Docker, Colima, or Podman is available and you wa
 npm run demo:runtime -- --reset
 ```
 
+The launcher fails closed unless seven credential-safe checks prove the local health boundary, intended demo profile, disposable Codex Runtime, offline receipt verifier, unique managed Agent, exact Outcome Contract, and ready lifecycle state.
+While the demo is running, rerun the proof with `npm run demo:readiness` or emit bounded machine-readable evidence with `npm run demo:readiness -- --json`.
+The readiness report commits its safe checks to a SHA-256 evidence digest and never returns ModelArk credentials, base URLs, model identifiers, or environment values.
 Open <http://127.0.0.1:3200> and use the three `Full safety loop` controls.
 For the fastest judge path, select `Run complete safety loop` to execute the same three ordered actions automatically, generate the repaired Run's signed two-decision chain, and verify every Canonical State handoff locally while each stage remains independently visible and rerunnable during rehearsal.
 The guide withholds its final signed-recovery verdict until that local cryptographic verification succeeds, and surfaces a retryable error if proof generation fails.

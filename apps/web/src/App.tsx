@@ -3176,8 +3176,10 @@ export default function App() {
                 ? "Local Responses fixture · " + (system.containerEngine ?? "container")
                 : system?.modelArkDemoMode
                   ? "Provider-backed ModelArk · " + (system.containerEngine ?? "container")
-              : (system?.arkModel ?? "Ark model not configured") +
-                (system?.containerEngine ? " · " + system.containerEngine : "")}
+                  : (system?.arkConfigured
+                      ? "Configured ModelArk profile"
+                      : "ModelArk profile not configured") +
+                    (system?.containerEngine ? " · " + system.containerEngine : "")}
           </span>
         </div>
         {system?.portableTrust.available && (

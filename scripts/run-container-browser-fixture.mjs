@@ -3,6 +3,10 @@ import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import {
+  assertJudgeReadiness,
+  inspectJudgeReadiness,
+} from "./judge-readiness.mjs";
 
 const execFile = promisify(execFileCallback);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -284,9 +288,19 @@ try {
     ),
   ]);
   if (demoRequested) {
-    await seedProtocolDemo(baseUrl);
+    const agent = await seedProtocolDemo(baseUrl);
+    const readiness = assertJudgeReadiness(
+      await inspectJudgeReadiness({
+        baseUrl,
+        expectedMode: "runtime",
+        expectedAgentId: agent.id,
+      }),
+    );
     console.log("");
     console.log("Agent Airlock real Runtime proof is ready: " + baseUrl);
+    console.log(
+      `Readiness: ${readiness.checks.length}/${readiness.checks.length} checks passed (${readiness.evidenceDigest}).`,
+    );
     console.log("Runtime: real pinned Codex CLI in a disposable container.");
     console.log("Inference: local deterministic Responses fixture.");
     console.log("Cost: no ModelArk request or paid inference.");

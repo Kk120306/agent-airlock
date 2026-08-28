@@ -73,6 +73,7 @@ Explain that the offline command verifies historical signed evidence and does no
 - [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
 - [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
 - [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and presents an evidence-backed Candidate, Validation, Promotion, and independent-verification path.
+- [ ] The launcher reports `7/7` credential-safe readiness checks, and `npm run demo:readiness` reproduces the same local evidence digest without returning provider values.
 - [ ] `Run complete safety loop` executes the three real-Runtime stages in order, stops immediately if an expected disposition is not produced, and automatically verifies the signed Repair lineage.
 - [ ] The guide reports `Full signed recovery proof verified` only after both signatures, the parent link, and every Canonical State handoff pass local verification.
 - [ ] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.

@@ -433,8 +433,7 @@ export interface SystemInfo {
     | "local-responses-protocol-fixture"
     | "modelark";
   arkConfigured: boolean;
-  arkBaseUrl: string;
-  arkModel: string | null;
+  modelProfileDisclosure: "configured-status-only";
   codexAvailable: boolean;
   codexSandboxMode: string;
   competingFutures: {

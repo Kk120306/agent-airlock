@@ -107,6 +107,19 @@ async function makeService(
 }
 
 describe("Agent lifecycle", () => {
+  it("reports ModelArk readiness without disclosing configured environment values", async () => {
+    const service = await makeService();
+    const info = await service.systemInfo();
+    expect(info).toMatchObject({
+      arkConfigured: true,
+      modelProfileDisclosure: "configured-status-only",
+    });
+    expect(info).not.toHaveProperty("arkBaseUrl");
+    expect(info).not.toHaveProperty("arkModel");
+    expect(JSON.stringify(info)).not.toContain("ep-test");
+    expect(JSON.stringify(info)).not.toContain("test-key");
+  });
+
   it("creates, updates, stops, starts and deletes an Agent", async () => {
     const service = await makeService();
     const agent = await service.createAgent({ name: "Builder" });
