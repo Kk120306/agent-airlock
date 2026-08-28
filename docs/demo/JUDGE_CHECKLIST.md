@@ -27,6 +27,7 @@ Select `Run failing Candidate` and show that the same real Runtime path now quar
 Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all nine required Validations, and advances Canonical State only after validation.
 Show the full recovery verdict, then select `Generate and verify proof` to finish with two locally verified signed decisions and their intact Canonical State handoff.
 The guided result exposes one primary `Download verified decision chain` action, while advanced export variants remain outside judge mode.
+Select `Inspect in zero-upload verifier` and show `0 API calls`, `2 signed decisions linked`, and the intact parent and Canonical State handoff checks without manually importing the file.
 This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
 
 When ModelArk free capacity is available, run the credentialed conformance proof:
@@ -68,6 +69,7 @@ Explain that the execution profile is a trusted Airlock control-plane attestatio
 - [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
 - [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
 - [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and presents an evidence-backed Candidate, Validation, Promotion, and independent-verification path.
+- [ ] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.
 - [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
 - [ ] The live UI shows `LIVE MODELARK PROOF`, one seeded Agent, and one `Run live Candidate` action.
 - [ ] The live Candidate creates the exact artifact, updates SQLite, submits one typed intent, passes the required state Validation, promotes all four resources, delivers exactly one effect after Promotion, and exports a locally verified signed decision.

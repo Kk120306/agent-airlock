@@ -234,6 +234,33 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(
     repairedEvidence.getByRole("button", { name: "Download verified evidence packet" }),
   ).not.toBeVisible();
+  await repairedEvidence
+    .getByRole("button", { name: "Inspect in zero-upload verifier" })
+    .click();
+  const verifier = page.getByRole("dialog", { name: "Verify trust without trusting this server" });
+  await expect(verifier.getByText("0 API calls · 0 uploads · 4 MB hard limit"))
+    .toBeVisible();
+  await expect(
+    verifier.getByText("Verified directly from the exact generated artifact", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(verifier.getByText("Cryptographic proof valid", { exact: true }))
+    .toBeVisible();
+  await expect(verifier.getByText("2 signed decisions linked", { exact: true }))
+    .toBeVisible();
+  await expect(
+    verifier.getByText("Every receipt, parent link, and state handoff agrees.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    verifier.getByText(
+      "The complete chain includes this parent and validates its exact receipt digest and Canonical State handoff.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await verifier.getByRole("button", { name: "Close receipt verifier" }).click();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(repairedProof).toBeVisible();

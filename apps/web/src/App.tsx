@@ -479,7 +479,18 @@ function PortableProofDetails({
   );
 }
 
-function ReceiptVerifier({ onClose }: { onClose: () => void }) {
+type PortableVerifierArtifact =
+  | PortablePromotionEnvelope
+  | PortableEvidencePacket
+  | PortableDecisionChain;
+
+function ReceiptVerifier({
+  initialArtifact,
+  onClose,
+}: {
+  initialArtifact: PortableVerifierArtifact | null;
+  onClose: () => void;
+}) {
   const [report, setReport] = useState<PortableVerificationReport | null>(null);
   const [packetReport, setPacketReport] =
     useState<PortableEvidencePacketVerificationReport | null>(null);
@@ -506,6 +517,48 @@ function ReceiptVerifier({ onClose }: { onClose: () => void }) {
   const [trustPolicyError, setTrustPolicyError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const verifySource = useCallback(async (source: string, sourceName: string) => {
+    setFilename(sourceName);
+    setReport(null);
+    setPacketReport(null);
+    setChainReport(null);
+    setDecisionChain(null);
+    setEnvelope(null);
+    setError(null);
+    setBusy(true);
+    try {
+      const parsed = JSON.parse(source) as PortableVerifierArtifact;
+      if (parsed.schema === "agent-airlock/portable-decision-chain") {
+        const nextChainReport =
+          await verifyPortableDecisionChainJsonInBrowser(source);
+        const leafPacket = parsed.packets.at(-1);
+        const leafPacketReport = nextChainReport.packets.at(-1) ?? null;
+        setChainReport(nextChainReport);
+        setDecisionChain(parsed);
+        setPacketReport(leafPacketReport);
+        setReport(leafPacketReport?.receipt ?? null);
+        if (leafPacket) setEnvelope(leafPacket.envelope);
+        if (!leafPacketReport) {
+          setError("The browser could not verify this decision chain.");
+        }
+      } else if (parsed.schema === "agent-airlock/portable-evidence-packet") {
+        const nextPacketReport =
+          await verifyPortableEvidencePacketJsonInBrowser(source);
+        setPacketReport(nextPacketReport);
+        setReport(nextPacketReport.receipt);
+        if (nextPacketReport.valid) setEnvelope(parsed.envelope);
+      } else {
+        const nextReport = await verifyPortablePromotionEnvelopeJsonInBrowser(source);
+        setReport(nextReport);
+        if (nextReport.valid) setEnvelope(parsed);
+      }
+    } catch {
+      setError("The browser could not read this receipt file.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -518,6 +571,16 @@ function ReceiptVerifier({ onClose }: { onClose: () => void }) {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose]);
+
+  useEffect(() => {
+    if (!initialArtifact) return;
+    const sourceName = initialArtifact.schema === "agent-airlock/portable-decision-chain"
+      ? "Generated decision chain"
+      : initialArtifact.schema === "agent-airlock/portable-evidence-packet"
+        ? "Generated evidence packet"
+        : "Generated receipt";
+    void verifySource(JSON.stringify(initialArtifact), sourceName);
+  }, [initialArtifact, verifySource]);
 
   useEffect(() => {
     let cancelled = false;
@@ -574,54 +637,14 @@ function ReceiptVerifier({ onClose }: { onClose: () => void }) {
 
   const verifyFile = async (file: File | undefined) => {
     if (!file) return;
-    setFilename(file.name);
-    setReport(null);
-    setPacketReport(null);
-    setChainReport(null);
-    setDecisionChain(null);
-    setEnvelope(null);
-    setError(null);
     if (file.size < 1 || file.size > 4_194_304) {
       setError("Choose a non-empty receipt, evidence packet, or decision chain no larger than 4 MB.");
       return;
     }
-    setBusy(true);
     try {
-      const source = await file.text();
-      const parsed = JSON.parse(source) as { schema?: unknown };
-      if (parsed.schema === "agent-airlock/portable-decision-chain") {
-        const nextChainReport =
-          await verifyPortableDecisionChainJsonInBrowser(source);
-        const chain = parsed as PortableDecisionChain;
-        const leafPacket = chain.packets.at(-1);
-        const leafPacketReport = nextChainReport.packets.at(-1) ?? null;
-        setChainReport(nextChainReport);
-        setDecisionChain(chain);
-        setPacketReport(leafPacketReport);
-        setReport(leafPacketReport?.receipt ?? null);
-        if (leafPacket) setEnvelope(leafPacket.envelope);
-        if (!leafPacketReport) {
-          setError("The browser could not verify this decision chain.");
-        }
-      } else if (parsed.schema === "agent-airlock/portable-evidence-packet") {
-        const nextPacketReport =
-          await verifyPortableEvidencePacketJsonInBrowser(source);
-        setPacketReport(nextPacketReport);
-        setReport(nextPacketReport.receipt);
-        if (nextPacketReport.valid) {
-          setEnvelope((parsed as PortableEvidencePacket).envelope);
-        }
-      } else {
-        const nextReport = await verifyPortablePromotionEnvelopeJsonInBrowser(source);
-        setReport(nextReport);
-        if (nextReport.valid) {
-          setEnvelope(parsed as PortablePromotionEnvelope);
-        }
-      }
+      await verifySource(await file.text(), file.name);
     } catch {
       setError("The browser could not read this receipt file.");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -731,7 +754,11 @@ function ReceiptVerifier({ onClose }: { onClose: () => void }) {
           <span aria-hidden="true">⌁</span>
           <strong>{filename ?? "Choose a receipt, packet, or decision chain"}</strong>
           <small>
-            {busy ? "Verifying locally…" : "Select an exported Agent Airlock JSON file"}
+            {busy
+              ? "Verifying locally…"
+              : initialArtifact
+                ? "Verified directly from the exact generated artifact"
+                : "Select an exported Agent Airlock JSON file"}
           </small>
         </label>
 
@@ -845,8 +872,9 @@ function ReceiptVerifier({ onClose }: { onClose: () => void }) {
                     <span className="eyebrow">Signed ancestry</span>
                     <strong>Repair lineage committed</strong>
                     <small>
-                      This receipt names its parent Run and prior receipt digest. Import
-                      the parent receipt separately to validate the complete chain.
+                      {decisionChain
+                        ? "The complete chain includes this parent and validates its exact receipt digest and Canonical State handoff."
+                        : "This receipt names its parent Run and prior receipt digest. Import the parent receipt separately to validate the complete chain."}
                     </small>
                   </div>
                   <dl>
@@ -1089,11 +1117,13 @@ function PortableTrustExport({
   evidenceRevision,
   judgeProofMode = false,
   onError,
+  onVerifyArtifact,
 }: {
   runId: string;
   evidenceRevision: string;
   judgeProofMode?: boolean;
   onError: (message: string) => void;
+  onVerifyArtifact?: (artifact: PortableVerifierArtifact) => void;
 }) {
   const [result, setResult] = useState<PortableReceiptExport | null>(null);
   const [availableDisclosures, setAvailableDisclosures] = useState<
@@ -1373,6 +1403,18 @@ function PortableTrustExport({
                 disabled={dirty || !result.verification.valid}
               >
                 {judgeProofMode ? "Download verified decision chain" : "Download complete decision chain"}
+              </button>
+            )}
+            {judgeProofMode && onVerifyArtifact && (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() =>
+                  onVerifyArtifact(result.decisionChain ?? result.packet)
+                }
+                disabled={dirty || !result.verification.valid}
+              >
+                Inspect in zero-upload verifier
               </button>
             )}
           </div>
@@ -1785,6 +1827,7 @@ function AirlockEvidence({
   portableTrustAvailable,
   judgeProofMode,
   onPortableError,
+  onVerifyArtifact,
 }: {
   run: AgentRun;
   actionBusy: boolean;
@@ -1793,6 +1836,7 @@ function AirlockEvidence({
   portableTrustAvailable: boolean;
   judgeProofMode: boolean;
   onPortableError: (message: string) => void;
+  onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
 }) {
   const transaction = run.transaction;
   if (!transaction) return null;
@@ -2261,6 +2305,7 @@ function AirlockEvidence({
               ].join(":")}
               judgeProofMode={judgeProofMode}
               onError={onPortableError}
+              onVerifyArtifact={onVerifyArtifact}
             />
           )}
         </>
@@ -2275,6 +2320,8 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
+  const [verifierArtifact, setVerifierArtifact] =
+    useState<PortableVerifierArtifact | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -2981,7 +3028,10 @@ export default function App() {
           <button
             type="button"
             className="button verify-receipt-button"
-            onClick={() => setShowReceiptVerifier(true)}
+            onClick={() => {
+              setVerifierArtifact(null);
+              setShowReceiptVerifier(true);
+            }}
           >
             <span aria-hidden="true">✓</span>
             Verify a receipt
@@ -3541,6 +3591,10 @@ export default function App() {
                       system?.modelArkDemoMode === true
                     }
                     onPortableError={setError}
+                    onVerifyArtifact={(artifact) => {
+                      setVerifierArtifact(artifact);
+                      setShowReceiptVerifier(true);
+                    }}
                   />
                 )}
                 {activeCandidateSet && (
@@ -3683,7 +3737,13 @@ export default function App() {
       )}
 
       {showReceiptVerifier && (
-        <ReceiptVerifier onClose={() => setShowReceiptVerifier(false)} />
+        <ReceiptVerifier
+          initialArtifact={verifierArtifact}
+          onClose={() => {
+            setShowReceiptVerifier(false);
+            setVerifierArtifact(null);
+          }}
+        />
       )}
     </div>
   );
