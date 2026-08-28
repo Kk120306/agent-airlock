@@ -385,8 +385,22 @@ function ProtocolScenarioGuide({
         </div>
         {repairedProofStatus === "verified" ? (
           <span>Signed recovery verified</span>
-        ) : complete && repairedProofStatus !== "requested" ? (
-          <span>Recovery proven</span>
+        ) : complete ? (
+          repairedProofStatus === "requested" ? (
+            <span>Verifying signed recovery</span>
+          ) : (
+            <button
+              type="button"
+              className="button button-primary protocol-run-all"
+              onClick={() => repaired && onRequestProof(repaired.id)}
+              disabled={busy || automationStage !== null || !repaired}
+            >
+              <span aria-hidden="true">↻</span>
+              {repairedProofStatus === "failed"
+                ? "Retry signed verification"
+                : "Verify signed recovery"}
+            </button>
+          )
         ) : (
           <button
             type="button"
@@ -464,14 +478,18 @@ function ProtocolScenarioGuide({
                 : complete
                   ? repairedProofStatus === "requested"
                     ? "Verifying signed recovery chain"
-                    : "Full recovery loop proven"
+                    : repairedProofStatus === "failed"
+                      ? "Signed recovery verification failed"
+                      : "Recovery lineage ready for verification"
                   : "Airlock controlled both outcomes"}
             </strong>
             <small>
               {repairedProofStatus === "verified"
                 ? "Two signed decisions, their parent link, and every Canonical State handoff verified locally without an upload."
                 : complete
-                ? "The rejected parent and promoted repair child now form one decision lineage ready for signed, independent verification."
+                ? repairedProofStatus === "failed"
+                  ? "The retained lineage remains intact, but Airlock will not claim independent proof until local verification succeeds."
+                  : "The rejected parent and promoted repair child now form one decision lineage ready for signed, independent verification."
                 : "The valid Candidate advanced Canonical State. The invalid Candidate left its fingerprint unchanged."}
             </small>
           </div>
@@ -2646,6 +2664,29 @@ export default function App() {
       messageEnd.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, activeRun, activeCandidateSet]);
+
+  useEffect(() => {
+    const transaction = activeRun?.transaction;
+    if (
+      !system?.protocolFixtureMode ||
+      activeRun?.status !== "completed" ||
+      transaction?.disposition !== "promoted" ||
+      transaction.lineage.depth < 1
+    ) {
+      return;
+    }
+    setAutomaticProof((current) =>
+      current?.runId === activeRun.id
+        ? current
+        : { runId: activeRun.id, status: "requested" },
+    );
+  }, [
+    activeRun?.id,
+    activeRun?.status,
+    activeRun?.transaction?.disposition,
+    activeRun?.transaction?.lineage.depth,
+    system?.protocolFixtureMode,
+  ]);
 
   const createAgent = async (event: React.FormEvent) => {
     event.preventDefault();

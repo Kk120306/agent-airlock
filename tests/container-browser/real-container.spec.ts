@@ -226,23 +226,20 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(repairedProof.getByText("1 typed effect delivered only after Canonical State advanced."))
     .toBeVisible();
   await expect(
-    pairedProof.getByText("Recovery proven", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    pairedProof.getByText("Full recovery loop proven", { exact: true }),
-  ).toBeVisible();
-  await expect(
     pairedProof.getByText("Rejected future safely repaired", { exact: true }),
   ).toBeVisible();
 
-  await repairedEvidence
-    .getByRole("button", { name: "Generate and verify proof" })
-    .click();
   await expect(
     repairedEvidence.getByText(
       "2 signed decisions verified locally with every Canonical State handoff intact.",
       { exact: true },
     ),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    pairedProof.getByText("Full signed recovery proof verified", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    pairedProof.getByText("Signed recovery verified", { exact: true }),
   ).toBeVisible();
   await expect(
     repairedEvidence.getByRole("button", {
@@ -280,8 +277,31 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await verifier.getByRole("button", { name: "Close receipt verifier" }).click();
 
+  await page.reload();
+  const reloadedGuide = page.getByRole("region", { name: "Full safety loop" });
+  const reloadedEvidence = page.getByRole("article", {
+    name: "Agent Airlock evidence",
+  });
+  await expect(
+    reloadedGuide.getByText("Full signed recovery proof verified", { exact: true }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    reloadedGuide.getByText("Signed recovery verified", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    reloadedEvidence.getByText(
+      "2 signed decisions verified locally with every Canonical State handoff intact.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    reloadedEvidence.getByRole("button", { name: "Generate and verify proof" }),
+  ).not.toBeVisible();
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(repairedProof).toBeVisible();
+  await expect(
+    reloadedEvidence.getByRole("region", { name: "Judge proof summary" }),
+  ).toBeVisible();
   expect(
     await pairedProof
       .locator(".protocol-scenario-actions small")

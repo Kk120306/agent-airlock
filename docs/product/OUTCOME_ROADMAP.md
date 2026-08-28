@@ -322,6 +322,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - Its guided controls run a valid Candidate, a deliberately invalid Candidate, and a bounded Repair Run through that same real Runtime.
 - A single `Run complete safety loop` action sequences those three real Runtime decisions, exposes its current stage, fails closed instead of attempting Repair after an unexpected disposition, and automatically generates and locally verifies the signed Repair decision chain.
 - Its completion state is evidence-gated: the final signed-recovery verdict is withheld until both signatures, the parent link, and every Canonical State handoff verify locally, while export failure remains explicit and retryable.
+- Reloading a completed Repair proof regenerates the signed chain from durable authority and repeats local verification before restoring either signed-recovery verdict.
 - The proof compares Canonical State advancement with an unchanged rejection fingerprint, then links the quarantined parent to the promoted repair child in one signed decision chain.
 - The real Runtime UI now reduces the transaction to an evidence-backed `Run`, `Validate`, `Promote`, and `Verify` judge path, while retaining the complete resource, journal, Validation, and change record behind one inspection control.
 - Its final action generates a private-by-default two-decision chain and verifies both signatures and the Canonical State handoff locally before download.

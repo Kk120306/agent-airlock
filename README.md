@@ -47,7 +47,8 @@ The third control starts a real Repair Run from the retained Quarantine, uses bo
 The focused judge view presents four immediately visible proof stages: Candidate isolation, Outcome Contract enforcement, four-resource disposition, and post-Promotion effect gating.
 It keeps Quarantine ancestry, canonical fingerprints, and complete forensic evidence one inspection control away.
 After all three controls complete, the recovery verdict proves that the same Agent and Outcome Contract controlled Promotion, rejection, and repair.
-Select `Generate and verify proof` on the repaired Run to produce and locally verify a complete two-decision chain containing the quarantined parent and promoted repair child.
+The repaired Run automatically produces and locally verifies a complete two-decision chain containing the quarantined parent and promoted repair child.
+Reloading the page regenerates that chain from durable Run authority and withholds every signed-recovery claim until local verification succeeds again.
 The guided proof then offers one primary artifact, `Download verified decision chain`, instead of competing raw-receipt and packet downloads.
 Select `Inspect in zero-upload verifier` to pass that exact generated chain directly into the browser-local verifier and show both signatures, the parent link, and the Canonical State handoff without an API call or manual file round trip.
 The download remains the cross-machine artifact and the in-app verifier remains a network-free consumer of the same portable JSON.

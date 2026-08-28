@@ -26,8 +26,9 @@ Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the four-
 Alternatively, select `Run complete safety loop` to execute Promotion, rejection, and Repair in order with live stage status, then automatically generate and locally verify the repaired Run's signed two-decision chain.
 The guide must remain in its signed-lineage verification stage until the final `Full signed recovery proof verified` verdict appears.
 Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
-Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all nine required Validations, and advances Canonical State only after validation.
-Show the full recovery verdict, then select `Generate and verify proof` to finish with two locally verified signed decisions and their intact Canonical State handoff.
+Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all ten required Validations, and advances Canonical State only after validation.
+Show the full recovery verdict after Airlock automatically verifies two signed decisions and their intact Canonical State handoff.
+Reload once and require the same verdict to reappear only after the chain is regenerated and verified from durable Run authority.
 The guided result exposes one primary `Download verified decision chain` action, while advanced export variants remain outside judge mode.
 Select `Inspect in zero-upload verifier` and show `0 API calls`, `2 signed decisions linked`, and the intact parent and Canonical State handoff checks without manually importing the file.
 This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
