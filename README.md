@@ -35,7 +35,7 @@ npm run demo:runtime -- --reset
 ```
 
 Open <http://127.0.0.1:3200> and use the three `Full safety loop` controls.
-For the fastest judge path, select `Run complete safety loop` to execute the same three ordered actions automatically while each stage remains independently visible and rerunnable during rehearsal.
+For the fastest judge path, select `Run complete safety loop` to execute the same three ordered actions automatically, generate the repaired Run's signed two-decision chain, and verify every Canonical State handoff locally while each stage remains independently visible and rerunnable during rehearsal.
 Real Codex runs inside a disposable container against isolated Candidate State, calls the execution tool, and changes an exact file, SQLite row, and typed outbox intent only in that Candidate.
 The passing Candidate satisfies the required file-and-database command, promotes all four resources, advances Canonical State, and delivers exactly one effect afterward.
 The failing Candidate writes deliberately invalid file and database values plus an unsafe intent, fails that same command, remains inspectable in Quarantine, and leaves the canonical fingerprint, accepted database, and delivery count unchanged.

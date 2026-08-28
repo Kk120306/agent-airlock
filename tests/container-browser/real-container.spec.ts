@@ -516,6 +516,45 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     automatedGuide.getByText("Rejected future safely repaired", { exact: true }),
   ).toBeVisible();
 
+  const automatedEvidence = page.getByRole("article", {
+    name: "Agent Airlock evidence",
+  });
+  await expect(
+    automatedEvidence.getByText("Signed proof verified locally", { exact: true }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    automatedEvidence.getByText(
+      "2 signed decisions verified locally with every Canonical State handoff intact.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    automatedEvidence.getByRole("button", {
+      name: "Download verified decision chain",
+    }),
+  ).toBeEnabled();
+  await automatedEvidence
+    .getByRole("button", { name: "Inspect in zero-upload verifier" })
+    .click();
+  const automatedVerifier = page.getByRole("dialog", {
+    name: "Verify trust without trusting this server",
+  });
+  await expect(
+    automatedVerifier.getByText("Cryptographic proof valid", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    automatedVerifier.getByText("2 signed decisions linked", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    automatedVerifier.getByText(
+      "Every receipt, parent link, and state handoff agrees.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await automatedVerifier
+    .getByRole("button", { name: "Close receipt verifier" })
+    .click();
+
   const automatedRunsResponse = await request.get(
     `/api/agents/${automatedAgent.agent.id}/runs`,
   );

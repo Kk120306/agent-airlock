@@ -273,14 +273,16 @@ function ProtocolScenarioGuide({
   busy,
   onRun,
   onRepair,
+  onRequestProof,
 }: {
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => Promise<AgentRun | null>;
   onRepair: (runId: string) => Promise<AgentRun | null>;
+  onRequestProof: (runId: string) => void;
 }) {
   const [automationStage, setAutomationStage] = useState<
-    "promote" | "quarantine" | "repair" | null
+    "promote" | "quarantine" | "repair" | "verify" | null
   >(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
   const promoted = runs.find(
@@ -332,7 +334,10 @@ function ProtocolScenarioGuide({
           setAutomationError(
             "Safety loop stopped: the retained Candidate did not produce a promoted Repair lineage.",
           );
+          return;
         }
+        setAutomationStage("verify");
+        onRequestProof(repairRun.id);
       }
     } finally {
       setAutomationStage(null);
@@ -344,6 +349,8 @@ function ProtocolScenarioGuide({
       ? "Proving rejection"
       : automationStage === "repair"
         ? "Repairing retained Candidate"
+        : automationStage === "verify"
+          ? "Verifying signed lineage"
         : "Run complete safety loop";
 
   return (
@@ -1191,12 +1198,14 @@ function PortableTrustExport({
   runId,
   evidenceRevision,
   judgeProofMode = false,
+  autoGenerateProof = false,
   onError,
   onVerifyArtifact,
 }: {
   runId: string;
   evidenceRevision: string;
   judgeProofMode?: boolean;
+  autoGenerateProof?: boolean;
   onError: (message: string) => void;
   onVerifyArtifact?: (artifact: PortableVerifierArtifact) => void;
 }) {
@@ -1210,6 +1219,7 @@ function PortableTrustExport({
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const requestGeneration = useRef(0);
+  const automaticGenerationRun = useRef<string | null>(null);
 
   useEffect(() => {
     requestGeneration.current += 1;
@@ -1245,6 +1255,15 @@ function PortableTrustExport({
       if (requestGeneration.current === generation) setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      !autoGenerateProof ||
+      automaticGenerationRun.current === runId
+    ) return;
+    automaticGenerationRun.current = runId;
+    void generate();
+  }, [autoGenerateProof, runId]);
 
   const invalidatePendingExport = () => {
     requestGeneration.current += 1;
@@ -1901,6 +1920,7 @@ function AirlockEvidence({
   onDiscard,
   portableTrustAvailable,
   judgeProofMode,
+  autoGenerateProof,
   onPortableError,
   onVerifyArtifact,
 }: {
@@ -1910,6 +1930,7 @@ function AirlockEvidence({
   onDiscard: () => void;
   portableTrustAvailable: boolean;
   judgeProofMode: boolean;
+  autoGenerateProof: boolean;
   onPortableError: (message: string) => void;
   onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
 }) {
@@ -2379,6 +2400,7 @@ function AirlockEvidence({
                 transaction.promotionReceipt.validationEvidenceHash,
               ].join(":")}
               judgeProofMode={judgeProofMode}
+              autoGenerateProof={autoGenerateProof}
               onError={onPortableError}
               onVerifyArtifact={onVerifyArtifact}
             />
@@ -2397,6 +2419,7 @@ export default function App() {
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
   const [verifierArtifact, setVerifierArtifact] =
     useState<PortableVerifierArtifact | null>(null);
+  const [automaticProofRunId, setAutomaticProofRunId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -3579,6 +3602,7 @@ export default function App() {
                     busy={demoActionBusy}
                     onRun={runPrompt}
                     onRepair={repairActiveRun}
+                    onRequestProof={setAutomaticProofRunId}
                   />
                 ) : null}
                 {system?.modelArkDemoMode ? (
@@ -3670,6 +3694,7 @@ export default function App() {
                       system?.protocolFixtureMode === true ||
                       system?.modelArkDemoMode === true
                     }
+                    autoGenerateProof={activeRun.id === automaticProofRunId}
                     onPortableError={setError}
                     onVerifyArtifact={(artifact) => {
                       setVerifierArtifact(artifact);
