@@ -3,6 +3,7 @@
 ## Status
 
 Accepted locally for the Phase 12 federated-admission boundary.
+The primary-source security analysis and deterministic defense vectors are recorded in [Replay, revocation, and split-view defenses for federated receipts](../research/federated-receipt-defenses.md).
 
 ## Context
 
@@ -79,27 +80,27 @@ The imported receipt, upstream disposition, signer authorization, transparency p
 
 ## Deterministic acceptance vectors
 
-| Vector | Inputs | Result | Stable reason |
-| --- | --- | --- | --- |
-| Authorized offline import | Exact trusted producer and key, allowed schema and artifact, fresh receipt, valid digest, unused import identifier, transparency not required | Admit to Candidate State | `admitted` |
-| Unknown producer | No exact local producer rule | Reject | `producer-untrusted` |
-| Trust on first use | Producer supplies a valid policy authority that is not locally pinned | Reject | `authority-unpinned` |
-| Wrong signer scope | Valid signature from a key outside the producer rule | Reject | `signer-scope-mismatch` |
-| Downgraded protocol | Receipt or artifact schema is not explicitly allowed | Reject | `protocol-not-allowed` |
-| Wrong resource scope | Receipt commits a provider or resource kind outside the rule | Reject | `resource-scope-mismatch` |
-| Stale receipt | Receiver evaluation time exceeds the maximum receipt age | Reject | `receipt-stale` |
-| Revoked signer | Current local policy marks the signer compromised | Reject | `signer-compromised` |
-| Emergency distrust | Producer rule is disabled at evaluation time | Reject | `producer-disabled` |
-| Artifact mutation | Artifact bytes do not match the import manifest digest and length | Reject | `artifact-integrity-failed` |
-| Incomplete ancestry | Complete chain is required but a parent is omitted or state handoff differs | Reject | `ancestry-incomplete` |
-| Replay | Exact import identifier already has an Admission Record | Return the existing result without a new Candidate | `admission-replay` |
-| Contradictory replay | A reused transfer identity binds different receipt, artifact, producer, or policy content | Reject | `admission-conflict` |
-| Missing inclusion | Producer rule requires transparency inclusion and no valid proof is present | Reject | `transparency-required` |
-| Split view | Same-size checkpoint conflicts with the receiver-pinned checkpoint | Reject | `transparency-split-view` |
-| Missing consistency base | Consistency is required but the receiver has no pinned prior checkpoint | Reject | `transparency-base-missing` |
-| Approval required | Every machine check passes but local approval is absent | Keep pending outside Candidate State | `approval-required` |
-| Local Validation fails | Admission succeeds but the receiver's Outcome Contract fails | Quarantine or discard local Candidate State | `local-validation-failed` |
-| Local Validation passes | Admission succeeds and every required local Validation passes | Eligible for local Promotion | `locally-eligible` |
+| Vector                    | Inputs                                                                                                                                        | Result                                             | Stable reason               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------- |
+| Authorized offline import | Exact trusted producer and key, allowed schema and artifact, fresh receipt, valid digest, unused import identifier, transparency not required | Admit to Candidate State                           | `admitted`                  |
+| Unknown producer          | No exact local producer rule                                                                                                                  | Reject                                             | `producer-untrusted`        |
+| Trust on first use        | Producer supplies a valid policy authority that is not locally pinned                                                                         | Reject                                             | `authority-unpinned`        |
+| Wrong signer scope        | Valid signature from a key outside the producer rule                                                                                          | Reject                                             | `signer-scope-mismatch`     |
+| Downgraded protocol       | Receipt or artifact schema is not explicitly allowed                                                                                          | Reject                                             | `protocol-not-allowed`      |
+| Wrong resource scope      | Receipt commits a provider or resource kind outside the rule                                                                                  | Reject                                             | `resource-scope-mismatch`   |
+| Stale receipt             | Receiver evaluation time exceeds the maximum receipt age                                                                                      | Reject                                             | `receipt-stale`             |
+| Revoked signer            | Current local policy marks the signer compromised                                                                                             | Reject                                             | `signer-compromised`        |
+| Emergency distrust        | Producer rule is disabled at evaluation time                                                                                                  | Reject                                             | `producer-disabled`         |
+| Artifact mutation         | Artifact bytes do not match the import manifest digest and length                                                                             | Reject                                             | `artifact-integrity-failed` |
+| Incomplete ancestry       | Complete chain is required but a parent is omitted or state handoff differs                                                                   | Reject                                             | `ancestry-incomplete`       |
+| Replay                    | Exact import identifier already has an Admission Record                                                                                       | Return the existing result without a new Candidate | `admission-replay`          |
+| Contradictory replay      | A reused transfer identity binds different receipt, artifact, producer, or policy content                                                     | Reject                                             | `admission-conflict`        |
+| Missing inclusion         | Producer rule requires transparency inclusion and no valid proof is present                                                                   | Reject                                             | `transparency-required`     |
+| Split view                | Same-size checkpoint conflicts with the receiver-pinned checkpoint                                                                            | Reject                                             | `transparency-split-view`   |
+| Missing consistency base  | Consistency is required but the receiver has no pinned prior checkpoint                                                                       | Reject                                             | `transparency-base-missing` |
+| Approval required         | Every machine check passes but local approval is absent                                                                                       | Keep pending outside Candidate State               | `approval-required`         |
+| Local Validation fails    | Admission succeeds but the receiver's Outcome Contract fails                                                                                  | Quarantine or discard local Candidate State        | `local-validation-failed`   |
+| Local Validation passes   | Admission succeeds and every required local Validation passes                                                                                 | Eligible for local Promotion                       | `locally-eligible`          |
 
 ## Consequences
 

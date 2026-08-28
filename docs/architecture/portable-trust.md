@@ -146,6 +146,7 @@ Unknown receipt keys, compromised keys, policy timing failures, signing-window f
 ## Federated admission boundary
 
 ADR 0018 adds a receiver-controlled decision above portable verification.
+The [federated receipt defense research](../research/federated-receipt-defenses.md) defines the evidence profiles, offline limitations, and adversarial vectors for that boundary.
 A Federated Admission Policy snapshots exact producer, signer, protocol, artifact, resource, ancestry, freshness, revocation, approval, and optional transparency scopes.
 The producer cannot supply or select that policy, and empty scopes grant no permission.
 

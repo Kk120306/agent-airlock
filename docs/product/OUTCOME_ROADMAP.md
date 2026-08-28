@@ -47,20 +47,20 @@ The winning story is:
 
 ## Outcome ladder
 
-| Phase                         | Product outcome                                                                                | Competitive level         | Irreversible proof                                                                                   |
-| ----------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 0. Baseline locked            | The unmodified starter journey is understood and repeatable.                                   | Eligibility               | Browser acceptance flow and `npm run check` pass.                                                    |
-| 1. Harmless failure           | A rejected Agent Run cannot change Canonical State.                                            | Qualifying                | Destructive candidate is quarantined and canonical hash is unchanged.                                |
-| 2. Explainable decision       | The operator can understand exactly why a future was accepted or rejected.                     | Strong submission         | Outcome Contract, change summary, timeline, and bounded evidence agree.                              |
-| 3. Whole-Agent continuity     | Workspace and Codex session advance or remain unchanged together.                              | Podium                    | Rejected work does not pollute the next turn, while promoted work continues correctly.               |
-| 4. Transactional effects      | The model works across files, SQLite, and a deferred external action.                          | Podium plus               | Rejection changes none of them and promotion delivers the action exactly once.                       |
-| 5. Recoverable intelligence   | Airlock can repair a quarantined future without contaminating Canonical State.                 | Winning target            | A Repair Run turns real failure evidence into a validated promoted result.                           |
-| 6. Adversarial resilience     | Crashes and obvious bypass attempts fail closed.                                               | Winning target            | Fault injection, path escape, symlink, timeout, and duplicate-delivery tests pass.                   |
-| 7. Judge-ready release        | A reviewer understands and believes the whole product in three minutes.                        | Submission release        | Fresh-clone setup, live demo, architecture, and full checks pass without hidden steps.               |
-| 8. Transactional Resource SDK | Other developers can put new resources behind Airlock.                                         | Post-hackathon platform   | A provider adapter passes a shared conformance suite.                                                |
-| 9. Competing futures          | Several Agents or models can attempt the same task and only the best valid future is promoted. | Category-defining product | Deterministic evaluation ranks isolated candidates without cross-contamination.                      |
-| 10. Adaptive assurance        | Airlock learns which protections should be strengthened from observed failures.                | Intelligent control plane | Suggested contract changes are explainable, versioned, reviewed, and never silently weakened.        |
-| 11. Portable trust            | Promotion evidence can be verified across runtimes and organizations.                          | Ecosystem standard        | A provider-neutral signed Promotion Receipt verifies independently of the original Airlock instance. |
+| Phase                         | Product outcome                                                                                | Competitive level         | Irreversible proof                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 0. Baseline locked            | The unmodified starter journey is understood and repeatable.                                   | Eligibility               | Browser acceptance flow and `npm run check` pass.                                                     |
+| 1. Harmless failure           | A rejected Agent Run cannot change Canonical State.                                            | Qualifying                | Destructive candidate is quarantined and canonical hash is unchanged.                                 |
+| 2. Explainable decision       | The operator can understand exactly why a future was accepted or rejected.                     | Strong submission         | Outcome Contract, change summary, timeline, and bounded evidence agree.                               |
+| 3. Whole-Agent continuity     | Workspace and Codex session advance or remain unchanged together.                              | Podium                    | Rejected work does not pollute the next turn, while promoted work continues correctly.                |
+| 4. Transactional effects      | The model works across files, SQLite, and a deferred external action.                          | Podium plus               | Rejection changes none of them and promotion delivers the action exactly once.                        |
+| 5. Recoverable intelligence   | Airlock can repair a quarantined future without contaminating Canonical State.                 | Winning target            | A Repair Run turns real failure evidence into a validated promoted result.                            |
+| 6. Adversarial resilience     | Crashes and obvious bypass attempts fail closed.                                               | Winning target            | Fault injection, path escape, symlink, timeout, and duplicate-delivery tests pass.                    |
+| 7. Judge-ready release        | A reviewer understands and believes the whole product in three minutes.                        | Submission release        | Fresh-clone setup, live demo, architecture, and full checks pass without hidden steps.                |
+| 8. Transactional Resource SDK | Other developers can put new resources behind Airlock.                                         | Post-hackathon platform   | A provider adapter passes a shared conformance suite.                                                 |
+| 9. Competing futures          | Several Agents or models can attempt the same task and only the best valid future is promoted. | Category-defining product | Deterministic evaluation ranks isolated candidates without cross-contamination.                       |
+| 10. Adaptive assurance        | Airlock learns which protections should be strengthened from observed failures.                | Intelligent control plane | Suggested contract changes are explainable, versioned, reviewed, and never silently weakened.         |
+| 11. Portable trust            | Promotion evidence can be verified across runtimes and organizations.                          | Ecosystem standard        | A provider-neutral signed Promotion Receipt verifies independently of the original Airlock instance.  |
 | 12. Federated acceptance      | Verified external Agent work can enter local Candidate State under receiver-controlled policy. | Networked control plane   | A remote artifact is locally admitted, validated, and promoted without trusting the producer Runtime. |
 
 ## Hackathon phases
@@ -549,8 +549,8 @@ Turn Portable Promotion Receipts into a vendor-neutral admission protocol while 
 
 **Current status**
 
-The policy boundary is resolved in ADR 0018.
-Replay, revocation, split-view research and the two-instance Candidate admission prototype remain outcome gates rather than delivered claims.
+The policy boundary is resolved in ADR 0018, and the primary-source replay, revocation, and split-view analysis defines four explicit evidence profiles with deterministic failure vectors.
+The two-instance Candidate admission prototype remains an outcome gate rather than a delivered claim.
 
 ## Hackathon cut lines
 
