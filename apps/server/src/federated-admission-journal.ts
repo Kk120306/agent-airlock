@@ -75,8 +75,25 @@ export interface FederatedCandidateAdapter {
     agentId: string;
     runId: string;
     bundle: FederatedWorkBundle;
+    provenance: FederatedCandidatePreparationProvenance;
   }): Promise<{ candidateStateId: string }>;
-  inspect(runId: string): Promise<{ candidateStateId: string } | null>;
+  inspect(input: {
+    agentId: string;
+    runId: string;
+    provenance: FederatedCandidatePreparationProvenance;
+  }): Promise<{ candidateStateId: string } | null>;
+}
+
+export interface FederatedCandidatePreparationProvenance {
+  schemaVersion: 1;
+  admissionId: ReceiptDigest;
+  importIdentifier: ReceiptDigest;
+  producerId: string;
+  receiptDigest: ReceiptDigest;
+  artifactDigest: ReceiptDigest;
+  policyId: string;
+  policyGeneration: number;
+  policyDigest: ReceiptDigest;
 }
 
 export class FederatedAdmissionJournal {
@@ -487,12 +504,28 @@ export class FederatedAdmissionCoordinator {
       }
       if (plan.decision.decision === "admit" && plan.phase === "record-published") {
         if (!plan.candidateRunId) throw new Error("Admitted plan has no Candidate Run identity");
-        let candidate = await this.candidates.inspect(plan.candidateRunId);
+        const provenance: FederatedCandidatePreparationProvenance = {
+          schemaVersion: 1,
+          admissionId: record.admissionId,
+          importIdentifier: record.importIdentifier,
+          producerId: record.producerId,
+          receiptDigest: record.decision.receiptDigest,
+          artifactDigest: record.decision.artifactDigest,
+          policyId: record.decision.policyId,
+          policyGeneration: record.decision.policyGeneration,
+          policyDigest: record.decision.policyDigest,
+        };
+        let candidate = await this.candidates.inspect({
+          agentId: plan.localAgentId,
+          runId: plan.candidateRunId,
+          provenance,
+        });
         if (!candidate) {
           candidate = await this.candidates.prepare({
             agentId: plan.localAgentId,
             runId: plan.candidateRunId,
             bundle: input.bundle,
+            provenance,
           });
           this.options.injectFault?.("candidate-created");
         }

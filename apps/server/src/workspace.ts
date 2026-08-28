@@ -13,9 +13,18 @@ import {
   realpath,
   rename,
   rm,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import {
+  assertWorkspaceChangeSetEnvelope,
+  decodeWorkspaceFileContent,
+  verifyFederatedWorkBundle,
+  type FederatedWorkBundle,
+  type ReceiptDigest,
+  type WorkspaceChangeOperation,
+} from "@agent-airlock/portable-promotion-receipt";
 import {
   parseResourceVersionReference,
   redactSensitiveText,
@@ -81,6 +90,25 @@ interface CandidateManifestV4 {
   repairReferenceHash: string | null;
   createdAt: string;
 }
+
+export interface FederatedCandidateProvenance {
+  schemaVersion: 1;
+  admissionId: ReceiptDigest;
+  importIdentifier: ReceiptDigest;
+  producerId: string;
+  receiptDigest: ReceiptDigest;
+  artifactDigest: ReceiptDigest;
+  policyId: string;
+  policyGeneration: number;
+  policyDigest: ReceiptDigest;
+}
+
+interface CandidateManifestV5 extends Omit<CandidateManifestV4, "schemaVersion"> {
+  schemaVersion: 5;
+  federatedProvenance: FederatedCandidateProvenance;
+}
+
+type CandidateManifest = CandidateManifestV4 | CandidateManifestV5;
 
 export interface CandidateStateReference {
   candidateStateId: string;
@@ -211,6 +239,17 @@ const fileExists = async (target: string): Promise<boolean> => {
   }
 };
 
+const lstatOrNull = async (
+  target: string,
+): Promise<Awaited<ReturnType<typeof lstat>> | null> => {
+  try {
+    return await lstat(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+};
+
 const now = () => new Date().toISOString();
 const safeIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -238,6 +277,7 @@ export class WorkspaceManager {
       mkdir(path.join(this.root, ".deleted"), { recursive: true }),
       mkdir(path.join(this.root, ".migrations"), { recursive: true }),
       mkdir(path.join(this.root, ".quarantine"), { recursive: true }),
+      mkdir(this.federatedPreparationRoot(), { recursive: true }),
       mkdir(this.providerRegistryTransitionRoot(), { recursive: true }),
     ]);
     if (options.recoverProviderRegistryTransitions !== false) {
@@ -787,6 +827,129 @@ export class WorkspaceManager {
       await rm(root, { recursive: true, force: true });
       throw error;
     }
+  }
+
+  async prepareFederatedCandidate(
+    agentId: string,
+    runId: string,
+    bundle: FederatedWorkBundle,
+    provenance: FederatedCandidateProvenance,
+  ): Promise<CandidateStateReference & {
+    federatedProvenance: FederatedCandidateProvenance;
+  }> {
+    this.assertIdentifier(agentId, "Agent");
+    this.assertIdentifier(runId, "Run");
+    this.assertFederatedCandidateProvenance(bundle, provenance);
+    const report = verifyFederatedWorkBundle(bundle);
+    if (!report.valid) {
+      throw new Error("Federated Work Bundle is invalid at Candidate materialization");
+    }
+    assertWorkspaceChangeSetEnvelope(bundle.artifact);
+    const canonical = await this.readCanonical(agentId);
+    const targetRoot = this.candidateRoot(runId);
+    if (await fileExists(targetRoot)) {
+      throw new Error("Candidate State already exists for Run " + runId);
+    }
+    const preparationRoot = this.federatedPreparationPath(runId);
+    await this.removeInterruptedFederatedPreparation(preparationRoot);
+    const workspacePath = path.join(preparationRoot, "workspace");
+    const codexHomePath = path.join(preparationRoot, "codex-home");
+    const outboxDirectory = path.join(preparationRoot, "outbox");
+    const outboxPath = path.join(outboxDirectory, "intents.jsonl");
+    const candidateStateId = randomUUID();
+    await mkdir(preparationRoot, { recursive: false, mode: 0o700 });
+    try {
+      await Promise.all([
+        cp(canonical.workspacePath, workspacePath, {
+          recursive: true,
+          preserveTimestamps: true,
+        }),
+        cp(canonical.codexHomePath, codexHomePath, {
+          recursive: true,
+          preserveTimestamps: true,
+        }),
+        mkdir(outboxDirectory, { recursive: true, mode: 0o700 }),
+        mkdir(path.join(preparationRoot, "resources"), {
+          recursive: true,
+          mode: 0o700,
+        }),
+      ]);
+      await this.refreshCodexConfig(codexHomePath);
+      await this.applyFederatedWorkspaceOperations(
+        workspacePath,
+        bundle.artifact.artifact.operations,
+      );
+      await this.assertResourceTreeSafe(
+        workspacePath,
+        "Federated Candidate workspace",
+      );
+      const manifest: CandidateManifestV5 = {
+        schemaVersion: 5,
+        agentId,
+        runId,
+        candidateStateId,
+        canonicalStateIdBefore: canonical.stateId,
+        canonicalContentHashBefore: canonical.contentHash,
+        canonicalWorkspaceHashBefore: canonical.workspaceContentHash,
+        canonicalSessionHashBefore: canonical.sessionContentHash,
+        canonicalSqliteHashBefore: canonical.sqliteContentHash,
+        canonicalOutboxHashBefore: canonical.outboxContentHash,
+        canonicalProviderVersionsBefore: structuredClone(
+          canonical.providerVersions,
+        ),
+        canonicalThreadIdBefore: canonical.codexThreadId,
+        candidateThreadId: canonical.codexThreadId,
+        repairSourceRunId: null,
+        repairReferenceHash: null,
+        federatedProvenance: structuredClone(provenance),
+        createdAt: now(),
+      };
+      await this.writeJson(path.join(preparationRoot, "candidate.json"), manifest);
+      await rename(preparationRoot, targetRoot);
+      return {
+        candidateStateId,
+        workspacePath: path.join(targetRoot, "workspace"),
+        codexHomePath: path.join(targetRoot, "codex-home"),
+        outboxPath: path.join(targetRoot, "outbox", "intents.jsonl"),
+        canonicalStateIdBefore: canonical.stateId,
+        canonicalContentHashBefore: canonical.contentHash,
+        canonicalWorkspaceHashBefore: canonical.workspaceContentHash,
+        canonicalSessionHashBefore: canonical.sessionContentHash,
+        canonicalSqliteHashBefore: canonical.sqliteContentHash,
+        canonicalOutboxHashBefore: canonical.outboxContentHash,
+        canonicalProviderVersionsBefore: structuredClone(
+          canonical.providerVersions,
+        ),
+        canonicalThreadIdBefore: canonical.codexThreadId,
+        runtimeThreadId: canonical.codexThreadId,
+        repairReferencePath: null,
+        federatedProvenance: structuredClone(provenance),
+      };
+    } catch (error) {
+      await rm(preparationRoot, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  async inspectFederatedCandidate(
+    agentId: string,
+    runId: string,
+    provenance: FederatedCandidateProvenance,
+  ): Promise<{ candidateStateId: string } | null> {
+    this.assertIdentifier(agentId, "Agent");
+    this.assertIdentifier(runId, "Run");
+    if (!(await fileExists(this.candidateRoot(runId)))) return null;
+    const manifest = await this.readCandidate(runId);
+    if (
+      manifest.schemaVersion !== 5 ||
+      manifest.agentId !== agentId ||
+      stableJson(manifest.federatedProvenance) !== stableJson(provenance)
+    ) {
+      throw new Error(
+        "Existing Candidate State contradicts federated admission authority",
+      );
+    }
+    return { candidateStateId: manifest.candidateStateId };
   }
 
   async prepareRepairCandidate(
@@ -1799,7 +1962,7 @@ export class WorkspaceManager {
     };
   }
 
-  private async readCandidate(runId: string): Promise<CandidateManifestV4> {
+  private async readCandidate(runId: string): Promise<CandidateManifest> {
     return this.readCandidateAt(this.candidateRoot(runId), runId);
   }
 
@@ -1808,11 +1971,11 @@ export class WorkspaceManager {
     runId: string,
     expectedProviderVersions:
       readonly ResourceVersionReference[] | null | undefined = undefined,
-  ): Promise<CandidateManifestV4> {
+  ): Promise<CandidateManifest> {
     const raw = await readFile(path.join(root, "candidate.json"), "utf8");
-    const manifest = JSON.parse(raw) as CandidateManifestV4;
+    const manifest = JSON.parse(raw) as CandidateManifest;
     if (
-      manifest.schemaVersion !== 4 ||
+      (manifest.schemaVersion !== 4 && manifest.schemaVersion !== 5) ||
       manifest.runId !== runId ||
       typeof manifest.agentId !== "string" ||
       typeof manifest.candidateStateId !== "string" ||
@@ -1836,6 +1999,29 @@ export class WorkspaceManager {
       typeof manifest.createdAt !== "string"
     ) {
       throw new Error("Invalid Candidate State manifest for Run " + runId);
+    }
+    if (manifest.schemaVersion === 5) {
+      const provenance = manifest.federatedProvenance;
+      if (
+        !provenance ||
+        provenance.schemaVersion !== 1 ||
+        typeof provenance.producerId !== "string" ||
+        typeof provenance.policyId !== "string" ||
+        !Number.isSafeInteger(provenance.policyGeneration)
+      ) {
+        throw new Error("Invalid federated Candidate provenance for Run " + runId);
+      }
+      for (const digest of [
+        provenance.admissionId,
+        provenance.importIdentifier,
+        provenance.receiptDigest,
+        provenance.artifactDigest,
+        provenance.policyDigest,
+      ]) {
+        if (!/^sha256:[a-f0-9]{64}$/.test(digest)) {
+          throw new Error("Invalid federated Candidate provenance digest for Run " + runId);
+        }
+      }
     }
     const canonicalProviderVersionsBefore = normalizeProviderVersions(
       manifest.canonicalProviderVersionsBefore,
@@ -2115,7 +2301,7 @@ export class WorkspaceManager {
   }
 
   private assertCandidateMatchesPlan(
-    candidate: CandidateManifestV4,
+    candidate: CandidateManifest,
     plan: PromotionPlan,
   ): void {
     if (
@@ -2588,6 +2774,189 @@ export class WorkspaceManager {
     });
   }
 
+  private assertFederatedCandidateProvenance(
+    bundle: FederatedWorkBundle,
+    provenance: FederatedCandidateProvenance,
+  ): void {
+    const digestPattern = /^sha256:[a-f0-9]{64}$/;
+    if (
+      provenance.schemaVersion !== 1 ||
+      !digestPattern.test(provenance.admissionId) ||
+      !digestPattern.test(provenance.importIdentifier) ||
+      !digestPattern.test(provenance.receiptDigest) ||
+      !digestPattern.test(provenance.artifactDigest) ||
+      !digestPattern.test(provenance.policyDigest) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(provenance.producerId) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(provenance.policyId) ||
+      !Number.isSafeInteger(provenance.policyGeneration) ||
+      provenance.policyGeneration < 1 ||
+      provenance.receiptDigest !== bundle.receipt.receiptDigest ||
+      provenance.artifactDigest !== bundle.artifact.artifactDigest
+    ) {
+      throw new Error("Federated Candidate provenance is invalid or contradicts its bundle");
+    }
+  }
+
+  private async removeInterruptedFederatedPreparation(
+    preparationRoot: string,
+  ): Promise<void> {
+    let stats: Awaited<ReturnType<typeof lstat>>;
+    try {
+      stats = await lstat(preparationRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      throw new Error("Interrupted federated Candidate preparation path is unsafe");
+    }
+    const expectedParent = await realpath(this.federatedPreparationRoot());
+    const actualParent = await realpath(path.dirname(preparationRoot));
+    if (actualParent !== expectedParent) {
+      throw new Error("Interrupted federated Candidate preparation escapes its root");
+    }
+    await rm(preparationRoot, { recursive: true, force: false });
+  }
+
+  private async applyFederatedWorkspaceOperations(
+    workspaceRoot: string,
+    operations: readonly WorkspaceChangeOperation[],
+  ): Promise<void> {
+    const resolvedRoot = await realpath(workspaceRoot);
+    for (const operation of operations) {
+      if (operation.operation === "add") {
+        const target = this.federatedWorkspacePath(resolvedRoot, operation.path);
+        await this.ensureFederatedParent(resolvedRoot, operation.path);
+        if (await lstatOrNull(target)) {
+          throw new Error("Federated add target already exists: " + operation.path);
+        }
+        await this.writeFederatedFile(
+          resolvedRoot,
+          operation.path,
+          decodeWorkspaceFileContent(operation),
+          operation.contentDigest,
+        );
+        continue;
+      }
+      if (operation.operation === "modify") {
+        await this.assertFederatedFileDigest(
+          resolvedRoot,
+          operation.path,
+          operation.priorContentDigest!,
+        );
+        await this.writeFederatedFile(
+          resolvedRoot,
+          operation.path,
+          decodeWorkspaceFileContent(operation),
+          operation.contentDigest,
+        );
+        continue;
+      }
+      if (operation.operation === "delete") {
+        const target = await this.assertFederatedFileDigest(
+          resolvedRoot,
+          operation.path,
+          operation.priorContentDigest,
+        );
+        await unlink(target);
+        continue;
+      }
+      if (operation.operation !== "rename") {
+        throw new Error("Federated workspace operation is unsupported");
+      }
+      const source = await this.assertFederatedFileDigest(
+        resolvedRoot,
+        operation.fromPath,
+        operation.contentDigest,
+      );
+      const target = this.federatedWorkspacePath(resolvedRoot, operation.toPath);
+      await this.ensureFederatedParent(resolvedRoot, operation.toPath);
+      if (await lstatOrNull(target)) {
+        throw new Error("Federated rename target already exists: " + operation.toPath);
+      }
+      await rename(source, target);
+      await this.assertFederatedFileDigest(
+        resolvedRoot,
+        operation.toPath,
+        operation.contentDigest,
+      );
+    }
+  }
+
+  private async ensureFederatedParent(
+    workspaceRoot: string,
+    relativePath: string,
+  ): Promise<void> {
+    const segments = relativePath.split("/").slice(0, -1);
+    let current = workspaceRoot;
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      const stats = await lstatOrNull(current);
+      if (!stats) {
+        await mkdir(current, { mode: 0o700 });
+        continue;
+      }
+      if (!stats.isDirectory() || stats.isSymbolicLink()) {
+        throw new Error("Federated workspace parent is not a safe directory");
+      }
+      const resolved = await realpath(current);
+      this.assertPathInside(workspaceRoot, resolved, "Federated workspace parent");
+    }
+  }
+
+  private async writeFederatedFile(
+    workspaceRoot: string,
+    relativePath: string,
+    content: Uint8Array,
+    expectedDigest: ReceiptDigest,
+  ): Promise<void> {
+    const target = this.federatedWorkspacePath(workspaceRoot, relativePath);
+    const temporary = target + ".federated-" + randomUUID() + ".tmp";
+    try {
+      await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+      await rename(temporary, target);
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
+    await this.assertFederatedFileDigest(workspaceRoot, relativePath, expectedDigest);
+  }
+
+  private async assertFederatedFileDigest(
+    workspaceRoot: string,
+    relativePath: string,
+    expectedDigest: ReceiptDigest,
+  ): Promise<string> {
+    const target = this.federatedWorkspacePath(workspaceRoot, relativePath);
+    const stats = await lstatOrNull(target);
+    if (!stats || !stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error("Federated workspace precondition is not a regular file: " + relativePath);
+    }
+    const resolved = await realpath(target);
+    this.assertPathInside(workspaceRoot, resolved, "Federated workspace file");
+    const digest =
+      "sha256:" + createHash("sha256").update(await readFile(resolved)).digest("hex");
+    if (digest !== expectedDigest) {
+      throw new Error("Federated workspace content precondition failed: " + relativePath);
+    }
+    return resolved;
+  }
+
+  private federatedWorkspacePath(
+    workspaceRoot: string,
+    relativePath: string,
+  ): string {
+    const target = path.resolve(workspaceRoot, ...relativePath.split("/"));
+    this.assertPathInside(workspaceRoot, target, "Federated workspace path");
+    return target;
+  }
+
+  private assertPathInside(root: string, target: string, label: string): void {
+    const relative = path.relative(path.resolve(root), path.resolve(target));
+    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(label + " escapes or aliases its root");
+    }
+  }
+
   private assertExactKeys(
     value: Record<string, unknown>,
     keys: readonly string[],
@@ -2662,6 +3031,15 @@ export class WorkspaceManager {
 
   private candidateCodexPath(runId: string): string {
     return path.join(this.candidateRoot(runId), "codex-home");
+  }
+
+  private federatedPreparationRoot(): string {
+    return path.join(this.root, ".federated-preparations");
+  }
+
+  private federatedPreparationPath(runId: string): string {
+    this.assertIdentifier(runId, "Run");
+    return path.join(this.federatedPreparationRoot(), runId);
   }
 
   private quarantineRoot(runId: string): string {

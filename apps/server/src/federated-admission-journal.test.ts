@@ -41,9 +41,10 @@ class MemoryCandidates implements FederatedCandidateAdapter {
   readonly candidates = new Map<string, { candidateStateId: string }>();
   prepareCount = 0;
 
-  async prepare(input: { agentId: string; runId: string; bundle: FederatedWorkBundle }) {
+  async prepare(input: Parameters<FederatedCandidateAdapter["prepare"]>[0]) {
     expect(input.agentId).toBe("local-agent");
     expect(input.bundle.schemaVersion).toBe(1);
+    expect(input.provenance.receiptDigest).toBe(input.bundle.receipt.receiptDigest);
     if (this.candidates.has(input.runId)) throw new Error("duplicate Candidate State");
     this.prepareCount += 1;
     const candidate = { candidateStateId: `candidate-${this.prepareCount}` };
@@ -51,8 +52,8 @@ class MemoryCandidates implements FederatedCandidateAdapter {
     return candidate;
   }
 
-  async inspect(runId: string) {
-    return this.candidates.get(runId) ?? null;
+  async inspect(input: Parameters<FederatedCandidateAdapter["inspect"]>[0]) {
+    return this.candidates.get(input.runId) ?? null;
   }
 }
 
