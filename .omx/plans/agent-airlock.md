@@ -355,6 +355,19 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Verify and download the packet independently in the browser and prove the real two-instance path at a 390 CSS pixel viewport.
 - [x] Reject omitted, duplicated, uncommitted, substituted, role-confused, unsafe, contradictory, and unsupported evidence without exporting a partial closure.
 
+## Phase 20 offline custody proof room
+
+- [x] Map the existing zero-upload verifier, custody checks, trust-policy flow, mobile layout, and missing custody-file dispatch.
+- [x] Define a protocol-owned verified-story projection that remains absent for invalid evidence.
+- [x] Separate mathematical validity, evidence completeness, and evaluator-controlled producer and receiver trust in the interaction model.
+- [x] Define promoted, quarantined, invalid, tampered, trust-unevaluated, and role-trust screen states.
+- [x] Bound three disposable in-memory tamper demonstrations and their expected first failed commitments.
+- [ ] Extend the receiver custody browser report with the verified-story projection.
+- [ ] Add receiver custody import and the five-node causal story to the independent verifier.
+- [ ] Add separate producer and receiver evaluator trust controls.
+- [ ] Add the bounded tamper lab with immutable-original reset behavior.
+- [ ] Prove backend-disconnected verification, mobile presentation, two-instance download reopening, and hosted release gates.
+
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.

@@ -776,8 +776,39 @@ Turn the complete bilateral decision path into a falsifiable offline proof while
 **Current status**
 
 The source-backed boundary is accepted in ADR 0020 and implementation is tracked by [Export and verify a receiver custody closure](https://github.com/Kk120306/agent-airlock/issues/28).
-The version 1 packet, restart-safe export, separate trust-policy evaluation, Node verifier, independent browser verifier, mobile federation proof, quarantined-state proof, and privacy boundary are implemented and locally release-gated.
-The implementation issue remains the source of truth for final hosted-release evidence.
+The version 1 packet, restart-safe export, separate trust-policy evaluation, Node verifier, independent browser verifier, mobile federation proof, quarantined-state proof, and privacy boundary are delivered and hosted-release verified on commit `8156778`.
+The completed implementation issue records the exact hosted evidence.
+
+### Phase 20: Offline custody proof room
+
+**Outcome**
+
+A first-time judge can import, understand, independently verify, and safely attack the complete producer-to-receiver custody proof without trusting or contacting either Airlock server.
+
+**Build**
+
+- Extend the zero-upload verifier to recognize receiver custody packets.
+- Return a bounded causal-story projection only after the complete browser verifier passes.
+- Render producer signature, Admission, optional Approval, receiver authority, Validation commitment, and terminal state disposition as one concise path.
+- Keep cryptographic validity and evaluator-controlled producer and receiver trust as visibly separate verdicts.
+- Add deterministic in-memory tamper demonstrations that identify the first violated commitment while preserving the original packet.
+
+**Exit gate**
+
+- Promoted and quarantined custody packets produce distinct valid stories at 390 CSS pixels.
+- Invalid or unsafe packets never produce a verified story.
+- Producer and receiver trust policies remain separate and external to the packet.
+- The downloaded two-instance packet verifies after the verifier is disconnected from its backend.
+- Local and hosted quality, production-browser, two-instance, and real CodeJam Runtime proof pass on the final revision.
+
+**Beyond-expectations finish**
+
+Let the judge attack a disposable proof copy and watch the exact trust boundary fail closed in real time.
+
+**Current status**
+
+The outcome is tracked by [Wayfinder: Make trust proof instantly understandable](https://github.com/Kk120306/agent-airlock/issues/29).
+The source-backed interaction and trust boundary are defined in [Offline receiver custody proof room](../research/offline-custody-proof-room.md).
 
 ## Hackathon cut lines
 
