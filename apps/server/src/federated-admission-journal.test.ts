@@ -240,6 +240,10 @@ describe("FederatedAdmissionCoordinator", () => {
       expect(record.decision.decision, boundary).toBe("admit");
       expect(state.candidates.prepareCount, boundary).toBe(1);
       expect((await restartedJournal.readByTransfer("transfer-one"))?.phase, boundary).toBe("completed");
+      await expect(
+        restartedJournal.readEvidenceBundle(record),
+        boundary,
+      ).resolves.toEqual(input.bundle);
     }
   });
 
@@ -255,6 +259,9 @@ describe("FederatedAdmissionCoordinator", () => {
     expect(rejected.decision).toMatchObject({ decision: "reject", reason: "producer-untrusted" });
     expect(rejected.candidateRunId).toBeNull();
     expect(rejectedState.candidates.prepareCount).toBe(0);
+    await expect(
+      rejectedState.journal.readEvidenceBundle(rejected),
+    ).resolves.toEqual(rejectedInput.bundle);
 
     const pendingInput = await fixture();
     pendingInput.policy.producers[0]!.requireLocalApproval = true;
@@ -271,6 +278,9 @@ describe("FederatedAdmissionCoordinator", () => {
     await expect(pendingState.journal.readPendingBundle(pending)).resolves.toEqual(
       pendingInput.bundle,
     );
+    await expect(
+      pendingState.journal.readEvidenceBundle(pending),
+    ).resolves.toEqual(pendingInput.bundle);
 
     const stagedBundlePath = path.join(
       pendingState.root,

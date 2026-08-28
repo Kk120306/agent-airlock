@@ -319,7 +319,15 @@ export class FederatedAdmissionJournal {
     ) {
       throw new Error("Only an approval-pending Admission may stage a bundle");
     }
-    assertBundleMatchesPendingRecord(record, bundle);
+    await this.stageEvidenceBundle(record, bundle);
+  }
+
+  async stageEvidenceBundle(
+    record: FederatedAdmissionRecord,
+    bundle: FederatedWorkBundle,
+  ): Promise<void> {
+    validateRecord(record);
+    assertBundleMatchesAdmissionRecord(record, bundle);
     const source = canonicalize(bundle) + "\n";
     if (Buffer.byteLength(source, "utf8") > MAXIMUM_STAGED_BUNDLE_BYTES) {
       throw new Error("Approval-pending Federated Work Bundle is too large");
@@ -331,6 +339,20 @@ export class FederatedAdmissionJournal {
   }
 
   async readPendingBundle(
+    record: FederatedAdmissionRecord,
+  ): Promise<FederatedWorkBundle | null> {
+    validateRecord(record);
+    if (
+      record.decision.decision !== "pending" ||
+      record.decision.reason !== "approval-required" ||
+      record.candidateRunId !== null
+    ) {
+      throw new Error("Only an approval-pending Admission may read a staged bundle");
+    }
+    return this.readEvidenceBundle(record);
+  }
+
+  async readEvidenceBundle(
     record: FederatedAdmissionRecord,
   ): Promise<FederatedWorkBundle | null> {
     validateRecord(record);
@@ -350,7 +372,7 @@ export class FederatedAdmissionJournal {
     if (!verification.valid) {
       throw new Error("Staged Federated Work Bundle is invalid");
     }
-    assertBundleMatchesPendingRecord(record, bundle);
+    assertBundleMatchesAdmissionRecord(record, bundle);
     return structuredClone(bundle);
   }
 
@@ -576,9 +598,7 @@ export class FederatedAdmissionCoordinator {
       const existingRecord = await this.journal.readRecord(plan.importIdentifier);
       if (plan.phase === "completed") {
         if (!existingRecord) throw new Error("Completed federated admission has no immutable record");
-        if (existingRecord.decision.decision === "pending") {
-          await this.journal.stagePendingBundle(existingRecord, input.bundle);
-        }
+        await this.journal.stageEvidenceBundle(existingRecord, input.bundle);
         result = existingRecord;
         return;
       }
@@ -591,9 +611,7 @@ export class FederatedAdmissionCoordinator {
       if (!record) {
         throw new Error("Federated journal references a missing immutable record");
       }
-      if (record.decision.decision === "pending") {
-        await this.journal.stagePendingBundle(record, input.bundle);
-      }
+      await this.journal.stageEvidenceBundle(record, input.bundle);
       if (plan.decision.decision === "admit" && plan.phase === "record-published") {
         if (!plan.candidateRunId) throw new Error("Admitted plan has no Candidate Run identity");
         const provenance: FederatedCandidatePreparationProvenance = {
@@ -733,20 +751,20 @@ function validateTransferPointer(value: unknown): asserts value is TransferPoint
   validateDigest(pointer.importIdentifier, "import identity");
 }
 
-function assertBundleMatchesPendingRecord(
+function assertBundleMatchesAdmissionRecord(
   record: FederatedAdmissionRecord,
   bundle: FederatedWorkBundle,
 ): void {
   const verification = verifyFederatedWorkBundle(bundle);
   if (!verification.valid) {
-    throw new Error("Approval-pending Federated Work Bundle is invalid");
+    throw new Error("Federated Work Bundle evidence is invalid");
   }
   if (
     bundle.receipt.receiptDigest !== record.decision.receiptDigest ||
     bundle.artifact.artifactDigest !== record.decision.artifactDigest
   ) {
     throw new Error(
-      "Approval-pending bundle contradicts its immutable Admission Record",
+      "Federated Work Bundle contradicts its immutable Admission Record",
     );
   }
 }
