@@ -1359,7 +1359,7 @@ function ReceiptVerifier({
 
         <div className="verifier-boundary" role="note">
           <span>LOCAL ONLY</span>
-          <strong>0 API calls · 0 uploads · 16 MB custody limit</strong>
+          <strong>0 API calls · 0 uploads · 16 MB custody / 4 MB other proofs</strong>
         </div>
 
         <label className="receipt-dropzone" data-loaded={filename !== null}>

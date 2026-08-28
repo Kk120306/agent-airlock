@@ -285,7 +285,7 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   await expect(
     ancestryCommitment.getByText(parentEnvelope.receiptDigest),
   ).toBeVisible();
-  await expect(verifier.getByText("0 API calls · 0 uploads · 4 MB hard limit"))
+  await expect(verifier.getByText("0 API calls · 0 uploads · 16 MB custody / 4 MB other proofs"))
     .toBeVisible();
   expect(localVerificationRequests).toEqual([]);
   await verifier.getByRole("button", { name: "Close receipt verifier" }).click();

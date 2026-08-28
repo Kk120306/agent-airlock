@@ -323,7 +323,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .getByRole("button", { name: "Inspect in zero-upload verifier" })
     .click();
   const verifier = page.getByRole("dialog", { name: "Verify trust without trusting this server" });
-  await expect(verifier.getByText("0 API calls · 0 uploads · 4 MB hard limit"))
+  await expect(verifier.getByText("0 API calls · 0 uploads · 16 MB custody / 4 MB other proofs"))
     .toBeVisible();
   await expect(
     verifier.getByText("Verified directly from the exact generated artifact", {
