@@ -7,6 +7,7 @@ import type {
   PortableEvidencePacketVerificationReport,
   PolicyAuthorityRotationVerificationReport,
   PortablePromotionEnvelope,
+  PortablePublicJwk,
   PortableVerificationReport,
   ReceiptDigest,
   SignedPolicyAuthorityRotationEnvelope,
@@ -14,6 +15,13 @@ import type {
   TrustPolicyVerificationReport,
   VerificationCheck,
 } from "./types.js";
+import type { FederatedWorkBundle } from "./federated-work-bundle.js";
+import type {
+  ReceiverCustodyBindings,
+  ReceiverCustodyPacket,
+  ReceiverCustodyRecordRole,
+  ReceiverCustodyVerificationReport,
+} from "./receiver-custody.js";
 import {
   assertSignedPolicyAuthorityRotationEnvelope,
   MAXIMUM_SIGNED_AUTHORITY_ROTATION_BYTES,
@@ -32,6 +40,12 @@ import {
 
 const RECEIPT_SIGNATURE_DOMAIN = utf8Bytes(
   "agent-airlock-portable-receipt-signature-v1\0",
+);
+const FEDERATED_WORK_SIGNATURE_DOMAIN = utf8Bytes(
+  "agent-airlock-federated-work-binding-v1\0",
+);
+const RECEIVER_CUSTODY_SIGNATURE_DOMAIN = utf8Bytes(
+  "agent-airlock-receiver-custody-manifest-v1\0",
 );
 const TRUST_POLICY_SIGNATURE_DOMAIN = utf8Bytes(
   "agent-airlock-signing-key-trust-policy-v1\0",
@@ -174,6 +188,98 @@ export async function verifyPortablePromotionEnvelopeJsonInBrowser(
     );
   } catch (error) {
     return invalidStructuralReport(error);
+  }
+}
+
+export async function verifyReceiverCustodyPacketInBrowser(
+  value: unknown,
+): Promise<ReceiverCustodyVerificationReport> {
+  const report: ReceiverCustodyVerificationReport = {
+    valid: false,
+    manifestDigest: null,
+    receiverKeyId: null,
+    producerReceiptDigest: null,
+    receiverReceiptDigest: null,
+    checks: [],
+  };
+  try {
+    const packet = assertBrowserReceiverCustodyPacket(value);
+    const { envelope } = packet;
+    const manifestDigest = await sha256Digest(
+      utf8Bytes(canonicalize(envelope.manifest)),
+    );
+    addCheck(
+      report.checks,
+      "manifest-digest",
+      manifestDigest === envelope.manifestDigest,
+      "The browser recomputed the exact receiver custody manifest digest.",
+    );
+    const receiverKeyId = await sha256Digest(
+      utf8Bytes(canonicalize(envelope.publicJwk)),
+    );
+    addCheck(
+      report.checks,
+      "receiver-key-id",
+      receiverKeyId === envelope.keyId,
+      "The receiver key fingerprint matches its included public key.",
+    );
+    const receiverSignature = await verifyEd25519DigestSignature(
+      envelope.publicJwk,
+      envelope.signature,
+      RECEIVER_CUSTODY_SIGNATURE_DOMAIN,
+      envelope.manifestDigest,
+    );
+    addCheck(
+      report.checks,
+      "receiver-signature",
+      receiverSignature,
+      "The browser verified the receiver signature under the custody-specific domain.",
+    );
+    const records = await decodeBrowserCustodyRecords(packet);
+    addCheck(
+      report.checks,
+      "record-commitments",
+      true,
+      "Every embedded canonical record matches its signed typed descriptor.",
+    );
+    await verifyBrowserCustodyBindings(envelope.manifest.bindings, records, report);
+    report.manifestDigest = envelope.manifestDigest;
+    report.receiverKeyId = envelope.keyId;
+    report.producerReceiptDigest = envelope.manifest.bindings.producerReceiptDigest;
+    report.receiverReceiptDigest = envelope.manifest.bindings.receiverReceiptDigest;
+  } catch (error) {
+    addCheck(
+      report.checks,
+      "packet-structure",
+      false,
+      safePortableDiagnostic(error),
+    );
+  }
+  report.valid =
+    report.checks.length > 0 && report.checks.every((check) => check.valid);
+  return report;
+}
+
+export async function verifyReceiverCustodyPacketJsonInBrowser(
+  source: string,
+): Promise<ReceiverCustodyVerificationReport> {
+  try {
+    return await verifyReceiverCustodyPacketInBrowser(
+      parseCanonicalJson(source, 16 * 1_048_576),
+    );
+  } catch (error) {
+    return {
+      valid: false,
+      manifestDigest: null,
+      receiverKeyId: null,
+      producerReceiptDigest: null,
+      receiverReceiptDigest: null,
+      checks: [{
+        name: "packet-structure",
+        valid: false,
+        detail: safePortableDiagnostic(error),
+      }],
+    };
   }
 }
 
@@ -622,6 +728,351 @@ export type {
   OrganizationalTrustReport,
   SigningKeyTrustPolicy,
 } from "./types.js";
+
+const BROWSER_CUSTODY_ROLE_REQUIREMENTS: Record<ReceiverCustodyRecordRole, {
+  trustDomain: "producer" | "receiver";
+  schema: string;
+  signingRequirement: "nested-required" | "manifest-covered" | "nested-and-manifest";
+}> = {
+  "producer-work-bundle": { trustDomain: "producer", schema: "agent-airlock/federated-work-bundle", signingRequirement: "nested-required" },
+  "receiver-admission": { trustDomain: "receiver", schema: "agent-airlock/federated-admission-record", signingRequirement: "manifest-covered" },
+  "receiver-approval": { trustDomain: "receiver", schema: "agent-airlock/federated-approval-decision", signingRequirement: "manifest-covered" },
+  "receiver-terminal-authority": { trustDomain: "receiver", schema: "agent-airlock/portable-decision-authority-commitment", signingRequirement: "manifest-covered" },
+  "receiver-promotion-envelope": { trustDomain: "receiver", schema: "agent-airlock/portable-promotion-envelope", signingRequirement: "nested-and-manifest" },
+};
+const BROWSER_FORBIDDEN_CUSTODY_EVIDENCE =
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----|Authorization\s*:\s*[^"\\]{4}|Bearer\s+[A-Za-z0-9._~-]{8}|\bark-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-[a-f0-9]{4,}\b|\/(?:Users|home|private|tmp)\//i;
+
+function assertBrowserReceiverCustodyPacket(value: unknown): ReceiverCustodyPacket {
+  const packet = browserRecord(value, "Receiver custody packet");
+  browserExactKeys(packet, ["schema", "schemaVersion", "envelope", "records", "anchors"], "Receiver custody packet");
+  if (
+    packet.schema !== "agent-airlock/portable-receiver-chain-of-custody" ||
+    packet.schemaVersion !== 1 ||
+    !Array.isArray(packet.records) ||
+    !Array.isArray(packet.anchors) ||
+    packet.anchors.length !== 0
+  ) throw new Error("Receiver custody packet protocol is invalid");
+  const envelope = browserRecord(packet.envelope, "Receiver custody envelope");
+  browserExactKeys(envelope, ["schema", "schemaVersion", "manifest", "manifestDigest", "signatureAlgorithm", "signature", "keyId", "publicJwk"], "Receiver custody envelope");
+  if (
+    envelope.schema !== "agent-airlock/receiver-custody-envelope" ||
+    envelope.schemaVersion !== 1 ||
+    envelope.signatureAlgorithm !== "Ed25519" ||
+    typeof envelope.signature !== "string" ||
+    !isDigest(envelope.manifestDigest) ||
+    !isDigest(envelope.keyId)
+  ) throw new Error("Receiver custody envelope protocol is invalid");
+  assertPortablePublicJwk(envelope.publicJwk);
+  const manifest = browserRecord(envelope.manifest, "Receiver custody manifest");
+  browserExactKeys(manifest, ["schema", "schemaVersion", "profile", "records", "bindings"], "Receiver custody manifest");
+  if (
+    manifest.schema !== "agent-airlock/receiver-custody-manifest" ||
+    manifest.schemaVersion !== 1 ||
+    manifest.profile !== "full-audit" ||
+    !Array.isArray(manifest.records)
+  ) throw new Error("Receiver custody manifest protocol is invalid");
+  const ids = new Set<string>();
+  const roles = new Set<string>();
+  for (const item of manifest.records) {
+    const descriptor = browserRecord(item, "Receiver custody descriptor");
+    browserExactKeys(descriptor, ["recordId", "role", "trustDomain", "schema", "schemaVersion", "mediaType", "canonicalization", "digestAlgorithm", "byteLength", "digest", "signingRequirement"], "Receiver custody descriptor");
+    if (!browserCustodyIdentifier(descriptor.recordId) || typeof descriptor.role !== "string" || !Object.hasOwn(BROWSER_CUSTODY_ROLE_REQUIREMENTS, descriptor.role)) {
+      throw new Error("Receiver custody descriptor identity or role is invalid");
+    }
+    const requirement = BROWSER_CUSTODY_ROLE_REQUIREMENTS[descriptor.role as ReceiverCustodyRecordRole];
+    if (
+      ids.has(descriptor.recordId) ||
+      roles.has(descriptor.role) ||
+      descriptor.trustDomain !== requirement.trustDomain ||
+      descriptor.schema !== requirement.schema ||
+      descriptor.signingRequirement !== requirement.signingRequirement ||
+      descriptor.mediaType !== "application/json" ||
+      descriptor.canonicalization !== "RFC8785" ||
+      descriptor.digestAlgorithm !== "SHA-256" ||
+      !Number.isSafeInteger(descriptor.schemaVersion) ||
+      !Number.isSafeInteger(descriptor.byteLength) ||
+      (descriptor.byteLength as number) < 2 ||
+      !isDigest(descriptor.digest)
+    ) throw new Error("Receiver custody descriptor is invalid");
+    ids.add(descriptor.recordId);
+    roles.add(descriptor.role);
+  }
+  const bindings = browserRecord(manifest.bindings, "Receiver custody bindings");
+  browserExactKeys(bindings, ["admissionId", "importIdentifier", "producerId", "receiverAgentId", "receiverRunId", "producerReceiptDigest", "artifactDigest", "admissionRecordDigest", "approvalDecisionDigest", "decisionContextDigest", "terminalAuthorityDigest", "receiverReceiptDigest", "outcomeContractDigest", "validationEvidenceRoot", "disposition"], "Receiver custody bindings");
+  for (const key of ["admissionId", "importIdentifier", "producerReceiptDigest", "artifactDigest", "admissionRecordDigest", "terminalAuthorityDigest", "receiverReceiptDigest", "outcomeContractDigest", "validationEvidenceRoot"] as const) {
+    if (!isDigest(bindings[key])) throw new Error(`Receiver custody ${key} is invalid`);
+  }
+  if ((bindings.approvalDecisionDigest !== null && !isDigest(bindings.approvalDecisionDigest)) || (bindings.decisionContextDigest !== null && !isDigest(bindings.decisionContextDigest))) {
+    throw new Error("Receiver custody approval bindings are invalid");
+  }
+  for (const key of ["producerId", "receiverAgentId", "receiverRunId"] as const) {
+    if (!browserCustodyIdentifier(bindings[key])) throw new Error(`Receiver custody ${key} is invalid`);
+  }
+  if (bindings.disposition !== "promoted" && bindings.disposition !== "quarantined") {
+    throw new Error("Receiver custody disposition is invalid");
+  }
+  if (packet.records.length !== manifest.records.length) {
+    throw new Error("Receiver custody packet contains an uncommitted or missing record");
+  }
+  const packetIds = new Set<string>();
+  for (const item of packet.records) {
+    const record = browserRecord(item, "Receiver custody record");
+    browserExactKeys(record, ["recordId", "canonicalBytes"], "Receiver custody record");
+    if (!browserCustodyIdentifier(record.recordId) || typeof record.canonicalBytes !== "string" || packetIds.has(record.recordId)) {
+      throw new Error("Receiver custody packet record identity is invalid or duplicated");
+    }
+    packetIds.add(record.recordId);
+  }
+  if ([...ids].some((id) => !packetIds.has(id))) {
+    throw new Error("Receiver custody packet is missing a committed record");
+  }
+  return value as ReceiverCustodyPacket;
+}
+
+async function decodeBrowserCustodyRecords(
+  packet: ReceiverCustodyPacket,
+): Promise<Map<ReceiverCustodyRecordRole, unknown>> {
+  const records = new Map(packet.records.map((record) => [record.recordId, record]));
+  const decoded = new Map<ReceiverCustodyRecordRole, unknown>();
+  for (const descriptor of packet.envelope.manifest.records) {
+    const record = records.get(descriptor.recordId);
+    if (!record) throw new Error(`Receiver custody record ${descriptor.recordId} is missing`);
+    const bytes = decodeCanonicalBase64Url(record.canonicalBytes, 12 * 1_048_576);
+    if (bytes.length !== descriptor.byteLength || await sha256Digest(bytes) !== descriptor.digest) {
+      throw new Error(`Receiver custody record ${descriptor.recordId} contradicts its descriptor`);
+    }
+    const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const value = parseCanonicalJson(source, 12 * 1_048_576);
+    if (canonicalize(value) !== source) throw new Error("Receiver custody record is not canonical JSON");
+    if (browserContainsForbiddenCustodyEvidence(value)) {
+      throw new Error("Receiver custody record crossed its evidence boundary");
+    }
+    decoded.set(descriptor.role, value);
+  }
+  const required: ReceiverCustodyRecordRole[] = ["producer-work-bundle", "receiver-admission", "receiver-terminal-authority", "receiver-promotion-envelope"];
+  if (packet.envelope.manifest.bindings.approvalDecisionDigest !== null) required.push("receiver-approval");
+  if (packet.envelope.manifest.bindings.approvalDecisionDigest === null && decoded.has("receiver-approval")) {
+    throw new Error("Receiver custody packet contains an undeclared Approval Decision");
+  }
+  if (required.some((role) => !decoded.has(role))) throw new Error("Receiver custody packet has an incomplete authority path");
+  return decoded;
+}
+
+async function verifyBrowserCustodyBindings(
+  bindings: ReceiverCustodyBindings,
+  records: Map<ReceiverCustodyRecordRole, unknown>,
+  report: ReceiverCustodyVerificationReport,
+): Promise<void> {
+  const bundle = await verifyFederatedWorkBundleInBrowser(
+    records.get("producer-work-bundle"),
+  );
+  addCheck(
+    report.checks,
+    "producer-evidence",
+    bundle.valid,
+    "The browser independently verified the producer receipt, artifact binding, and producer signature.",
+  );
+  if (
+    bundle.receiptDigest !== bindings.producerReceiptDigest ||
+    bundle.artifactDigest !== bindings.artifactDigest
+  ) throw new Error("Producer evidence contradicts the custody bindings");
+
+  const admission = browserRecord(records.get("receiver-admission"), "Admission Record");
+  const admissionDecision = browserRecord(admission.decision, "Admission decision");
+  if (
+    admission.admissionId !== bindings.admissionId ||
+    admission.importIdentifier !== bindings.importIdentifier ||
+    admission.producerId !== bindings.producerId ||
+    admission.localAgentId !== bindings.receiverAgentId ||
+    admission.recordDigest !== bindings.admissionRecordDigest ||
+    await digestCanonical(browserWithout(admission, "recordDigest")) !== admission.recordDigest ||
+    admissionDecision.receiptDigest !== bindings.producerReceiptDigest ||
+    admissionDecision.artifactDigest !== bindings.artifactDigest
+  ) throw new Error("Receiver Admission Record contradicts the custody bindings");
+
+  if (bindings.approvalDecisionDigest !== null) {
+    const approval = browserRecord(records.get("receiver-approval"), "Approval Decision");
+    if (
+      approval.admissionId !== bindings.admissionId ||
+      approval.pendingRecordDigest !== bindings.admissionRecordDigest ||
+      approval.recordDigest !== bindings.approvalDecisionDigest ||
+      (approval.decisionContextDigest ?? null) !== bindings.decisionContextDigest ||
+      await digestCanonical(browserWithout(approval, "recordDigest")) !== approval.recordDigest
+    ) throw new Error("Receiver Approval Decision contradicts the reviewed custody context");
+  }
+
+  const authority = browserRecord(records.get("receiver-terminal-authority"), "Terminal authority");
+  if (
+    authority.authorityDigest !== bindings.terminalAuthorityDigest ||
+    authority.runId !== bindings.receiverRunId ||
+    authority.agentId !== bindings.receiverAgentId ||
+    authority.disposition !== bindings.disposition ||
+    !isDigest(authority.transactionEvidenceHash) ||
+    await digestCanonical(browserWithout(authority, "authorityDigest")) !== authority.authorityDigest
+  ) throw new Error("Receiver terminal authority contradicts the custody bindings");
+
+  const receiver = await verifyPortablePromotionEnvelopeInBrowser(
+    records.get("receiver-promotion-envelope"),
+  );
+  addCheck(
+    report.checks,
+    "receiver-terminal-receipt",
+    receiver.valid,
+    "The browser independently verified the receiver terminal Promotion Receipt.",
+  );
+  if (!receiver.valid) throw new Error("Receiver terminal Promotion Receipt is invalid");
+  const envelope = records.get("receiver-promotion-envelope") as PortablePromotionEnvelope;
+  const receipt = envelope.receipt;
+  if (
+    envelope.receiptDigest !== bindings.receiverReceiptDigest ||
+    receipt.decision.runId !== bindings.receiverRunId ||
+    receipt.decision.agentId !== bindings.receiverAgentId ||
+    receipt.decision.disposition !== bindings.disposition ||
+    receipt.outcomeContract.digest !== bindings.outcomeContractDigest ||
+    receipt.validationEvidence.root !== bindings.validationEvidenceRoot
+  ) throw new Error("Receiver terminal receipt contradicts the custody bindings");
+  if (
+    bindings.disposition === "quarantined" &&
+    (receipt.state.before.stateId !== receipt.state.after.stateId ||
+      receipt.state.before.compositeHash !== receipt.state.after.compositeHash)
+  ) throw new Error("Quarantined receiver custody evidence advanced Canonical State");
+  addCheck(
+    report.checks,
+    "authority-links",
+    true,
+    "The browser closed one producer-to-receiver authority path with no missing custody hop.",
+  );
+}
+
+async function verifyFederatedWorkBundleInBrowser(value: unknown): Promise<{
+  valid: boolean;
+  receiptDigest: ReceiptDigest | null;
+  artifactDigest: ReceiptDigest | null;
+}> {
+  try {
+    const raw = browserRecord(value, "Federated Work Bundle");
+    browserExactKeys(raw, ["schema", "schemaVersion", "receipt", "artifact", "binding", "bindingDigest", "signatureAlgorithm", "signature", "keyId"], "Federated Work Bundle");
+    if (
+      raw.schema !== "agent-airlock/federated-work-bundle" ||
+      raw.schemaVersion !== 1 ||
+      raw.signatureAlgorithm !== "Ed25519" ||
+      typeof raw.signature !== "string" ||
+      !isDigest(raw.bindingDigest) ||
+      !isDigest(raw.keyId)
+    ) throw new Error("Federated Work Bundle protocol is invalid");
+    const bundle = raw as unknown as FederatedWorkBundle;
+    const receipt = await verifyPortablePromotionEnvelopeInBrowser(bundle.receipt);
+    if (!receipt.valid || bundle.keyId !== bundle.receipt.keyId) throw new Error("Producer receipt or key binding is invalid");
+    const artifactEnvelope = browserRecord(bundle.artifact, "Workspace Change Set Envelope");
+    browserExactKeys(artifactEnvelope, ["schema", "schemaVersion", "artifact", "artifactDigest"], "Workspace Change Set Envelope");
+    const artifact = browserRecord(artifactEnvelope.artifact, "Workspace Change Set artifact");
+    browserExactKeys(artifact, ["protocol", "baseStateDigest", "resultStateDigest", "operations"], "Workspace Change Set artifact");
+    const protocol = browserRecord(artifact.protocol, "Workspace Change Set protocol");
+    browserExactKeys(protocol, ["schema", "schemaVersion", "canonicalization", "digestAlgorithm", "pathSemantics"], "Workspace Change Set protocol");
+    if (
+      artifactEnvelope.schema !== "agent-airlock/workspace-change-set-envelope" ||
+      artifactEnvelope.schemaVersion !== 1 ||
+      !isDigest(artifactEnvelope.artifactDigest) ||
+      protocol.schema !== "agent-airlock/workspace-change-set" ||
+      protocol.schemaVersion !== 1 ||
+      protocol.canonicalization !== "RFC8785" ||
+      protocol.digestAlgorithm !== "SHA-256" ||
+      protocol.pathSemantics !== "normalized-relative-posix-nfc" ||
+      !isDigest(artifact.baseStateDigest) ||
+      !isDigest(artifact.resultStateDigest) ||
+      !Array.isArray(artifact.operations) ||
+      await digestCanonical(artifact) !== artifactEnvelope.artifactDigest ||
+      artifact.baseStateDigest !== bundle.receipt.receipt.state.before.compositeHash ||
+      artifact.resultStateDigest !== bundle.receipt.receipt.state.after.compositeHash
+    ) throw new Error("Producer artifact or state binding is invalid");
+    const binding = browserRecord(bundle.binding, "Federated work binding");
+    const expectedBinding = {
+      schema: "agent-airlock/federated-work-binding",
+      schemaVersion: 1,
+      receiptDigest: bundle.receipt.receiptDigest,
+      artifactDigest: bundle.artifact.artifactDigest,
+      artifactProtocol: {
+        schema: protocol.schema,
+        schemaVersion: protocol.schemaVersion,
+        pathSemantics: protocol.pathSemantics,
+      },
+      baseStateDigest: artifact.baseStateDigest,
+      resultStateDigest: artifact.resultStateDigest,
+    };
+    if (
+      canonicalize(binding) !== canonicalize(expectedBinding) ||
+      await digestCanonical(binding) !== bundle.bindingDigest
+    ) throw new Error("Producer artifact binding is invalid");
+    const signature = await verifyEd25519DigestSignature(
+      bundle.receipt.publicJwk,
+      bundle.signature,
+      FEDERATED_WORK_SIGNATURE_DOMAIN,
+      bundle.bindingDigest,
+    );
+    return {
+      valid: signature,
+      receiptDigest: bundle.receipt.receiptDigest,
+      artifactDigest: bundle.artifact.artifactDigest,
+    };
+  } catch {
+    return { valid: false, receiptDigest: null, artifactDigest: null };
+  }
+}
+
+async function verifyEd25519DigestSignature(
+  publicJwk: PortablePublicJwk,
+  signature: string,
+  domain: Uint8Array,
+  digest: ReceiptDigest,
+): Promise<boolean> {
+  try {
+    const publicKey = await globalThis.crypto.subtle.importKey(
+      "jwk",
+      publicJwk,
+      { name: "Ed25519" },
+      false,
+      ["verify"],
+    );
+    return await globalThis.crypto.subtle.verify(
+      { name: "Ed25519" },
+      publicKey,
+      decodeCanonicalBase64Url(signature, 64),
+      concatBytes(domain, decodeHexDigest(digest)),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function browserWithout(value: Record<string, unknown>, key: string): Record<string, unknown> {
+  const result = { ...value };
+  delete result[key];
+  return result;
+}
+
+function browserCustodyIdentifier(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
+
+function browserContainsForbiddenCustodyEvidence(value: unknown): boolean {
+  if (typeof value === "string") {
+    return BROWSER_FORBIDDEN_CUSTODY_EVIDENCE.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => browserContainsForbiddenCustodyEvidence(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).some((item) =>
+      browserContainsForbiddenCustodyEvidence(item),
+    );
+  }
+  return false;
+}
+
+async function digestCanonical(value: unknown): Promise<ReceiptDigest> {
+  return sha256Digest(utf8Bytes(canonicalize(value)));
+}
 
 async function verifySignature(envelope: PortablePromotionEnvelope): Promise<boolean> {
   try {

@@ -2104,6 +2104,68 @@ textarea:focus {
   gap: 14px;
 }
 
+.federation-custody {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid #c7d7d9;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f5f9f9, #eef4f3);
+}
+
+.federation-custody[data-verified="true"] {
+  border-color: #8bc7ae;
+  background: linear-gradient(135deg, #f0faf5, #e5f5ed);
+}
+
+.federation-custody strong,
+.federation-custody p {
+  display: block;
+  margin-top: 5px;
+}
+
+.federation-custody p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.federation-custody > small {
+  grid-column: 1 / -1;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.federation-custody-domains {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.federation-custody-domains span {
+  padding: 8px 10px;
+  border: 1px solid rgba(72, 111, 117, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #405e63;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.federation-custody-domains i {
+  margin-right: 4px;
+  color: var(--green);
+  font-style: normal;
+}
+
+.federation-custody-domains b {
+  color: #7b9194;
+}
+
 .federation-approval {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr);
@@ -5060,7 +5122,8 @@ textarea:focus {
 
   .federation-heading,
   .federation-verdict,
-  .federation-approval {
+  .federation-approval,
+  .federation-custody {
     grid-template-columns: 1fr;
     gap: 8px;
   }
@@ -5147,6 +5210,19 @@ textarea:focus {
   .federation-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .federation-custody-domains {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .federation-custody-domains b {
+    display: none;
+  }
+
+  .federation-custody .button {
+    width: 100%;
   }
 
   .federation-actions .button {

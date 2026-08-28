@@ -18,6 +18,9 @@ import type { FederatedAdmissionPolicy } from "./federated-admission-policy.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
+const receiverCustodyRunIdParams = z.object({
+  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+});
 const candidateSetIdParams = z.object({ id: z.string().uuid() });
 const assuranceProposalIdParams = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
@@ -387,6 +390,11 @@ export async function createApp(
   app.post("/api/runs/:id/federated-work-bundle", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return service.exportFederatedWorkBundle(id);
+  });
+
+  app.post("/api/runs/:id/receiver-custody", async (request) => {
+    const { id } = receiverCustodyRunIdParams.parse(request.params);
+    return service.exportReceiverCustody(id);
   });
 
   app.get("/api/candidate-sets/:id", async (request) => {

@@ -37,6 +37,13 @@ describe("RFC 8785 canonical JSON boundary", () => {
     );
   });
 
+  it("parses escaped backslashes without treating their contents as escapes", () => {
+    const input = { pattern: String.raw`Bearer\s+[A-Za-z0-9._~-]{12,}` };
+    const source = canonicalize(input);
+    expect(parseCanonicalJson(source)).toEqual(input);
+    expect(canonicalize(parseCanonicalJson(source))).toBe(source);
+  });
+
   it("enforces the node boundary across the whole object graph", () => {
     const value = Array.from({ length: 250 }, () =>
       Array.from({ length: 250 }, () => null),

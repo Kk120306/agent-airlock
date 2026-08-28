@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   LocalTransparencyLog,
+  buildReceiverCustodyPacket,
+  buildReceiverCustodyRecord,
   buildFederatedWorkBundle,
   buildPortableDecisionChain,
   buildPortableEvidencePacket,
@@ -11,9 +13,11 @@ import {
   signPortableReceipt,
   verifyFederatedWorkBundle,
   verifyPortablePromotionEnvelope,
+  verifyReceiverCustodyPacket,
   verifySignedSigningKeyTrustPolicyEnvelope,
   type FederatedWorkBundle,
   type ReceiptDigest,
+  type ReceiverCustodyManifest,
   type SignedSigningKeyTrustPolicyEnvelope,
 } from "@agent-airlock/portable-promotion-receipt";
 import { redactSensitiveText } from "@agent-airlock/transactional-resource-sdk";
@@ -2237,6 +2241,187 @@ export class AgentService {
           : "Federated workspace artifact is unavailable",
       );
     }
+  }
+
+  async exportReceiverCustody(runId: string) {
+    const run = this.getRun(runId);
+    const transaction = run.transaction;
+    if (
+      run.status !== "completed" ||
+      !transaction ||
+      (transaction.disposition !== "promoted" &&
+        transaction.disposition !== "quarantined")
+    ) {
+      throw new HttpError(
+        409,
+        "Receiver custody export requires a terminal federated Promotion or Quarantine",
+      );
+    }
+
+    let match:
+      | {
+          admission: FederatedAdmissionRecord;
+          approval: FederatedApprovalDecisionRecord | null;
+        }
+      | null = null;
+    for (const admission of await this.federatedAdmissionJournal.listRecords()) {
+      const approvalResult =
+        await this.federatedApprovalJournal.readResultByAdmissionId(
+          admission.admissionId,
+        );
+      if (
+        admission.candidateRunId !== runId &&
+        approvalResult?.plan.candidateRunId !== runId
+      ) {
+        continue;
+      }
+      if (match) {
+        throw new HttpError(
+          409,
+          "Receiver Run has ambiguous federated authority",
+        );
+      }
+      match = {
+        admission,
+        approval: approvalResult?.approval ?? null,
+      };
+    }
+    if (!match) {
+      throw new HttpError(409, "Run is not authorized by a Federated Admission");
+    }
+    const { admission, approval } = match;
+    const bundle =
+      await this.federatedAdmissionJournal.readEvidenceBundle(admission);
+    if (!bundle) {
+      throw new HttpError(
+        409,
+        "Federated producer evidence is not durably available",
+      );
+    }
+    const authority =
+      await this.portableDecisionJournal.readUnambiguousTerminalAuthority(
+        run.id,
+        run.agentId,
+      );
+    if (!authority || authority.disposition !== transaction.disposition) {
+      throw new HttpError(
+        409,
+        "Receiver terminal Decision Authority is unavailable",
+      );
+    }
+    const receiptExport = await this.exportPortableReceipt(runId, {
+      disclosureIdentities: [],
+      includeAncestry: false,
+      localAnchor: false,
+      evmPayload: false,
+    });
+    const receiverEnvelope = receiptExport.envelope;
+    const entries = [
+      buildReceiverCustodyRecord({
+        recordId: "producer-work-bundle",
+        role: "producer-work-bundle",
+        trustDomain: "producer",
+        schema: bundle.schema,
+        schemaVersion: bundle.schemaVersion,
+        signingRequirement: "nested-required",
+        value: bundle,
+      }),
+      buildReceiverCustodyRecord({
+        recordId: "receiver-admission",
+        role: "receiver-admission",
+        trustDomain: "receiver",
+        schema: admission.schema,
+        schemaVersion: admission.schemaVersion,
+        signingRequirement: "manifest-covered",
+        value: admission,
+      }),
+      ...(approval
+        ? [
+            buildReceiverCustodyRecord({
+              recordId: "receiver-approval",
+              role: "receiver-approval" as const,
+              trustDomain: "receiver" as const,
+              schema: approval.schema,
+              schemaVersion: approval.schemaVersion,
+              signingRequirement: "manifest-covered" as const,
+              value: approval,
+            }),
+          ]
+        : []),
+      buildReceiverCustodyRecord({
+        recordId: "receiver-terminal-authority",
+        role: "receiver-terminal-authority",
+        trustDomain: "receiver",
+        schema: "agent-airlock/portable-decision-authority-commitment",
+        schemaVersion: authority.schemaVersion,
+        signingRequirement: "manifest-covered",
+        value: {
+          schemaVersion: authority.schemaVersion,
+          transactionEvidenceHash: authority.transactionEvidenceHash,
+          parentAuthorityDigest: authority.parentAuthorityDigest,
+          candidateSetAuthorityDigest: authority.candidateSetAuthorityDigest,
+          runId: authority.runId,
+          agentId: authority.agentId,
+          disposition: authority.disposition,
+          decidedAt: authority.decidedAt,
+          authorityDigest: authority.authorityDigest,
+        },
+      }),
+      buildReceiverCustodyRecord({
+        recordId: "receiver-promotion-envelope",
+        role: "receiver-promotion-envelope",
+        trustDomain: "receiver",
+        schema: receiverEnvelope.schema,
+        schemaVersion: receiverEnvelope.schemaVersion,
+        signingRequirement: "nested-and-manifest",
+        value: receiverEnvelope,
+      }),
+    ];
+    const manifest: ReceiverCustodyManifest = {
+      schema: "agent-airlock/receiver-custody-manifest",
+      schemaVersion: 1,
+      profile: "full-audit",
+      records: entries.map((entry) => entry.descriptor),
+      bindings: {
+        admissionId: admission.admissionId,
+        importIdentifier: admission.importIdentifier,
+        producerId: admission.producerId,
+        receiverAgentId: run.agentId,
+        receiverRunId: run.id,
+        producerReceiptDigest: bundle.receipt.receiptDigest,
+        artifactDigest: bundle.artifact.artifactDigest,
+        admissionRecordDigest: admission.recordDigest,
+        approvalDecisionDigest: approval?.recordDigest ?? null,
+        decisionContextDigest:
+          approval?.schemaVersion === 2
+            ? approval.decisionContextDigest
+            : null,
+        terminalAuthorityDigest: authority.authorityDigest as ReceiptDigest,
+        receiverReceiptDigest: receiverEnvelope.receiptDigest,
+        outcomeContractDigest: receiverEnvelope.receipt.outcomeContract.digest,
+        validationEvidenceRoot:
+          receiverEnvelope.receipt.validationEvidence.root,
+        disposition: transaction.disposition,
+      },
+    };
+    let signingKey: Awaited<ReturnType<typeof loadOrCreatePortableSigningKey>>;
+    try {
+      signingKey = await loadOrCreatePortableSigningKey(
+        this.config.portableSigningKeyPath,
+      );
+    } catch {
+      throw new HttpError(503, "Receiver custody signing is unavailable");
+    }
+    const packet = buildReceiverCustodyPacket({
+      manifest,
+      records: entries.map((entry) => entry.record),
+      privateKey: signingKey.privateKeyPem,
+    });
+    const verification = verifyReceiverCustodyPacket(packet);
+    if (!verification.valid) {
+      throw new Error("Receiver custody packet failed offline verification");
+    }
+    return { packet, verification };
   }
 
   private async verifyPortableRunState(

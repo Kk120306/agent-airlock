@@ -207,9 +207,12 @@ The chain adds no signature or authority of its own and remains separate from ev
 ADR 0020 defines a separate receiver-signed closure for the complete federated path.
 It does not extend the producer receipt or transfer producer authority into the receiver trust domain.
 
-The closure manifest commits typed descriptors and explicit edges for the producer Federated Work Bundle, receiver Admission Record, optional Federated Approval Decision, receiver terminal Decision Authority, and receiver Portable Promotion Envelope.
-The transport carries exact bounded canonical records so an offline verifier can recompute every descriptor digest and run each native nested verifier.
+The closure manifest commits typed descriptors and explicit bindings for the producer Federated Work Bundle, receiver Admission Record, optional Federated Approval Decision, receiver terminal Decision Authority commitment, and receiver Portable Promotion Envelope.
+The transport carries exact bounded canonical producer and receiver records so an offline verifier can recompute every descriptor digest and run each native nested verifier.
+The terminal authority record is a privacy-bounded projection that exposes the recomputable authority digest, transaction evidence hash, parent authority link, Candidate Set authority link, Run identity, Agent identity, disposition, and decision time.
+It does not expose the underlying Run Transaction, raw prompt, Runtime output, local path, or other private validation evidence.
 Producer and receiver signing identities are evaluated under separate evaluator-supplied policies that remain outside the packet.
+The Node verifier and browser WebCrypto verifier both reject missing or uncommitted records, digest substitution, role confusion, unsupported versions, broken signatures, broken authority links, unsafe evidence strings, and a quarantined receipt that advances Canonical State.
 
 The closure signature proves only that the receiver signer committed the exact closed evidence set.
 It does not prove that previously unsigned records existed before export, that receiver Validation was sufficient, or that an optional transparency or blockchain inclusion granted Admission or Promotion authority.

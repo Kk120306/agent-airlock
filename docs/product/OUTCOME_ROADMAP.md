@@ -756,7 +756,7 @@ An independent verifier can inspect one receiver-signed packet that closes the r
 **Build**
 
 - Add a strict full-audit closure manifest with typed record descriptors, required roles, and explicit transition edges.
-- Preserve the producer receipt, Federated Work Bundle, receiver Admission, optional human Approval, terminal Decision Authority, and receiver receipt as distinct evidence.
+- Preserve the producer receipt, Federated Work Bundle, receiver Admission, optional human Approval, privacy-bounded terminal Decision Authority commitment, and receiver receipt as distinct evidence.
 - Verify nested signatures, record digests, reviewed-context binding, Outcome Contract and Validation commitments, terminal disposition, and state handoffs offline.
 - Evaluate producer and receiver signer roles under separate evaluator-controlled trust policies.
 - Expose additive export and browser verification without changing the normal import, Validation, Promotion, Quarantine, or judge paths.
@@ -776,6 +776,8 @@ Turn the complete bilateral decision path into a falsifiable offline proof while
 **Current status**
 
 The source-backed boundary is accepted in ADR 0020 and implementation is tracked by [Export and verify a receiver custody closure](https://github.com/Kk120306/agent-airlock/issues/28).
+The version 1 packet, restart-safe export, separate trust-policy evaluation, Node verifier, independent browser verifier, mobile federation proof, quarantined-state proof, and privacy boundary are implemented and locally release-gated.
+The implementation issue remains the source of truth for final hosted-release evidence.
 
 ## Hackathon cut lines
 

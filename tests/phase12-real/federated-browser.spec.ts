@@ -4,12 +4,15 @@ import {
   generatePortableSigningKey,
   signSigningKeyTrustPolicy,
   verifyFederatedWorkBundleJson,
+  verifyReceiverCustodyPacketJson,
   type FederatedWorkBundle,
   type SigningKeyTrustPolicy,
 } from "@agent-airlock/portable-promotion-receipt";
 
 const producerUrl = "http://127.0.0.1:3212";
 const receiverUrl = "http://127.0.0.1:3213";
+
+test.use({ viewport: { width: 390, height: 844 } });
 
 test("two independent Airlocks transfer signed work and keep Promotion local", async ({
   page,
@@ -208,6 +211,21 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
     .toBeVisible();
   await expect(federationPanel.getByText(/Reviewed context sha256:[a-f0-9]{64}/))
     .toBeVisible();
+  const custodyDownloadPromise = page.waitForEvent("download");
+  await federationPanel
+    .getByRole("button", { name: "Verify and download custody proof" })
+    .click();
+  const custodyDownload = await custodyDownloadPromise;
+  const custodyPath = await custodyDownload.path();
+  expect(custodyPath).not.toBeNull();
+  expect(verifyReceiverCustodyPacketJson(await readFile(custodyPath!, "utf8")).valid)
+    .toBe(true);
+  await expect(
+    federationPanel.getByText("Verified independently in this browser"),
+  ).toBeVisible();
+  await expect(
+    federationPanel.getByText(/cryptographic and authority checks passed locally/),
+  ).toBeVisible();
   const receiverAfterApproval = await request.get(receiverUrl + "/api/agents");
   expect(receiverAfterApproval.ok()).toBe(true);
   expect((await receiverAfterApproval.json()).agents[0].canonicalStateId).not.toBe(

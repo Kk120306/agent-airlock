@@ -7,6 +7,7 @@ import {
   verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser,
   verifySignedSigningKeyTrustPolicyEnvelopeJsonInBrowser,
   verifyPortablePromotionEnvelopeJsonInBrowser,
+  verifyReceiverCustodyPacketJsonInBrowser,
 } from "@agent-airlock/portable-promotion-receipt/browser";
 import type {
   PortablePromotionEnvelope,
@@ -17,6 +18,7 @@ import type {
   PolicyAuthorityRotationVerificationReport,
   PortableVerificationReport,
   ReceiptDigest,
+  ReceiverCustodyVerificationReport,
   TrustPolicyVerificationReport,
 } from "@agent-airlock/portable-promotion-receipt";
 import { api, ApiError, setAuthToken } from "./api";
@@ -37,6 +39,20 @@ import type {
 
 const MAXIMUM_FEDERATED_BUNDLE_FILE_BYTES = 9 * 1_048_576;
 const MAXIMUM_TRUST_POLICY_FILE_BYTES = 262_144;
+
+function downloadJsonArtifact(value: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 const starterPrompts = [
   "Build a dependency-free Node.js OrderGuard CLI using only built-in modules and node:test. Do not run npm install or create node_modules. Read local JSON, reject invalid orders, summarize valid revenue by status, add sample data and tests, run the tests, and summarize the result.",
@@ -2659,6 +2675,9 @@ function FederationAirlock({
   );
   const [approvalReason, setApprovalReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [custodyBusy, setCustodyBusy] = useState(false);
+  const [custodyVerification, setCustodyVerification] =
+    useState<ReceiverCustodyVerificationReport | null>(null);
 
   const loadInbox = useCallback(async () => {
     setInboxBusy(true);
@@ -2791,6 +2810,36 @@ function FederationAirlock({
     selectedInboxItem?.state === "quarantined"
       ? selectedInboxItem.state
       : null);
+
+  useEffect(() => {
+    setCustodyVerification(null);
+  }, [currentRunId]);
+
+  const exportReceiverCustody = async () => {
+    if (!currentRunId || (disposition !== "promoted" && disposition !== "quarantined")) return;
+    setCustodyBusy(true);
+    setLocalError(null);
+    try {
+      const exported = await api.exportReceiverCustody(currentRunId);
+      if (!exported.verification.valid) {
+        throw new Error("The receiver rejected its own custody closure.");
+      }
+      const source = JSON.stringify(exported.packet);
+      const browserReport = await verifyReceiverCustodyPacketJsonInBrowser(source);
+      setCustodyVerification(browserReport);
+      if (!browserReport.valid) {
+        throw new Error("The browser independently rejected the custody closure.");
+      }
+      downloadJsonArtifact(
+        exported.packet,
+        `agent-airlock-receiver-custody-${currentRunId}.json`,
+      );
+    } catch (reason) {
+      setLocalError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setCustodyBusy(false);
+    }
+  };
   const pipeline = [
     {
       label: "Verify",
@@ -3167,6 +3216,45 @@ function FederationAirlock({
             <div><dt>Canonical</dt><dd>{disposition === "promoted" ? "advanced" : "unchanged"}</dd></div>
           </dl>
         </div>
+      )}
+
+      {currentRunId && (disposition === "promoted" || disposition === "quarantined") && (
+        <section
+          className="federation-custody"
+          data-verified={custodyVerification?.valid === true}
+          aria-label="Receiver chain of custody"
+        >
+          <div>
+            <span className="eyebrow">Portable receiver closure</span>
+            <strong>
+              {custodyVerification?.valid
+                ? "Verified independently in this browser"
+                : "Close the producer-to-receiver authority path"}
+            </strong>
+            <p>
+              One downloadable proof binds the producer signature, receiver Admission,
+              operator approval when required, terminal authority, and receiver receipt.
+            </p>
+          </div>
+          <div className="federation-custody-domains">
+            <span><i>1</i> Producer trust domain</span>
+            <b aria-hidden="true">→</b>
+            <span><i>2</i> Receiver trust domain</span>
+          </div>
+          {custodyVerification?.valid && (
+            <small>
+              {custodyVerification.checks.length} cryptographic and authority checks passed locally.
+            </small>
+          )}
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={custodyBusy}
+            onClick={() => void exportReceiverCustody()}
+          >
+            {custodyBusy ? <Spinner /> : custodyVerification?.valid ? "Verify and download again" : "Verify and download custody proof"}
+          </button>
+        </section>
       )}
 
       {admission?.decision.decision === "pending" &&

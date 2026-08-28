@@ -1,4 +1,8 @@
 import type {
+  ReceiverCustodyPacket,
+  ReceiverCustodyVerificationReport,
+} from "@agent-airlock/portable-promotion-receipt";
+import type {
   Agent,
   AgentRun,
   AssuranceProposal,
@@ -214,6 +218,11 @@ export const api = {
       bundle: unknown;
       verification: { valid: boolean; receiptDigest: string | null; artifactDigest: string | null };
     }>("/api/runs/" + id + "/federated-work-bundle", { method: "POST" }),
+  exportReceiverCustody: (id: string) =>
+    request<{
+      packet: ReceiverCustodyPacket;
+      verification: ReceiverCustodyVerificationReport;
+    }>("/api/runs/" + id + "/receiver-custody", { method: "POST" }),
   repairRun: (id: string, objective?: string) =>
     request<{ run: AgentRun; message: Message }>("/api/runs/" + id + "/repair", {
       method: "POST",

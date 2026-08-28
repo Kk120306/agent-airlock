@@ -10,6 +10,7 @@ import {
   signPortableReceipt,
   signSigningKeyTrustPolicy,
   verifyFederatedWorkBundle,
+  verifyReceiverCustodyPacket,
   type PortablePromotionEnvelope,
   type SigningKeyTrustPolicy,
 } from "@agent-airlock/portable-promotion-receipt";
@@ -108,6 +109,36 @@ describe("federated HTTP execution", () => {
     expect(after.stateId).not.toBe(before.stateId);
     await expect(readFile(path.join(after.workspacePath, "federated.txt"), "utf8"))
       .resolves.toBe("federated work\n");
+
+    const custody = await fixture.app.inject({
+      method: "POST",
+      url: `/api/runs/${imported.json().run.id}/receiver-custody`,
+    });
+    expect(custody.statusCode).toBe(200);
+    expect(custody.json().verification).toMatchObject({ valid: true });
+    expect(verifyReceiverCustodyPacket(custody.json().packet)).toMatchObject({
+      valid: true,
+      receiverReceiptDigest:
+        custody.json().verification.receiverReceiptDigest,
+    });
+    const custodySource = JSON.stringify(custody.json().packet);
+    expect(custodySource).not.toContain('"transaction":');
+    expect(custodySource).not.toContain('"output":');
+    expect(custodySource).not.toContain('"prompt":');
+    expect(custodySource).not.toContain('"authorityPublicJwk":');
+    expect(custodySource).not.toMatch(/\/(?:Users|home|private|tmp)\//);
+    expect(custodySource).not.toMatch(/Authorization\s*:\s*Bearer/i);
+    expect(custody.json().packet.envelope.manifest.bindings).toMatchObject({
+      admissionId: imported.json().admission.admissionId,
+      approvalDecisionDigest: null,
+      decisionContextDigest: null,
+      disposition: "promoted",
+    });
+    const omitted = structuredClone(custody.json().packet);
+    omitted.records = omitted.records.filter(
+      (record: { recordId: string }) => record.recordId !== "receiver-admission",
+    );
+    expect(verifyReceiverCustodyPacket(omitted).valid).toBe(false);
 
     const currentContract = fixture.service.getAgent(fixture.agentId).outcomeContract;
     await fixture.service.updateOutcomeContract(fixture.agentId, {
@@ -230,6 +261,20 @@ describe("federated HTTP execution", () => {
     expect(after.stateId).not.toBe(before.stateId);
     await expect(readFile(path.join(after.workspacePath, "federated.txt"), "utf8"))
       .resolves.toBe("federated work\n");
+
+    const custody = await fixture.app.inject({
+      method: "POST",
+      url: `/api/runs/${approved.json().run.id}/receiver-custody`,
+    });
+    expect(custody.statusCode).toBe(200);
+    expect(custody.json().verification).toMatchObject({ valid: true });
+    expect(verifyReceiverCustodyPacket(custody.json().packet).valid).toBe(true);
+    expect(custody.json().packet.envelope.manifest.bindings).toMatchObject({
+      admissionId: imported.json().admission.admissionId,
+      approvalDecisionDigest: approved.json().approval.recordDigest,
+      decisionContextDigest,
+      disposition: "promoted",
+    });
 
     const currentContract = fixture.service.getAgent(fixture.agentId).outcomeContract;
     await fixture.service.updateOutcomeContract(fixture.agentId, {
@@ -759,6 +804,20 @@ describe("federated HTTP execution", () => {
         }),
       ]),
     );
+    const custody = await fixture.app.inject({
+      method: "POST",
+      url: `/api/runs/${response.json().run.id}/receiver-custody`,
+    });
+    expect(custody.statusCode).toBe(200);
+    expect(custody.json()).toMatchObject({
+      packet: {
+        envelope: {
+          manifest: { bindings: { disposition: "quarantined" } },
+        },
+      },
+      verification: { valid: true },
+    });
+    expect(verifyReceiverCustodyPacket(custody.json().packet).valid).toBe(true);
     await fixture.app.close();
   });
 
@@ -895,6 +954,10 @@ describe("federated HTTP execution", () => {
     });
     const after = await recoveredWorkspaces.readCanonical(fixture.agentId);
     expect(after.stateId).not.toBe(before.stateId);
+    const recoveredCustody = await recoveredService.exportReceiverCustody(
+      failedRun.id,
+    );
+    expect(recoveredCustody.verification.valid).toBe(true);
   });
 });
 

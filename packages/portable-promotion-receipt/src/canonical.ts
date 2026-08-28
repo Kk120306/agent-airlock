@@ -222,6 +222,7 @@ class StrictJsonParser {
         if (!'"\\/bfnrt'.includes(this.source[this.index]!)) {
           throw new Error("JSON string escape is invalid");
         }
+        this.index += 1;
       } else {
         if (code <= 0x1f) throw new Error("JSON string contains a control character");
         this.index += 1;

@@ -344,6 +344,17 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Run receiver-owned Outcome Contract Validation and local Promotion for admitted work.
 - [x] Prove credential-free export, transfer, admission, Validation, and Promotion between two independently configured Airlock instances through the browser.
 
+## Phase 19 receiver custody acceptance
+
+- [x] Define a strict version 1 receiver custody manifest, packet, typed record roles, and custody-specific signature domain.
+- [x] Retain the exact producer Federated Work Bundle and receiver Admission and Approval evidence required to close the path after restart.
+- [x] Export one receiver-signed packet only for a terminal promoted or quarantined federated Run with unambiguous durable authority.
+- [x] Carry a privacy-bounded terminal Decision Authority commitment instead of the raw Run Transaction or Runtime evidence.
+- [x] Verify producer and receiver signatures, exact record commitments, reviewed-context binding, terminal authority, Outcome Contract, Validation root, disposition, and Canonical State handoff offline.
+- [x] Keep producer and receiver organizational trust under distinct evaluator-controlled policies that remain outside the packet.
+- [x] Verify and download the packet independently in the browser and prove the real two-instance path at a 390 CSS pixel viewport.
+- [x] Reject omitted, duplicated, uncommitted, substituted, role-confused, unsafe, contradictory, and unsupported evidence without exporting a partial closure.
+
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.

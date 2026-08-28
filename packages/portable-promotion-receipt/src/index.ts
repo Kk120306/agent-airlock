@@ -6,6 +6,7 @@ export * from "./evm.js";
 export * from "./evidence-packet.js";
 export * from "./federated-work-bundle.js";
 export * from "./local-transparency-log.js";
+export * from "./receiver-custody.js";
 export * from "./merkle.js";
 export * from "./signing-key.js";
 export * from "./transparency.js";
