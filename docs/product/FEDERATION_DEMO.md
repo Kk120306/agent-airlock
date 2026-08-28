@@ -20,6 +20,18 @@ Run the same proof in a visible browser for a presentation:
 npm run demo:phase12
 ```
 
+## Adversarial operator proof
+
+Run:
+
+```bash
+npm run test:phase11:ui:mock
+```
+
+The production UI suite proves that untrusted authority, compromised signer, wrong Agent scope, stale receipt, protocol downgrade, and transparency split-view decisions remain explicit receiver rejections with Canonical State shown as unchanged.
+It also proves that artifact tamper, receipt tamper, and conflicting replay errors remain fail-closed before the interface can claim Promotion.
+The lower protocol, policy, admission journal, and HTTP suites independently verify the underlying cryptography, exact replay identity, immutable decision evidence, local Quarantine, and crash recovery behavior.
+
 ## What to point out
 
 The producer's signature proves bundle integrity and key possession, but it does not grant authority on the receiver.

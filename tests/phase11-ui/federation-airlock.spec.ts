@@ -261,56 +261,143 @@ test("imports signed work through the visible receiver-owned Promotion path", as
   );
 });
 
-test("shows a receiver rejection without implying that Canonical State changed", async ({
-  page,
-}) => {
-  const rejected: FederatedImportResult = {
-    admission: {
-      ...promoted.admission,
-      candidateRunId: null,
-      decision: {
-        ...promoted.admission.decision,
-        decision: "reject",
-        reason: "authority-unpinned",
-        detail: "The producer trust-policy authority is not pinned by this receiver.",
-      },
-    },
-    run: null,
-  };
-  await serveProductionBundle(page, [], rejected);
-  await page.goto("http://airlock.local/");
-  await page.getByRole("button", { name: "Federation" }).click();
-  const panel = page.locator("#federation-airlock-panel");
-  await panel.getByLabel("Transfer identity").fill("judge-rejected-001");
-  await panel.getByLabel("Federated Work Bundle").setInputFiles({
-    name: "untrusted-work.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(JSON.stringify({ schema: "agent-airlock/federated-work-bundle" })),
-  });
-  await panel.getByLabel("Signed Trust Policy").setInputFiles({
-    name: "untrusted-policy.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(
-      JSON.stringify({ schema: "agent-airlock/signed-signing-key-trust-policy" }),
-    ),
-  });
-  await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+const operatorVisibleRejections = [
+  {
+    name: "untrusted authority",
+    reason: "authority-unpinned",
+    detail: "The producer trust-policy authority is not pinned by this receiver.",
+  },
+  {
+    name: "compromised signer",
+    reason: "signer-compromised",
+    detail: "The producer receipt signer is compromised under receiver policy.",
+  },
+  {
+    name: "wrong Agent scope",
+    reason: "agent-scope-mismatch",
+    detail: "The signed work is outside the receiver-approved Agent scope.",
+  },
+  {
+    name: "stale receipt",
+    reason: "receipt-stale",
+    detail: "The producer receipt is older than the receiver freshness limit.",
+  },
+  {
+    name: "protocol downgrade",
+    reason: "protocol-not-allowed",
+    detail: "The proposed artifact protocol is not allowed by receiver policy.",
+  },
+  {
+    name: "transparency split view",
+    reason: "transparency-split-view",
+    detail: "The supplied transparency evidence conflicts with the receiver checkpoint.",
+  },
+] as const;
 
-  await expect(panel.getByText("REJECT")).toBeVisible();
-  await expect(
-    panel
-      .getByRole("status")
-      .getByText("The producer trust-policy authority is not pinned by this receiver."),
-  ).toBeVisible();
-  await expect(panel.getByText("unchanged", { exact: true })).toBeVisible();
-  await expect(panel.getByText("No mutable Canonical path enters the import Runtime"))
-    .toBeVisible();
-});
+for (const rejection of operatorVisibleRejections) {
+  test(`shows ${rejection.name} rejection with Canonical State unchanged`, async ({
+    page,
+  }) => {
+    const rejected: FederatedImportResult = {
+      admission: {
+        ...promoted.admission,
+        candidateRunId: null,
+        decision: {
+          ...promoted.admission.decision,
+          decision: "reject",
+          reason: rejection.reason,
+          detail: rejection.detail,
+        },
+      },
+      run: null,
+    };
+    await serveProductionBundle(page, [], rejected);
+    await page.goto("http://airlock.local/");
+    await page.getByRole("button", { name: "Federation" }).click();
+    const panel = page.locator("#federation-airlock-panel");
+    await panel.getByLabel("Transfer identity").fill("judge-rejected-001");
+    await panel.getByLabel("Federated Work Bundle").setInputFiles({
+      name: "untrusted-work.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({ schema: "agent-airlock/federated-work-bundle" }),
+      ),
+    });
+    await panel.getByLabel("Signed Trust Policy").setInputFiles({
+      name: "untrusted-policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({ schema: "agent-airlock/signed-signing-key-trust-policy" }),
+      ),
+    });
+    await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+
+    await expect(panel.getByText("REJECT")).toBeVisible();
+    await expect(panel.getByRole("status").getByText(rejection.detail)).toBeVisible();
+    await expect(panel.getByText("unchanged", { exact: true })).toBeVisible();
+    await expect(panel.getByText("No mutable Canonical path enters the import Runtime"))
+      .toBeVisible();
+  });
+}
+
+const failClosedImportErrors = [
+  {
+    name: "artifact tamper",
+    status: 400,
+    error: "Federated Work Bundle artifact digest is invalid.",
+  },
+  {
+    name: "receipt tamper",
+    status: 400,
+    error: "Portable receipt signature is invalid.",
+  },
+  {
+    name: "conflicting replay",
+    status: 409,
+    error: "Transfer identity conflicts with an earlier Admission Record.",
+  },
+] as const;
+
+for (const failure of failClosedImportErrors) {
+  test(`shows ${failure.name} failure before Canonical State can change`, async ({
+    page,
+  }) => {
+    await serveProductionBundle(page, [], failure);
+    await page.goto("http://airlock.local/");
+    await page.getByRole("button", { name: "Federation" }).click();
+    const panel = page.locator("#federation-airlock-panel");
+    await panel.getByLabel("Transfer identity").fill("judge-failed-001");
+    await panel.getByLabel("Federated Work Bundle").setInputFiles({
+      name: "invalid-work.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({ schema: "agent-airlock/federated-work-bundle" }),
+      ),
+    });
+    await panel.getByLabel("Signed Trust Policy").setInputFiles({
+      name: "receiver-policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({ schema: "agent-airlock/signed-signing-key-trust-policy" }),
+      ),
+    });
+    await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+
+    await expect(panel.getByRole("alert")).toHaveText(failure.error);
+    await expect(panel.getByText("No mutable Canonical path enters the import Runtime"))
+      .toBeVisible();
+    await expect(panel.getByText("PROMOTED BY RECEIVER")).toHaveCount(0);
+  });
+}
+
+type FederatedImportResponse =
+  | FederatedImportResult
+  | { status: number; error: string };
 
 async function serveProductionBundle(
   page: Page,
   importRequests: unknown[],
-  importResult: FederatedImportResult = promoted,
+  importResult: FederatedImportResponse = promoted,
 ): Promise<void> {
   await page.route("http://airlock.local/**", async (route) => {
     const url = new URL(route.request().url());
@@ -330,6 +417,14 @@ async function serveProductionBundle(
       route.request().method() === "POST"
     ) {
       importRequests.push(route.request().postDataJSON());
+      if ("status" in importResult) {
+        await route.fulfill({
+          status: importResult.status,
+          contentType: "application/json",
+          body: JSON.stringify({ error: importResult.error }),
+        });
+        return;
+      }
       await route.fulfill({
         status: importResult.run ? 201 : 200,
         contentType: "application/json",
