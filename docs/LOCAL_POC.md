@@ -98,6 +98,16 @@ Authentication, network, timeout, malformed-response, and all other failures sto
 The model that completes preflight becomes the Runtime's `ARK_MODEL`.
 Keep Free Credits Only Mode enabled for every activated model because the launcher does not change or verify account billing settings.
 Confirm that every configured model is activated and visibly has remaining free quota in Model activation before the demo.
+After `Run live Candidate` completes a promoted file, SQLite, Codex-session, and one-effect transaction, the guided launcher records a private signed Portable Evidence Packet under its managed state root.
+The packet includes only the safe execution-profile disclosure and excludes credentials, provider URLs, raw endpoint identifiers, prompts, Runtime output, and environment values.
+Verify the latest recorded packet without contacting ModelArk:
+
+```bash
+npm run verify:modelark-evidence
+```
+
+This command verifies historical signed evidence only.
+It does not replace `npm run check:modelark` or prove current provider availability.
 Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass that fail-fast provider check explicitly.
 Explicit process environment variables take precedence.
 Keep the Beijing default for mainland Volcengine credentials.

@@ -331,6 +331,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - Every successful Run now records a required execution-profile Validation before Promotion, commits only a SHA-256 model identity, and carries the safe profile claim into the signed Validation Merkle root.
 - The live judge view distinguishes this trusted Airlock control-plane attestation from independent BytePlus attestation and never reveals the API key, endpoint identifier, base URL, or environment values.
 - The guided launcher forces the live preflight even when the generic POC skip flag is present, and its tested seed contract rejects persisted policy drift until the operator explicitly resets the managed demo.
+- A complete guided live Promotion automatically records a private credential-free Portable Evidence Packet with the safe ModelArk execution-profile disclosure, and a separate offline command verifies that historical artifact without claiming current provider availability.
 - ADR 0009 freezes P0 scope and separates the deterministic release proof from credentialed ModelArk conformance.
 - The credential-safe live preflight currently reaches the BytePlus Asia Pacific Responses API but receives HTTP 429 because configured free quota or the inference limit is unavailable.
 - Live ModelArk conformance must be rerun at judging time because provider quota, capacity, and model availability are external and time-varying.

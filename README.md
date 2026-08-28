@@ -258,6 +258,9 @@ Open <http://127.0.0.1:3201> and select `Run live Candidate`.
 ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`, update the Candidate SQLite row to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
 Airlock validates the actual Candidate file and database independently of the model response, promotes workspace, Codex session, SQLite, and outbox under one decision, and dispatches the intent only after Canonical State advances.
 The resulting judge view reports conformance complete only when all four resources are promoted and exactly one deferred effect is delivered, then exposes the signed portable receipt.
+After that complete live Promotion, the launcher automatically captures a private, credential-free Portable Evidence Packet with the safe ModelArk execution-profile disclosure.
+Verify the latest recorded packet later with `npm run verify:modelark-evidence` without contacting ModelArk.
+The verifier labels this as historical signed evidence and never substitutes it for a current provider preflight or live Run.
 Run `npm run demo:modelark` without `--reset` to preserve the proof across restart.
 If provider quota, capacity, authentication, or the selected model is unavailable, the launcher stops before showing a live-proof UI.
 
@@ -302,6 +305,8 @@ cp .env.example .env
 npm run check:modelark
 npm run poc:doctor
 npm run demo:modelark -- --reset
+# After a complete live Promotion:
+npm run verify:modelark-evidence
 ```
 
 `check:modelark` performs a minimal Responses API request and prints neither the credential nor model output.
@@ -314,6 +319,8 @@ Confirm that each configured model is activated and visibly has remaining free q
 It reports those checks independently, so provider HTTP 429 capacity failures cannot be confused with an application or Runtime failure.
 `npm run demo:modelark` and `npm run poc` repeat that fail-fast preflight before installing dependencies or building the Runtime image.
 The model that passes preflight is exported as `ARK_MODEL` for the actual Runtime.
+The guided launcher watches only its managed Agent for a complete provider-backed Whole-Agent Promotion, requests the safe execution-profile disclosure, and atomically records the signed packet under its marker-protected state root.
+It will not capture partial Promotion, failed Validation, missing effect delivery, deterministic fixture evidence, or content containing credential-like or endpoint-like material.
 Set `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only when the provider was already verified and a temporary provider outage must not block local startup.
 The first successful run loads `.env`, installs Node.js dependencies, and builds the Runtime image.
 Explicit process environment variables take precedence over `.env`.

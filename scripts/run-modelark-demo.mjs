@@ -9,6 +9,7 @@ import {
   liveModelArkPrompt,
   seedLiveModelArkDemo,
 } from "./modelark-demo-profile.mjs";
+import { monitorLiveModelArkConformance } from "./modelark-conformance-evidence.mjs";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const argumentsList = process.argv.slice(2);
@@ -101,8 +102,30 @@ if (!ready) {
     : new Error("The live ModelArk demo failed its preflight or startup checks");
 }
 
+let captureController = null;
+let captureTask = Promise.resolve();
 try {
-  await seedLiveModelArkDemo(baseUrl);
+  const agent = await seedLiveModelArkDemo(baseUrl);
+  captureController = new AbortController();
+  captureTask = monitorLiveModelArkConformance({
+    baseUrl,
+    agentId: agent.id,
+    stateRoot,
+    signal: captureController.signal,
+    onCaptured: ({ relativePath }) => {
+      console.log(
+        "Signed live ModelArk conformance evidence captured: " + relativePath,
+      );
+      console.log(
+        "Verify it later with npm run verify:modelark-evidence without contacting ModelArk.",
+      );
+    },
+    onError: () => {
+      console.error(
+        "Signed conformance evidence capture is waiting to retry; the live Run evidence remains in Agent Airlock.",
+      );
+    },
+  });
   console.log("");
   console.log("Agent Airlock live ModelArk proof is ready: " + baseUrl);
   console.log("Inference: provider-backed ModelArk Responses API.");
@@ -118,5 +141,7 @@ try {
 }
 
 const outcome = await childExit;
+captureController?.abort();
+await captureTask;
 if (outcome.error instanceof Error) throw outcome.error;
 if (!stopping && outcome.code !== 0) process.exitCode = outcome.code ?? 1;
