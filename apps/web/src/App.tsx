@@ -4450,7 +4450,7 @@ export default function App() {
       <main className="auth-screen">
         <section className="auth-card" aria-live="polite">
           <div className="brand-mark">A</div>
-          <span className="eyebrow">Agent Launchpad</span>
+          <span className="eyebrow">Agent Airlock</span>
           <h1>Connecting to the control plane</h1>
           {error ? <div className="error-banner" role="alert">{error}</div> : <Spinner />}
         </section>
@@ -4463,7 +4463,7 @@ export default function App() {
       <main className="auth-screen">
         <form className="auth-card" onSubmit={unlock}>
           <div className="brand-mark">A</div>
-          <span className="eyebrow">Agent Launchpad</span>
+          <span className="eyebrow">Agent Airlock</span>
           <h1>Enter the access token</h1>
           <p>This shared demo token is configured by the platform operator.</p>
           {error && <div className="error-banner" role="alert">{error}</div>}
@@ -4479,7 +4479,7 @@ export default function App() {
             />
           </label>
           <button className="button button-primary" disabled={busy || !authInput.trim()}>
-            {busy ? <Spinner /> : "Open Launchpad"}
+            {busy ? <Spinner /> : "Open Airlock"}
           </button>
         </form>
       </main>
@@ -4492,7 +4492,7 @@ export default function App() {
         <div className="brand">
           <div className="brand-mark">A</div>
           <div>
-            <strong>Agent Launchpad</strong>
+            <strong>Agent Airlock</strong>
             <span>
               {system?.demoMode
                 ? "Free local proof · no network model"
@@ -5267,7 +5267,7 @@ export default function App() {
         ) : (
           <div className="no-agent">
             <div className="no-agent-art">A</div>
-            <span className="eyebrow">Agent Launchpad</span>
+            <span className="eyebrow">Agent Airlock</span>
             <h1>Your runtime is ready for an Agent.</h1>
             <p>Create a workspace, give Codex a job, and continue the conversation here.</p>
             <button

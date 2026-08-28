@@ -120,6 +120,17 @@ Verify the latest recorded packet without contacting ModelArk:
 npm run verify:modelark-evidence
 ```
 
+Run the complete browser-driven conformance journey with one bounded command:
+
+```bash
+npm run prove:modelark -- --reset
+```
+
+Add `--headed` to watch the production Chrome interaction during rehearsal or recording.
+The command requires the existing live preflight, exact four-resource Promotion, single post-Promotion effect, signed packet capture, and offline verification before it returns success.
+It returns a safe `provider-unavailable` result when the free-only provider boundary has no capacity and never switches billing mode or stores raw provider output.
+The owner-only result capsule is only a projection over the signed packet and does not add provider authority or a trusted timestamp.
+
 This command verifies historical signed evidence only.
 It does not replace `npm run check:modelark` or prove current provider availability.
 Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass the generic `npm run poc` fail-fast provider check explicitly.

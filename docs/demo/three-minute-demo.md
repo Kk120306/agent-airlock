@@ -136,3 +136,7 @@ Point out that the model endpoint appears only as a SHA-256 commitment inside th
 State the limit precisely: Airlock attests its configured execution path, while BytePlus does not independently sign this receipt.
 The model response is supporting context, while the independently inspected Candidate artifact and durable Airlock evidence are the proof.
 Do not change the deterministic release gate or commit any credential-bearing output.
+
+For a recording rehearsal, run `npm run prove:modelark -- --reset --headed` instead.
+That command drives the same production browser action, requires the exact persisted Whole-Agent Promotion, waits for signed packet capture, verifies it offline, and cleans up the owned browser and server.
+If the free-only provider boundary returns HTTP 429, record the deterministic real Runtime proof and retry live conformance later rather than disabling Free Credits Only Mode.

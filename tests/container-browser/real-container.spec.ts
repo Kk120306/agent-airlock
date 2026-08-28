@@ -35,6 +35,8 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(page.getByText("Runtime configuration needed", { exact: true }))
     .not.toBeVisible();
   releaseSystemRequest();
+  await expect(page.locator(".brand").getByText("Agent Airlock", { exact: true }))
+    .toBeVisible();
   await expect(page.getByText("REAL RUNTIME PROOF", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Real Codex CLI in a disposable container", { exact: true }),

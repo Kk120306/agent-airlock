@@ -46,6 +46,8 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
 }) => {
   await page.goto("/");
 
+  await expect(page.locator(".brand").getByText("Agent Airlock", { exact: true }))
+    .toBeVisible();
   const demoBanner = page.locator(".demo-mode-banner");
   await expect(demoBanner).toContainText("FREE LOCAL DEMO");
   await expect(demoBanner).toContainText("No ModelArk request or paid inference is active.");

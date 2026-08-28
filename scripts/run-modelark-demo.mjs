@@ -100,10 +100,11 @@ for (let attempt = 0; attempt < 1_200; attempt += 1) {
 
 if (!ready) {
   if (!child.killed) child.kill("SIGTERM");
-  const outcome = await childExit;
-  throw outcome.error instanceof Error
-    ? outcome.error
-    : new Error("The live ModelArk demo failed its preflight or startup checks");
+  await childExit;
+  console.error(
+    "[modelark-demo] The live ModelArk demo failed its preflight or startup checks.",
+  );
+  process.exit(1);
 }
 
 let captureController = null;

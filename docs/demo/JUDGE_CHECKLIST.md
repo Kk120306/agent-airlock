@@ -36,17 +36,18 @@ This path uses a local deterministic Responses fixture and visibly discloses tha
 When ModelArk free capacity is available, run the credentialed conformance proof:
 
 ```bash
-npm run demo:modelark -- --reset
+npm run prove:modelark -- --reset --headed
 ```
 
 The command cannot inherit the generic preflight-skip escape hatch.
 It must complete a credential-safe live Responses request before it can start the application or display `LIVE MODELARK PROOF`.
-Open <http://127.0.0.1:3201> and select `Run live Candidate`.
+The runner opens production Chrome and invokes the existing `Run live Candidate` control.
 The seeded Outcome Contract requires the exact `modelark-proof.txt` content and SQLite value, so the provider response cannot prove success by narration alone.
 Show the required `execution-profile` Validation, its private model commitment, the required state Validation, four promoted resources, one post-Promotion `modelark-live-ready` effect, the Canonical State fingerprint transition, and the locally verified signed decision.
 Explain that the execution profile is a trusted Airlock control-plane attestation committed by the signed receipt, not an independent BytePlus signature.
 After the live Promotion, show that the launcher reports a captured signed conformance packet, then run `npm run verify:modelark-evidence` in a separate terminal.
 Explain that the offline command verifies historical signed evidence and does not claim that ModelArk is currently available.
+If live interaction must remain manual, use `npm run demo:modelark -- --reset` and open <http://127.0.0.1:3201>.
 
 ## Rubric evidence
 
@@ -81,6 +82,8 @@ Explain that the offline command verifies historical signed evidence and does no
 - [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
 - [ ] The live UI shows `LIVE MODELARK PROOF`, fresh generated-output preflight evidence, one seeded Agent, and one `Run live Candidate` action.
 - [ ] A complete live Promotion automatically records one private signed evidence packet with the safe ModelArk execution-profile disclosure, and `npm run verify:modelark-evidence` validates it offline.
+- [ ] `npm run prove:modelark -- --reset --headed` drives the production browser, verifies the signed packet offline, cleans up owned processes, and returns success only after all eight proof gates pass.
+- [ ] Provider HTTP 429 returns the safe `provider-unavailable` class without a live-proof UI, paid fallback, credential disclosure, or overwritten successful capsule.
 - [ ] Recorded evidence is labelled historical and is never presented as a substitute for a current live preflight.
 - [ ] The live Candidate creates the exact artifact, updates SQLite, submits one typed intent, passes the required state Validation, promotes all four resources, delivers exactly one effect after Promotion, and exports a locally verified signed decision.
 

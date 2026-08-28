@@ -273,6 +273,18 @@ The verifier labels this as historical signed evidence and never substitutes it 
 Run `npm run demo:modelark` without `--reset` to preserve the proof across restart.
 If provider quota, capacity, authentication, or the selected model is unavailable, the launcher stops before showing a live-proof UI.
 
+For a recording rehearsal or a single pass-or-fail conformance run, use:
+
+```bash
+npm run prove:modelark -- --reset
+```
+
+This command starts the same managed live launcher, drives the existing `Run live Candidate` control in production Chrome, requires the exact persisted Whole-Agent Promotion, waits for the private signed packet, verifies that packet offline, and then cleans up its browser and server.
+Add `--headed` to make the Chrome interaction visible during rehearsal or recording.
+Add `--json` for the bounded credential-free result projection.
+The result is a convenience summary rather than new authority, and the signed packet remains the independently verifiable proof.
+HTTP 429 free-capacity failure returns `provider-unavailable` and never disables Free Credits Only Mode or falls back to a paid path.
+
 - Node.js 22+
 - npm 10+
 - Docker, Colima, or Podman

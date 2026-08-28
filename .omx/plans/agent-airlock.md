@@ -368,6 +368,18 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Add the bounded tamper lab with immutable-original reset behavior.
 - [x] Prove backend-disconnected verification, mobile presentation, two-instance download reopening, and hosted release gates.
 
+## Phase 21 one-command live ModelArk proof
+
+- [x] Map the existing preflight, managed launcher, production Chrome action, Run authority, signed packet capture, and offline verifier seams.
+- [x] Define the eight-gate success contract, safe failure taxonomy, privacy boundary, result schema, cleanup model, and release matrix.
+- [x] Extract structured recorded-evidence verification behind the existing human CLI.
+- [x] Add the browser-driven proof core, credential-safe result capsule, and one-command entry point.
+- [x] Add deterministic tests for success, Quarantine, timeout, browser failure, invalid evidence, interruption, redaction, permissions, and preservation of prior success.
+- [x] Align the visible product brand with Agent Airlock for recording consistency.
+- [x] Pass the complete local quality and real Runtime regression gates.
+- [ ] Pass the exact hosted release workflow on the final revision.
+- [ ] Complete the live provider-backed browser proof while Free Credits Only Mode has available capacity.
+
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.

@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 11 on `post-hackathon/phases-8-11`, with later demo and Portable Trust refinements under release verification
+**Delivered:** Phases 0 through 20, with the Phase 21 live ModelArk proof runner under hosted release and provider-capacity verification
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -811,6 +811,38 @@ The outcome is tracked by [Wayfinder: Make trust proof instantly understandable]
 The source-backed interaction and trust boundary are defined in [Offline receiver custody proof room](../research/offline-custody-proof-room.md).
 The delivered implementation passes the backend-disconnected two-instance browser proof for both receiver Promotion and receiver Quarantine at 390 CSS pixels.
 Hosted quality, dependency, release-boundary, real CodeJam Runtime, production-browser, Portable Trust, and two-instance federation gates pass on the delivered revision.
+
+### Phase 21: One-command live ModelArk proof
+
+**Outcome**
+
+A reviewer can run one bounded command that drives the production browser through live ModelArk inference, independently verifies the resulting signed evidence, and exits with an honest pass or safe failure class.
+
+**Build**
+
+- Orchestrate the existing mandatory provider preflight, managed launcher, production Chrome control, persisted Run evidence, private packet capture, and offline verifier without adding another inference path.
+- Require the exact artifact, SQLite state, four-resource Promotion, one post-Promotion effect, bound execution profile, and signed packet before returning success.
+- Emit one credential-free non-authoritative result capsule that points to the signed packet by relative filename.
+- Classify provider unavailability, startup failure, browser failure, Quarantine, failed Run, bounded timeouts, invalid evidence, and interruption without persisting raw child output.
+- Close every browser and process owned by the runner on success, failure, timeout, or signal.
+
+**Exit gate**
+
+- Deterministic tests prove orchestration, classification, cleanup, redaction, atomic owner-only persistence, and preservation of the last successful capsule.
+- Existing hosted quality, production-browser, two-instance federation, and real CodeJam Runtime gates remain green.
+- `npm run prove:modelark -- --reset` completes the real provider-backed browser transaction while Free Credits Only Mode visibly has available capacity.
+- `npm run verify:modelark-evidence` verifies the captured packet after the provider and server are gone.
+
+**Beyond-expectations finish**
+
+Turn the fragile moment in a live AI demo into a portable conformance capsule that remains independently verifiable after the service is unavailable.
+
+**Current status**
+
+The outcome is tracked by [Wayfinder: Make live ModelArk proof one-command and self-verifying](https://github.com/Kk120306/agent-airlock/issues/32).
+The orchestration, authority, failure, privacy, and release boundaries are defined in [Bounded live ModelArk proof runner](../research/live-modelark-proof-runner.md).
+The runner, deterministic failure matrix, production-browser brand guard, complete local quality gate, real disposable-container transaction, and two-Airlock signed transfer are green locally.
+The current credentialed preflight reaches the provider but returns HTTP 429 at the free-only capacity boundary, so no live conformance success is claimed.
 
 ## Hackathon cut lines
 

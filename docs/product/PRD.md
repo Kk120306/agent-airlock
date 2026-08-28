@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 19 delivered and regression-locked; the Phase 20 offline custody proof room is under release verification
+**Status:** Phases 0 through 20 delivered and regression-locked; the Phase 21 one-command live ModelArk proof is under hosted release and provider-capacity verification
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -260,6 +260,10 @@ This journey describes the complete product direction, including later roadmap p
 - Live ModelArk execution-profile evidence must commit to the configured model identity with SHA-256, identify the Codex CLI, Responses protocol, and Runtime class, and exclude credentials, raw endpoint identifiers, base URLs, and environment values.
 - The signed portable receipt must commit to execution-profile evidence through its Validation Merkle root and permit bounded selective disclosure of the safe attestation summary.
 - The product must label execution-profile evidence as an Airlock control-plane attestation rather than independent provider-signed evidence.
+- A one-command live proof runner must invoke the existing production Chrome control and must not create a second provider or Runtime path.
+- The runner must return success only after the exact live Whole-Agent Promotion, private signed packet capture, and offline packet verification all pass.
+- Provider capacity, startup, browser, Run, evidence, timeout, and interruption failures must remain distinct and must never overwrite the latest successful result.
+- The runner result must be credential-free, owner-only, atomic, explicitly non-authoritative, and limited to safe gate results plus the signed receipt digest and relative packet filename.
 
 ## Reliability requirements
 
@@ -364,6 +368,7 @@ Phase 18 makes that exact reviewed context durable inside every new immutable Fe
 The receiver exposes the committed digest after approval or denial, rejects contradictory retries and tampering, and preserves legacy decisions without claiming evidence they never recorded.
 Phase 19 closes the producer-to-receiver path in one receiver-signed custody packet that independently verifies the source work, Admission, optional Approval, receiver authority, terminal Validation commitment, and Canonical State disposition.
 Phase 20 turns that packet into a zero-upload proof room with a five-node verified story, separate producer and receiver trust roots, and disposable tamper attacks that never mutate the original evidence.
+Phase 21 turns the manual live ModelArk journey into one bounded browser-driven proof command whose success requires the complete Promotion plus independently verified signed evidence.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations
