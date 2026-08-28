@@ -3430,6 +3430,12 @@ export default function App() {
                 "playground" +
                 (system?.protocolFixtureMode || system?.modelArkDemoMode
                   ? " protocol-proof-playground"
+                  : "") +
+                ((system?.protocolFixtureMode || system?.modelArkDemoMode) &&
+                messages.length === 0 &&
+                !activeRun &&
+                !activeCandidateSet
+                  ? " protocol-proof-standby"
                   : "")
               }
             >
@@ -3672,7 +3678,17 @@ export default function App() {
                 ) : null}
               </div>
 
-              <div className="messages">
+              <div
+                className={
+                  "messages" +
+                  ((system?.protocolFixtureMode || system?.modelArkDemoMode) &&
+                  messages.length === 0 &&
+                  !activeRun &&
+                  !activeCandidateSet
+                    ? " protocol-proof-standby-messages"
+                    : "")
+                }
+              >
                 {messages.length === 0 && !activeRun && !activeCandidateSet ? (
                   <div className="welcome">
                     <div className="welcome-orbit">

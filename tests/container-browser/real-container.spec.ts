@@ -50,6 +50,16 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(page.getByRole("button", { name: "Explore futures" }))
     .not.toBeVisible();
 
+  await page.setViewportSize({ width: 590, height: 1024 });
+  const standbyPlayground = page.locator(".protocol-proof-standby");
+  await expect(standbyPlayground).toBeVisible();
+  const composerBox = await page.locator(".composer").boundingBox();
+  expect(composerBox).not.toBeNull();
+  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(1024);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(590);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   const systemResponse = await request.get("/api/system");
   const system = await systemResponse.json();
   expect(system).toMatchObject({

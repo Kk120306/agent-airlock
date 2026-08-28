@@ -1635,6 +1635,58 @@ textarea:focus {
   padding: 25px 0 50px;
 }
 
+.protocol-proof-playground.protocol-proof-standby {
+  height: auto;
+  min-height: 0;
+}
+
+.protocol-proof-standby-messages {
+  overflow: visible;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+.protocol-proof-standby-messages .welcome {
+  min-height: 0;
+  padding: 0;
+}
+
+.protocol-proof-standby-messages .welcome-orbit {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 12px;
+}
+
+.protocol-proof-standby-messages .welcome-orbit::before {
+  width: 38px;
+  height: 38px;
+}
+
+.protocol-proof-standby-messages .welcome-orbit::after {
+  top: 4px;
+  right: 8px;
+  box-shadow: -37px 28px 0 #bcaef2;
+}
+
+.protocol-proof-standby-messages .welcome-orbit div {
+  width: 28px;
+  height: 28px;
+  font-size: 17px;
+}
+
+.protocol-proof-standby-messages .welcome > p {
+  margin-bottom: 14px;
+}
+
+.protocol-proof-standby-messages .prompt-grid {
+  max-width: 700px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.protocol-proof-standby-messages .prompt-grid button {
+  min-height: 66px;
+}
+
 .welcome-orbit {
   width: 72px;
   height: 72px;
@@ -4429,6 +4481,15 @@ textarea:focus {
     min-height: 44px;
   }
 
+  .protocol-proof-standby-messages {
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .protocol-proof-standby-messages .welcome-orbit {
+    display: none;
+  }
+
   .contract-badge {
     display: none;
   }
@@ -4664,6 +4725,12 @@ textarea:focus {
   }
 
   .contract-rules {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 430px) {
+  .protocol-proof-standby-messages .prompt-grid {
     grid-template-columns: 1fr;
   }
 }
