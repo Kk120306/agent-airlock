@@ -71,9 +71,18 @@ export interface AirlockRunOptions {
   deferPromotionFor?: DeferredSelectionIdentity;
 }
 
+export interface FederatedRunIdentity {
+  admissionId: string;
+  importIdentifier: string;
+  recordDigest: string;
+  producerId: string;
+  policyDigest: string;
+}
+
 export interface PromotionRecoveryAuthorityContext {
   candidateSetRunIds: ReadonlySet<string>;
   expectedCandidateSetAuthorities: ReadonlyMap<string, PromotionAuthority>;
+  expectedFederatedAuthorities: ReadonlyMap<string, PromotionAuthority>;
   terminalPromotionTransactions: ReadonlyMap<string, RunTransaction>;
 }
 
@@ -1096,7 +1105,9 @@ export class AirlockRunner {
     transaction = await this.transition(
       transaction,
       "promoting",
-      "Selected Candidate seal and every required Validation were reverified",
+      authority.kind === "federated-admission"
+        ? "Federated Admission authority and every receiver Validation were reverified"
+        : "Selected Candidate seal and every required Validation were reverified",
       onProgress,
     );
     const providerPlans = await this.resources.planAll({
@@ -1231,7 +1242,9 @@ export class AirlockRunner {
       transaction = this.recordTransition(
         transaction,
         "promoted",
-        "Selected Candidate State is now Canonical State",
+        authority.kind === "federated-admission"
+          ? "Receiver-approved federated Candidate State is now Canonical State"
+          : "Selected Candidate State is now Canonical State",
       );
       journal = await this.promotionJournal.advance(
         request.runId,
@@ -1268,6 +1281,252 @@ export class AirlockRunner {
         false,
         error,
       );
+    }
+  }
+
+  async validateAndPromoteFederatedCandidate(
+    request: AirlockRunRequest,
+    initialTransaction: RunTransaction,
+    identity: FederatedRunIdentity,
+    onProgress: TransactionProgress,
+  ): Promise<AirlockRunResult> {
+    let transaction = structuredClone(initialTransaction);
+    let preparedResources: CoordinatedPreparedResource[] = [];
+    let providerEvidence: CoordinatedResourceEvidence[] = [];
+    const candidateWorkspacePath = await this.workspaces.candidateWorkspacePath(
+      request.runId,
+      true,
+    );
+    const candidateOutboxPath = await this.workspaces.candidateOutboxPath(
+      request.runId,
+      true,
+    );
+    const candidateResourcesRoot =
+      await this.workspaces.candidateResourcesPath(request.runId, true);
+    const canonical = await this.workspaces.readCanonical(request.agentId);
+    const candidate = await this.workspaces.inspectFederatedCandidate(
+      request.agentId,
+      request.runId,
+      await this.workspaces.federatedCandidateProvenance(request.runId),
+    );
+    if (
+      !candidate ||
+      canonical.stateId !== request.canonicalStateId ||
+      transaction.canonicalStateIdBefore !== canonical.stateId ||
+      transaction.canonicalContentHashBefore !== canonical.contentHash
+    ) {
+      throw new StaleCandidateSourceError(
+        "Federated Candidate source no longer matches receiver Canonical State",
+      );
+    }
+    transaction.candidateStateId = candidate.candidateStateId;
+    const result: RunnerResult = {
+      output:
+        "Federated work passed receiver admission and local Outcome Contract Validation.",
+      threadId: canonical.codexThreadId,
+      usage: null,
+    };
+    const recordResourceEvent = async (
+      event: RunTransaction["providerResourceEvents"][number],
+    ) => {
+      appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      await onProgress(transaction);
+    };
+    try {
+      const sqliteBefore = await this.sqlite.inspect(canonical.workspacePath);
+      if (sqliteBefore.contentHash !== canonical.sqliteContentHash) {
+        throw new Error("Canonical SQLite snapshot does not match its manifest");
+      }
+      transaction.sqlite = {
+        databasePath: SQLITE_RELATIVE_PATH,
+        integrity: "passed",
+        before: sqliteBefore,
+        candidate: null,
+        after: null,
+      };
+      preparedResources = await this.resources.prepareAll({
+        agentId: request.agentId,
+        runId: request.runId,
+        candidateStateId: candidate.candidateStateId,
+        candidateResourcesRoot,
+        sourceVersions: canonical.providerVersions,
+        onEvent: recordResourceEvent,
+        onPrepared: async (resources) => {
+          preparedResources = structuredClone([...resources]);
+          transaction.providerResources = providerRecordsFromPrepared(resources);
+          await onProgress(transaction);
+        },
+      });
+      transaction.providerResources = providerRecordsFromPrepared(preparedResources);
+      transaction = await this.transition(
+        transaction,
+        "validating",
+        "Receiver is evaluating imported Candidate State under its local Outcome Contract",
+        onProgress,
+      );
+      const validationResult = await this.validator.validate(
+        canonical.workspacePath,
+        candidateWorkspacePath,
+        transaction.outcomeContract,
+        request.runId,
+      );
+      const [sqliteValidation, actionValidation, resourceValidation] =
+        await Promise.all([
+          this.sqlite.validate(
+            candidateWorkspacePath,
+            transaction.outcomeContract.secretPatterns,
+          ),
+          this.actionOutbox.validate(candidateOutboxPath, request.runId),
+          this.resources.describeAndValidate({
+            agentId: request.agentId,
+            runId: request.runId,
+            candidateStateId: candidate.candidateStateId,
+            candidateResourcesRoot,
+            prepared: preparedResources,
+            onEvent: recordResourceEvent,
+          }),
+        ]);
+      providerEvidence = resourceValidation;
+      transaction.providerResources = mergeProviderEvidence(
+        transaction.providerResources,
+        providerEvidence,
+      );
+      transaction.changes = validationResult.changes;
+      transaction.validations = [
+        {
+          name: "federated-receiver-import",
+          status: "passed",
+          required: true,
+          summary:
+            "Receiver imported the exact admitted artifact without invoking a model Runtime",
+          durationMs: 0,
+          output: JSON.stringify(
+            {
+              schemaVersion: 1,
+              admissionId: identity.admissionId,
+              importIdentifier: identity.importIdentifier,
+              producerId: identity.producerId,
+              policyDigest: identity.policyDigest,
+            },
+            null,
+            2,
+          ),
+        },
+        ...validationResult.validations,
+        sqliteValidation.evidence,
+        actionValidation.evidence,
+        ...providerEvidence.flatMap((resource) =>
+          resource.validations.map((validation) => ({
+            name: resource.providerId + ":" + validation.name,
+            status: validation.status,
+            required: resource.required && validation.required,
+            summary: validation.summary,
+            durationMs: validation.durationMs,
+            output: validation.output,
+          })),
+        ),
+      ];
+      transaction.sqlite = {
+        databasePath: SQLITE_RELATIVE_PATH,
+        integrity:
+          sqliteValidation.evidence.status === "passed" ? "passed" : "failed",
+        before: sqliteBefore,
+        candidate: sqliteValidation.snapshot,
+        after: null,
+      };
+      transaction.externalActions.intents = intentEvidence(
+        actionValidation.intents,
+        "deferred",
+      );
+      const failedRequiredValidation = transaction.validations.find(
+        (validation) => validation.required && validation.status !== "passed",
+      );
+      if (failedRequiredValidation) {
+        const providerQuarantines = await this.resources.quarantineAll({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          evidence: providerEvidence,
+          failureStage: "validate",
+          onEvent: recordResourceEvent,
+        });
+        transaction.providerResources = markProviderQuarantined(
+          transaction.providerResources,
+          providerQuarantines,
+        );
+        transaction.quarantinePath = await this.workspaces.quarantineCandidate(
+          request.runId,
+        );
+        transaction.quarantineAvailable = true;
+        transaction.disposition = "quarantined";
+        transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
+        transaction.canonicalContentHashAfter =
+          transaction.canonicalContentHashBefore;
+        transaction.externalActions.intents = intentEvidence(
+          actionValidation.intents,
+          "rejected",
+        );
+        if (transaction.sqlite) transaction.sqlite.after = sqliteBefore;
+        transaction = finalizeResources(transaction, "quarantined", undefined, {
+          sqlite: sqliteBefore.contentHash,
+          "external-actions": externalActionFingerprint([]),
+        });
+        transaction.promotionReceipt = createPromotionReceipt(transaction);
+        transaction = await this.transition(
+          transaction,
+          "quarantined",
+          "Imported Candidate failed receiver Validation " +
+            failedRequiredValidation.name,
+          onProgress,
+        );
+        return { ...result, transaction, canonicalState: null };
+      }
+      transaction = await this.transition(
+        transaction,
+        "sealed",
+        "Imported Candidate passed receiver Validation and is sealed for local Promotion",
+        onProgress,
+      );
+      const seal = createSealedCandidateReference({
+        identity: {
+          candidateSetId: identity.admissionId,
+          competitorId: identity.importIdentifier,
+        },
+        transaction,
+        result,
+      });
+      return await this.promoteSealedCandidate(
+        request,
+        seal,
+        transaction,
+        result,
+        {
+          schemaVersion: 1,
+          kind: "federated-admission",
+          admissionId: identity.admissionId,
+          importIdentifier: identity.importIdentifier,
+          recordDigest: identity.recordDigest,
+          producerId: identity.producerId,
+          policyDigest: identity.policyDigest,
+        },
+        onProgress,
+      );
+    } catch (error) {
+      if (error instanceof AirlockRunError) throw error;
+      const journal = await this.promotionJournal.read(request.runId).catch(() => null);
+      if (journal) {
+        throw new AirlockRunError(
+          "Federated Promotion was interrupted at " +
+            journal.phase +
+            " and requires durable reconciliation",
+          journal.transaction,
+          false,
+          error,
+        );
+      }
+      throw error;
     }
   }
 
@@ -1431,6 +1690,7 @@ export class AirlockRunner {
     authorityContext: PromotionRecoveryAuthorityContext = {
       candidateSetRunIds: new Set(),
       expectedCandidateSetAuthorities: new Map(),
+      expectedFederatedAuthorities: new Map(),
       terminalPromotionTransactions: new Map(),
     },
   ): Promise<{
@@ -2024,10 +2284,26 @@ function assertRecoveryAuthority(
   context: PromotionRecoveryAuthorityContext,
 ): void {
   const expected = context.expectedCandidateSetAuthorities.get(record.runId);
+  const expectedFederated = context.expectedFederatedAuthorities.get(record.runId);
   if (record.authority.kind === "ordinary-run") {
-    if (context.candidateSetRunIds.has(record.runId) || expected) {
+    if (
+      context.candidateSetRunIds.has(record.runId) ||
+      expected ||
+      expectedFederated
+    ) {
       throw new Error(
-        "Candidate Set Promotion journal is missing its persisted winner authority",
+        "Promotion journal is missing its persisted specialized authority",
+      );
+    }
+    return;
+  }
+  if (record.authority.kind === "federated-admission") {
+    if (
+      !expectedFederated ||
+      canonicalJson(record.authority) !== canonicalJson(expectedFederated)
+    ) {
+      throw new Error(
+        "Federated Promotion journal contradicts its immutable Admission Record",
       );
     }
     return;

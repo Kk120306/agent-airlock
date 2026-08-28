@@ -9,6 +9,11 @@ import { createDefaultSelectionContract } from "./candidate-selection.js";
 import { DEFAULT_CANDIDATE_SET_BUDGET } from "./candidate-set.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
+import type {
+  FederatedWorkBundle,
+  SignedSigningKeyTrustPolicyEnvelope,
+} from "@agent-airlock/portable-promotion-receipt";
+import type { FederatedAdmissionPolicy } from "./federated-admission-policy.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -134,6 +139,14 @@ const outcomeContractRollbackBody = z
     expectedCurrentVersion: z.number().int().min(1),
   })
   .strict();
+const federatedImportBody = z
+  .object({
+    transferId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+    producerId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+    bundle: z.unknown(),
+    trustPolicy: z.unknown(),
+  })
+  .strict();
 
 export async function createApp(
   config: AppConfig,
@@ -187,6 +200,17 @@ export async function createApp(
   app.get("/api/effects", async () => ({
     effects: await service.listExternalEffects(),
   }));
+
+  app.get("/api/federation/policies/active", async () =>
+    service.activeFederatedAdmissionPolicy(),
+  );
+
+  app.post("/api/federation/policies", async (request, reply) => {
+    const result = await service.installFederatedAdmissionPolicy(
+      request.body as FederatedAdmissionPolicy,
+    );
+    return reply.code(201).send(result);
+  });
 
   app.get("/api/agents", async () => ({ agents: service.listAgents() }));
 
@@ -295,6 +319,18 @@ export async function createApp(
     const body = messageBody.parse(request.body);
     const result = await service.sendMessage(id, body.content);
     return reply.code(202).send(result);
+  });
+
+  app.post("/api/agents/:id/federated-imports", async (request, reply) => {
+    const { id } = agentIdParams.parse(request.params);
+    const body = federatedImportBody.parse(request.body);
+    const result = await service.importFederatedWork(id, {
+      transferId: body.transferId,
+      producerId: body.producerId,
+      bundle: body.bundle as FederatedWorkBundle,
+      trustPolicy: body.trustPolicy as SignedSigningKeyTrustPolicyEnvelope,
+    });
+    return reply.code(result.run ? 201 : 200).send(result);
   });
 
   app.get("/api/runs/:id", async (request) => {

@@ -952,6 +952,17 @@ export class WorkspaceManager {
     return { candidateStateId: manifest.candidateStateId };
   }
 
+  async federatedCandidateProvenance(
+    runId: string,
+  ): Promise<FederatedCandidateProvenance> {
+    this.assertIdentifier(runId, "Run");
+    const manifest = await this.readCandidate(runId);
+    if (manifest.schemaVersion !== 5) {
+      throw new Error("Candidate State has no federated admission provenance");
+    }
+    return structuredClone(manifest.federatedProvenance);
+  }
+
   async prepareRepairCandidate(
     agentId: string,
     sourceRunId: string,

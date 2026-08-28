@@ -4,11 +4,16 @@ import {
   LocalTransparencyLog,
   buildPortableDecisionChain,
   buildPortableEvidencePacket,
+  evaluateSigningKeyTrust,
   encodeOfflineEvmAnchorPayload,
   loadOrCreatePortableSigningKey,
   signPortableReceipt,
+  verifyFederatedWorkBundle,
   verifyPortablePromotionEnvelope,
+  verifySignedSigningKeyTrustPolicyEnvelope,
+  type FederatedWorkBundle,
   type ReceiptDigest,
+  type SignedSigningKeyTrustPolicyEnvelope,
 } from "@agent-airlock/portable-promotion-receipt";
 import { redactSensitiveText } from "@agent-airlock/transactional-resource-sdk";
 import {
@@ -51,6 +56,15 @@ import {
   MockExternalActionDispatcher,
   type MockDeliveryReceipt,
 } from "./external-actions.js";
+import {
+  FederatedAdmissionCoordinator,
+  FederatedAdmissionJournal,
+  type FederatedAdmissionRecord,
+} from "./federated-admission-journal.js";
+import {
+  FederatedAdmissionPolicyStore,
+  type FederatedAdmissionPolicy,
+} from "./federated-admission-policy.js";
 import {
   createDefaultOutcomeContract,
   createNextOutcomeContract,
@@ -101,8 +115,21 @@ import {
   type ValidationCommandExecutor,
 } from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
+import { WorkspaceFederatedCandidateAdapter } from "./workspace-federated-candidate-adapter.js";
 
 const now = () => new Date().toISOString();
+
+export interface FederatedImportInput {
+  transferId: string;
+  producerId: string;
+  bundle: FederatedWorkBundle;
+  trustPolicy: SignedSigningKeyTrustPolicyEnvelope;
+}
+
+export interface FederatedImportResult {
+  admission: FederatedAdmissionRecord;
+  run: AgentRun | null;
+}
 
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
@@ -115,6 +142,9 @@ export class AgentService {
   private readonly promotionJournal: PromotionJournal;
   private readonly portableDecisionJournal: PortableDecisionJournal;
   private readonly agentDeletionJournal: AgentDeletionJournal;
+  private readonly federatedAdmissionPolicies: FederatedAdmissionPolicyStore;
+  private readonly federatedAdmissionJournal: FederatedAdmissionJournal;
+  private readonly federatedAdmissionCoordinator: FederatedAdmissionCoordinator;
   private readonly runnerEnforcesTokenBudgets: boolean;
   private transparencyOperation: Promise<void> = Promise.resolve();
   private providerRegistryReady = false;
@@ -146,6 +176,17 @@ export class AgentService {
     this.agentDeletionJournal = new AgentDeletionJournal(
       path.join(config.dataDirectory, "agent-deletion-journal"),
     );
+    this.federatedAdmissionPolicies = new FederatedAdmissionPolicyStore(
+      path.join(config.dataDirectory, "federated-admission-policies"),
+    );
+    this.federatedAdmissionJournal = new FederatedAdmissionJournal(
+      path.join(config.dataDirectory, "federated-admission-journal"),
+    );
+    this.federatedAdmissionCoordinator = new FederatedAdmissionCoordinator(
+      this.federatedAdmissionPolicies,
+      this.federatedAdmissionJournal,
+      new WorkspaceFederatedCandidateAdapter(workspaces),
+    );
     this.runner = new AirlockRunner(
       runner,
       workspaces,
@@ -171,6 +212,8 @@ export class AgentService {
     await this.promotionJournal.initialize();
     await this.portableDecisionJournal.initialize();
     await this.agentDeletionJournal.initialize();
+    await this.federatedAdmissionPolicies.initialize();
+    await this.federatedAdmissionJournal.initialize();
     await this.reconcileAgentDeletions();
     await this.workspaces.recoverProviderRegistryTransitions();
     const registryDescriptors = this.resourceCoordinator.registryDescriptors();
@@ -209,6 +252,8 @@ export class AgentService {
         candidateSetRunIds: promotionAuthority.candidateSetRunIds,
         expectedCandidateSetAuthorities:
           promotionAuthority.expectedCandidateSetAuthorities,
+        expectedFederatedAuthorities:
+          promotionAuthority.expectedFederatedAuthorities,
         terminalPromotionTransactions:
           promotionAuthority.terminalPromotionTransactions,
       },
@@ -2555,6 +2600,232 @@ export class AgentService {
     return this.actionDispatcher.list();
   }
 
+  async installFederatedAdmissionPolicy(
+    policy: FederatedAdmissionPolicy,
+  ): Promise<{
+    policy: FederatedAdmissionPolicy;
+    policyDigest: ReceiptDigest;
+  }> {
+    return this.federatedAdmissionPolicies.installAndActivate(policy);
+  }
+
+  async activeFederatedAdmissionPolicy(): Promise<{
+    policy: FederatedAdmissionPolicy;
+    policyDigest: ReceiptDigest;
+  }> {
+    return this.federatedAdmissionPolicies.readActive();
+  }
+
+  async importFederatedWork(
+    agentId: string,
+    input: FederatedImportInput,
+  ): Promise<FederatedImportResult> {
+    this.assertProviderRegistryReady();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.transferId)) {
+      throw new HttpError(400, "Federated transfer identity is invalid");
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.producerId)) {
+      throw new HttpError(400, "Federated producer identity is invalid");
+    }
+    const agent = this.getAgent(agentId);
+    const bundleReport = verifyFederatedWorkBundle(input.bundle);
+    const active = await this.federatedAdmissionPolicies.readActive();
+    const producerRule = active.policy.producers.find(
+      (candidate) => candidate.producerId === input.producerId,
+    );
+    const previous = await this.federatedAdmissionJournal.readByTransfer(
+      input.transferId,
+    );
+    const evaluatedAt = previous?.decision.evaluatedAt ?? now();
+    const authorityKeyIds = producerRule?.authorityKeyIds ?? [];
+    const trustPolicyReport = verifySignedSigningKeyTrustPolicyEnvelope(
+      input.trustPolicy,
+      authorityKeyIds,
+    );
+    const organizationalTrust =
+      bundleReport.valid && trustPolicyReport.policy
+        ? evaluateSigningKeyTrust(input.bundle.receipt, trustPolicyReport.policy, {
+            cryptographicValid: true,
+            evaluatedAt,
+          })
+        : null;
+    const fallbackAuthorityKeyId =
+      "sha256:" + "0".repeat(64) as ReceiptDigest;
+    const admission = await this.federatedAdmissionCoordinator.admit({
+      transferId: input.transferId,
+      producerId: input.producerId,
+      localAgentId: agentId,
+      bundle: input.bundle,
+      facts: {
+        authorityKeyId:
+          trustPolicyReport.authorityKeyId ?? fallbackAuthorityKeyId,
+        authorityPinned:
+          trustPolicyReport.valid && organizationalTrust?.trusted === true,
+        completeDecisionChain:
+          input.bundle.receipt.receipt.ancestry.depth === 0,
+        evaluatedAt,
+        onlineHandoff: null,
+        transparency: null,
+        localApprovalGranted: false,
+      },
+    });
+    if (admission.decision.decision !== "admit") {
+      return { admission, run: null };
+    }
+    const plan = await this.federatedAdmissionJournal.readByTransfer(
+      input.transferId,
+    );
+    if (!plan?.candidateRunId || !plan.candidateStateId) {
+      throw new Error("Admitted federated transfer has no prepared Candidate State");
+    }
+    const existing = this.store
+      .snapshot()
+      .runs.find((candidate) => candidate.id === plan.candidateRunId);
+    if (existing) {
+      return { admission, run: structuredClone(existing) };
+    }
+    const canonical = await this.workspaces.readCanonical(agentId);
+    const timestamp = now();
+    const transaction = createRunTransaction(
+      plan.candidateRunId,
+      canonical,
+      agent.outcomeContract,
+      this.config.maxRepairDepth,
+    );
+    transaction.events[0] = {
+      status: "preparing",
+      at: timestamp,
+      summary:
+        "Receiver admitted verified work into isolated Candidate State under " +
+        admission.decision.policyId +
+        " generation " +
+        admission.decision.policyGeneration,
+    };
+    transaction.candidateStateId = plan.candidateStateId;
+    const run: AgentRun = {
+      id: plan.candidateRunId,
+      agentId,
+      candidateSetId: null,
+      competitorId: null,
+      status: "running",
+      prompt:
+        "Federated import " +
+        admission.importIdentifier +
+        " from producer " +
+        admission.producerId,
+      output: null,
+      error: null,
+      usage: null,
+      transaction,
+      startedAt: timestamp,
+      completedAt: null,
+      createdAt: admission.recordedAt,
+    };
+    await this.store.mutate((database) => {
+      const storedAgent = database.agents.find((candidate) => candidate.id === agentId);
+      if (!storedAgent) throw new HttpError(404, "Agent not found");
+      if (storedAgent.status === "stopped") {
+        throw new HttpError(409, "Start the Agent before importing federated work");
+      }
+      if (storedAgent.status === "busy") {
+        throw new HttpError(409, "This Agent is already running");
+      }
+      if (
+        storedAgent.canonicalStateId !== canonical.stateId ||
+        storedAgent.outcomeContract.version !== transaction.outcomeContractVersion
+      ) {
+        throw new HttpError(
+          409,
+          "Receiver Canonical State changed during federated admission",
+        );
+      }
+      storedAgent.status = "busy";
+      storedAgent.lastError = null;
+      storedAgent.updatedAt = timestamp;
+      database.runs.push(run);
+    });
+    try {
+      const result = await this.runner.validateAndPromoteFederatedCandidate(
+        {
+          runId: run.id,
+          agentId,
+          workspacePath: canonical.workspacePath,
+          codexHomePath: canonical.codexHomePath,
+          prompt: run.prompt,
+          threadId: canonical.codexThreadId,
+          canonicalStateId: canonical.stateId,
+        },
+        transaction,
+        {
+          admissionId: admission.admissionId,
+          importIdentifier: admission.importIdentifier,
+          recordDigest: admission.recordDigest,
+          producerId: admission.producerId,
+          policyDigest: admission.decision.policyDigest,
+        },
+        async (progress) => {
+          await this.persistRunProgress(run.id, progress);
+        },
+      );
+      const completedAt = now();
+      await this.recordPortableDecisionAuthority(run.id, result.transaction);
+      await this.store.mutate((database) => {
+        const storedRun = database.runs.find((candidate) => candidate.id === run.id);
+        const storedAgent = database.agents.find((candidate) => candidate.id === agentId);
+        if (!storedRun || !storedAgent) {
+          throw new Error("Federated Run disappeared before completion");
+        }
+        storedRun.status = "completed";
+        storedRun.output = result.output;
+        storedRun.usage = result.usage;
+        storedRun.transaction = result.transaction;
+        storedRun.completedAt = completedAt;
+        storedAgent.status = "ready";
+        storedAgent.lastError = result.canonicalState
+          ? null
+          : "Federated Candidate was quarantined by receiver Validation";
+        if (result.canonicalState) {
+          storedAgent.workspacePath = result.canonicalState.workspacePath;
+          storedAgent.canonicalStateId = result.canonicalState.stateId;
+          storedAgent.codexThreadId = result.canonicalState.codexThreadId;
+        }
+        storedAgent.updatedAt = completedAt;
+      });
+      return { admission, run: this.getRun(run.id) };
+    } catch (error) {
+      const completedAt = now();
+      const terminal =
+        error instanceof AirlockRunError ? error.transaction : null;
+      if (
+        terminal?.disposition &&
+        terminal.status === terminal.disposition &&
+        terminal.promotionReceipt
+      ) {
+        await this.recordPortableDecisionAuthority(run.id, terminal);
+      }
+      const message = boundedPersistedError(
+        error,
+        "Federated receiver execution failed closed",
+      );
+      await this.store.mutate((database) => {
+        const storedRun = database.runs.find((candidate) => candidate.id === run.id);
+        const storedAgent = database.agents.find((candidate) => candidate.id === agentId);
+        if (storedRun) {
+          storedRun.status = "failed";
+          storedRun.error = message;
+          if (terminal) storedRun.transaction = structuredClone(terminal);
+          storedRun.completedAt = completedAt;
+        }
+        if (storedAgent) {
+          storedAgent.status = "error";
+          storedAgent.lastError = message;
+          storedAgent.updatedAt = completedAt;
+        }
+      });
+      throw error;
+    }
+  }
+
   async sendMessage(
     agentId: string,
     prompt: string,
@@ -3047,6 +3318,7 @@ export class AgentService {
   ): Promise<{
     candidateSetRunIds: Set<string>;
     expectedCandidateSetAuthorities: Map<string, PromotionAuthority>;
+    expectedFederatedAuthorities: Map<string, PromotionAuthority>;
     terminalPromotionTransactions: Map<string, RunTransaction>;
     invalidCandidateSets: Map<string, string>;
   }> {
@@ -3058,8 +3330,26 @@ export class AgentService {
       PromotionAuthority
     >();
     const terminalPromotionTransactions = new Map<string, RunTransaction>();
+    const expectedFederatedAuthorities = new Map<string, PromotionAuthority>();
     const invalidCandidateSets = new Map<string, string>();
     const runsById = new Map(runs.map((run) => [run.id, run]));
+    for (const record of await this.federatedAdmissionJournal.listRecords()) {
+      if (
+        record.decision.decision !== "admit" ||
+        !record.candidateRunId
+      ) {
+        continue;
+      }
+      expectedFederatedAuthorities.set(record.candidateRunId, {
+        schemaVersion: 1,
+        kind: "federated-admission",
+        admissionId: record.admissionId,
+        importIdentifier: record.importIdentifier,
+        recordDigest: record.recordDigest,
+        producerId: record.producerId,
+        policyDigest: record.decision.policyDigest,
+      });
+    }
     for (const run of runs) {
       try {
         const authority =
@@ -3099,6 +3389,7 @@ export class AgentService {
     return {
       candidateSetRunIds,
       expectedCandidateSetAuthorities,
+      expectedFederatedAuthorities,
       terminalPromotionTransactions,
       invalidCandidateSets,
     };

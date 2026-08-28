@@ -64,6 +64,15 @@ export type PromotionAuthority =
       sealDigest: string;
       sourceStateId: string;
       sourceContentHash: string;
+    }
+  | {
+      schemaVersion: 1;
+      kind: "federated-admission";
+      admissionId: string;
+      importIdentifier: string;
+      recordDigest: string;
+      producerId: string;
+      policyDigest: string;
     };
 
 export interface PromotionJournalScanError {
@@ -382,6 +391,32 @@ function validatePromotionAuthority(record: PromotionJournalRecord): void {
     );
     if (authority.schemaVersion !== 1) {
       throw new Error("Promotion journal authority schema is invalid");
+    }
+    return;
+  }
+  if (authority.kind === "federated-admission") {
+    assertExactKeys(
+      authority,
+      [
+        "schemaVersion",
+        "kind",
+        "admissionId",
+        "importIdentifier",
+        "recordDigest",
+        "producerId",
+        "policyDigest",
+      ],
+      "Federated Admission Promotion authority",
+    );
+    if (
+      authority.schemaVersion !== 1 ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.admissionId) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.importIdentifier) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.recordDigest) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(authority.producerId) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.policyDigest)
+    ) {
+      throw new Error("Federated Admission Promotion authority is invalid");
     }
     return;
   }

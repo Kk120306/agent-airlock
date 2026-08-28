@@ -272,6 +272,25 @@ export class FederatedAdmissionJournal {
     return structuredClone(parsed);
   }
 
+  async listRecords(): Promise<FederatedAdmissionRecord[]> {
+    const entries = await readdir(this.recordRoot(), { withFileTypes: true });
+    const records: FederatedAdmissionRecord[] = [];
+    for (const entry of entries.sort((left, right) =>
+      left.name.localeCompare(right.name),
+    )) {
+      if (!entry.isFile() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
+        continue;
+      }
+      const importIdentifier = `sha256:${entry.name.slice(0, -5)}` as ReceiptDigest;
+      const record = await this.readRecord(importIdentifier);
+      if (!record) {
+        throw new Error("Federated Admission Record disappeared during scan");
+      }
+      records.push(record);
+    }
+    return records;
+  }
+
   private async advance(
     importIdentifier: ReceiptDigest,
     phase: FederatedAdmissionPhase,
