@@ -182,8 +182,17 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
     .toBeVisible();
   await expect(panel.getByText(goldenDocument.envelope.receiptDigest)).toBeVisible();
 
-  await panel.getByText(/Selectively disclose Validation evidence/).click();
-  await panel.getByRole("checkbox", { name: /passed required/ }).check();
+  await panel.getByText("Disclose signed evidence (0/2 selected)").click();
+  await expect(
+    panel.getByText(
+      "The signed Merkle root commits to 2 Validation leaves: 1 required and 1 optional. Only selected redacted leaves and their inclusion proofs enter the downloaded envelope.",
+    ),
+  ).toBeVisible();
+  await expect(panel.getByText("Evidence commitment required · passed required"))
+    .toBeVisible();
+  await expect(panel.getByText("Evidence commitment optional · passed optional"))
+    .toBeVisible();
+  await panel.getByRole("checkbox", { name: /required · passed required/ }).check();
   await panel.getByRole("checkbox", { name: /Append to local transparency log/ }).check();
   await panel.getByRole("checkbox", { name: /Prepare digest-only EVM calldata/ }).check();
   await expect(
@@ -270,8 +279,8 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   expect(Math.min(...essentialFontSizes)).toBeGreaterThanOrEqual(12);
   await mobilePanel.getByRole("button", { name: "Generate receipt" }).click();
   await expect(mobilePanel.getByText("Self-check passed")).toBeVisible();
-  await mobilePanel.getByText(/Selectively disclose Validation evidence/).click();
-  await mobilePanel.getByRole("checkbox", { name: /passed required/ }).check();
+  await mobilePanel.getByText(/Disclose signed evidence/).click();
+  await mobilePanel.getByRole("checkbox", { name: /required · passed required/ }).check();
   await mobilePanel.getByRole("checkbox", {
     name: /Append to local transparency log/,
   }).check();
@@ -632,7 +641,10 @@ function portableExport(body: Record<string, unknown>): PortableReceiptExport {
         "The verifier does not assign organizational trust to the signing key.",
       ],
     },
-    availableDisclosureIdentities: ["validation:required-paths"],
+    availableDisclosureIdentities: [
+      "validation:required-paths",
+      "validation:optional-check",
+    ],
     availableDisclosures: [
       {
         identity: "validation:required-paths",
@@ -640,6 +652,13 @@ function portableExport(body: Record<string, unknown>): PortableReceiptExport {
         status: "passed",
         required: true,
         summary: "Required public artifacts are present.",
+      },
+      {
+        identity: "validation:optional-check",
+        category: "validation",
+        status: "passed",
+        required: false,
+        summary: "Optional operator evidence is available.",
       },
     ],
     anchor,

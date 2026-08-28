@@ -1406,6 +1406,17 @@ function PortableTrustExport({
   );
   const hasDecisionChain = (result?.decisionChain?.packets.length ?? 0) > 1;
   const proofVerified = result?.verification.valid === true && !dirty;
+  const requiredDisclosureCount = availableDisclosures.filter(
+    (disclosure) => disclosure.required,
+  ).length;
+  const optionalDisclosureCount =
+    availableDisclosures.length - requiredDisclosureCount;
+
+  const evidenceCommitmentLabel = (identity: string) => {
+    const separator = identity.lastIndexOf(":");
+    const commitment = identity.slice(separator + 1, separator + 9);
+    return `Evidence commitment ${commitment}`;
+  };
 
   return (
     <section className="portable-trust" aria-label="Portable trust receipt">
@@ -1470,12 +1481,14 @@ function PortableTrustExport({
       {availableDisclosures.length > 0 && (
         <details className="portable-disclosures">
           <summary>
-            Selectively disclose Validation evidence ({selectedDisclosures.length}/
-            {availableDisclosures.length})
+            Disclose signed evidence ({selectedDisclosures.length}/
+            {availableDisclosures.length} selected)
           </summary>
           <p>
-            The signed Merkle root commits to every leaf. Only selected leaves and their
-            inclusion proofs enter the downloaded envelope.
+            The signed Merkle root commits to {availableDisclosures.length} Validation
+            {availableDisclosures.length === 1 ? " leaf" : " leaves"}: {requiredDisclosureCount}
+            {" required and "}{optionalDisclosureCount} optional. Only selected redacted
+            leaves and their inclusion proofs enter the downloaded envelope.
           </p>
           <div>
             {availableDisclosures.map((disclosure) => (
@@ -1489,7 +1502,8 @@ function PortableTrustExport({
                 />
                 <span>
                   <strong>
-                    {disclosure.status} {disclosure.required ? "required" : "optional"}
+                    {evidenceCommitmentLabel(disclosure.identity)} · {disclosure.status}{" "}
+                    {disclosure.required ? "required" : "optional"}
                   </strong>
                   <small>{disclosure.summary ?? disclosure.category}</small>
                 </span>

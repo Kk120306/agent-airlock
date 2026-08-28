@@ -258,6 +258,13 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       name: "Signed recovery independently verified",
     }),
   ).toBeVisible();
+  await repairedEvidence.getByText("Disclose signed evidence (0/11 selected)").click();
+  await expect(
+    repairedEvidence.getByText(/commits to 11 Validation leaves: 10 required and 1 optional/),
+  ).toBeVisible();
+  await expect(
+    repairedEvidence.getByText(/Evidence commitment [a-f0-9]{8} · passed required/).first(),
+  ).toBeVisible();
   await expect(
     repairedEvidence.getByRole("button", { name: "Download verified evidence packet" }),
   ).not.toBeVisible();
