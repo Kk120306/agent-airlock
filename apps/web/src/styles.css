@@ -4464,6 +4464,12 @@ textarea:focus {
     width: 100%;
   }
 
+  .protocol-scenario-actions small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
   .protocol-paired-verdict {
     grid-template-columns: 27px minmax(0, 1fr);
   }

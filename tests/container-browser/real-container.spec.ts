@@ -232,6 +232,12 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(repairedProof).toBeVisible();
+  expect(
+    await pairedProof
+      .locator(".protocol-scenario-actions small")
+      .first()
+      .evaluate((element) => getComputedStyle(element).whiteSpace),
+  ).toBe("normal");
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
 
