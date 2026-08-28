@@ -131,6 +131,43 @@ if (!readme.includes("must be rerun at judging time")) {
   failures.push("README must disclose that live ModelArk conformance is rerun at judging time");
 }
 
+const packageManifest = JSON.parse(
+  await readFile(path.join(projectRoot, "package.json"), "utf8"),
+);
+const phaseThirteenCommand = packageManifest.scripts?.["check:phase13"];
+const requiredPhaseThirteenSteps = [
+  "npm run check",
+  "npm run test:phase11:ui:mock",
+  "npm run test:phase12:real",
+  "npm run check:phase13:runtime",
+  "npm run audit:release",
+];
+if (
+  typeof phaseThirteenCommand !== "string" ||
+  requiredPhaseThirteenSteps.some(
+    (required) => !phaseThirteenCommand.includes(required),
+  )
+) {
+  failures.push(
+    "check:phase13 must retain quality, adversarial UI, two-instance, real Runtime, and release-audit gates",
+  );
+}
+const releaseWorkflow = await readFile(
+  path.join(projectRoot, ".github/workflows/release-proof.yml"),
+  "utf8",
+);
+for (const requiredCommand of [
+  "npm run test:phase12:real",
+  "npm run check:phase13:runtime",
+]) {
+  if (!releaseWorkflow.includes(requiredCommand)) {
+    failures.push("Hosted Release proof is missing: " + requiredCommand);
+  }
+}
+if (!trackedFiles.includes("scripts/check-phase-thirteen.mjs")) {
+  failures.push("Missing tracked Phase 13 combined Runtime proof");
+}
+
 if (failures.length > 0) {
   console.error("Release audit failed:\n" + failures.map((item) => "- " + item).join("\n"));
   process.exit(1);

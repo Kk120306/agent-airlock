@@ -115,11 +115,8 @@ jobs:
       - name: Install the pinned browser runtime
         run: npx playwright install --with-deps chromium
 
-      - name: Build the pinned Codex Runtime image
-        run: docker build --file Dockerfile.runtime --tag volc-agent-runtime:local .
-
-      - name: Prove browser to isolated Candidate to Promotion
-        run: npm run test:container-browser
+      - name: Build and prove browser to real Runtime to Promotion
+        run: npm run check:phase13:runtime
 
       - name: Preserve Runtime failure evidence
         if: failure()

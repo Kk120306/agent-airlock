@@ -15,6 +15,14 @@ The automated proof pauses at an approval-required Admission, verifies Canonical
 No ModelArk request, wallet, RPC call, blockchain transaction, or paid inference is used.
 The same command runs in the hosted `Release proof` workflow on every pull request, so the repository cannot merge a UI or HTTP change that silently breaks the federation journey.
 
+Run the complete release proof, including the real pinned Codex Runtime container, with:
+
+```bash
+npm run check:phase13
+```
+
+This command auto-selects a running Docker engine, Colima Docker context, or Podman engine, builds the Runtime image, and drives both the two-instance federation browser and browser-to-container Promotion journeys.
+
 Run the same proof in a visible browser for a presentation:
 
 ```bash

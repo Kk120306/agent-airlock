@@ -589,6 +589,8 @@ The receiver durably stages bounded verified bundles, preserves the original pen
 Approval prepares one isolated Candidate State, while denial prepares none.
 Promotion journals distinguish automated Federated Admission authority from human Federated Approval authority and fail recovery closed when either committed digest is missing or contradictory.
 HTTP, journal, restart, production UI, mock browser, and real two-instance browser proofs cover the complete path without paid inference.
+`npm run check:phase13` combines the full quality gate, adversarial production UI, two-instance approval journey, auto-selected Docker or Podman Runtime image build, real container browser proof, and release audit.
+The hosted Release proof calls the same Runtime sub-gate, and the release audit rejects removal of either the two-instance or real Runtime command.
 
 ## Hackathon cut lines
 
