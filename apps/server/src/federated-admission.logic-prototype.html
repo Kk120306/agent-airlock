@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Airlock Federated Admission State Prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090d13;
+        --panel: #111821;
+        --panel-2: #17212d;
+        --line: #263446;
+        --text: #ecf3fa;
+        --muted: #9aabbd;
+        --accent: #61d7b4;
+        --accent-ink: #06281f;
+        --danger: #ff7c7c;
+        --warning: #f2c56d;
+        --good: #70e0a5;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { max-width: 850px; font-size: clamp(2rem, 5vw, 4.5rem); line-height: 1.02; letter-spacing: -0.045em; }
+      h2 { font-size: 1.05rem; letter-spacing: 0.02em; }
+      h3 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.09em; }
+      .eyebrow { color: var(--accent); font-size: 0.8rem; font-weight: 750; letter-spacing: 0.12em; text-transform: uppercase; }
+      .lede { max-width: 850px; color: #c5d1dd; font-size: 1.1rem; }
+      .notice { margin: 24px 0 30px; padding: 14px 16px; border: 1px solid #5d4924; background: #251d0f; color: #f8dba2; border-radius: 10px; }
+      .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+      .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 18px; }
+      .panel.wide { grid-column: 1 / -1; }
+      .metric { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1f2b3a; }
+      .metric:last-child { border-bottom: 0; }
+      .metric span:first-child { color: var(--muted); }
+      .metric strong { text-align: right; overflow-wrap: anywhere; }
+      .good { color: var(--good); }
+      .bad { color: var(--danger); }
+      .warn { color: var(--warning); }
+      .controls { display: flex; flex-wrap: wrap; gap: 9px; }
+      button {
+        appearance: none;
+        border: 1px solid #34465b;
+        border-radius: 9px;
+        padding: 10px 13px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+      button.danger { color: #ffc3c3; border-color: #714040; }
+      button:disabled { cursor: not-allowed; opacity: 0.45; }
+      section { margin-top: 28px; }
+      .event { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 14px; padding: 9px 0; border-bottom: 1px solid #1e2a38; }
+      .event:last-child { border-bottom: 0; }
+      .event code { color: var(--accent); font-size: 0.78rem; }
+      .empty { color: var(--muted); font-style: italic; }
+      .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+      .tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+      .walkthrough { border: 1px solid var(--line); border-radius: 14px; padding: 18px; background: #0e141c; }
+      .steps { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
+      .step-number { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; background: #26374a; color: #cbd8e5; font-size: 0.75rem; }
+      .answer { border-left: 3px solid var(--accent); padding-left: 14px; color: #cbd8e5; }
+      footer { margin-top: 40px; color: var(--muted); }
+      @media (max-width: 850px) { .grid { grid-template-columns: 1fr; } .panel.wide { grid-column: auto; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Throwaway logic prototype</p>
+      <h1>Can imported Agent work stay powerless until local proof is complete?</h1>
+      <p class="lede">
+        This prototype tests whether a receiving Airlock can verify remote evidence, create only isolated Candidate State, run its own Validations, and reuse its existing Promotion journal without giving a remote receipt any direct path to Canonical State.
+      </p>
+      <div class="notice">
+        Prototype only. This page models the state boundary in memory and does not claim that Phase 12 is implemented.
+      </div>
+
+      <section>
+        <h2>Current state</h2>
+        <div class="grid" id="state-panels"></div>
+      </section>
+
+      <section>
+        <h2>Free play</h2>
+        <p class="lede">Try actions in any order. Illegal transitions are rejected visibly and never change Canonical State.</p>
+        <div class="panel controls" id="free-play"></div>
+      </section>
+
+      <section>
+        <h2>Guided walkthroughs</h2>
+        <div class="tabs" id="scenario-tabs"></div>
+        <div class="walkthrough" id="scenario"></div>
+      </section>
+
+      <section>
+        <h2>Decision log</h2>
+        <div class="panel" id="events"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Prototype answer</h2>
+        <p class="answer">
+          The model is viable only when Admission Record publication and Candidate creation share one recoverable receiver operation, and when Promotion still requires a separate local Validation result plus the existing Promotion journal. A receipt, checkpoint, witness, or blockchain digest never advances Canonical State by itself.
+        </p>
+      </section>
+
+      <footer>Agent Airlock Phase 12 state-model prototype. Open this file directly in any modern browser.</footer>
+    </main>
+
+    <script>
+      const FederationModel = (() => {
+        const digest = (label) => "sha256:" + label.padEnd(64, "0").slice(0, 64);
+
+        function initialState(profile = "offline") {
+          return {
+            profile,
+            producer: {
+              bundle: null,
+              signerStatus: "active",
+              checkpoint: { size: 12, root: digest("root-a") },
+            },
+            transfer: {
+              artifactTampered: false,
+              receiptTampered: false,
+              receiverChallenge: null,
+              conflictingCheckpoint: false,
+            },
+            receiver: {
+              id: "receiver-airlock-b",
+              policyGeneration: 4,
+              policyDigest: digest("policy-4"),
+              pinnedCheckpoint: { size: 11, root: digest("root-before") },
+              admission: { status: "idle", reason: "not-evaluated", importId: null },
+              replayLedger: {},
+              candidate: null,
+              canonical: { version: 7, digest: digest("canonical-v7") },
+              promotionJournal: null,
+            },
+            injectedValidationFailure: false,
+            eventSequence: 0,
+            events: [],
+          };
+        }
+
+        function clone(state) { return structuredClone(state); }
+        function log(state, reason, message) {
+          state.eventSequence += 1;
+          state.events.unshift({ sequence: state.eventSequence, reason, message });
+          state.events = state.events.slice(0, 24);
+        }
+        function bundleImportId(bundle) {
+          return digest([bundle.producerId, bundle.receiptDigest, bundle.artifactDigest, bundle.artifactSchema, bundle.mediaType].join("|"));
+        }
+        function reject(state, reason, message) {
+          state.receiver.admission = { status: "rejected", reason, importId: state.producer.bundle ? bundleImportId(state.producer.bundle) : null };
+          log(state, reason, message + " Canonical State stayed at version " + state.receiver.canonical.version + ".");
+          return state;
+        }
+
+        function reduce(current, action) {
+          if (action.type === "RESET") return initialState(action.profile || current.profile);
+          const state = clone(current);
+
+          switch (action.type) {
+            case "SET_PROFILE":
+              state.profile = action.profile;
+              state.receiver.admission = { status: "idle", reason: "profile-changed", importId: null };
+              log(state, "profile-selected", "Receiver selected the " + action.profile + " evidence profile.");
+              return state;
+            case "EXPORT_BUNDLE": {
+              state.producer.bundle = {
+                producerId: "producer-airlock-a",
+                receiptDigest: digest("receipt-42"),
+                artifactDigest: digest("artifact-42"),
+                artifactSchema: "agent-airlock/workspace-change-set-v1",
+                mediaType: "application/vnd.agent-airlock.change-set+json",
+                receiptAgeMinutes: 3,
+                checkpoint: clone(state.producer.checkpoint),
+              };
+              state.transfer.artifactTampered = false;
+              state.transfer.receiptTampered = false;
+              state.transfer.conflictingCheckpoint = false;
+              log(state, "bundle-exported", "Producer exported one signed receipt and exact typed artifact commitment.");
+              return state;
+            }
+            case "ISSUE_CHALLENGE":
+              state.transfer.receiverChallenge = { id: "challenge-" + (state.eventSequence + 1), receiverId: state.receiver.id, consumed: false };
+              log(state, "challenge-issued", "Receiver issued one bounded receiver-specific challenge.");
+              return state;
+            case "TAMPER_ARTIFACT":
+              state.transfer.artifactTampered = true;
+              log(state, "artifact-mutated", "One artifact byte was changed after export.");
+              return state;
+            case "TAMPER_RECEIPT":
+              state.transfer.receiptTampered = true;
+              log(state, "receipt-mutated", "One signed receipt field was changed after export.");
+              return state;
+            case "COMPROMISE_SIGNER":
+              state.producer.signerStatus = "compromised";
+              log(state, "signer-distrusted", "Receiver policy now marks the producer receipt key compromised for new admission.");
+              return state;
+            case "PRESENT_SPLIT_VIEW":
+              state.transfer.conflictingCheckpoint = true;
+              if (state.producer.bundle) state.producer.bundle.checkpoint = { size: 11, root: digest("forked-root") };
+              log(state, "checkpoint-conflict-presented", "Producer presented a same-size checkpoint with a conflicting root.");
+              return state;
+            case "INJECT_VALIDATION_FAILURE":
+              state.injectedValidationFailure = true;
+              log(state, "validation-failure-armed", "The local required-path Validation will fail for the imported Candidate.");
+              return state;
+            case "EVALUATE_IMPORT": {
+              const bundle = state.producer.bundle;
+              if (!bundle) return reject(state, "bundle-missing", "No portable bundle exists.");
+              if (state.transfer.receiptTampered) return reject(state, "receipt-integrity-failed", "The receipt signature no longer matches.");
+              if (state.transfer.artifactTampered) return reject(state, "artifact-integrity-failed", "The artifact digest no longer matches.");
+              if (state.producer.signerStatus === "compromised") return reject(state, "signer-compromised", "Current local distrust denies new admission.");
+              if (state.profile === "online" && (!state.transfer.receiverChallenge || state.transfer.receiverChallenge.consumed)) {
+                return reject(state, "handoff-challenge-invalid", "The online profile requires one fresh unconsumed receiver challenge.");
+              }
+              if (state.profile === "transparent") {
+                if (state.transfer.conflictingCheckpoint || (bundle.checkpoint.size === state.receiver.pinnedCheckpoint.size && bundle.checkpoint.root !== state.receiver.pinnedCheckpoint.root)) {
+                  return reject(state, "transparency-split-view", "The checkpoint conflicts with the receiver's pinned view.");
+                }
+                if (bundle.checkpoint.size < state.receiver.pinnedCheckpoint.size) {
+                  return reject(state, "transparency-rollback", "The checkpoint moves behind the receiver's pinned view.");
+                }
+              }
+              const importId = bundleImportId(bundle);
+              const existing = state.receiver.replayLedger[importId];
+              if (existing) {
+                state.receiver.admission = { status: existing.status, reason: "admission-replay", importId };
+                log(state, "admission-replay", "The exact prior Admission Record was returned without creating another Candidate.");
+                return state;
+              }
+              if (state.transfer.receiverChallenge) state.transfer.receiverChallenge.consumed = true;
+              const candidateId = "candidate-import-" + (Object.keys(state.receiver.replayLedger).length + 1);
+              const record = {
+                status: "admitted",
+                reason: "admitted",
+                policyGeneration: state.receiver.policyGeneration,
+                policyDigest: state.receiver.policyDigest,
+                candidateId,
+                canonicalVersionBefore: state.receiver.canonical.version,
+              };
+              state.receiver.replayLedger[importId] = record;
+              state.receiver.admission = { status: "admitted", reason: "admitted", importId };
+              state.receiver.candidate = { id: candidateId, importId, validation: "pending", isolated: true };
+              log(state, "admitted", "Receiver atomically recorded admission and created isolated Candidate State.");
+              return state;
+            }
+            case "RUN_VALIDATION":
+              if (!state.receiver.candidate) return reject(state, "candidate-missing", "No admitted Candidate exists for local Validation.");
+              state.receiver.candidate.validation = state.injectedValidationFailure ? "failed" : "passed";
+              log(state, state.injectedValidationFailure ? "local-validation-failed" : "local-validation-passed", state.injectedValidationFailure ? "Receiver Outcome Contract rejected the imported Candidate." : "Every required receiver Validation passed.");
+              return state;
+            case "AUTHORIZE_PROMOTION":
+              if (!state.receiver.candidate) return reject(state, "candidate-missing", "No Candidate exists for Promotion.");
+              if (state.receiver.candidate.validation !== "passed") return reject(state, "promotion-not-eligible", "Local Validation has not made this Candidate eligible.");
+              state.receiver.promotionJournal = {
+                phase: "approved",
+                candidateId: state.receiver.candidate.id,
+                targetVersion: state.receiver.canonical.version + 1,
+                targetDigest: digest("canonical-v" + (state.receiver.canonical.version + 1)),
+              };
+              log(state, "promotion-authorized", "Receiver wrote its own Promotion journal. Remote evidence still has no Promotion authority.");
+              return state;
+            case "SIMULATE_CRASH":
+              if (!state.receiver.promotionJournal) {
+                log(state, "crash-before-authority", "Process stopped without a Promotion journal. Canonical State cannot advance during recovery.");
+                return state;
+              }
+              state.receiver.promotionJournal.phase = "installing";
+              log(state, "promotion-interrupted", "Process stopped after local Promotion authority but before completion.");
+              return state;
+            case "RECOVER":
+              if (!state.receiver.promotionJournal) {
+                log(state, "recovery-noop", "Recovery found no Promotion authority and left Canonical State unchanged.");
+                return state;
+              }
+              if (state.receiver.promotionJournal.phase === "completed") {
+                log(state, "promotion-recovery-replay", "Recovery confirmed the completed receiver-authorized Promotion without changing Canonical State.");
+                return state;
+              }
+              if (!state.receiver.candidate || state.receiver.candidate.id !== state.receiver.promotionJournal.candidateId || state.receiver.candidate.validation !== "passed") {
+                return reject(state, "promotion-recovery-contradiction", "Recovery evidence does not match the validated Candidate.");
+              }
+              state.receiver.canonical = { version: state.receiver.promotionJournal.targetVersion, digest: state.receiver.promotionJournal.targetDigest };
+              state.receiver.promotionJournal.phase = "completed";
+              state.receiver.candidate = null;
+              log(state, "promotion-recovered", "Recovery completed exactly the receiver-authorized Promotion once.");
+              return state;
+            default:
+              log(state, "unknown-action", "The prototype ignored an unknown action.");
+              return state;
+          }
+        }
+
+        return { initialState, reduce };
+      })();
+
+      const actionCatalog = [
+        ["Export producer bundle", { type: "EXPORT_BUNDLE" }, "primary"],
+        ["Use offline profile", { type: "SET_PROFILE", profile: "offline" }],
+        ["Use online challenge", { type: "SET_PROFILE", profile: "online" }],
+        ["Require transparency", { type: "SET_PROFILE", profile: "transparent" }],
+        ["Issue receiver challenge", { type: "ISSUE_CHALLENGE" }],
+        ["Evaluate admission", { type: "EVALUATE_IMPORT" }, "primary"],
+        ["Run local Validations", { type: "RUN_VALIDATION" }],
+        ["Write Promotion authority", { type: "AUTHORIZE_PROMOTION" }],
+        ["Simulate process crash", { type: "SIMULATE_CRASH" }],
+        ["Recover authorized Promotion", { type: "RECOVER" }, "primary"],
+        ["Change one artifact byte", { type: "TAMPER_ARTIFACT" }, "danger"],
+        ["Change one receipt field", { type: "TAMPER_RECEIPT" }, "danger"],
+        ["Distrust producer signer", { type: "COMPROMISE_SIGNER" }, "danger"],
+        ["Present conflicting checkpoint", { type: "PRESENT_SPLIT_VIEW" }, "danger"],
+        ["Make local Validation fail", { type: "INJECT_VALIDATION_FAILURE" }, "danger"],
+        ["Reset everything", { type: "RESET" }],
+      ];
+
+      const scenarios = [
+        {
+          id: "happy",
+          name: "Offline success",
+          profile: "offline",
+          description: "Watch Canonical State stay unchanged through admission and Validation, then advance only after receiver Promotion authority exists.",
+          steps: [
+            ["Export evidence and artifact", { type: "EXPORT_BUNDLE" }],
+            ["Admit into Candidate State", { type: "EVALUATE_IMPORT" }],
+            ["Run receiver Validations", { type: "RUN_VALIDATION" }],
+            ["Write receiver Promotion authority", { type: "AUTHORIZE_PROMOTION" }],
+            ["Recover or complete Promotion", { type: "RECOVER" }],
+          ],
+        },
+        {
+          id: "tamper",
+          name: "Artifact tamper",
+          profile: "offline",
+          description: "A one-byte mutation must fail before Candidate State exists and leave receiver Canonical State untouched.",
+          steps: [
+            ["Export valid bundle", { type: "EXPORT_BUNDLE" }],
+            ["Change one artifact byte", { type: "TAMPER_ARTIFACT" }],
+            ["Attempt admission", { type: "EVALUATE_IMPORT" }],
+          ],
+        },
+        {
+          id: "replay",
+          name: "Exact replay",
+          profile: "offline",
+          description: "An exact retry must return the immutable prior Admission Record without creating a second Candidate.",
+          steps: [
+            ["Export valid bundle", { type: "EXPORT_BUNDLE" }],
+            ["Admit once", { type: "EVALUATE_IMPORT" }],
+            ["Offer the same import again", { type: "EVALUATE_IMPORT" }],
+          ],
+        },
+        {
+          id: "revoked",
+          name: "Current distrust",
+          profile: "offline",
+          description: "A historically valid signature stays mathematically inspectable but current local distrust denies new Candidate creation.",
+          steps: [
+            ["Export while signer is active", { type: "EXPORT_BUNDLE" }],
+            ["Mark signer compromised locally", { type: "COMPROMISE_SIGNER" }],
+            ["Attempt admission", { type: "EVALUATE_IMPORT" }],
+          ],
+        },
+        {
+          id: "split",
+          name: "Split view",
+          profile: "transparent",
+          description: "A same-size signed checkpoint with a different root is direct equivocation evidence and must not be downgraded to signature-only admission.",
+          steps: [
+            ["Export transparent bundle", { type: "EXPORT_BUNDLE" }],
+            ["Present conflicting checkpoint", { type: "PRESENT_SPLIT_VIEW" }],
+            ["Attempt transparent admission", { type: "EVALUATE_IMPORT" }],
+          ],
+        },
+        {
+          id: "recovery",
+          name: "Crash recovery",
+          profile: "offline",
+          description: "A process interruption after local authority must recover exactly one Promotion, while an interruption before authority cannot advance Canonical State.",
+          steps: [
+            ["Export valid bundle", { type: "EXPORT_BUNDLE" }],
+            ["Admit into Candidate State", { type: "EVALUATE_IMPORT" }],
+            ["Pass local Validations", { type: "RUN_VALIDATION" }],
+            ["Write Promotion authority", { type: "AUTHORIZE_PROMOTION" }],
+            ["Interrupt installation", { type: "SIMULATE_CRASH" }],
+            ["Recover from journal", { type: "RECOVER" }],
+            ["Repeat recovery safely", { type: "RECOVER" }],
+          ],
+        },
+      ];
+
+      let state = FederationModel.initialState();
+      let activeScenario = scenarios[0];
+      let scenarioStep = 0;
+
+      const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
+      const short = (value) => value ? value.slice(0, 15) + "…" : "none";
+      const tone = (value) => ["passed", "admitted", "completed", "active"].includes(value) ? "good" : ["failed", "rejected", "compromised"].includes(value) ? "bad" : "warn";
+
+      function panel(title, rows) {
+        return `<article class="panel"><h3>${escape(title)}</h3>${rows.map(([label, value, className = ""]) => `<div class="metric"><span>${escape(label)}</span><strong class="${className}">${escape(value)}</strong></div>`).join("")}</article>`;
+      }
+
+      function render() {
+        const candidate = state.receiver.candidate;
+        document.querySelector("#state-panels").innerHTML = [
+          panel("Remote evidence", [
+            ["Bundle", state.producer.bundle ? "exported" : "not exported", state.producer.bundle ? "good" : "warn"],
+            ["Signer", state.producer.signerStatus, tone(state.producer.signerStatus)],
+            ["Artifact", state.transfer.artifactTampered ? "mutated" : "exact", state.transfer.artifactTampered ? "bad" : "good"],
+            ["Receipt", state.transfer.receiptTampered ? "mutated" : "exact", state.transfer.receiptTampered ? "bad" : "good"],
+          ]),
+          panel("Receiver admission", [
+            ["Evidence profile", state.profile],
+            ["Policy generation", String(state.receiver.policyGeneration)],
+            ["Decision", state.receiver.admission.status, tone(state.receiver.admission.status)],
+            ["Reason", state.receiver.admission.reason, tone(state.receiver.admission.status)],
+            ["Replay records", String(Object.keys(state.receiver.replayLedger).length)],
+          ]),
+          panel("Local authority", [
+            ["Canonical version", String(state.receiver.canonical.version), "good"],
+            ["Canonical digest", short(state.receiver.canonical.digest)],
+            ["Candidate", candidate ? candidate.id : "none", candidate ? "warn" : "good"],
+            ["Local Validation", candidate ? candidate.validation : "not running", candidate ? tone(candidate.validation) : ""],
+            ["Promotion journal", state.receiver.promotionJournal ? state.receiver.promotionJournal.phase : "none", state.receiver.promotionJournal ? tone(state.receiver.promotionJournal.phase) : ""],
+          ]),
+        ].join("");
+
+        document.querySelector("#events").innerHTML = state.events.length
+          ? state.events.map((event) => `<div class="event"><code>${escape(event.reason)}</code><span>${escape(event.message)}</span></div>`).join("")
+          : '<p class="empty">No actions yet.</p>';
+
+        document.querySelector("#scenario-tabs").innerHTML = scenarios.map((scenario) => `<button data-scenario="${scenario.id}" aria-selected="${activeScenario.id === scenario.id}">${escape(scenario.name)}</button>`).join("");
+        document.querySelectorAll("[data-scenario]").forEach((button) => button.addEventListener("click", () => startScenario(button.dataset.scenario)));
+
+        document.querySelector("#scenario").innerHTML = `<h3>${escape(activeScenario.name)}</h3><p>${escape(activeScenario.description)}</p><div class="steps">${activeScenario.steps.map(([label], index) => `<span class="step-number">${index + 1}</span><button data-step="${index}" ${index !== scenarioStep ? "disabled" : ""}>${escape(label)}</button>`).join("")}</div>`;
+        document.querySelectorAll("[data-step]").forEach((button) => button.addEventListener("click", () => runScenarioStep(Number(button.dataset.step))));
+      }
+
+      function dispatch(action) { state = FederationModel.reduce(state, action); render(); }
+      function startScenario(id) {
+        activeScenario = scenarios.find((scenario) => scenario.id === id) || scenarios[0];
+        scenarioStep = 0;
+        state = FederationModel.initialState(activeScenario.profile);
+        render();
+      }
+      function runScenarioStep(index) {
+        if (index !== scenarioStep) return;
+        state = FederationModel.reduce(state, activeScenario.steps[index][1]);
+        scenarioStep = Math.min(scenarioStep + 1, activeScenario.steps.length);
+        render();
+      }
+
+      document.querySelector("#free-play").innerHTML = actionCatalog.map(([label, action, className = ""]) => `<button class="${className}" data-action='${escape(JSON.stringify(action))}'>${escape(label)}</button>`).join("");
+      document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => dispatch(JSON.parse(button.dataset.action))));
+      render();
+    </script>
+  </body>
+</html>
