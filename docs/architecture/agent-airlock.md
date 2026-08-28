@@ -291,9 +291,11 @@ Phase 12 persists immutable receiver policy generations, admission plans, Admiss
 Phase 13 persists a separate immutable Federated Approval Decision plus a monotonic approval recovery plan.
 The pending Admission remains unchanged, and the federated-approval Promotion authority commits both the pending Admission digest and Approval Decision digest before any physical Promotion can recover.
 Phase 14 derives a read-only operator inbox from Admission Records, Approval Decision records, approval plans, and safe Run summaries.
-The projection is Agent-scoped, deterministically ordered, bounded by the server, and excludes staged bundles, trust policies, mutable paths, Runtime output, Validation output, and credentials.
+The projection is Agent-scoped, deterministically ordered, bounded by the server, and excludes staged bundles, trust policies, local mutable paths, Runtime output, Validation output, and credentials.
 The inbox is never authority.
 An action selected from the inbox still passes through the same append-only decision coordinator and dual-authority Promotion path.
+Phase 15 reverifies the staged bundle and derives a content-free review projection containing normalized artifact-relative paths, operation metadata, bounded producer claims, and resource counts.
+The review projection is explanatory evidence only and cannot substitute for Candidate materialization or receiver Validation.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -341,6 +343,7 @@ Schema evolution must increment the database version and include a tested migrat
 | Federated Approval recovery lacks either the pending Admission or Approval Decision authority                       | Refuse physical Promotion recovery, dispatch no effect, and surface a bounded recovery failure.                                                                                                                                                                  |
 | Browser state is lost or an operator opens the receiver on another client                                           | Reconstruct the bounded Agent-scoped inbox from durable journals and require the normal append-only decision path.                                                                                                                                                |
 | A stale operator submits a decision after another operator committed a contradiction                               | Return a visible conflict, retain the first immutable decision, create no additional Candidate, and leave Canonical State unchanged.                                                                                                                             |
+| Staged evidence is missing or changes before an operator requests review                                            | Fail the complete inbox request closed, render no partial review, create no Candidate, and leave Canonical State unchanged.                                                                                                                                      |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 

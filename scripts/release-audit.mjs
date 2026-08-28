@@ -174,6 +174,7 @@ const federationUiProof = await readFile(
 for (const requiredProof of [
   "discovers and resolves a pending Admission after a full browser reload",
   "fails closed when a stale operator contradicts an append-only decision",
+  "PRODUCER CLAIM · NOT RECEIVER AUTHORITY",
 ]) {
   if (!federationUiProof.includes(requiredProof)) {
     failures.push("Federation operator continuity proof is missing: " + requiredProof);
@@ -185,10 +186,11 @@ const federationRealProof = await readFile(
 );
 if (
   !federationRealProof.includes("await page.reload()") ||
-  !federationRealProof.includes("Federated approval inbox")
+  !federationRealProof.includes("Federated approval inbox") ||
+  !federationRealProof.includes("Pending Admission review")
 ) {
   failures.push(
-    "Two-instance federation proof must cross a receiver browser reload through the durable inbox",
+    "Two-instance federation proof must cross receiver reload and inspect the bounded Admission review",
   );
 }
 

@@ -164,6 +164,21 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
     .locator(".federation-inbox-list button")
     .filter({ hasText: "browser-handoff-approved" })
     .click();
+  const review = federationPanel.getByRole("region", {
+    name: "Pending Admission review",
+  });
+  await expect(
+    review.getByText("PRODUCER CLAIM · NOT RECEIVER AUTHORITY"),
+  ).toBeVisible();
+  const firstOperation = bundle.artifact.artifact.operations[0]!;
+  const firstOperationPath =
+    firstOperation.operation === "rename"
+      ? firstOperation.fromPath
+      : firstOperation.path;
+  await expect(review.getByText(firstOperationPath, { exact: true })).toBeVisible();
+  await expect(
+    review.getByText(/Receiver Outcome Contract checks run only after approval/),
+  ).toBeVisible();
   await expect(
     federationPanel.getByText(
       "Canonical State is unchanged while this decision is pending.",

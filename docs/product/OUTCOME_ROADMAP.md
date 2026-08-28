@@ -625,6 +625,36 @@ The production API exposes a fixed safe projection with a bounded limit, and the
 HTTP coverage proves service-restart continuity and Agent scoping, while production-browser coverage proves reload recovery and fail-closed stale-operator conflicts.
 The two-instance release proof now reloads the receiving browser between pending Admission and local approval.
 
+### Phase 15: Evidence-first Admission review
+
+**Outcome**
+
+The operator can understand the exact bounded change proposal before deciding, without exposing staged content or treating producer evidence as receiver authority.
+
+**Build**
+
+- Reverify the exact staged Federated Work Bundle whenever its review projection is requested.
+- Project only normalized artifact-relative operation paths, operation kinds, payload byte counts, bounded producer receipt claims, and resource commitment counts.
+- Cap displayed operations while retaining the exact total and an explicit truncation flag.
+- Label every producer claim as non-authoritative and explain that receiver Outcome Contract checks run only after approval.
+- Keep content, signatures, keys, trust policies, digests not already in the Admission, local paths, Runtime output, and Validation output out of the projection.
+
+**Exit gate**
+
+- The reload-safe inbox visibly shows the proposed add, modify, delete, and rename metadata before a decision.
+- API tests prove content and signing material never enter the review response.
+- A one-bit staged evidence contradiction makes the entire review request fail closed while Canonical State and Candidate count remain unchanged.
+- The real two-instance browser proof reviews an exact transferred operation before approval.
+
+**Beyond-expectations finish**
+
+Make human approval informed and honest: the producer may describe what happened, but only receiver-owned isolation and Validation can establish what is safe to accept.
+
+**Current status**
+
+Implementation is tracked by [Wayfinder issue 23](https://github.com/Kk120306/agent-airlock/issues/23).
+The safe review projection and production review panel are implemented with reload, redaction, and staged-tamper coverage.
+
 ## Hackathon cut lines
 
 ### Qualifying proof

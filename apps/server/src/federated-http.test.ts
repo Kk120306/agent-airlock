@@ -253,12 +253,37 @@ describe("federated HTTP execution", () => {
           state: "pending",
           admission: { transferId: "transfer-inbox-restart" },
           approval: null,
+          review: {
+            authority: "producer-claim-non-authoritative",
+            producerClaim: {
+              runId: fixture.receipt.receipt.decision.runId,
+              agentId: fixture.receipt.receipt.decision.agentId,
+              disposition: "promoted",
+            },
+            artifact: {
+              operationCount: 1,
+              displayedOperationCount: 1,
+              truncated: false,
+              totalPayloadBytes: 15,
+              operations: [
+                {
+                  operation: "add",
+                  path: "federated.txt",
+                  toPath: null,
+                  byteLength: 15,
+                },
+              ],
+            },
+          },
           run: null,
         },
       ],
     });
     expect(beforeRestart.body).not.toContain("federated work");
     expect(beforeRestart.body).not.toContain("privateKey");
+    expect(beforeRestart.body).not.toContain('"content"');
+    expect(beforeRestart.body).not.toContain('"signature"');
+    expect(beforeRestart.body).not.toContain('"keyId"');
     const otherAgent = await fixture.service.createAgent({ name: "Other Receiver" });
     const otherInbox = await fixture.app.inject({
       method: "GET",
@@ -315,6 +340,45 @@ describe("federated HTTP execution", () => {
       run: { status: "completed", disposition: "promoted" },
     });
     await restartedApp.close();
+  });
+
+  it("fails the review closed when staged evidence changes by one bit", async () => {
+    const fixture = await createFixture();
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const canonicalBefore = await fixture.workspaces.readCanonical(fixture.agentId);
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-review-tamper",
+        producerId: "producer-one",
+        bundle: fixture.bundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+    const importIdentifier = imported.json().admission.importIdentifier as string;
+    const stagedPath = path.join(
+      fixture.config.dataDirectory,
+      "federated-admission-journal",
+      "pending-bundles",
+      importIdentifier.slice("sha256:".length) + ".json",
+    );
+    const staged = await readFile(stagedPath, "utf8");
+    const tampered = staged.replace('"content":"Z', '"content":"Y');
+    expect(tampered).not.toBe(staged);
+    await writeFile(stagedPath, tampered, { mode: 0o600 });
+
+    const inbox = await fixture.app.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions`,
+    });
+    expect(inbox.statusCode).toBe(500);
+    expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(
+      canonicalBefore,
+    );
+    expect(fixture.service.getRuns(fixture.agentId)).toHaveLength(0);
+    await fixture.app.close();
   });
 
   it("denies approval-required work without creating a Run or changing Canonical", async () => {

@@ -354,6 +354,8 @@ Phase 13 adds resumable approval-required Admissions without mutating the origin
 A separate immutable Federated Approval Decision binds receiver-derived operator identity and reason to the exact pending Admission, and approved Promotion recovery requires both digests.
 Phase 14 adds an Agent-scoped durable approval inbox derived from those immutable records.
 Operators can reload or hand off the browser, recover the same pending item, and visibly fail closed when a stale decision contradicts the append-only record.
+Phase 15 adds an evidence-first review that exposes bounded operation metadata and producer claims without staged content or signing material.
+The interface explicitly separates those non-authoritative claims from receiver Outcome Contract checks that run after approval.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations

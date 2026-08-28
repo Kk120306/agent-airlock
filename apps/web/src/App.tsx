@@ -2673,6 +2673,7 @@ function FederationAirlock({
             ) ?? null
           : null,
       );
+      return response.admissions;
     } finally {
       setInboxBusy(false);
     }
@@ -2728,7 +2729,13 @@ function FederationAirlock({
       setSelectedInboxItem(null);
       setResult(imported);
       await onImported(imported);
-      await loadInbox();
+      const admissions = await loadInbox();
+      setSelectedInboxItem(
+        admissions.find(
+          (item) =>
+            item.admission.admissionId === imported.admission.admissionId,
+        ) ?? null,
+      );
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -2906,6 +2913,72 @@ function FederationAirlock({
           </div>
         )}
       </section>
+
+      {selectedInboxItem?.review && (
+        <section
+          className="federation-review"
+          aria-label="Pending Admission review"
+        >
+          <div className="federation-review-heading">
+            <div>
+              <span className="eyebrow">Evidence-first review</span>
+              <strong>
+                {selectedInboxItem.review.artifact.operationCount} proposed operation
+                {selectedInboxItem.review.artifact.operationCount === 1 ? "" : "s"}
+              </strong>
+            </div>
+            <span>PRODUCER CLAIM · NOT RECEIVER AUTHORITY</span>
+          </div>
+          <div className="federation-review-claim">
+            <div>
+              <span>Claimed Run</span>
+              <code>{selectedInboxItem.review.producerClaim.runId}</code>
+            </div>
+            <div>
+              <span>Claimed Agent</span>
+              <code>{selectedInboxItem.review.producerClaim.agentId}</code>
+            </div>
+            <div>
+              <span>Claimed result</span>
+              <strong>{selectedInboxItem.review.producerClaim.disposition}</strong>
+            </div>
+            <div>
+              <span>Payload</span>
+              <strong>
+                {formatBytes(selectedInboxItem.review.artifact.totalPayloadBytes)}
+              </strong>
+            </div>
+          </div>
+          <div className="federation-review-operations">
+            {selectedInboxItem.review.artifact.operations.map((operation) => (
+              <div key={operation.operation + ":" + operation.path}>
+                <span data-operation={operation.operation}>
+                  {operation.operation.toUpperCase()}
+                </span>
+                <code>
+                  {operation.path}
+                  {operation.toPath ? " → " + operation.toPath : ""}
+                </code>
+                <small>
+                  {operation.byteLength === null
+                    ? "no embedded payload"
+                    : formatBytes(operation.byteLength)}
+                </small>
+              </div>
+            ))}
+          </div>
+          {selectedInboxItem.review.artifact.truncated && (
+            <p>
+              Showing {selectedInboxItem.review.artifact.displayedOperationCount} of {" "}
+              {selectedInboxItem.review.artifact.operationCount} operations.
+            </p>
+          )}
+          <p>
+            Receiver Outcome Contract checks run only after approval.
+            This summary contains metadata, never staged file content.
+          </p>
+        </section>
+      )}
 
       <div className="federation-pipeline" aria-label="Federated import pipeline">
         {pipeline.map((stage, index) => (

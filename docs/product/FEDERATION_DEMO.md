@@ -56,4 +56,6 @@ After any completed local Promotion, generate a Portable Trust receipt and choos
 On the receiving Agent, choose **Federation**, select the trusted producer, upload the Federated Work Bundle and signed organizational trust policy, and choose **Admit into Candidate State**.
 When the policy requires approval, record a reason and choose **Approve into Candidate State** or **Deny and preserve Canonical**.
 You may reload or reopen the receiver before deciding, select the pending transfer in **Durable approval inbox**, and continue through the same append-only decision path.
+Before deciding, point out **Evidence-first review**, the exact proposed operation paths and sizes, and the explicit **Producer claim - not receiver authority** boundary.
+No staged file content or signing material is sent to the browser, and the receiver still performs its own checks only after approval.
 The resulting panel shows the durable Admission identity, policy generation, operator decision digest, receiver Run, required Validation count, and whether Canonical State advanced.

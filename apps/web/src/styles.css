@@ -1646,6 +1646,118 @@ textarea:focus {
   font-size: 7px;
 }
 
+.federation-review {
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid #bdd5da;
+  border-radius: 12px;
+  background: #f8fbfc;
+}
+
+.federation-review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.federation-review-heading strong {
+  display: block;
+  margin-top: 3px;
+  color: #244d57;
+  font-size: 11px;
+}
+
+.federation-review-heading > span {
+  padding: 5px 8px;
+  border: 1px solid #e1c789;
+  border-radius: 999px;
+  background: #fff9e9;
+  color: #805b13;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.federation-review-claim {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.federation-review-claim > div {
+  min-width: 0;
+  padding: 8px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid #dce7e9;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.federation-review-claim span {
+  color: #718185;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.federation-review-claim code,
+.federation-review-claim strong {
+  overflow: hidden;
+  color: #315860;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.federation-review-operations {
+  display: grid;
+  gap: 5px;
+}
+
+.federation-review-operations > div {
+  min-width: 0;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #dce7e9;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.federation-review-operations span {
+  color: #477078;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.federation-review-operations span[data-operation="delete"] {
+  color: #a34f3e;
+}
+
+.federation-review-operations code {
+  overflow: hidden;
+  color: #315860;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.federation-review-operations small,
+.federation-review > p {
+  color: #718185;
+  font-size: 7px;
+}
+
+.federation-review > p {
+  margin: 0;
+}
+
 .federation-pipeline {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4828,6 +4940,10 @@ textarea:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .federation-review-claim {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .explore-controls {
     grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr);
   }
@@ -4865,6 +4981,19 @@ textarea:focus {
   .federation-pipeline,
   .federation-verdict dl {
     grid-template-columns: 1fr;
+  }
+
+  .federation-review-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .federation-review-operations > div {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .federation-review-operations small {
+    grid-column: 2;
   }
 
   .federation-actions {

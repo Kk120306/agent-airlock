@@ -236,6 +236,44 @@ const approval = {
   recordDigest: digest("8"),
 };
 
+const pendingReview: NonNullable<FederatedAdmissionInboxItem["review"]> = {
+  schemaVersion: 1,
+  authority: "producer-claim-non-authoritative",
+  producerClaim: {
+    runId: "producer-run-001",
+    agentId: "producer-agent-001",
+    disposition: "promoted",
+    decidedAt: timestamp,
+    outcomeContractVersion: 4,
+  },
+  artifact: {
+    operationCount: 2,
+    displayedOperationCount: 2,
+    truncated: false,
+    totalPayloadBytes: 1536,
+    operations: [
+      {
+        operation: "modify",
+        path: "src/release.ts",
+        toPath: null,
+        byteLength: 1024,
+      },
+      {
+        operation: "add",
+        path: "docs/release-proof.md",
+        toPath: null,
+        byteLength: 512,
+      },
+    ],
+  },
+  resources: {
+    builtinBefore: 3,
+    builtinAfter: 3,
+    providerBefore: 1,
+    providerAfter: 1,
+  },
+};
+
 test("imports signed work through the visible receiver-owned Promotion path", async ({
   page,
 }) => {
@@ -337,6 +375,7 @@ test("discovers and resolves a pending Admission after a full browser reload", a
   const pendingInboxItem: FederatedAdmissionInboxItem = {
     admission: pending.admission,
     approval: null,
+    review: pendingReview,
     run: null,
     state: "pending",
   };
@@ -360,6 +399,17 @@ test("discovers and resolves a pending Admission after a full browser reload", a
     .locator(".federation-inbox-list button")
     .filter({ hasText: "judge-transfer-001" })
     .click();
+  const review = panel.getByRole("region", { name: "Pending Admission review" });
+  await expect(review.getByText("PRODUCER CLAIM · NOT RECEIVER AUTHORITY"))
+    .toBeVisible();
+  await expect(review.getByText("src/release.ts")).toBeVisible();
+  await expect(review.getByText("docs/release-proof.md")).toBeVisible();
+  await expect(review.getByText(/Receiver Outcome Contract checks run only after approval/))
+    .toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(review).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
   await expect(panel.getByRole("region", { name: "Local admission decision" }))
     .toBeVisible();
   await panel.getByLabel("Decision reason").fill(approval.reason);
@@ -377,6 +427,7 @@ test("fails closed when a stale operator contradicts an append-only decision", a
   const pendingInboxItem: FederatedAdmissionInboxItem = {
     admission: pending.admission,
     approval: null,
+    review: pendingReview,
     run: null,
     state: "pending",
   };

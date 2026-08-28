@@ -156,10 +156,41 @@ export type FederatedAdmissionInboxState =
 export interface FederatedAdmissionInboxItem {
   admission: FederatedAdmissionRecord;
   approval: FederatedApprovalDecisionRecord | null;
+  review: FederatedAdmissionReview | null;
   run: Pick<AgentRun, "id" | "status"> & {
     disposition: RunTransaction["disposition"];
   } | null;
   state: FederatedAdmissionInboxState;
+}
+
+export interface FederatedAdmissionReview {
+  schemaVersion: 1;
+  authority: "producer-claim-non-authoritative";
+  producerClaim: {
+    runId: string;
+    agentId: string;
+    disposition: "promoted" | "quarantined" | "discarded" | "cancelled";
+    decidedAt: string;
+    outcomeContractVersion: number;
+  };
+  artifact: {
+    operationCount: number;
+    displayedOperationCount: number;
+    truncated: boolean;
+    totalPayloadBytes: number;
+    operations: Array<{
+      operation: "add" | "modify" | "delete" | "rename";
+      path: string;
+      toPath: string | null;
+      byteLength: number | null;
+    }>;
+  };
+  resources: {
+    builtinBefore: number;
+    builtinAfter: number;
+    providerBefore: number;
+    providerAfter: number;
+  };
 }
 
 export class AgentService {
@@ -2739,6 +2770,18 @@ export class AgentService {
             admission.admissionId,
           );
         const approval = approvalResult?.approval ?? null;
+        const stagedBundle =
+          admission.decision.decision === "pending"
+            ? await this.federatedAdmissionJournal.readPendingBundle(admission)
+            : null;
+        if (admission.decision.decision === "pending" && !stagedBundle) {
+          throw new Error(
+            "Approval-pending Federated Work Bundle is not durably staged",
+          );
+        }
+        const review = stagedBundle
+          ? buildFederatedAdmissionReview(stagedBundle)
+          : null;
         const runRecord = admission.candidateRunId
           ? snapshot.runs.find((run) => run.id === admission.candidateRunId)
           : approvalResult?.plan.candidateRunId
@@ -2772,6 +2815,7 @@ export class AgentService {
         return {
           admission: structuredClone(admission),
           approval: approval ? structuredClone(approval) : null,
+          review,
           run,
           state,
         };
@@ -5597,4 +5641,52 @@ function markTransactionCancelledBeforeStart(
   });
   next.promotionReceipt = createPromotionReceipt(next);
   return next;
+}
+
+function buildFederatedAdmissionReview(
+  bundle: FederatedWorkBundle,
+): FederatedAdmissionReview {
+  const operations = bundle.artifact.artifact.operations;
+  const displayed = operations.slice(0, 50).map((operation) => ({
+    operation: operation.operation,
+    path:
+      operation.operation === "rename" ? operation.fromPath : operation.path,
+    toPath: operation.operation === "rename" ? operation.toPath : null,
+    byteLength:
+      operation.operation === "add" || operation.operation === "modify"
+        ? operation.byteLength
+        : null,
+  }));
+  const receipt = bundle.receipt.receipt;
+  return {
+    schemaVersion: 1,
+    authority: "producer-claim-non-authoritative",
+    producerClaim: {
+      runId: receipt.decision.runId,
+      agentId: receipt.decision.agentId,
+      disposition: receipt.decision.disposition,
+      decidedAt: receipt.decision.decidedAt,
+      outcomeContractVersion: receipt.outcomeContract.version,
+    },
+    artifact: {
+      operationCount: operations.length,
+      displayedOperationCount: displayed.length,
+      truncated: displayed.length < operations.length,
+      totalPayloadBytes: operations.reduce(
+        (total, operation) =>
+          total +
+          (operation.operation === "add" || operation.operation === "modify"
+            ? operation.byteLength
+            : 0),
+        0,
+      ),
+      operations: displayed,
+    },
+    resources: {
+      builtinBefore: receipt.state.before.builtinResources.length,
+      builtinAfter: receipt.state.after.builtinResources.length,
+      providerBefore: receipt.state.before.providerResources.length,
+      providerAfter: receipt.state.after.providerResources.length,
+    },
+  };
 }

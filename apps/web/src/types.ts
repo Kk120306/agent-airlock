@@ -621,6 +621,35 @@ export type FederatedAdmissionInboxState =
 export interface FederatedAdmissionInboxItem {
   admission: FederatedAdmissionRecord;
   approval: FederatedApprovalDecisionRecord | null;
+  review: {
+    schemaVersion: 1;
+    authority: "producer-claim-non-authoritative";
+    producerClaim: {
+      runId: string;
+      agentId: string;
+      disposition: "promoted" | "quarantined" | "discarded" | "cancelled";
+      decidedAt: string;
+      outcomeContractVersion: number;
+    };
+    artifact: {
+      operationCount: number;
+      displayedOperationCount: number;
+      truncated: boolean;
+      totalPayloadBytes: number;
+      operations: Array<{
+        operation: "add" | "modify" | "delete" | "rename";
+        path: string;
+        toPath: string | null;
+        byteLength: number | null;
+      }>;
+    };
+    resources: {
+      builtinBefore: number;
+      builtinAfter: number;
+      providerBefore: number;
+      providerAfter: number;
+    };
+  } | null;
   run: {
     id: string;
     status: AgentRun["status"];
