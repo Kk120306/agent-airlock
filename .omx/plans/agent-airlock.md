@@ -334,6 +334,16 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Carry a fresh credential-free preflight handoff into server admission, visible readiness, and signed execution-profile evidence while keeping it explicitly an Airlock attestation.
 - [ ] Rerun the complete provider-backed browser transaction when free ModelArk capacity is available.
 
+## Phase 12 federated acceptance
+
+- [x] Define canonical workspace change-set and signed Federated Work Bundle protocols with strict path, byte, digest, state-transition, and signature binding.
+- [x] Persist immutable receiver-controlled Federated Admission Policy generations with exact chained activation and deterministic fail-closed evaluation.
+- [x] Publish digest-protected Admission Records before Candidate materialization and pin redacted receiver evidence plus the evaluated policy generation.
+- [x] Recover plan, record publication, Candidate creation, Candidate journaling, and completed replay without creating a second Candidate.
+- [ ] Apply the verified workspace artifact through the production WorkspaceManager Candidate boundary.
+- [ ] Run receiver-owned Outcome Contract Validation and local Promotion for admitted work.
+- [ ] Prove credential-free export, transfer, admission, Validation, and Promotion between two independently configured Airlock instances through the browser.
+
 ## Trust boundaries
 
 - The Agent Runtime is untrusted and receives only the Candidate workspace, Candidate Codex home, and Candidate outbox as writable state.

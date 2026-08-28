@@ -241,6 +241,25 @@ The transfer container is an `agent-airlock/federated-work-bundle` that binds th
 The receiver verifies both signatures and requires the artifact base and result digests to match the signed receipt before and after composite hashes exactly.
 This binding prevents artifact or protocol substitution without treating the producer signature as local trust.
 
+## Durable federated admission
+
+The receiver stores each Federated Admission Policy generation as immutable canonical JSON and advances one atomic active-generation pointer only when the policy identifier, receiver organization, generation number, and prior digest form an exact chain.
+Policy evaluation is a pure deterministic operation over one verified Federated Work Bundle, one pinned policy generation, and bounded receiver-derived evidence facts.
+The evaluator fails closed for inactive policy, unknown or disabled producer, unpinned authority, signer scope or timing, protocol, Agent, disposition, resource, ancestry, freshness, handoff, artifact, transparency, and approval mismatches.
+Artifact byte length is derived from canonical artifact bytes rather than accepted from a caller.
+
+The replay ledger derives one domain-separated import identifier from the producer, receipt digest, artifact digest, and artifact protocol.
+It separately commits a redacted evidence digest covering online handoff, transparency, authority, ancestry, evaluation time, and approval facts without persisting credentials or provider-private values.
+Reusing a transfer identifier with different imported work, receiver evidence, or local Agent scope fails as a deterministic conflict.
+An exact retry returns the original immutable Admission Record and never re-evaluates that import under a newer policy generation.
+
+The recovery journal publishes the immutable Admission Record before its deterministic Candidate Run identifier becomes available for Candidate materialization.
+An admitted record grants authority only to prepare that isolated Candidate Run and carries no local Promotion Authority.
+The journal then records the resulting Candidate State identity and completes monotonically.
+Restart recovery inspects the deterministic Candidate Run before preparing it, which prevents a crash between physical Candidate creation and journal advancement from creating a second Candidate.
+Rejected and approval-pending records never receive a Candidate Run identifier.
+Admission Record digests detect mutated durable evidence, and malformed or orphaned replay pointers fail startup reconciliation closed.
+
 ## Export boundary
 
 The server builds a portable receipt only from strictly parsed durable Run Transaction evidence.

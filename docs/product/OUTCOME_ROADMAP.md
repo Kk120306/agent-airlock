@@ -549,8 +549,9 @@ Turn Portable Promotion Receipts into a vendor-neutral admission protocol while 
 
 **Current status**
 
-The policy boundary is resolved in ADR 0018, and the primary-source replay, revocation, and split-view analysis defines four explicit evidence profiles with deterministic failure vectors.
-The two-instance Candidate admission prototype remains an outcome gate rather than a delivered claim.
+The policy boundary is resolved in ADR 0018, and strict immutable receiver policy generations now evaluate signed workspace bundles across exact trust, scope, freshness, protocol, transparency, and approval rules.
+The receiver now persists immutable digest-protected Admission Records before Candidate materialization and recovers exact replay across every durable boundary without creating a second Candidate.
+Production workspace materialization, receiver-owned Validation and Promotion, and the two-instance browser journey remain outcome gates rather than delivered claims.
 
 ## Hackathon cut lines
 
