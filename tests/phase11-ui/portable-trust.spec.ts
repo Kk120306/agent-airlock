@@ -127,6 +127,7 @@ const system: SystemInfo = {
   demoMode: false,
   protocolFixtureMode: false,
   modelArkDemoMode: false,
+  modelArkPreflight: null,
   inferenceMode: "modelark",
   arkConfigured: false,
   arkBaseUrl: "https://ark.example.invalid",
@@ -326,6 +327,13 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   const liveSystem: SystemInfo = {
     ...system,
     modelArkDemoMode: true,
+    modelArkPreflight: {
+      checkedAt: "2026-08-28T02:00:00.000Z",
+      generatedAssistantOutput: true,
+      attemptCount: 1,
+      requestCount: 1,
+      retryDelayMs: 0,
+    },
     arkConfigured: true,
     arkModel: "ep-live-model",
     runtimeProvider: "container",
@@ -380,6 +388,23 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     deliveredCount: 1,
     bypassDisclosure: "No effect bypass is available.",
   };
+  const liveExecutionProfile = liveRun.transaction!.validations.find(
+    (validation) => validation.name === "execution-profile",
+  );
+  if (!liveExecutionProfile) throw new Error("Missing execution profile fixture");
+  liveExecutionProfile.summary =
+    "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.";
+  liveExecutionProfile.output = JSON.stringify({
+    schemaVersion: 2,
+    attestation: "airlock-control-plane",
+    inferenceMode: "modelark",
+    modelCommitment: "sha256:" + "a".repeat(64),
+    preflight: {
+      generatedAssistantOutput: true,
+      endpointOriginCommitment: "sha256:" + "b".repeat(64),
+      requestCount: 1,
+    },
+  });
   await serveProductionBundle(
     page,
     liveRequests,
@@ -390,12 +415,17 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   await page.goto("http://airlock.local/");
 
   await expect(page.getByText("LIVE MODELARK PROOF", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(/Fresh preflight generated assistant output in 1 bounded request/),
+  ).toBeVisible();
   const guide = page.getByRole("region", { name: "Live ModelArk proof" });
   await expect(guide.getByText("Model decides. Contract verifies.")).toBeVisible();
   await expect(guide.getByRole("button", { name: /Run another live Candidate/ }))
     .toBeVisible();
-  await expect(guide.getByText("Live profile attested")).toBeVisible();
-  await expect(guide.getByText("ModelArk profile and Promotion proven")).toBeVisible();
+  await expect(guide.getByText("Preflight + Runtime bound")).toBeVisible();
+  await expect(
+    guide.getByText("ModelArk preflight, Runtime, and Promotion bound"),
+  ).toBeVisible();
   await expect(page.getByText("Independent proof")).toBeVisible();
   const liveProof = page.getByRole("region", { name: "Judge proof summary" });
   await expect(liveProof.getByText("4/4 resources promoted", { exact: true }))

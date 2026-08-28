@@ -3,7 +3,10 @@ import { execFile as execFileCallback } from "node:child_process";
 import { createServer } from "node:http";
 import test from "node:test";
 import { promisify } from "node:util";
-import { checkModelArkLive } from "./check-modelark-live.mjs";
+import {
+  buildModelArkPreflightProof,
+  checkModelArkLive,
+} from "./check-modelark-live.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -60,6 +63,70 @@ test("proves a completed Responses API request without returning the key", async
         retryDelayMs: 0,
       });
       assert.doesNotMatch(JSON.stringify(result), /secret-live-key/);
+    },
+  );
+});
+
+test("builds a bounded launch handoff without provider-private values", () => {
+  const proof = buildModelArkPreflightProof(
+    {
+      origin: "https://ark.private.example",
+      model: "ep-private-model",
+      responseId: "private-response-id",
+      attemptCount: 2,
+      requestCount: 4,
+      retryDelayMs: 4_000,
+    },
+    new Date("2026-08-28T02:00:00.000Z"),
+  );
+  assert.deepEqual(proof, {
+    schema: "agent-airlock/modelark-preflight-proof",
+    schemaVersion: 1,
+    checkedAt: "2026-08-28T02:00:00.000Z",
+    generatedAssistantOutput: true,
+    modelCommitment:
+      "sha256:3bfdd3b152852c9a60b05833859e6f05c22dd55acf1e87c1b6d3732e73594e03",
+    endpointOriginCommitment:
+      "sha256:40668476cd880a09d63581066b9c8e187ba72b599f1ccd6ad9348e54a6cd00ae",
+    attemptCount: 2,
+    requestCount: 4,
+    retryDelayMs: 4_000,
+  });
+  assert.doesNotMatch(
+    JSON.stringify(proof),
+    /ark\.private\.example|ep-private-model|private-response-id/,
+  );
+});
+
+test("the launch command emits one parseable redacted handoff", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(completedResponse("private-response-id")));
+    },
+    async (baseUrl) => {
+      const { stdout, stderr } = await execFile(
+        process.execPath,
+        ["scripts/check-modelark-live.mjs", "--launch-result-json"],
+        {
+          cwd: new URL("..", import.meta.url),
+          env: {
+            ...process.env,
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "ep-private-model",
+            ARK_BASE_URL: baseUrl,
+          },
+        },
+      );
+      const result = JSON.parse(stdout);
+      assert.equal(result.selectedModel, "ep-private-model");
+      assert.equal(result.proof.generatedAssistantOutput, true);
+      assert.equal(result.proof.requestCount, 1);
+      assert.equal(stderr, "");
+      assert.doesNotMatch(
+        JSON.stringify(result.proof),
+        /secret-live-key|ep-private-model|private-response-id|127\.0\.0\.1/,
+      );
     },
   );
 });

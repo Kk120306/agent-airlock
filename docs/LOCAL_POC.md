@@ -103,6 +103,8 @@ Use its result before the live demo to distinguish a ModelArk capacity failure f
 Before building the Runtime, it performs a minimal Responses API request and requires a completed response with non-empty assistant `output_text`.
 An HTTP success or `completed` status without generated assistant text fails the preflight.
 The credential and model output are never printed.
+Successful preflight passes a bounded credential-free handoff into the server with a timestamp, request counts, and SHA-256 commitments to the selected model and provider origin.
+The guided live judge profile refuses missing, stale, malformed, wrong-model, or wrong-origin handoffs before displaying live-proof mode.
 `ARK_MODEL_FALLBACKS` accepts a comma-separated list of operator-approved models and is bounded to four unique models including `ARK_MODEL`.
 Only HTTP 404 and 429 advance to the next model.
 Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.
@@ -120,7 +122,8 @@ npm run verify:modelark-evidence
 
 This command verifies historical signed evidence only.
 It does not replace `npm run check:modelark` or prove current provider availability.
-Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass that fail-fast provider check explicitly.
+Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass the generic `npm run poc` fail-fast provider check explicitly.
+The `npm run demo:modelark` judge profile always rejects that bypass.
 Explicit process environment variables take precedence.
 Keep the Beijing default for mainland Volcengine credentials.
 For BytePlus Asia Pacific credentials, use:

@@ -2970,6 +2970,15 @@ export class AgentService {
       demoMode: this.config.demoMode,
       protocolFixtureMode: this.config.protocolFixtureMode,
       modelArkDemoMode: this.config.modelArkDemoMode,
+      modelArkPreflight: this.config.modelArkPreflightProof
+        ? {
+            checkedAt: this.config.modelArkPreflightProof.checkedAt,
+            generatedAssistantOutput: true,
+            attemptCount: this.config.modelArkPreflightProof.attemptCount,
+            requestCount: this.config.modelArkPreflightProof.requestCount,
+            retryDelayMs: this.config.modelArkPreflightProof.retryDelayMs,
+          }
+        : null,
       inferenceMode: this.config.demoMode
         ? "deterministic-local-fixture"
         : this.config.protocolFixtureMode

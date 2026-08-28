@@ -21,7 +21,18 @@ function completeRun() {
           required: true,
           status: "passed",
           summary:
-            "Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.",
+            "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.",
+          output: JSON.stringify({
+            schemaVersion: 2,
+            attestation: "airlock-control-plane",
+            inferenceMode: "modelark",
+            modelCommitment: "sha256:" + "a".repeat(64),
+            preflight: {
+              generatedAssistantOutput: true,
+              endpointOriginCommitment: "sha256:" + "b".repeat(64),
+              requestCount: 1,
+            },
+          }),
         },
         {
           name: "modelark-live-state",
@@ -61,7 +72,7 @@ function exportResult(runId, disclosures) {
         required: true,
         status: "passed",
         summary:
-          "Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.",
+          "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.",
       },
     ],
     packet: {
@@ -89,9 +100,23 @@ test("recognizes only a complete provider-backed Whole-Agent Promotion", () => {
   missingEffect.transaction.externalActions.deliveredCount = 0;
   assert.equal(isCompleteLiveModelArkPromotion(missingEffect), false);
   const wrongProfile = structuredClone(run);
-  wrongProfile.transaction.validations[0].summary =
-    "Airlock attested a local deterministic Responses fixture.";
+  wrongProfile.transaction.validations[0].output = JSON.stringify({
+    schemaVersion: 2,
+    attestation: "airlock-control-plane",
+    inferenceMode: "local-responses-protocol-fixture",
+    modelCommitment: "sha256:" + "a".repeat(64),
+    preflight: null,
+  });
   assert.equal(isCompleteLiveModelArkPromotion(wrongProfile), false);
+  const missingPreflight = structuredClone(run);
+  missingPreflight.transaction.validations[0].output = JSON.stringify({
+    schemaVersion: 2,
+    attestation: "airlock-control-plane",
+    inferenceMode: "modelark",
+    modelCommitment: "sha256:" + "a".repeat(64),
+    preflight: null,
+  });
+  assert.equal(isCompleteLiveModelArkPromotion(missingPreflight), false);
 });
 
 test("captures one private signed packet with the ModelArk profile disclosed", async () => {

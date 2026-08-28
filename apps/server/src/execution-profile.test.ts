@@ -31,6 +31,51 @@ describe("execution profile evidence", () => {
     );
   });
 
+  it("binds fresh generated-output preflight facts into live judge evidence", () => {
+    const model = "ep-private-endpoint";
+    const endpointOrigin = "https://ark.ap-southeast.bytepluses.com";
+    const evidence = buildExecutionProfileEvidence(
+      loadConfig({
+        NODE_ENV: "test",
+        HOST: "127.0.0.1",
+        AIRLOCK_MODELARK_DEMO_MODE: "true",
+        AIRLOCK_MODELARK_PREFLIGHT_PROOF: JSON.stringify({
+          schema: "agent-airlock/modelark-preflight-proof",
+          schemaVersion: 1,
+          checkedAt: new Date().toISOString(),
+          generatedAssistantOutput: true,
+          modelCommitment:
+            "sha256:" + createHash("sha256").update(model).digest("hex"),
+          endpointOriginCommitment:
+            "sha256:" +
+            createHash("sha256").update(endpointOrigin).digest("hex"),
+          attemptCount: 2,
+          requestCount: 4,
+          retryDelayMs: 4_000,
+        }),
+        ARK_API_KEY: "ark-private-key",
+        ARK_MODEL: model,
+        ARK_BASE_URL: endpointOrigin + "/api/v3",
+        RUNTIME_PROVIDER: "container",
+        CODEX_BIN: "codex",
+      }),
+    );
+    const output = JSON.parse(evidence.output ?? "");
+
+    expect(evidence.summary).toContain(
+      "fresh provider preflight generated assistant output in 4 bounded requests",
+    );
+    expect(output.preflight).toMatchObject({
+      generatedAssistantOutput: true,
+      attemptCount: 2,
+      requestCount: 4,
+      retryDelayMs: 4_000,
+    });
+    expect(JSON.stringify(evidence)).not.toMatch(
+      /ark-private-key|ep-private-endpoint|ark\.ap-southeast\.bytepluses\.com/,
+    );
+  });
+
   it("labels the local protocol fixture honestly", () => {
     const evidence = buildExecutionProfileEvidence(
       loadConfig({

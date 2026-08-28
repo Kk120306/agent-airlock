@@ -331,6 +331,7 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Automatically preserve the next complete live Promotion as a private credential-free signed packet and verify it offline without weakening the current-provider preflight.
 - [x] Gate both judge launchers on a reproducible credential-safe readiness report that never returns the configured provider URL or model identifier.
 - [x] Require live preflight success to include non-empty assistant `output_text` so an HTTP success or provider `completed` status alone cannot unlock the judge path.
+- [x] Carry a fresh credential-free preflight handoff into server admission, visible readiness, and signed execution-profile evidence while keeping it explicitly an Airlock attestation.
 - [ ] Rerun the complete provider-backed browser transaction when free ModelArk capacity is available.
 
 ## Trust boundaries

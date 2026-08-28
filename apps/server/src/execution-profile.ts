@@ -4,7 +4,7 @@ import { isArkConfigured } from "./config.js";
 import type { ValidationEvidence } from "./types.js";
 
 interface ExecutionProfileAttestation {
-  schemaVersion: 1;
+  schemaVersion: 2;
   attestation: "airlock-control-plane";
   inferenceMode:
     | "deterministic-local-fixture"
@@ -15,6 +15,14 @@ interface ExecutionProfileAttestation {
   runtimeProvider: "local-process" | "container";
   providerProtocol: "responses";
   modelCommitment: string;
+  preflight: {
+    checkedAt: string;
+    generatedAssistantOutput: true;
+    endpointOriginCommitment: string;
+    attemptCount: number;
+    requestCount: number;
+    retryDelayMs: number;
+  } | null;
 }
 
 export const EXECUTION_PROFILE_VALIDATION_NAME = "execution-profile";
@@ -31,7 +39,7 @@ export function buildExecutionProfileEvidence(
           ? "modelark"
           : "unconfigured";
   const attestation: ExecutionProfileAttestation = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     attestation: "airlock-control-plane",
     inferenceMode,
     executor: config.demoMode ? "deterministic-fixture" : "codex-cli",
@@ -39,6 +47,17 @@ export function buildExecutionProfileEvidence(
     providerProtocol: "responses",
     modelCommitment:
       "sha256:" + createHash("sha256").update(config.arkModel).digest("hex"),
+    preflight: config.modelArkPreflightProof
+      ? {
+          checkedAt: config.modelArkPreflightProof.checkedAt,
+          generatedAssistantOutput: true,
+          endpointOriginCommitment:
+            config.modelArkPreflightProof.endpointOriginCommitment,
+          attemptCount: config.modelArkPreflightProof.attemptCount,
+          requestCount: config.modelArkPreflightProof.requestCount,
+          retryDelayMs: config.modelArkPreflightProof.retryDelayMs,
+        }
+      : null,
   };
   const profileLabel = {
     "deterministic-local-fixture": "the deterministic local fixture",
@@ -53,6 +72,9 @@ export function buildExecutionProfileEvidence(
     status: "passed",
     required: true,
     summary:
+      (attestation.preflight
+        ? `A fresh provider preflight generated assistant output in ${attestation.preflight.requestCount} bounded request${attestation.preflight.requestCount === 1 ? "" : "s"}. `
+        : "") +
       "Airlock control plane attested successful execution through " +
       profileLabel +
       ". Model identity is committed without disclosure as " +

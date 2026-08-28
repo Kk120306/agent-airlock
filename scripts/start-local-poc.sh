@@ -81,10 +81,18 @@ if (( node_major < 22 )); then
 fi
 
 if [[ "${AIRLOCK_SKIP_MODELARK_PREFLIGHT:-false}" == "true" ]]; then
+  if [[ "${AIRLOCK_MODELARK_DEMO_MODE:-false}" == "true" ]]; then
+    log "The live ModelArk judge profile cannot skip provider preflight."
+    exit 2
+  fi
+  unset AIRLOCK_MODELARK_PREFLIGHT_PROOF
   log "Skipping the live ModelArk preflight by explicit request."
 else
   log "Checking the live ModelArk Responses API before building the Runtime."
-  selected_model="$(node scripts/check-modelark-live.mjs --selected-model-only)"
+  preflight_result="$(node scripts/check-modelark-live.mjs --launch-result-json)"
+  selected_model="$(node -e 'const result = JSON.parse(process.argv[1]); process.stdout.write(result.selectedModel);' "$preflight_result")"
+  AIRLOCK_MODELARK_PREFLIGHT_PROOF="$(node -e 'const result = JSON.parse(process.argv[1]); process.stdout.write(JSON.stringify(result.proof));' "$preflight_result")"
+  export AIRLOCK_MODELARK_PREFLIGHT_PROOF
   if [[ "$selected_model" != "$ARK_MODEL" ]]; then
     log "Using the operator-approved ModelArk fallback that passed the live preflight."
   fi

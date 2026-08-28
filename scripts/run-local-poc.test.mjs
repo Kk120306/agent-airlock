@@ -45,23 +45,40 @@ test("the local POC launcher passes .env values to the startup script", async ()
   }
 });
 
+test("the live ModelArk judge profile refuses the generic preflight bypass", () => {
+  const result = spawnSync(path.resolve("scripts/start-local-poc.sh"), [], {
+    cwd: path.resolve("."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      AIRLOCK_MODELARK_DEMO_MODE: "true",
+      AIRLOCK_SKIP_MODELARK_PREFLIGHT: "true",
+      ARK_API_KEY: "fixture-key",
+      ARK_MODEL: "ep-fixture",
+    },
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /cannot skip provider preflight/);
+});
+
 test("the local POC launcher exports the fallback selected by preflight", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-poc-fallback-"));
   const fakeBin = path.join(fixtureRoot, "bin");
   const nodePath = path.join(fakeBin, "node");
   const enginePath = path.join(fakeBin, "airlock-model-probe");
   const capturedModelPath = path.join(fixtureRoot, "selected-model.txt");
+  const capturedProofPath = path.join(fixtureRoot, "preflight-proof.txt");
 
   try {
     await import("node:fs/promises").then(({ mkdir }) => mkdir(fakeBin));
     await writeFile(
       nodePath,
-      '#!/bin/sh\nif [ "$1" = "-p" ]; then printf "22"; exit 0; fi\nif [ "$1" = "scripts/check-modelark-live.mjs" ]; then printf "ep-selected-fallback\\n"; exit 0; fi\nexit 97\n',
+      '#!/bin/sh\nif [ "$1" = "-p" ]; then printf "22"; exit 0; fi\nif [ "$1" = "scripts/check-modelark-live.mjs" ]; then printf \'%s\\n\' \'{"selectedModel":"ep-selected-fallback","proof":{"schema":"agent-airlock/modelark-preflight-proof","schemaVersion":1,"checkedAt":"2026-08-28T02:00:00.000Z","generatedAssistantOutput":true,"modelCommitment":"sha256:model","endpointOriginCommitment":"sha256:origin","attemptCount":2,"requestCount":2,"retryDelayMs":0}}\'; exit 0; fi\nexec "$AIRLOCK_REAL_NODE" "$@"\n',
       "utf8",
     );
     await writeFile(
       enginePath,
-      '#!/bin/sh\nif [ "$1" = "info" ]; then printf "%s" "$ARK_MODEL" > "$AIRLOCK_CAPTURED_MODEL"; exit 1; fi\nexit 98\n',
+      '#!/bin/sh\nif [ "$1" = "info" ]; then printf "%s" "$ARK_MODEL" > "$AIRLOCK_CAPTURED_MODEL"; printf "%s" "$AIRLOCK_MODELARK_PREFLIGHT_PROOF" > "$AIRLOCK_CAPTURED_PROOF"; exit 1; fi\nexit 98\n',
       "utf8",
     );
     await chmod(nodePath, 0o755);
@@ -73,6 +90,8 @@ test("the local POC launcher exports the fallback selected by preflight", async 
       env: {
         ...process.env,
         AIRLOCK_CAPTURED_MODEL: capturedModelPath,
+        AIRLOCK_CAPTURED_PROOF: capturedProofPath,
+        AIRLOCK_REAL_NODE: process.execPath,
         ARK_API_KEY: "fixture-key",
         ARK_MODEL: "ep-primary",
         ARK_MODEL_FALLBACKS: "ep-selected-fallback",
@@ -83,7 +102,22 @@ test("the local POC launcher exports the fallback selected by preflight", async 
 
     assert.equal(result.status, 1);
     assert.equal(await readFile(capturedModelPath, "utf8"), "ep-selected-fallback");
+    assert.deepEqual(JSON.parse(await readFile(capturedProofPath, "utf8")), {
+      schema: "agent-airlock/modelark-preflight-proof",
+      schemaVersion: 1,
+      checkedAt: "2026-08-28T02:00:00.000Z",
+      generatedAssistantOutput: true,
+      modelCommitment: "sha256:model",
+      endpointOriginCommitment: "sha256:origin",
+      attemptCount: 2,
+      requestCount: 2,
+      retryDelayMs: 0,
+    });
     assert.match(result.stderr, /Using the operator-approved ModelArk fallback/);
+    assert.doesNotMatch(
+      result.stderr,
+      /modelark-preflight-proof|sha256:model|sha256:origin/,
+    );
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

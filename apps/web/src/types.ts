@@ -428,6 +428,13 @@ export interface SystemInfo {
   demoMode: boolean;
   protocolFixtureMode: boolean;
   modelArkDemoMode: boolean;
+  modelArkPreflight: {
+    checkedAt: string;
+    generatedAssistantOutput: true;
+    attemptCount: number;
+    requestCount: number;
+    retryDelayMs: number;
+  } | null;
   inferenceMode:
     | "deterministic-local-fixture"
     | "local-responses-protocol-fixture"

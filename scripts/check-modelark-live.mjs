@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -11,6 +12,8 @@ const TRANSIENT_RATE_LIMIT_CODES = new Set([
 const TRANSIENT_RETRY_DELAYS_MS = [1_000, 3_000, 7_000];
 const MAXIMUM_RETRY_AFTER_MS = 10_000;
 const MAXIMUM_TOTAL_RETRY_DELAY_MS = 15_000;
+const MODELARK_PREFLIGHT_PROOF_SCHEMA =
+  "agent-airlock/modelark-preflight-proof";
 
 function requiredValue(environment, name) {
   const value = environment[name]?.trim();
@@ -265,8 +268,35 @@ export async function checkModelArkLive({
   throw new Error("ModelArk preflight exhausted its configured models");
 }
 
+function commitment(value) {
+  return "sha256:" + createHash("sha256").update(value).digest("hex");
+}
+
+export function buildModelArkPreflightProof(result, checkedAt = new Date()) {
+  return {
+    schema: MODELARK_PREFLIGHT_PROOF_SCHEMA,
+    schemaVersion: 1,
+    checkedAt: checkedAt.toISOString(),
+    generatedAssistantOutput: true,
+    modelCommitment: commitment(result.model),
+    endpointOriginCommitment: commitment(result.origin),
+    attemptCount: result.attemptCount,
+    requestCount: result.requestCount,
+    retryDelayMs: result.retryDelayMs,
+  };
+}
+
 async function main() {
   const result = await checkModelArkLive();
+  if (process.argv.includes("--launch-result-json")) {
+    process.stdout.write(
+      JSON.stringify({
+        selectedModel: result.model,
+        proof: buildModelArkPreflightProof(result),
+      }) + "\n",
+    );
+    return;
+  }
   if (process.argv.includes("--selected-model-only")) {
     process.stdout.write(`${result.model}\n`);
     return;

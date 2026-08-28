@@ -11,6 +11,27 @@ const requiredResourceKinds = [
   "external-actions",
 ];
 
+function hasBoundModelArkPreflight(validation) {
+  if (validation?.status !== "passed" || !validation.output) return false;
+  try {
+    const profile = JSON.parse(validation.output);
+    return (
+      profile?.schemaVersion === 2 &&
+      profile?.attestation === "airlock-control-plane" &&
+      profile?.inferenceMode === "modelark" &&
+      /^sha256:[a-f0-9]{64}$/.test(profile?.modelCommitment ?? "") &&
+      profile?.preflight?.generatedAssistantOutput === true &&
+      /^sha256:[a-f0-9]{64}$/.test(
+        profile.preflight.endpointOriginCommitment ?? "",
+      ) &&
+      Number.isInteger(profile.preflight.requestCount) &&
+      profile.preflight.requestCount >= 1
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isCompleteLiveModelArkPromotion(run) {
   const transaction = run?.transaction;
   if (!transaction || transaction.disposition !== "promoted") return false;
@@ -31,7 +52,7 @@ export function isCompleteLiveModelArkPromotion(run) {
   const intents = transaction.externalActions?.intents ?? [];
   return (
     executionProfile?.required === true &&
-    executionProfile.status === "passed" &&
+    hasBoundModelArkPreflight(executionProfile) &&
     executionProfile.summary?.includes("configured ModelArk Responses profile") &&
     liveStateValidation?.required === true &&
     liveStateValidation.status === "passed" &&
@@ -139,6 +160,9 @@ export async function captureLiveModelArkConformance({
       (disclosure) =>
         disclosure.required === true &&
         disclosure.status === "passed" &&
+        disclosure.summary?.includes(
+          "fresh provider preflight generated assistant output",
+        ) &&
         disclosure.summary?.includes("configured ModelArk Responses profile"),
     );
     if (!executionProfile) {

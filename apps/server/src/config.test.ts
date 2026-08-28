@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
+
+function commitment(value: string): string {
+  return "sha256:" + createHash("sha256").update(value).digest("hex");
+}
 
 const deterministicDemoEnvironment = {
   NODE_ENV: "production",
@@ -23,6 +28,20 @@ const protocolFixtureEnvironment = {
   ARK_BASE_URL: "http://host.docker.internal:43994/v1",
 } as const;
 
+const liveModelArkModel = "ep-live-model";
+const liveModelArkBaseUrl = "https://ark.ap-southeast.bytepluses.com/api/v3";
+const liveModelArkPreflightProof = {
+  schema: "agent-airlock/modelark-preflight-proof",
+  schemaVersion: 1,
+  checkedAt: new Date().toISOString(),
+  generatedAssistantOutput: true,
+  modelCommitment: commitment(liveModelArkModel),
+  endpointOriginCommitment: commitment(new URL(liveModelArkBaseUrl).origin),
+  attemptCount: 1,
+  requestCount: 1,
+  retryDelayMs: 0,
+};
+
 const liveModelArkDemoEnvironment = {
   NODE_ENV: "production",
   HOST: "127.0.0.1",
@@ -30,8 +49,9 @@ const liveModelArkDemoEnvironment = {
   RUNTIME_PROVIDER: "container",
   CODEX_BIN: "codex",
   ARK_API_KEY: "ark-live-test-key",
-  ARK_MODEL: "ep-live-model",
-  ARK_BASE_URL: "https://ark.ap-southeast.bytepluses.com/api/v3",
+  ARK_MODEL: liveModelArkModel,
+  ARK_BASE_URL: liveModelArkBaseUrl,
+  AIRLOCK_MODELARK_PREFLIGHT_PROOF: JSON.stringify(liveModelArkPreflightProof),
 } as const;
 
 describe("deterministic demo configuration", () => {
@@ -99,6 +119,11 @@ describe("live ModelArk judge demo configuration", () => {
     expect(config.modelArkDemoMode).toBe(true);
     expect(config.demoMode).toBe(false);
     expect(config.protocolFixtureMode).toBe(false);
+    expect(config.modelArkPreflightProof).toMatchObject({
+      generatedAssistantOutput: true,
+      attemptCount: 1,
+      requestCount: 1,
+    });
   });
 
   it.each([
@@ -113,6 +138,39 @@ describe("live ModelArk judge demo configuration", () => {
     expect(() =>
       loadConfig({ ...liveModelArkDemoEnvironment, ...override }),
     ).toThrow(/loopback-only live ModelArk container profile/);
+  });
+
+  it.each([
+    ["missing proof", undefined],
+    ["malformed proof", "not-json"],
+    [
+      "stale proof",
+      JSON.stringify({
+        ...liveModelArkPreflightProof,
+        checkedAt: "2026-08-27T00:00:00.000Z",
+      }),
+    ],
+    [
+      "wrong model commitment",
+      JSON.stringify({
+        ...liveModelArkPreflightProof,
+        modelCommitment: commitment("ep-other-model"),
+      }),
+    ],
+    [
+      "wrong endpoint commitment",
+      JSON.stringify({
+        ...liveModelArkPreflightProof,
+        endpointOriginCommitment: commitment("https://other.example"),
+      }),
+    ],
+  ])("rejects a %s", (_name, proof) => {
+    expect(() =>
+      loadConfig({
+        ...liveModelArkDemoEnvironment,
+        AIRLOCK_MODELARK_PREFLIGHT_PROOF: proof,
+      }),
+    ).toThrow(/fresh launcher-issued ModelArk preflight proof/);
   });
 
   it("cannot be combined with a fixture demo", () => {

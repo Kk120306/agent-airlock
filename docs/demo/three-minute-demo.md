@@ -118,6 +118,7 @@ Configure `ARK_API_KEY`, `ARK_MODEL`, and the region-matching `ARK_BASE_URL` onl
 Optionally configure up to three activated free-quota models in `ARK_MODEL_FALLBACKS`.
 Confirm that each configured model visibly has remaining free quota in Model activation.
 Run `npm run check:modelark` to fail fast with minimal credential-safe Responses API requests.
+The guided launcher carries a fresh redacted generated-output preflight handoff into server admission and rejects missing, stale, wrong-model, or wrong-origin handoffs.
 Run `npm run poc:doctor` to prove provider and container readiness as independent checks.
 The doctor also drives the pinned real Codex CLI through a local two-turn Responses tool-call fixture, but that protocol proof never substitutes for the separate live ModelArk check.
 Run `npm run test:container-transaction` to extend that proof through the production CodeJam HTTP control plane, required Validation, Promotion, independent receipt verification, restart, and accepted-session continuation.
@@ -128,6 +129,7 @@ Keep Free Credits Only Mode enabled for every configured model.
 Run `npm run demo:modelark -- --reset`.
 The guided launcher forces the live provider preflight even when the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch exists in the shell.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
+Point to the live banner showing that fresh preflight generated assistant output and that output and credentials remain private.
 Confirm that ModelArk directs the real Codex Runtime to create the exact `modelark-proof.txt`, update Candidate SQLite to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
 Show that the required execution-profile and state Validations pass, all four resources promote together, the effect dispatches only after Canonical State advances, and the signed decision verifies locally.
 Point out that the model endpoint appears only as a SHA-256 commitment inside the trusted execution-profile evidence and that the receipt commits to that Validation through its Merkle root.

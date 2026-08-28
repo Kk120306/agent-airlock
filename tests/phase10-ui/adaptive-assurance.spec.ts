@@ -117,6 +117,7 @@ const system: SystemInfo = {
   demoMode: false,
   protocolFixtureMode: false,
   modelArkDemoMode: false,
+  modelArkPreflight: null,
   inferenceMode: "modelark",
   arkConfigured: false,
   arkBaseUrl: "https://ark.example.invalid",

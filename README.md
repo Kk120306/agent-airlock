@@ -258,11 +258,16 @@ npm run demo:modelark -- --reset
 
 The launcher forces the live Responses API check before building or starting the application, binds the control plane to loopback, uses a disposable container Runtime, and seeds one `Live ModelArk Proof` Agent.
 It does not honor the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch.
+Successful preflight creates a bounded credential-free launch handoff containing only timestamps, request counts, and SHA-256 commitments to the selected model and provider origin.
+The server verifies that handoff is recent and matches its exact private configuration before it can expose `LIVE MODELARK PROOF` mode.
+Missing, stale, malformed, wrong-model, or wrong-origin handoffs fail closed.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
 ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`, update the Candidate SQLite row to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
 Airlock validates the actual Candidate file and database independently of the model response, promotes workspace, Codex session, SQLite, and outbox under one decision, and dispatches the intent only after Canonical State advances.
 The resulting judge view reports conformance complete only when all four resources are promoted and exactly one deferred effect is delivered, then exposes the signed portable receipt.
 After that complete live Promotion, the launcher automatically captures a private, credential-free Portable Evidence Packet with the safe ModelArk execution-profile disclosure.
+That signed disclosure binds the generated-output preflight facts to the successful Runtime profile without storing the generated text.
+It remains an Airlock control-plane attestation and is not a BytePlus-signed statement.
 Verify the latest recorded packet later with `npm run verify:modelark-evidence` without contacting ModelArk.
 The verifier labels this as historical signed evidence and never substitutes it for a current provider preflight or live Run.
 Run `npm run demo:modelark` without `--reset` to preserve the proof across restart.

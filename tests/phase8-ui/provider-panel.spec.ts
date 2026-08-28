@@ -41,6 +41,7 @@ const system: SystemInfo = {
   demoMode: false,
   protocolFixtureMode: false,
   modelArkDemoMode: false,
+  modelArkPreflight: null,
   inferenceMode: "modelark",
   arkConfigured: true,
   arkBaseUrl: "http://127.0.0.1:1/api/v3",

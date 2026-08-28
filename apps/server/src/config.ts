@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -41,6 +42,7 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  AIRLOCK_MODELARK_PREFLIGHT_PROOF: z.string().max(4_096).optional(),
   AIRLOCK_HTTP_OBJECT_URL: z.string().url().optional(),
   AIRLOCK_HTTP_OBJECT_SOCKET: z.string().min(1).optional(),
   AIRLOCK_HTTP_OBJECT_VERSION_ID: z
@@ -87,6 +89,62 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
+const modelArkPreflightProofSchema = z
+  .object({
+    schema: z.literal("agent-airlock/modelark-preflight-proof"),
+    schemaVersion: z.literal(1),
+    checkedAt: z.string().datetime({ offset: true }),
+    generatedAssistantOutput: z.literal(true),
+    modelCommitment: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    endpointOriginCommitment: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    attemptCount: z.number().int().min(1).max(4),
+    requestCount: z.number().int().min(1).max(16),
+    retryDelayMs: z.number().int().min(0).max(15_000),
+  })
+  .strict();
+
+const MODELARK_PREFLIGHT_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
+const MODELARK_PREFLIGHT_FUTURE_TOLERANCE_MS = 60_000;
+
+function sha256Commitment(value: string): string {
+  return "sha256:" + createHash("sha256").update(value).digest("hex");
+}
+
+function parseModelArkPreflightProof(
+  raw: string | undefined,
+  model: string,
+  endpointOrigin: string,
+) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw ?? "");
+  } catch {
+    throw new Error(
+      "AIRLOCK_MODELARK_DEMO_MODE requires a fresh launcher-issued ModelArk preflight proof",
+    );
+  }
+  const proof = modelArkPreflightProofSchema.safeParse(parsed);
+  if (!proof.success) {
+    throw new Error(
+      "AIRLOCK_MODELARK_DEMO_MODE requires a fresh launcher-issued ModelArk preflight proof",
+    );
+  }
+  const checkedAtMs = Date.parse(proof.data.checkedAt);
+  const ageMs = Date.now() - checkedAtMs;
+  const valid =
+    ageMs >= -MODELARK_PREFLIGHT_FUTURE_TOLERANCE_MS &&
+    ageMs <= MODELARK_PREFLIGHT_MAX_AGE_MS &&
+    proof.data.requestCount >= proof.data.attemptCount &&
+    proof.data.modelCommitment === sha256Commitment(model) &&
+    proof.data.endpointOriginCommitment === sha256Commitment(endpointOrigin);
+  if (!valid) {
+    throw new Error(
+      "AIRLOCK_MODELARK_DEMO_MODE requires a fresh launcher-issued ModelArk preflight proof",
+    );
+  }
+  return proof.data;
+}
+
 export type AppConfig = ReturnType<typeof loadConfig>;
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
@@ -98,6 +156,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     env.AIRLOCK_PROTOCOL_FIXTURE_MODE,
     env.AIRLOCK_MODELARK_DEMO_MODE,
   ].filter(Boolean).length;
+  let modelArkPreflightProof: z.infer<
+    typeof modelArkPreflightProofSchema
+  > | null = null;
   if (activeDemoModes > 1) {
     throw new Error(
       "Airlock demo modes are mutually exclusive",
@@ -156,6 +217,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
         "AIRLOCK_MODELARK_DEMO_MODE requires the loopback-only live ModelArk container profile",
       );
     }
+    modelArkPreflightProof = parseModelArkPreflightProof(
+      env.AIRLOCK_MODELARK_PREFLIGHT_PROOF,
+      env.ARK_MODEL?.trim() ?? "",
+      arkUrl.origin,
+    );
   }
   if (!loopbackHosts.has(env.HOST)) {
     if (authToken.length < 24 || authToken.startsWith("replace-")) {
@@ -233,6 +299,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     demoMode: env.AIRLOCK_DEMO_MODE,
     protocolFixtureMode: env.AIRLOCK_PROTOCOL_FIXTURE_MODE,
     modelArkDemoMode: env.AIRLOCK_MODELARK_DEMO_MODE,
+    modelArkPreflightProof,
     httpObjectResource:
       env.AIRLOCK_HTTP_OBJECT_URL &&
       env.AIRLOCK_HTTP_OBJECT_VERSION_ID &&

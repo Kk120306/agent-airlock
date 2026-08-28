@@ -334,6 +334,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - The guided launcher forces the live preflight even when the generic POC skip flag is present, and its tested seed contract rejects persisted policy drift until the operator explicitly resets the managed demo.
 - A complete guided live Promotion automatically records a private credential-free Portable Evidence Packet with the safe ModelArk execution-profile disclosure, and a separate offline command verifies that historical artifact without claiming current provider availability.
 - Both judge launchers now fail closed on one seven-check local readiness contract, while a separate human-readable or JSON command reproduces the credential-safe evidence digest without exposing provider configuration.
+- The live server now requires a fresh launcher-issued generated-output preflight handoff bound by SHA-256 commitments to its exact model and provider origin, exposes only safe request facts, and commits those facts into signed execution-profile evidence.
 - ADR 0009 freezes P0 scope and separates the deterministic release proof from credentialed ModelArk conformance.
 - The credential-safe live preflight currently reaches the BytePlus Asia Pacific Responses API but receives HTTP 429 because configured free quota or the inference limit is unavailable.
 - Live ModelArk conformance must be rerun at judging time because provider quota, capacity, and model availability are external and time-varying.

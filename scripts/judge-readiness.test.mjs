@@ -18,6 +18,15 @@ function fixture(mode = "runtime") {
       modelArkDemoMode: !runtime,
       inferenceMode: runtime ? "local-responses-protocol-fixture" : "modelark",
       arkConfigured: true,
+      modelArkPreflight: runtime
+        ? null
+        : {
+            checkedAt: "2026-08-28T02:00:00.000Z",
+            generatedAssistantOutput: true,
+            attemptCount: 1,
+            requestCount: 1,
+            retryDelayMs: 0,
+          },
       runtimeProvider: "container",
       containerEngine: "docker",
       codexAvailable: true,
@@ -96,6 +105,22 @@ test("fails closed for drifted policy, duplicate identity, and non-ready lifecyc
     ["managed-agent", "outcome-contract", "agent-lifecycle"],
   );
   assert.throws(() => assertJudgeReadiness(report), /Judge readiness failed/);
+});
+
+test("does not call the ModelArk judge profile ready without generated-output preflight evidence", async () => {
+  const value = fixture("modelark");
+  value.system.modelArkPreflight = null;
+  const report = await inspectJudgeReadiness({
+    expectedMode: "modelark",
+    fetchImpl: fetchFixture(value),
+  });
+  assert.equal(report.ready, false);
+  assert.deepEqual(
+    report.checks
+      .filter((item) => item.status === "fail")
+      .map((item) => item.id),
+    ["demo-profile"],
+  );
 });
 
 test("accepts only plain loopback HTTP origins", () => {

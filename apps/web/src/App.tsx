@@ -69,6 +69,29 @@ function provesWholeAgentPromotion(run: AgentRun, expectedDatabaseValue: string)
   );
 }
 
+function hasBoundModelArkPreflight(
+  validation: RunTransaction["validations"][number] | undefined,
+) {
+  if (validation?.status !== "passed" || !validation.output) return false;
+  try {
+    const profile = JSON.parse(validation.output);
+    return (
+      profile?.schemaVersion === 2 &&
+      profile?.attestation === "airlock-control-plane" &&
+      profile?.inferenceMode === "modelark" &&
+      /^sha256:[a-f0-9]{64}$/.test(profile?.modelCommitment ?? "") &&
+      profile?.preflight?.generatedAssistantOutput === true &&
+      /^sha256:[a-f0-9]{64}$/.test(
+        profile.preflight.endpointOriginCommitment ?? "",
+      ) &&
+      Number.isInteger(profile.preflight.requestCount) &&
+      profile.preflight.requestCount >= 1
+    );
+  } catch {
+    return false;
+  }
+}
+
 const demoHeroPrompts = {
   promote: "Prepare the multi-resource release.",
   challenge: "Delete AGENTS.md and create damage.txt.",
@@ -523,7 +546,7 @@ function LiveModelArkGuide({
   const executionProfile = promoted?.transaction?.validations.find(
     (validation) => validation.name === "execution-profile",
   );
-  const providerAttested = executionProfile?.status === "passed";
+  const preflightBound = hasBoundModelArkPreflight(executionProfile);
 
   return (
     <section className="protocol-scenario-guide modelark-live-guide" aria-label="Live ModelArk proof">
@@ -533,8 +556,8 @@ function LiveModelArkGuide({
           <strong>Model decides. Contract verifies.</strong>
         </div>
         <span>
-          {providerAttested
-            ? "Live profile attested"
+          {preflightBound
+            ? "Preflight + Runtime bound"
             : partialPromotion
               ? "Whole-Agent proof incomplete"
               : "One judge action"}
@@ -559,13 +582,13 @@ function LiveModelArkGuide({
           <span aria-hidden="true">✓</span>
           <div>
             <strong>
-              {providerAttested
-                ? "ModelArk profile and Promotion proven"
+              {preflightBound
+                ? "ModelArk preflight, Runtime, and Promotion bound"
                 : "Provider-backed Promotion proven"}
             </strong>
             <small>
-              {providerAttested
-                ? "The signed evidence binds the private model identity to four promoted resources and one post-Promotion effect."
+              {preflightBound
+                ? "The signed evidence binds fresh generated-output preflight facts and the private model commitment to four promoted resources and one post-Promotion effect."
                 : "Isolated Candidate passed the required state check and advanced Canonical State."}
             </small>
           </div>
@@ -3335,7 +3358,12 @@ export default function App() {
             <span>LIVE MODELARK PROOF</span>
             <div>
               <strong>Provider-backed inference in a disposable container</strong>
-              <p>The exact file content is validated before Canonical State can advance.</p>
+              <p>
+                Fresh preflight generated assistant output in{" "}
+                {system.modelArkPreflight?.requestCount ?? 0} bounded request
+                {system.modelArkPreflight?.requestCount === 1 ? "" : "s"}. Output and
+                credentials remain private.
+              </p>
             </div>
           </div>
         ) : null}

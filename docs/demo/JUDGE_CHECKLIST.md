@@ -79,7 +79,7 @@ Explain that the offline command verifies historical signed evidence and does no
 - [ ] The guide reports `Full signed recovery proof verified` only after both signatures, the parent link, and every Canonical State handoff pass local verification.
 - [ ] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.
 - [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
-- [ ] The live UI shows `LIVE MODELARK PROOF`, one seeded Agent, and one `Run live Candidate` action.
+- [ ] The live UI shows `LIVE MODELARK PROOF`, fresh generated-output preflight evidence, one seeded Agent, and one `Run live Candidate` action.
 - [ ] A complete live Promotion automatically records one private signed evidence packet with the safe ModelArk execution-profile disclosure, and `npm run verify:modelark-evidence` validates it offline.
 - [ ] Recorded evidence is labelled historical and is never presented as a substitute for a current live preflight.
 - [ ] The live Candidate creates the exact artifact, updates SQLite, submits one typed intent, passes the required state Validation, promotes all four resources, delivers exactly one effect after Promotion, and exports a locally verified signed decision.

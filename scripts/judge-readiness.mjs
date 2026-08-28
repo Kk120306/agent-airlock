@@ -139,7 +139,15 @@ export async function inspectJudgeReadiness({
     validations[0]?.required === true;
   const profileReady =
     mode === evaluatedMode &&
-    (evaluatedMode !== "modelark" || system?.arkConfigured === true);
+    (evaluatedMode !== "modelark" ||
+      (system?.arkConfigured === true &&
+        system?.modelArkPreflight?.generatedAssistantOutput === true &&
+        typeof system.modelArkPreflight.checkedAt === "string" &&
+        Number.isInteger(system.modelArkPreflight.attemptCount) &&
+        system.modelArkPreflight.attemptCount >= 1 &&
+        Number.isInteger(system.modelArkPreflight.requestCount) &&
+        system.modelArkPreflight.requestCount >=
+          system.modelArkPreflight.attemptCount));
   const runtimeReady =
     system?.runtimeProvider === "container" &&
     system?.codexAvailable === true &&
@@ -170,7 +178,7 @@ export async function inspectJudgeReadiness({
       profileReady
         ? evaluatedMode === "runtime"
           ? "The no-cost real Runtime proof profile is active."
-          : "The credentialed ModelArk proof profile is active after provider preflight."
+          : `The credentialed ModelArk proof profile is active after a provider preflight generated assistant output in ${system.modelArkPreflight.requestCount} bounded request${system.modelArkPreflight.requestCount === 1 ? "" : "s"}.`
         : "The active server does not match the requested judge proof profile.",
     ),
     readinessCheck(
