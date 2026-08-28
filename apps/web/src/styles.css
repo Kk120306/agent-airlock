@@ -997,11 +997,10 @@ textarea:focus {
 
 .protocol-scenario-actions small {
   margin-top: 3px;
-  overflow: hidden;
   color: #85857e;
   font-size: 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .protocol-automation-error {

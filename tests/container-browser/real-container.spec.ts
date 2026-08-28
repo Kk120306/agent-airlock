@@ -20,7 +20,21 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(created.agent.name).toBe("Real Runtime Proof");
   const agentId = created.agent.id;
 
+  let releaseSystemRequest = () => {};
+  const systemRequestGate = new Promise<void>((resolve) => {
+    releaseSystemRequest = resolve;
+  });
+  await page.route("**/api/system", async (route) => {
+    await systemRequestGate;
+    await route.continue();
+  });
   await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Connecting to the control plane" }),
+  ).toBeVisible();
+  await expect(page.getByText("Runtime configuration needed", { exact: true }))
+    .not.toBeVisible();
+  releaseSystemRequest();
   await expect(page.getByText("REAL RUNTIME PROOF", { exact: true })).toBeVisible();
   await expect(
     page.getByText("Real Codex CLI in a disposable container", { exact: true }),
@@ -80,6 +94,20 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(
     pairedProof.getByRole("button", { name: "Run complete safety loop" }),
   ).toBeEnabled();
+  const proofCardCopy = pairedProof.locator(".protocol-scenario-actions small");
+  await expect(proofCardCopy).toHaveCount(3);
+  expect(
+    await proofCardCopy.evaluateAll((elements) =>
+      elements.every((element) => {
+        const style = window.getComputedStyle(element);
+        return (
+          style.whiteSpace === "normal" &&
+          element.scrollWidth <= element.clientWidth &&
+          element.scrollHeight <= element.clientHeight
+        );
+      }),
+    ),
+  ).toBe(true);
   await pairedProof.getByRole("button", { name: /Run passing Candidate/ }).click();
 
   await expect(

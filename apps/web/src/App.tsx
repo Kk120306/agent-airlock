@@ -2684,8 +2684,12 @@ export default function App() {
       .auth()
       .then(async ({ required }) => {
         if (!mountedRef.current) return;
-        setAuthRequired(required);
-        if (!required) await bootstrap();
+        if (required) {
+          setAuthRequired(true);
+          return;
+        }
+        await bootstrap();
+        if (mountedRef.current) setAuthRequired(false);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
     return () => {
