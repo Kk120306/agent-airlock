@@ -2967,6 +2967,53 @@ function FederationAirlock({
               </div>
             ))}
           </div>
+          <div
+            className="federation-preflight"
+            data-status={selectedInboxItem.review.preflight.status}
+          >
+            <div>
+              <span>Receiver metadata preflight</span>
+              <strong>
+                {selectedInboxItem.review.preflight.status ===
+                "no-metadata-blocker"
+                  ? "No predicted metadata blocker"
+                  : selectedInboxItem.review.preflight.blockers.length +
+                    " predicted blocker" +
+                    (selectedInboxItem.review.preflight.blockers.length === 1
+                      ? ""
+                      : "s")}
+              </strong>
+              <small>
+                Outcome Contract v
+                {selectedInboxItem.review.preflight.contractVersion} · {" "}
+                {selectedInboxItem.review.preflight.affectedPathCount} affected path
+                {selectedInboxItem.review.preflight.affectedPathCount === 1
+                  ? ""
+                  : "s"}
+              </small>
+            </div>
+            {selectedInboxItem.review.preflight.blockers.map((blocker) => (
+              <div className="federation-preflight-blocker" key={blocker.code}>
+                <span>{blocker.code.replaceAll("-", " ")}</span>
+                <strong>{blocker.summary}</strong>
+                {blocker.paths.length > 0 && (
+                  <code>{blocker.paths.join(", ")}</code>
+                )}
+              </div>
+            ))}
+            <div className="federation-preflight-deferred">
+              <span>Deferred to authoritative Candidate Validation</span>
+              <div>
+                {selectedInboxItem.review.preflight.deferredChecks.map((check) => (
+                  <small key={check}>{check.replaceAll("-", " ")}</small>
+                ))}
+              </div>
+            </div>
+            <p>
+              This preflight uses metadata only.
+              Approval never bypasses receiver Validation or grants Promotion.
+            </p>
+          </div>
           {selectedInboxItem.review.artifact.truncated && (
             <p>
               Showing {selectedInboxItem.review.artifact.displayedOperationCount} of {" "}

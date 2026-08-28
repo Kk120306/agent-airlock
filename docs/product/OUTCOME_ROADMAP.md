@@ -655,6 +655,36 @@ Make human approval informed and honest: the producer may describe what happened
 Implementation is tracked by [Wayfinder issue 23](https://github.com/Kk120306/agent-airlock/issues/23).
 The safe review projection and production review panel are implemented with reload, redaction, and staged-tamper coverage.
 
+### Phase 16: Receiver Outcome Contract preflight
+
+**Outcome**
+
+The operator sees deterministic receiver-policy blockers that can be proven from the exact staged operation metadata before deciding whether Candidate preparation is worthwhile.
+
+**Build**
+
+- Evaluate affected path count, known added payload bytes, protected-path patterns, and removal of literal required paths against the receiver's current Outcome Contract.
+- Reuse the authoritative validator's path-pattern matcher so explanatory and final policy semantics cannot drift.
+- Name every content-dependent, Candidate-dependent, command-dependent, and rename-size check that remains deferred.
+- Present safe and blocked states without disabling the operator decision or claiming that metadata is authoritative Validation.
+
+**Exit gate**
+
+- A safe proposal reports no metadata-predictable blocker and identifies the receiver Outcome Contract version.
+- A protected-path proposal reports its exact path before approval, creates no Run during review, and leaves Canonical State unchanged.
+- Browser reload and service restart reproduce the same preflight from the reverified durable bundle and current receiver contract.
+- The production review remains usable without horizontal overflow at 390 CSS pixels.
+- The real two-instance browser proof displays the safe preflight before approval and still completes receiver-owned Validation and Promotion.
+
+**Beyond-expectations finish**
+
+Give operators an honest early warning without weakening the central trust boundary: metadata can predict some failures, but only isolated Candidate State and receiver Validation decide acceptance.
+
+**Current status**
+
+Implementation is tracked by [Wayfinder issue 24](https://github.com/Kk120306/agent-airlock/issues/24).
+The API and production UI expose a bounded metadata-only preflight with explicit deferred checks and paired safe and protected-path proofs.
+
 ## Hackathon cut lines
 
 ### Qualifying proof

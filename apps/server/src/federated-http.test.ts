@@ -274,6 +274,17 @@ describe("federated HTTP execution", () => {
                 },
               ],
             },
+            preflight: {
+              authority: "metadata-only-not-validation",
+              contractVersion: 1,
+              status: "no-metadata-blocker",
+              affectedPathCount: 1,
+              blockers: [],
+              deferredChecks: [
+                "secret-content-scan",
+                "candidate-resource-validation",
+              ],
+            },
           },
           run: null,
         },
@@ -319,6 +330,15 @@ describe("federated HTTP execution", () => {
         admissionId: imported.json().admission.admissionId,
         recordDigest: imported.json().admission.recordDigest,
       },
+      review: {
+        preflight: {
+          authority: "metadata-only-not-validation",
+          contractVersion: 1,
+          status: "no-metadata-blocker",
+          affectedPathCount: 1,
+          blockers: [],
+        },
+      },
     });
 
     const approved = await restartedApp.inject({
@@ -340,6 +360,113 @@ describe("federated HTTP execution", () => {
       run: { status: "completed", disposition: "promoted" },
     });
     await restartedApp.close();
+  });
+
+  it("predicts protected-path blockers from the exact staged metadata without creating a Run", async () => {
+    const fixture = await createFixture();
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const canonicalBefore = await fixture.workspaces.readCanonical(fixture.agentId);
+    const currentContract = fixture.service.getAgent(fixture.agentId).outcomeContract;
+    const preflightContract = await fixture.service.updateOutcomeContract(
+      fixture.agentId,
+      {
+        requiredPaths: ["README.md"],
+        protectedPaths: ["AGENTS.md"],
+        maxChangedFiles: 1,
+        maxAddedBytes: 1,
+        secretPatterns: currentContract.secretPatterns,
+        validationCommands: currentContract.validationCommands,
+      },
+    );
+    const content = Buffer.from("# producer replacement\n", "utf8");
+    const protectedArtifact = buildWorkspaceChangeSetEnvelope({
+      baseStateDigest: fixture.receipt.receipt.state.before.compositeHash,
+      resultStateDigest: fixture.receipt.receipt.state.after.compositeHash,
+      operations: [
+        {
+          operation: "modify",
+          path: "AGENTS.md",
+          mediaType: "text/markdown",
+          encoding: "base64url",
+          content: content.toString("base64url"),
+          contentDigest: sha256Digest(content),
+          byteLength: content.length,
+          priorContentDigest: sha256Digest(Buffer.from("# receiver policy\n")),
+        },
+        {
+          operation: "delete",
+          path: "README.md",
+          priorContentDigest: sha256Digest(Buffer.from("# receiver readme\n")),
+        },
+      ],
+    });
+    const protectedBundle = buildFederatedWorkBundle({
+      receipt: fixture.receipt,
+      artifact: protectedArtifact,
+      privateKey: fixture.receiptPrivateKey,
+    });
+
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-protected-preflight",
+        producerId: "producer-one",
+        bundle: protectedBundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json()).toMatchObject({
+      admission: { decision: { decision: "pending" } },
+      run: null,
+    });
+
+    const inbox = await fixture.app.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions`,
+    });
+    expect(inbox.statusCode).toBe(200);
+    expect(inbox.json().admissions[0]).toMatchObject({
+      state: "pending",
+      review: {
+        preflight: {
+          authority: "metadata-only-not-validation",
+          contractVersion: preflightContract.version,
+          status: "predicted-blocker",
+          affectedPathCount: 2,
+          blockers: [
+            {
+              code: "protected-path-change",
+              paths: ["AGENTS.md"],
+            },
+            {
+              code: "changed-files-limit",
+              paths: ["AGENTS.md", "README.md"],
+            },
+            {
+              code: "added-bytes-limit",
+              paths: [],
+            },
+            {
+              code: "required-literal-removed",
+              paths: ["README.md"],
+            },
+          ],
+          deferredChecks: [
+            "secret-content-scan",
+            "candidate-resource-validation",
+          ],
+        },
+      },
+      run: null,
+    });
+    expect(fixture.service.getRuns(fixture.agentId)).toHaveLength(0);
+    expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(
+      canonicalBefore,
+    );
+    await fixture.app.close();
   });
 
   it("fails the review closed when staged evidence changes by one bit", async () => {

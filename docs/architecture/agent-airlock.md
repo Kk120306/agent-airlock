@@ -296,6 +296,10 @@ The inbox is never authority.
 An action selected from the inbox still passes through the same append-only decision coordinator and dual-authority Promotion path.
 Phase 15 reverifies the staged bundle and derives a content-free review projection containing normalized artifact-relative paths, operation metadata, bounded producer claims, and resource counts.
 The review projection is explanatory evidence only and cannot substitute for Candidate materialization or receiver Validation.
+Phase 16 derives a deterministic preflight from that reverified operation metadata and the receiver's current Outcome Contract.
+It shares protected-path pattern semantics with authoritative Validation and can predict path-count, known-byte-count, protected-path, and literal required-path blockers without reading content or creating Candidate State.
+The preflight records the exact receiver contract version and names checks deferred to Candidate Validation.
+Its result is advisory evidence, not Admission authority, Approval authority, Validation, or Promotion authority.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -344,6 +348,7 @@ Schema evolution must increment the database version and include a tested migrat
 | Browser state is lost or an operator opens the receiver on another client                                           | Reconstruct the bounded Agent-scoped inbox from durable journals and require the normal append-only decision path.                                                                                                                                                |
 | A stale operator submits a decision after another operator committed a contradiction                               | Return a visible conflict, retain the first immutable decision, create no additional Candidate, and leave Canonical State unchanged.                                                                                                                             |
 | Staged evidence is missing or changes before an operator requests review                                            | Fail the complete inbox request closed, render no partial review, create no Candidate, and leave Canonical State unchanged.                                                                                                                                      |
+| Metadata preflight predicts a receiver Outcome Contract blocker                                                     | Show the bounded prediction and deferred checks, retain the normal append-only decision path, create no Candidate during review, and let authoritative Candidate Validation own the final disposition after approval.                                               |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 

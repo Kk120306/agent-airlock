@@ -272,6 +272,56 @@ const pendingReview: NonNullable<FederatedAdmissionInboxItem["review"]> = {
     providerBefore: 1,
     providerAfter: 1,
   },
+  preflight: {
+    authority: "metadata-only-not-validation",
+    contractVersion: 4,
+    status: "no-metadata-blocker",
+    affectedPathCount: 2,
+    blockers: [],
+    deferredChecks: [
+      "secret-content-scan",
+      "validation-commands",
+      "candidate-resource-validation",
+    ],
+  },
+};
+
+const blockedPendingReview: NonNullable<
+  FederatedAdmissionInboxItem["review"]
+> = {
+  ...pendingReview,
+  artifact: {
+    ...pendingReview.artifact,
+    operationCount: 1,
+    displayedOperationCount: 1,
+    totalPayloadBytes: 384,
+    operations: [
+      {
+        operation: "modify",
+        path: "AGENTS.md",
+        toPath: null,
+        byteLength: 384,
+      },
+    ],
+  },
+  preflight: {
+    authority: "metadata-only-not-validation",
+    contractVersion: 4,
+    status: "predicted-blocker",
+    affectedPathCount: 1,
+    blockers: [
+      {
+        code: "protected-path-change",
+        summary: "1 proposed path matches the receiver protected-path policy",
+        paths: ["AGENTS.md"],
+      },
+    ],
+    deferredChecks: [
+      "secret-content-scan",
+      "validation-commands",
+      "candidate-resource-validation",
+    ],
+  },
 };
 
 test("imports signed work through the visible receiver-owned Promotion path", async ({
@@ -404,6 +454,12 @@ test("discovers and resolves a pending Admission after a full browser reload", a
     .toBeVisible();
   await expect(review.getByText("src/release.ts")).toBeVisible();
   await expect(review.getByText("docs/release-proof.md")).toBeVisible();
+  await expect(review.getByText("No predicted metadata blocker")).toBeVisible();
+  await expect(
+    review.getByText("Deferred to authoritative Candidate Validation"),
+  ).toBeVisible();
+  await expect(review.getByText(/Approval never bypasses receiver Validation/))
+    .toBeVisible();
   await expect(review.getByText(/Receiver Outcome Contract checks run only after approval/))
     .toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -419,6 +475,41 @@ test("discovers and resolves a pending Admission after a full browser reload", a
   expect(decisionRequests).toEqual([
     { choice: "approve", reason: approval.reason },
   ]);
+});
+
+test("shows predicted receiver blockers without claiming authoritative validation", async ({
+  page,
+}) => {
+  const pendingInboxItem: FederatedAdmissionInboxItem = {
+    admission: pending.admission,
+    approval: null,
+    review: blockedPendingReview,
+    run: null,
+    state: "pending",
+  };
+  await serveProductionBundle(page, [], pending, pending, [], [pendingInboxItem]);
+  await page.goto("http://airlock.local/");
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await panel
+    .locator(".federation-inbox-list button")
+    .filter({ hasText: "judge-transfer-001" })
+    .click();
+  const review = panel.getByRole("region", { name: "Pending Admission review" });
+
+  await expect(review.getByText("1 predicted blocker")).toBeVisible();
+  await expect(review.getByText("protected path change")).toBeVisible();
+  await expect(review.getByText("AGENTS.md", { exact: true }).first()).toBeVisible();
+  await expect(review.getByText(/metadata only/)).toBeVisible();
+  await expect(review.getByText(/Approval never bypasses receiver Validation/))
+    .toBeVisible();
+  await expect(panel.getByRole("button", { name: "Approve into Candidate State" }))
+    .toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(review).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
 });
 
 test("fails closed when a stale operator contradicts an append-only decision", async ({

@@ -125,7 +125,9 @@ export class OutcomeValidator {
 
     const protectedStarted = Date.now();
     const protectedChanges = describedChanges.all.filter((change) =>
-      contract.protectedPaths.some((pattern) => matchesPattern(change.path, pattern)),
+      contract.protectedPaths.some((pattern) =>
+        matchesOutcomePathPattern(change.path, pattern),
+      ),
     );
     validations.push(
       requiredEvidence(
@@ -145,7 +147,10 @@ export class OutcomeValidator {
     const requiredStarted = Date.now();
     const candidatePaths = [...candidateInventory.keys()];
     const missingPatterns = contract.requiredPaths.filter(
-      (pattern) => !candidatePaths.some((candidatePath) => matchesPattern(candidatePath, pattern)),
+      (pattern) =>
+        !candidatePaths.some((candidatePath) =>
+          matchesOutcomePathPattern(candidatePath, pattern),
+        ),
     );
     validations.push(
       requiredEvidence(
@@ -467,7 +472,10 @@ async function hashFile(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
-function matchesPattern(relativePath: string, pattern: string): boolean {
+export function matchesOutcomePathPattern(
+  relativePath: string,
+  pattern: string,
+): boolean {
   return globToRegExp(pattern).test(relativePath);
 }
 

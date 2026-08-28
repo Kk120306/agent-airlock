@@ -1758,6 +1758,112 @@ textarea:focus {
   margin: 0;
 }
 
+.federation-preflight {
+  padding: 11px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid #b9d8ca;
+  border-radius: 9px;
+  background: #f1f9f5;
+}
+
+.federation-preflight[data-status="predicted-blocker"] {
+  border-color: #e4bd88;
+  background: #fff9ef;
+}
+
+.federation-preflight > div:first-child {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.federation-preflight > div:first-child > span {
+  color: #477078;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.federation-preflight > div:first-child > strong {
+  color: #28604e;
+  font-size: 9px;
+}
+
+.federation-preflight[data-status="predicted-blocker"]
+  > div:first-child
+  > strong {
+  color: #8d551c;
+}
+
+.federation-preflight > div:first-child > small,
+.federation-preflight > p {
+  color: #718185;
+  font-size: 7px;
+}
+
+.federation-preflight-blocker {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 4px 9px;
+  border: 1px solid #ecd3af;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.federation-preflight-blocker span {
+  color: #955d25;
+  font-size: 7px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.federation-preflight-blocker strong,
+.federation-preflight-blocker code {
+  color: #6e5438;
+  font-size: 8px;
+}
+
+.federation-preflight-blocker code {
+  grid-column: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.federation-preflight-deferred {
+  display: grid;
+  gap: 5px;
+}
+
+.federation-preflight-deferred > span {
+  color: #65777a;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.federation-preflight-deferred > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.federation-preflight-deferred small {
+  padding: 4px 6px;
+  border: 1px solid #d5e1e3;
+  border-radius: 999px;
+  background: #fff;
+  color: #65777a;
+  font-size: 7px;
+}
+
+.federation-preflight > p {
+  margin: 0;
+}
+
 .federation-pipeline {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4994,6 +5100,16 @@ textarea:focus {
 
   .federation-review-operations small {
     grid-column: 2;
+  }
+
+  .federation-preflight > div:first-child,
+  .federation-preflight-blocker {
+    grid-template-columns: 1fr;
+  }
+
+  .federation-preflight-blocker code {
+    grid-column: 1;
+    white-space: normal;
   }
 
   .federation-actions {

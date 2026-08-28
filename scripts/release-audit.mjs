@@ -174,7 +174,10 @@ const federationUiProof = await readFile(
 for (const requiredProof of [
   "discovers and resolves a pending Admission after a full browser reload",
   "fails closed when a stale operator contradicts an append-only decision",
+  "shows predicted receiver blockers without claiming authoritative validation",
   "PRODUCER CLAIM · NOT RECEIVER AUTHORITY",
+  "No predicted metadata blocker",
+  "Approval never bypasses receiver Validation",
 ]) {
   if (!federationUiProof.includes(requiredProof)) {
     failures.push("Federation operator continuity proof is missing: " + requiredProof);
@@ -187,11 +190,26 @@ const federationRealProof = await readFile(
 if (
   !federationRealProof.includes("await page.reload()") ||
   !federationRealProof.includes("Federated approval inbox") ||
-  !federationRealProof.includes("Pending Admission review")
+  !federationRealProof.includes("Pending Admission review") ||
+  !federationRealProof.includes("No predicted metadata blocker") ||
+  !federationRealProof.includes("Approval never bypasses receiver Validation")
 ) {
   failures.push(
-    "Two-instance federation proof must cross receiver reload and inspect the bounded Admission review",
+    "Two-instance federation proof must cross receiver reload and inspect the bounded Admission review and receiver preflight",
   );
+}
+const federationHttpProof = await readFile(
+  path.join(projectRoot, "apps/server/src/federated-http.test.ts"),
+  "utf8",
+);
+for (const requiredProof of [
+  "predicts protected-path blockers from the exact staged metadata without creating a Run",
+  'status: "predicted-blocker"',
+  'code: "protected-path-change"',
+]) {
+  if (!federationHttpProof.includes(requiredProof)) {
+    failures.push("Receiver metadata preflight proof is missing: " + requiredProof);
+  }
 }
 
 if (failures.length > 0) {

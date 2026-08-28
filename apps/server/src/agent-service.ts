@@ -76,7 +76,10 @@ import {
   createDefaultOutcomeContract,
   createNextOutcomeContract,
 } from "./outcome-contract.js";
-import { OutcomeValidator } from "./outcome-validator.js";
+import {
+  OutcomeValidator,
+  matchesOutcomePathPattern,
+} from "./outcome-validator.js";
 import {
   buildPortableReceiptDraft,
   type PortableReceiptDraft,
@@ -190,6 +193,28 @@ export interface FederatedAdmissionReview {
     builtinAfter: number;
     providerBefore: number;
     providerAfter: number;
+  };
+  preflight: {
+    authority: "metadata-only-not-validation";
+    contractVersion: number;
+    status: "no-metadata-blocker" | "predicted-blocker";
+    affectedPathCount: number;
+    blockers: Array<{
+      code:
+        | "protected-path-change"
+        | "changed-files-limit"
+        | "added-bytes-limit"
+        | "required-literal-removed";
+      summary: string;
+      paths: string[];
+    }>;
+    deferredChecks: Array<
+      | "required-glob-presence"
+      | "rename-payload-size"
+      | "secret-content-scan"
+      | "validation-commands"
+      | "candidate-resource-validation"
+    >;
   };
 }
 
@@ -2750,7 +2775,7 @@ export class AgentService {
     agentId: string,
     limit = 25,
   ): Promise<FederatedAdmissionInboxItem[]> {
-    this.getAgent(agentId);
+    const agent = this.getAgent(agentId);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new HttpError(400, "Federated Admission inbox limit is invalid");
     }
@@ -2780,7 +2805,7 @@ export class AgentService {
           );
         }
         const review = stagedBundle
-          ? buildFederatedAdmissionReview(stagedBundle)
+          ? buildFederatedAdmissionReview(stagedBundle, agent.outcomeContract)
           : null;
         const runRecord = admission.candidateRunId
           ? snapshot.runs.find((run) => run.id === admission.candidateRunId)
@@ -5645,6 +5670,7 @@ function markTransactionCancelledBeforeStart(
 
 function buildFederatedAdmissionReview(
   bundle: FederatedWorkBundle,
+  contract: OutcomeContract,
 ): FederatedAdmissionReview {
   const operations = bundle.artifact.artifact.operations;
   const displayed = operations.slice(0, 50).map((operation) => ({
@@ -5658,6 +5684,108 @@ function buildFederatedAdmissionReview(
         : null,
   }));
   const receipt = bundle.receipt.receipt;
+  const affectedPaths = [
+    ...new Set(
+      operations.flatMap((operation) =>
+        operation.operation === "rename"
+          ? [operation.fromPath, operation.toPath]
+          : [operation.path],
+      ),
+    ),
+  ].sort();
+  const protectedPaths = affectedPaths.filter((affectedPath) =>
+    contract.protectedPaths.some((pattern) =>
+      matchesOutcomePathPattern(affectedPath, pattern),
+    ),
+  );
+  const resultingWrittenPaths = new Set(
+    operations.flatMap((operation) =>
+      operation.operation === "add" || operation.operation === "modify"
+        ? [operation.path]
+        : operation.operation === "rename"
+          ? [operation.toPath]
+          : [],
+    ),
+  );
+  const removedPaths = new Set(
+    operations.flatMap((operation) =>
+      operation.operation === "delete"
+        ? [operation.path]
+        : operation.operation === "rename"
+          ? [operation.fromPath]
+          : [],
+    ),
+  );
+  const requiredLiteralRemoved = contract.requiredPaths
+    .filter((pattern) => !/[*?]/.test(pattern))
+    .filter(
+      (requiredPath) =>
+        removedPaths.has(requiredPath) && !resultingWrittenPaths.has(requiredPath),
+    );
+  const totalPayloadBytes = operations.reduce(
+    (total, operation) =>
+      total +
+      (operation.operation === "add" || operation.operation === "modify"
+        ? operation.byteLength
+        : 0),
+    0,
+  );
+  const blockers: FederatedAdmissionReview["preflight"]["blockers"] = [];
+  if (protectedPaths.length > 0) {
+    blockers.push({
+      code: "protected-path-change",
+      summary:
+        protectedPaths.length +
+        " proposed path" +
+        (protectedPaths.length === 1 ? " matches" : "s match") +
+        " the receiver protected-path policy",
+      paths: protectedPaths.slice(0, 10),
+    });
+  }
+  if (affectedPaths.length > contract.maxChangedFiles) {
+    blockers.push({
+      code: "changed-files-limit",
+      summary:
+        affectedPaths.length +
+        " affected paths exceed the receiver limit of " +
+        contract.maxChangedFiles,
+      paths: affectedPaths.slice(0, 10),
+    });
+  }
+  if (totalPayloadBytes > contract.maxAddedBytes) {
+    blockers.push({
+      code: "added-bytes-limit",
+      summary:
+        totalPayloadBytes +
+        " known payload bytes exceed the receiver limit of " +
+        contract.maxAddedBytes,
+      paths: [],
+    });
+  }
+  if (requiredLiteralRemoved.length > 0) {
+    blockers.push({
+      code: "required-literal-removed",
+      summary:
+        requiredLiteralRemoved.length +
+        " required literal path" +
+        (requiredLiteralRemoved.length === 1 ? " is" : "s are") +
+        " removed without replacement",
+      paths: requiredLiteralRemoved.slice(0, 10),
+    });
+  }
+  const deferredChecks: FederatedAdmissionReview["preflight"]["deferredChecks"] = [
+    "secret-content-scan",
+    "candidate-resource-validation",
+  ];
+  if (contract.requiredPaths.some((pattern) => /[*?]/.test(pattern))) {
+    deferredChecks.push("required-glob-presence");
+  }
+  if (operations.some((operation) => operation.operation === "rename")) {
+    deferredChecks.push("rename-payload-size");
+  }
+  if (contract.validationCommands.length > 0) {
+    deferredChecks.push("validation-commands");
+  }
   return {
     schemaVersion: 1,
     authority: "producer-claim-non-authoritative",
@@ -5672,14 +5800,7 @@ function buildFederatedAdmissionReview(
       operationCount: operations.length,
       displayedOperationCount: displayed.length,
       truncated: displayed.length < operations.length,
-      totalPayloadBytes: operations.reduce(
-        (total, operation) =>
-          total +
-          (operation.operation === "add" || operation.operation === "modify"
-            ? operation.byteLength
-            : 0),
-        0,
-      ),
+      totalPayloadBytes,
       operations: displayed,
     },
     resources: {
@@ -5687,6 +5808,14 @@ function buildFederatedAdmissionReview(
       builtinAfter: receipt.state.after.builtinResources.length,
       providerBefore: receipt.state.before.providerResources.length,
       providerAfter: receipt.state.after.providerResources.length,
+    },
+    preflight: {
+      authority: "metadata-only-not-validation",
+      contractVersion: contract.version,
+      status: blockers.length > 0 ? "predicted-blocker" : "no-metadata-blocker",
+      affectedPathCount: affectedPaths.length,
+      blockers,
+      deferredChecks,
     },
   };
 }

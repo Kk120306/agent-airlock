@@ -649,6 +649,28 @@ export interface FederatedAdmissionInboxItem {
       providerBefore: number;
       providerAfter: number;
     };
+    preflight: {
+      authority: "metadata-only-not-validation";
+      contractVersion: number;
+      status: "no-metadata-blocker" | "predicted-blocker";
+      affectedPathCount: number;
+      blockers: Array<{
+        code:
+          | "protected-path-change"
+          | "changed-files-limit"
+          | "added-bytes-limit"
+          | "required-literal-removed";
+        summary: string;
+        paths: string[];
+      }>;
+      deferredChecks: Array<
+        | "required-glob-presence"
+        | "rename-payload-size"
+        | "secret-content-scan"
+        | "validation-commands"
+        | "candidate-resource-validation"
+      >;
+    };
   } | null;
   run: {
     id: string;

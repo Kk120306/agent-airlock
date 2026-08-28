@@ -176,6 +176,12 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
       ? firstOperation.fromPath
       : firstOperation.path;
   await expect(review.getByText(firstOperationPath, { exact: true })).toBeVisible();
+  await expect(review.getByText("No predicted metadata blocker")).toBeVisible();
+  await expect(
+    review.getByText("Deferred to authoritative Candidate Validation"),
+  ).toBeVisible();
+  await expect(review.getByText(/Approval never bypasses receiver Validation/))
+    .toBeVisible();
   await expect(
     review.getByText(/Receiver Outcome Contract checks run only after approval/),
   ).toBeVisible();

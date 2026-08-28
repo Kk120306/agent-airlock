@@ -356,6 +356,8 @@ Phase 14 adds an Agent-scoped durable approval inbox derived from those immutabl
 Operators can reload or hand off the browser, recover the same pending item, and visibly fail closed when a stale decision contradicts the append-only record.
 Phase 15 adds an evidence-first review that exposes bounded operation metadata and producer claims without staged content or signing material.
 The interface explicitly separates those non-authoritative claims from receiver Outcome Contract checks that run after approval.
+Phase 16 adds deterministic receiver Outcome Contract preflight for the checks that exact staged metadata can prove before approval.
+The interface shows predicted protected-path, file-count, byte-count, and literal required-path blockers while explicitly deferring content, command, resource, and full Candidate checks to authoritative receiver Validation.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations
