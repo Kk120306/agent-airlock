@@ -42,6 +42,7 @@ import type {
   RunnerRequest,
   RunnerResult,
   SealedCandidateReference,
+  ValidationEvidence,
 } from "./types.js";
 import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -238,6 +239,7 @@ export class AirlockRunner {
     private readonly promotionJournal: PromotionJournal,
     private readonly resources: ResourceCoordinator,
     private readonly injectPromotionFault?: PromotionFaultInjector,
+    private readonly executionProfileEvidence?: ValidationEvidence,
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -532,6 +534,9 @@ export class AirlockRunner {
       );
       transaction.changes = validationResult.changes;
       transaction.validations = [
+        ...(this.executionProfileEvidence
+          ? [structuredClone(this.executionProfileEvidence)]
+          : []),
         ...validationResult.validations,
         sqliteValidation.evidence,
         actionValidation.evidence,

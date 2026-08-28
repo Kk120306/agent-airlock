@@ -312,6 +312,35 @@ describe("Agent lifecycle", () => {
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(messages[1]?.content).toContain("write hello world");
     expect(service.getAgent(agent.id).codexThreadId).toBe("fake-thread");
+    const completedRun = service.getRun(run.id);
+    const executionProfile = completedRun.transaction?.validations.find(
+      (validation) => validation.name === "execution-profile",
+    );
+    expect(executionProfile).toMatchObject({
+      status: "passed",
+      required: true,
+    });
+    expect(executionProfile?.summary).toContain(
+      "configured ModelArk Responses profile",
+    );
+    expect(JSON.stringify(executionProfile)).not.toMatch(/test-key|ep-test/);
+
+    const portable = await service.exportPortableReceipt(run.id, {
+      disclosureIdentities: [],
+      includeAncestry: false,
+      localAnchor: false,
+      evmPayload: false,
+    });
+    expect(portable.availableDisclosures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          required: true,
+          summary: expect.stringContaining(
+            "configured ModelArk Responses profile",
+          ),
+        }),
+      ]),
+    );
   });
 
   it("persists a safe actionable error when ModelArk free capacity is exhausted", async () => {

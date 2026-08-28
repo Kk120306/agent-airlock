@@ -252,6 +252,10 @@ This journey describes the complete product direction, including later roadmap p
 - A reviewer must be able to distinguish reproducible middleware proof from completed local live ModelArk conformance.
 - The guided live ModelArk judge launcher must force a successful provider preflight, must not inherit the generic preflight-skip escape hatch, and must not display live-proof mode before that preflight succeeds.
 - The guided live ModelArk judge launcher must seed exactly one Agent with a falsifiable required artifact and Validation command, preserve an exact persisted contract across restart, and refuse policy drift without an explicit reset.
+- Every completed Runtime execution must add a required trusted execution-profile Validation before the Promotion decision.
+- Live ModelArk execution-profile evidence must commit to the configured model identity with SHA-256, identify the Codex CLI, Responses protocol, and Runtime class, and exclude credentials, raw endpoint identifiers, base URLs, and environment values.
+- The signed portable receipt must commit to execution-profile evidence through its Validation Merkle root and permit bounded selective disclosure of the safe attestation summary.
+- The product must label execution-profile evidence as an Airlock control-plane attestation rather than independent provider-signed evidence.
 
 ## Reliability requirements
 

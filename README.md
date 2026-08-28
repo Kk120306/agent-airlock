@@ -328,8 +328,12 @@ In the guided Web UI:
 
 1. Select `Run live Candidate`.
 2. Watch the Candidate execute and the required content Validation complete.
-3. Confirm that the canonical fingerprint advances only for a promoted result.
-4. Select `Generate and verify proof` to verify the signed decision locally.
+3. Confirm that `execution-profile` attests the live ModelArk Responses profile through a private model commitment rather than a raw endpoint identifier.
+4. Confirm that the canonical fingerprint advances only for a promoted result.
+5. Select `Generate and verify proof` to verify the signed decision locally and selectively disclose the safe execution-profile leaf when requested.
+
+The execution-profile evidence is a trusted Airlock control-plane attestation, not an independent statement signed by BytePlus.
+It proves which configured profile completed the Run and binds that claim into the Promotion Receipt without exposing the API key, model endpoint identifier, base URL, or environment values.
 
 In the generic `npm run poc` Web UI:
 

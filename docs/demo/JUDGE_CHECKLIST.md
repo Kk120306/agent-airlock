@@ -38,7 +38,8 @@ The command cannot inherit the generic preflight-skip escape hatch.
 It must complete a credential-safe live Responses request before it can start the application or display `LIVE MODELARK PROOF`.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
 The seeded Outcome Contract requires `modelark-proof.txt` to contain exactly `modelark-live`, so the provider response cannot prove success by narration alone.
-Show the required content Validation, Canonical State fingerprint transition, and locally verified signed decision.
+Show the required `execution-profile` Validation, its private model commitment, the required content Validation, Canonical State fingerprint transition, and locally verified signed decision.
+Explain that the execution profile is a trusted Airlock control-plane attestation committed by the signed receipt, not an independent BytePlus signature.
 
 ## Rubric evidence
 

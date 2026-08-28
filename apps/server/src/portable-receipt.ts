@@ -587,6 +587,7 @@ function validationLeaf(
   scope: string,
   validation: ValidationEvidence | RunTransaction["providerResources"][number]["validations"][number],
 ): PortableEvidenceLeaf {
+  const executionProfile = validation.name === "execution-profile";
   return {
     schemaVersion: 1,
     identity: `validation:${sha256Digest(Buffer.from(`${scope}\u0000${validation.name}`, "utf8")).slice("sha256:".length)}`,
@@ -594,7 +595,9 @@ function validationLeaf(
     status: validation.status,
     required: validation.required,
     durationMs: validation.durationMs,
-    summary: `Trusted Validation reported ${validation.status}.`,
+    summary: executionProfile
+      ? validation.summary
+      : `Trusted Validation reported ${validation.status}.`,
     valueHash: digestValue(validation),
   };
 }

@@ -128,6 +128,8 @@ Keep Free Credits Only Mode enabled for every configured model.
 Run `npm run demo:modelark -- --reset`.
 The guided launcher forces the live provider preflight even when the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch exists in the shell.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
-Confirm that ModelArk directs the real Codex Runtime to create `modelark-proof.txt`, the trusted content Validation passes, Canonical State advances, and the signed decision verifies locally.
+Confirm that ModelArk directs the real Codex Runtime to create `modelark-proof.txt`, the required execution-profile and content Validations pass, Canonical State advances, and the signed decision verifies locally.
+Point out that the model endpoint appears only as a SHA-256 commitment inside the trusted execution-profile evidence and that the receipt commits to that Validation through its Merkle root.
+State the limit precisely: Airlock attests its configured execution path, while BytePlus does not independently sign this receipt.
 The model response is supporting context, while the independently inspected Candidate artifact and durable Airlock evidence are the proof.
 Do not change the deterministic release gate or commit any credential-bearing output.

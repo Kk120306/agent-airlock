@@ -80,6 +80,15 @@ const run = {
     changes: { totalChangedFiles: 0, totalAddedBytes: 0, files: [], truncated: false },
     validations: [
       {
+        name: "execution-profile",
+        status: "passed",
+        required: true,
+        summary:
+          "Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile. Model identity is committed without disclosure as sha256:123456789abc.",
+        durationMs: 0,
+        output: null,
+      },
+      {
         name: "required-paths",
         status: "passed",
         required: true,
@@ -313,7 +322,8 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   await expect(guide.getByText("Model decides. Contract verifies.")).toBeVisible();
   await expect(guide.getByRole("button", { name: /Run another live Candidate/ }))
     .toBeVisible();
-  await expect(guide.getByText("Provider-backed Promotion proven")).toBeVisible();
+  await expect(guide.getByText("Live profile attested")).toBeVisible();
+  await expect(guide.getByText("ModelArk profile and Promotion proven")).toBeVisible();
   await expect(page.getByText("Independent proof")).toBeVisible();
 
   await guide.getByRole("button", { name: /Run another live Candidate/ }).click();

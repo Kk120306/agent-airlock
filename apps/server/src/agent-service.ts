@@ -45,6 +45,7 @@ import {
   type AgentArchiveAudit,
 } from "./agent-deletion-journal.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import { buildExecutionProfileEvidence } from "./execution-profile.js";
 import {
   ExternalActionOutbox,
   MockExternalActionDispatcher,
@@ -155,6 +156,7 @@ export class AgentService {
       this.promotionJournal,
       this.resourceCoordinator,
       promotionFaultInjector,
+      buildExecutionProfileEvidence(config),
     );
   }
 

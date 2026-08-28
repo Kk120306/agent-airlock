@@ -325,6 +325,8 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - Its final action generates a private-by-default two-decision chain and verifies both signatures and the Canonical State handoff locally before download.
 - `npm run demo:modelark -- --reset` adds a strict credentialed judge profile that preflights ModelArk, seeds one falsifiable file-content Outcome Contract, and refuses to start a live-proof UI when the provider is unavailable.
 - The live guide reduces provider conformance to one action and independently checks the resulting Candidate artifact before showing canonical advancement or signed proof.
+- Every successful Run now records a required execution-profile Validation before Promotion, commits only a SHA-256 model identity, and carries the safe profile claim into the signed Validation Merkle root.
+- The live judge view distinguishes this trusted Airlock control-plane attestation from independent BytePlus attestation and never reveals the API key, endpoint identifier, base URL, or environment values.
 - The guided launcher forces the live preflight even when the generic POC skip flag is present, and its tested seed contract rejects persisted policy drift until the operator explicitly resets the managed demo.
 - ADR 0009 freezes P0 scope and separates the deterministic release proof from credentialed ModelArk conformance.
 - The credential-safe live preflight currently reaches the BytePlus Asia Pacific Responses API but receives HTTP 429 because configured free quota or the inference limit is unavailable.

@@ -333,6 +333,10 @@ function LiveModelArkGuide({
     (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
   );
   const completed = Boolean(promoted?.transaction);
+  const executionProfile = promoted?.transaction?.validations.find(
+    (validation) => validation.name === "execution-profile",
+  );
+  const providerAttested = executionProfile?.status === "passed";
 
   return (
     <section className="protocol-scenario-guide modelark-live-guide" aria-label="Live ModelArk proof">
@@ -341,7 +345,13 @@ function LiveModelArkGuide({
           <span className="eyebrow">Provider proof</span>
           <strong>Model decides. Contract verifies.</strong>
         </div>
-        <span>{completed ? "Live proof complete" : "One judge action"}</span>
+        <span>
+          {providerAttested
+            ? "Live profile attested"
+            : completed
+              ? "Live proof complete"
+              : "One judge action"}
+        </span>
       </header>
       <div className="protocol-scenario-actions">
         <button
@@ -363,9 +373,15 @@ function LiveModelArkGuide({
         <div className="protocol-paired-verdict" role="status">
           <span aria-hidden="true">✓</span>
           <div>
-            <strong>Provider-backed Promotion proven</strong>
+            <strong>
+              {providerAttested
+                ? "ModelArk profile and Promotion proven"
+                : "Provider-backed Promotion proven"}
+            </strong>
             <small>
-              Isolated Candidate passed the required content check and advanced Canonical State.
+              {providerAttested
+                ? "The signed evidence commits to the private model identity and the validated Canonical State transition."
+                : "Isolated Candidate passed the required content check and advanced Canonical State."}
             </small>
           </div>
           <code>{shortHash(promoted.transaction.canonicalContentHashAfter)}</code>
