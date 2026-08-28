@@ -143,6 +143,26 @@ The verifier checks schema, policy digest, authority-key fingerprint, policy sig
 A valid policy signature from an unpinned authority fails authorization, which prevents a receipt producer from minting a policy that trusts its own receipt key.
 Unknown receipt keys, compromised keys, policy timing failures, signing-window failures, scope mismatches, and invalid receipt cryptography fail closed without rewriting the underlying mathematical signature result.
 
+## Federated admission boundary
+
+ADR 0018 adds a receiver-controlled decision above portable verification.
+A Federated Admission Policy snapshots exact producer, signer, protocol, artifact, resource, ancestry, freshness, revocation, approval, and optional transparency scopes.
+The producer cannot supply or select that policy, and empty scopes grant no permission.
+
+Admission strictly verifies the portable evidence and artifact commitment before it creates any receiver state.
+It then evaluates current local distrust, required transparency, and an append-only replay identity derived from the producer, receipt digest, artifact digest, artifact schema, and media type.
+Every terminal evaluation produces an immutable Federated Admission Record bound to the exact policy version.
+An exact retry returns that existing result without creating another Candidate, while contradictory reuse fails closed.
+
+Signature-only evidence is sufficient only when the matched local rule says transparency is not required.
+An inclusion-required rule pins exact transparency-log keys.
+A consistency-required rule also pins a prior receiver checkpoint and rejects rollback, changed log keys, invalid consistency, and conflicting same-size checkpoints.
+An offline receiver without a prior checkpoint cannot claim consistency and rejects that rule.
+
+A successful evaluation authorizes only materialization into isolated Candidate State.
+The receiver snapshots its own Outcome Contract, runs its own required Validations, and retains sole Promotion Authority.
+An upstream Promotion, local admission, and local Promotion are three distinct decisions with independent evidence.
+
 ## Offline verification report
 
 The CLI accepts one bounded envelope file and emits both human-readable and JSON results.

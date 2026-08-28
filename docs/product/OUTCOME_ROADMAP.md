@@ -61,6 +61,7 @@ The winning story is:
 | 9. Competing futures          | Several Agents or models can attempt the same task and only the best valid future is promoted. | Category-defining product | Deterministic evaluation ranks isolated candidates without cross-contamination.                      |
 | 10. Adaptive assurance        | Airlock learns which protections should be strengthened from observed failures.                | Intelligent control plane | Suggested contract changes are explainable, versioned, reviewed, and never silently weakened.        |
 | 11. Portable trust            | Promotion evidence can be verified across runtimes and organizations.                          | Ecosystem standard        | A provider-neutral signed Promotion Receipt verifies independently of the original Airlock instance. |
+| 12. Federated acceptance      | Verified external Agent work can enter local Candidate State under receiver-controlled policy. | Networked control plane   | A remote artifact is locally admitted, validated, and promoted without trusting the producer Runtime. |
 
 ## Hackathon phases
 
@@ -520,6 +521,36 @@ Establish Outcome Contracts and Promotion Receipts as a portable trust protocol 
 - The production Docker image builds every workspace, resolves all three runtime packages through the pruned workspace installation, starts as the non-root runtime user, and passes its live health boundary.
 - `npm run check:phase11:protocol` and the Phase 11 server acceptance matrix require no ModelArk credential, paid inference, provider purchase, wallet, or public blockchain transaction.
 - `npm run check:phase11:docker` turns the production-image build, runtime package imports, and live health probe into a repeatable release gate.
+
+### Phase 12: Federated acceptance
+
+**Outcome**
+
+One organization can admit externally produced Agent work without trusting the producer database, Runtime, model, signer claims, or blockchain.
+
+**Build**
+
+- Define immutable receiver-controlled Federated Admission Policy versions with exact producer, signer, artifact, resource, ancestry, freshness, revocation, approval, and transparency scopes.
+- Bind each transfer to strict portable evidence, an exact artifact digest, and an append-only local replay identity.
+- Materialize accepted artifacts only as isolated Candidate State.
+- Evaluate the imported Candidate under a receiver-owned Outcome Contract and local Validations.
+- Preserve immutable admission evidence without turning an upstream receipt or anchor into local Promotion Authority.
+
+**Exit gate**
+
+- Two independently configured Airlock instances complete a credential-free export, transfer, local admission, Validation, and Promotion journey.
+- Unknown, stale, revoked, wrong-scope, downgraded, replayed, mutated, contradictory, and required-transparency failure paths leave receiver Canonical State unchanged.
+- The receiver can explain every admission decision from an immutable policy snapshot and Federated Admission Record.
+- The path works offline by default without a wallet, RPC, paid inference, or public transaction.
+
+**Beyond-expectations finish**
+
+Turn Portable Promotion Receipts into a vendor-neutral admission protocol while keeping every acceptance decision local, inspectable, and reversible.
+
+**Current status**
+
+The policy boundary is resolved in ADR 0018.
+Replay, revocation, split-view research and the two-instance Candidate admission prototype remain outcome gates rather than delivered claims.
 
 ## Hackathon cut lines
 

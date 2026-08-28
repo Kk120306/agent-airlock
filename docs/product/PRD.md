@@ -347,6 +347,7 @@ Phase 8 delivers the Transactional Resource SDK on the isolated post-hackathon b
 Phase 9 delivers competing Agent futures with deterministic one-winner Selection on the same branch.
 Phase 10 delivers deterministic, operator-controlled Adaptive Assurance on the same branch.
 Phase 11 delivers independently verifiable Portable Promotion Receipts on the same branch.
+Phase 12 is planned as receiver-controlled federated Candidate admission and is not yet delivered.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations
@@ -374,5 +375,6 @@ Monotonic evidence-backed assurance and explicit operator authority are resolved
 Canonical portable receipts, key identity, selective disclosure, and optional anchoring are resolved in [ADR 0013](../adr/0013-sign-canonical-portable-receipts-and-keep-anchoring-optional.md).
 The closed [post-hackathon Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/10) and [trust-boundary ratification](https://github.com/Kk120306/agent-airlock/issues/11) bind the evidence to published release commit `cb9b63f9caa4ad9ade6d9d76d99d604edcba0d84`.
 Authority-first Selection, exact terminal replay, and append-only transparency lock turns are resolved locally in [ADR 0014](../adr/0014-publish-selection-and-terminal-authority-before-mutable-projections.md).
+Receiver-controlled federated admission policy, replay identity, current distrust, transparency requirements, and non-authoritative Candidate entry are resolved locally in [ADR 0018](../adr/0018-make-federated-admission-local-versioned-and-non-authoritative.md).
 
 The [implementation Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) and [post-hackathon trust-protocol map](https://github.com/Kk120306/agent-airlock/issues/10) are the canonical indexes for these decisions.

@@ -139,6 +139,15 @@ _Avoid_: Activity log, database export, self-authorizing chain
 A bounded evaluator-governed statement naming which Portable Promotion Receipt keys are active, retired, or compromised for exact signing windows, Agents, and dispositions.
 _Avoid_: Receipt claim, self-authorization, global identity
 
+**Federated Admission Policy**:
+An immutable receiver-controlled policy version that decides whether exact portable evidence and its artifact may enter isolated local Candidate State.
+It never grants Promotion Authority and cannot be selected or expanded by the producer.
+_Avoid_: Producer allowlist, receipt authority, automatic federation
+
+**Federated Admission Record**:
+The immutable local evidence of one admission evaluation, including the exact policy snapshot, receipt and artifact commitments, replay identity, decision, and stable reason.
+_Avoid_: Import log, trust cache, upstream approval
+
 **Policy Authority**:
 The separate Ed25519 identity that signs a canonical Signing-Key Trust Policy without becoming a receipt signer or Promotion authority.
 _Avoid_: Included-key trust, receipt authority, blockchain owner
