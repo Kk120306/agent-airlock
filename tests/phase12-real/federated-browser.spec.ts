@@ -206,6 +206,8 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
     .toBeVisible();
   await expect(federationPanel.getByText("Recorded by local-control-plane"))
     .toBeVisible();
+  await expect(federationPanel.getByText(/Reviewed context sha256:[a-f0-9]{64}/))
+    .toBeVisible();
   const receiverAfterApproval = await request.get(receiverUrl + "/api/agents");
   expect(receiverAfterApproval.ok()).toBe(true);
   expect((await receiverAfterApproval.json()).agents[0].canonicalStateId).not.toBe(

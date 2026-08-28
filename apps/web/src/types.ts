@@ -596,11 +596,12 @@ export interface FederatedImportResult {
 
 export interface FederatedApprovalDecisionRecord {
   schema: "agent-airlock/federated-approval-decision";
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   approvalId: string;
   admissionId: string;
   importIdentifier: string;
   pendingRecordDigest: string;
+  decisionContextDigest?: string;
   localAgentId: string;
   operatorId: string;
   choice: "approve" | "deny";

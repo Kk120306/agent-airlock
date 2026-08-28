@@ -216,8 +216,10 @@ describe("federated HTTP execution", () => {
     expect(approved.statusCode).toBe(201);
     expect(approved.json()).toMatchObject({
       approval: {
+        schemaVersion: 2,
         choice: "approve",
         operatorId: "local-control-plane",
+        decisionContextDigest,
       },
       run: {
         status: "completed",
@@ -228,6 +230,35 @@ describe("federated HTTP execution", () => {
     expect(after.stateId).not.toBe(before.stateId);
     await expect(readFile(path.join(after.workspacePath, "federated.txt"), "utf8"))
       .resolves.toBe("federated work\n");
+
+    const currentContract = fixture.service.getAgent(fixture.agentId).outcomeContract;
+    await fixture.service.updateOutcomeContract(fixture.agentId, {
+      requiredPaths: currentContract.requiredPaths,
+      protectedPaths: currentContract.protectedPaths,
+      maxChangedFiles: currentContract.maxChangedFiles - 1,
+      maxAddedBytes: currentContract.maxAddedBytes,
+      secretPatterns: currentContract.secretPatterns,
+      validationCommands: currentContract.validationCommands,
+    });
+    const rotatedDecisionContextDigest = await readDecisionContextDigest(
+      fixture.app,
+      fixture.agentId,
+      imported.json().admission.admissionId,
+    );
+    expect(rotatedDecisionContextDigest).not.toBe(decisionContextDigest);
+    const contradictoryReplay = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: {
+        choice: "approve",
+        reason: "Verified producer evidence",
+        decisionContextDigest: rotatedDecisionContextDigest,
+      },
+    });
+    expect(contradictoryReplay.statusCode).toBe(409);
 
     const replay = await fixture.app.inject({
       method: "POST",

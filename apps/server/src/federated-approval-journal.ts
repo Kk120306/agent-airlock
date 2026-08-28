@@ -32,7 +32,7 @@ export type FederatedApprovalPhase =
   | "candidate-prepared"
   | "completed";
 
-export interface FederatedApprovalDecisionRecord {
+interface FederatedApprovalDecisionRecordV1 {
   schema: "agent-airlock/federated-approval-decision";
   schemaVersion: 1;
   approvalId: ReceiptDigest;
@@ -46,6 +46,26 @@ export interface FederatedApprovalDecisionRecord {
   decidedAt: string;
   recordDigest: ReceiptDigest;
 }
+
+interface FederatedApprovalDecisionRecordV2 {
+  schema: "agent-airlock/federated-approval-decision";
+  schemaVersion: 2;
+  approvalId: ReceiptDigest;
+  admissionId: ReceiptDigest;
+  importIdentifier: ReceiptDigest;
+  pendingRecordDigest: ReceiptDigest;
+  decisionContextDigest: ReceiptDigest;
+  localAgentId: string;
+  operatorId: string;
+  choice: FederatedApprovalChoice;
+  reason: string;
+  decidedAt: string;
+  recordDigest: ReceiptDigest;
+}
+
+export type FederatedApprovalDecisionRecord =
+  | FederatedApprovalDecisionRecordV1
+  | FederatedApprovalDecisionRecordV2;
 
 export interface FederatedApprovalPlan {
   schemaVersion: 1;
@@ -88,12 +108,14 @@ export class FederatedApprovalJournal {
 
   async begin(input: {
     pending: FederatedAdmissionRecord;
+    decisionContextDigest: ReceiptDigest;
     operatorId: string;
     choice: FederatedApprovalChoice;
     reason: string;
     now: string;
   }): Promise<FederatedApprovalResult> {
     assertPendingAdmission(input.pending);
+    validateDigest(input.decisionContextDigest, "decision context digest");
     validateIdentifier(input.operatorId, "operator identity");
     validateChoice(input.choice);
     validateReason(input.reason);
@@ -105,13 +127,14 @@ export class FederatedApprovalJournal {
       if (approval) {
         assertSameDecision(approval, input);
       } else {
-        const body: Omit<FederatedApprovalDecisionRecord, "recordDigest"> = {
+        const body: Omit<FederatedApprovalDecisionRecordV2, "recordDigest"> = {
           schema: "agent-airlock/federated-approval-decision",
-          schemaVersion: 1,
+          schemaVersion: 2,
           approvalId,
           admissionId: input.pending.admissionId,
           importIdentifier: input.pending.importIdentifier,
           pendingRecordDigest: input.pending.recordDigest,
+          decisionContextDigest: input.decisionContextDigest,
           localAgentId: input.pending.localAgentId,
           operatorId: input.operatorId,
           choice: input.choice,
@@ -390,6 +413,7 @@ export class FederatedApprovalCoordinator {
 
   async decide(input: {
     pending: FederatedAdmissionRecord;
+    decisionContextDigest: ReceiptDigest;
     operatorId: string;
     choice: FederatedApprovalChoice;
     reason: string;
@@ -498,6 +522,7 @@ function assertSameDecision(
   existing: FederatedApprovalDecisionRecord,
   input: {
     pending: FederatedAdmissionRecord;
+    decisionContextDigest: ReceiptDigest;
     operatorId: string;
     choice: FederatedApprovalChoice;
     reason: string;
@@ -511,6 +536,14 @@ function assertSameDecision(
     existing.operatorId !== input.operatorId ||
     existing.choice !== input.choice ||
     existing.reason !== input.reason
+  ) {
+    throw new Error(
+      "Federated Approval Decision conflicts with the immutable first decision",
+    );
+  }
+  if (
+    existing.schemaVersion === 2 &&
+    existing.decisionContextDigest !== input.decisionContextDigest
   ) {
     throw new Error(
       "Federated Approval Decision conflicts with the immutable first decision",
@@ -541,7 +574,7 @@ function validateApprovalRecord(
   value: unknown,
 ): asserts value is FederatedApprovalDecisionRecord {
   const record = asRecord(value, "Federated Approval Decision");
-  assertExactKeys(record, [
+  const commonKeys = [
     "schema",
     "schemaVersion",
     "approvalId",
@@ -554,10 +587,21 @@ function validateApprovalRecord(
     "reason",
     "decidedAt",
     "recordDigest",
-  ]);
+  ];
+  if (record.schemaVersion === 1) {
+    assertExactKeys(record, commonKeys);
+  } else if (record.schemaVersion === 2) {
+    assertExactKeys(record, [
+      ...commonKeys.slice(0, 6),
+      "decisionContextDigest",
+      ...commonKeys.slice(6),
+    ]);
+  } else {
+    throw new Error("Federated Approval Decision protocol is invalid");
+  }
   if (
     record.schema !== "agent-airlock/federated-approval-decision" ||
-    record.schemaVersion !== 1
+    (record.schemaVersion !== 1 && record.schemaVersion !== 2)
   ) {
     throw new Error("Federated Approval Decision protocol is invalid");
   }
@@ -565,6 +609,9 @@ function validateApprovalRecord(
   validateDigest(record.admissionId, "admission identity");
   validateDigest(record.importIdentifier, "import identity");
   validateDigest(record.pendingRecordDigest, "pending record digest");
+  if (record.schemaVersion === 2) {
+    validateDigest(record.decisionContextDigest, "decision context digest");
+  }
   validateDigest(record.recordDigest, "approval record digest");
   validateIdentifier(record.localAgentId, "local Agent identity");
   validateIdentifier(record.operatorId, "operator identity");

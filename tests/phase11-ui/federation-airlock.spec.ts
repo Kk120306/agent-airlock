@@ -223,11 +223,12 @@ const pending: FederatedImportResult = {
 
 const approval = {
   schema: "agent-airlock/federated-approval-decision" as const,
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   approvalId: digest("7"),
   admissionId: pending.admission.admissionId,
   importIdentifier: pending.admission.importIdentifier,
   pendingRecordDigest: pending.admission.recordDigest,
+  decisionContextDigest: digest("9"),
   localAgentId: agent.id,
   operatorId: "local-control-plane",
   choice: "approve" as const,
@@ -405,6 +406,7 @@ test("resumes a pending Admission through the visible append-only operator gate"
     ],
   );
   await page.goto("http://airlock.local/");
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Federation" }).click();
   const panel = page.locator("#federation-airlock-panel");
   await panel.getByLabel("Transfer identity").fill("judge-pending-001");
@@ -428,7 +430,12 @@ test("resumes a pending Admission through the visible append-only operator gate"
 
   await expect(panel.getByText("PROMOTED BY RECEIVER")).toBeVisible();
   await expect(panel.getByText(approval.recordDigest)).toBeVisible();
+  await expect(
+    panel.getByText("Reviewed context " + approval.decisionContextDigest),
+  ).toBeVisible();
   await expect(panel.getByText("Recorded by local-control-plane")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth))
+    .toBeLessThanOrEqual(390);
   expect(decisionRequests).toEqual([
     {
       choice: "approve",

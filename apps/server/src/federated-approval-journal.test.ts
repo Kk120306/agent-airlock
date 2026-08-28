@@ -214,6 +214,7 @@ function decision(
 ) {
   return {
     pending,
+    decisionContextDigest: sha256Digest("reviewed receiver context"),
     operatorId: "local-control-plane",
     choice,
     reason: choice === "approve" ? "Evidence reviewed" : "Risk rejected",
@@ -235,6 +236,10 @@ describe("FederatedApprovalCoordinator", () => {
 
     expect(retry).toEqual(first);
     expect(first.approval.choice).toBe("approve");
+    expect(first.approval).toMatchObject({
+      schemaVersion: 2,
+      decisionContextDigest: sha256Digest("reviewed receiver context"),
+    });
     expect(first.plan).toMatchObject({
       phase: "completed",
       candidateStateId: "candidate-1",
@@ -281,6 +286,12 @@ describe("FederatedApprovalCoordinator", () => {
       coordinator.decide({
         ...decision(state.pending, "deny"),
         reason: "Different reason",
+      }),
+    ).rejects.toThrow(/conflicts with the immutable first decision/);
+    await expect(
+      coordinator.decide({
+        ...decision(state.pending, "deny"),
+        decisionContextDigest: sha256Digest("different receiver context"),
       }),
     ).rejects.toThrow(/conflicts with the immutable first decision/);
   });
@@ -351,6 +362,55 @@ describe("FederatedApprovalCoordinator", () => {
     expect(result.plan.phase).toBe("completed");
   });
 
+  it("recovers a legacy decision without inventing reviewed-context evidence", async () => {
+    const state = await system();
+    const approvalId = sha256Digest(
+      "agent-airlock/federated-approval-id/v1\n" + state.pending.admissionId,
+    );
+    const legacyBody = {
+      schema: "agent-airlock/federated-approval-decision" as const,
+      schemaVersion: 1 as const,
+      approvalId,
+      admissionId: state.pending.admissionId,
+      importIdentifier: state.pending.importIdentifier,
+      pendingRecordDigest: state.pending.recordDigest,
+      localAgentId: state.pending.localAgentId,
+      operatorId: "local-control-plane",
+      choice: "approve" as const,
+      reason: "Evidence reviewed",
+      decidedAt: "2026-08-27T00:00:02.000Z",
+    };
+    const legacyRecord = {
+      ...legacyBody,
+      recordDigest: sha256Digest(canonicalize(legacyBody)),
+    };
+    await writeFile(
+      path.join(
+        state.root,
+        "approvals",
+        "records",
+        `${approvalId.slice("sha256:".length)}.json`,
+      ),
+      canonicalize(legacyRecord) + "\n",
+      { mode: 0o600 },
+    );
+
+    const restartedJournal = new FederatedApprovalJournal(
+      path.join(state.root, "approvals"),
+    );
+    await restartedJournal.initialize();
+    const result = await new FederatedApprovalCoordinator(
+      state.admissionJournal,
+      restartedJournal,
+      state.candidates,
+    ).decide(decision(state.pending));
+
+    expect(result.approval.schemaVersion).toBe(1);
+    expect("decisionContextDigest" in result.approval).toBe(false);
+    expect(result.plan.phase).toBe("completed");
+    expect(state.candidates.prepareCount).toBe(1);
+  });
+
   it("fails closed when durable approval evidence is tampered", async () => {
     const recordState = await system();
     const record = await recordState.approvalJournal.begin({
@@ -364,7 +424,7 @@ describe("FederatedApprovalCoordinator", () => {
       `${record.approval.approvalId.slice("sha256:".length)}.json`,
     );
     const tamperedRecord = JSON.parse(await readFile(recordPath, "utf8"));
-    tamperedRecord.reason = "Silently changed";
+    tamperedRecord.decisionContextDigest = sha256Digest("silently changed");
     await writeFile(recordPath, canonicalize(tamperedRecord) + "\n", "utf8");
     await expect(recordState.approvalJournal.listRecords()).rejects.toThrow(
       /digest/,

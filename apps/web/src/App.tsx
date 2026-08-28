@@ -2744,7 +2744,9 @@ function FederationAirlock({
   };
 
   const decidePendingAdmission = async (choice: "approve" | "deny") => {
-    const decisionContextDigest = selectedInboxItem?.review?.decisionContextDigest;
+    const decisionContextDigest =
+      result?.approval?.decisionContextDigest ??
+      selectedInboxItem?.review?.decisionContextDigest;
     if (!result?.admission || !approvalReason.trim() || !decisionContextDigest) return;
     setDecisionBusy(choice);
     setLocalError(null);
@@ -3199,7 +3201,8 @@ function FederationAirlock({
                 className="button"
                 disabled={
                   !approvalReason.trim() ||
-                  !selectedInboxItem?.review?.decisionContextDigest ||
+                  !(result?.approval?.decisionContextDigest ??
+                    selectedInboxItem?.review?.decisionContextDigest) ||
                   decisionBusy !== null
                 }
                 onClick={() => void decidePendingAdmission("deny")}
@@ -3212,7 +3215,8 @@ function FederationAirlock({
               className="button button-primary"
               disabled={
                 !approvalReason.trim() ||
-                !selectedInboxItem?.review?.decisionContextDigest ||
+                !(result?.approval?.decisionContextDigest ??
+                  selectedInboxItem?.review?.decisionContextDigest) ||
                 decisionBusy !== null
               }
               onClick={() => void decidePendingAdmission("approve")}
@@ -3234,6 +3238,13 @@ function FederationAirlock({
           <span>{result.approval.choice === "approve" ? "APPROVED" : "DENIED"}</span>
           <strong>{result.approval.reason}</strong>
           <code>{result.approval.recordDigest}</code>
+          {result.approval.decisionContextDigest ? (
+            <small>
+              Reviewed context {result.approval.decisionContextDigest}
+            </small>
+          ) : (
+            <small>Legacy decision - no reviewed-context commitment</small>
+          )}
           <small>Recorded by {result.approval.operatorId}</small>
         </div>
       )}

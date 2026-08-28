@@ -2163,12 +2163,17 @@ textarea:focus {
 }
 
 .federation-decision-evidence > span {
-  grid-row: 1 / 4;
+  grid-row: 1 / 5;
   align-self: center;
   color: var(--green);
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.08em;
+}
+
+.federation-decision-evidence small {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .federation-decision-evidence[data-choice="deny"] > span {

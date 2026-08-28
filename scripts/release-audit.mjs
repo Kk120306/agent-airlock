@@ -180,6 +180,7 @@ for (const requiredProof of [
   "Approval never bypasses receiver Validation",
   "refreshes a stale review after receiver policy rotation without losing the reason",
   "Decision bound to this exact review",
+  "Reviewed context ",
 ]) {
   if (!federationUiProof.includes(requiredProof)) {
     failures.push("Federation operator continuity proof is missing: " + requiredProof);
@@ -195,7 +196,8 @@ if (
   !federationRealProof.includes("Pending Admission review") ||
   !federationRealProof.includes("No predicted metadata blocker") ||
   !federationRealProof.includes("Approval never bypasses receiver Validation") ||
-  !federationRealProof.includes("Decision bound to this exact review")
+  !federationRealProof.includes("Decision bound to this exact review") ||
+  !federationRealProof.includes("Reviewed context sha256:")
 ) {
   failures.push(
     "Two-instance federation proof must cross receiver reload and inspect the bounded Admission review and receiver preflight",
@@ -211,9 +213,25 @@ for (const requiredProof of [
   'code: "protected-path-change"',
   "rejects a stale receiver review after Outcome Contract rotation before Candidate preparation",
   "Receiver review context is stale; refresh the Admission before deciding",
+  "rotatedDecisionContextDigest",
+  "decisionContextDigest,",
 ]) {
   if (!federationHttpProof.includes(requiredProof)) {
     failures.push("Receiver metadata preflight proof is missing: " + requiredProof);
+  }
+}
+const federationApprovalProof = await readFile(
+  path.join(projectRoot, "apps/server/src/federated-approval-journal.test.ts"),
+  "utf8",
+);
+for (const requiredProof of [
+  "recovers a legacy decision without inventing reviewed-context evidence",
+  "silently changed",
+  'schemaVersion: 2,',
+  "decisionContextDigest",
+]) {
+  if (!federationApprovalProof.includes(requiredProof)) {
+    failures.push("Durable reviewed-context proof is missing: " + requiredProof);
   }
 }
 

@@ -360,6 +360,8 @@ Phase 16 adds deterministic receiver Outcome Contract preflight for the checks t
 The interface shows predicted protected-path, file-count, byte-count, and literal required-path blockers while explicitly deferring content, command, resource, and full Candidate checks to authoritative receiver Validation.
 Phase 17 binds every new operator decision to the exact pending Admission and receiver Outcome Contract review shown in the browser.
 Receiver policy rotation makes an old review stale, rejects it before Candidate preparation, refreshes the current evidence without losing the operator's reason, and preserves exact replay for decisions that were already committed.
+Phase 18 makes that exact reviewed context durable inside every new immutable Federated Approval Decision.
+The receiver exposes the committed digest after approval or denial, rejects contradictory retries and tampering, and preserves legacy decisions without claiming evidence they never recorded.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations

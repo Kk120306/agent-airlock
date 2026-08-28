@@ -2977,6 +2977,7 @@ export class AgentService {
       try {
         decision = await this.federatedApprovalCoordinator.decide({
           pending: admission,
+          decisionContextDigest: input.decisionContextDigest,
           operatorId: this.config.operatorId,
           choice: input.choice,
           reason: input.reason,

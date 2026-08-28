@@ -15,9 +15,12 @@ Keeping only an in-memory approval flag would make Candidate creation ambiguous 
 ## Decision
 
 Define a **Federated Approval Decision** as a separate immutable receiver-controlled record bound to one pending Federated Admission Record.
-The record commits the exact pending Admission digest, import identity, local Agent, receiver-derived operator identity, approve or deny choice, bounded operator reason, decision time, and its own digest.
+New schema-version-2 records commit the exact pending Admission digest, opaque reviewed-context digest, import identity, local Agent, receiver-derived operator identity, approve or deny choice, bounded operator reason, decision time, and their own digest.
+The reviewed-context digest binds the pending Admission and receiver Outcome Contract context that passed the first-decision freshness gate.
 The first valid decision is authoritative for that pending Admission.
 An exact retry returns the existing decision, while a contradictory choice, operator identity, or reason fails closed.
+For schema-version-2 records, a retry carrying a different reviewed-context digest also fails closed.
+Legacy schema-version-1 records remain readable and recoverable, but the receiver does not invent a reviewed-context commitment that those historical records never contained.
 
 The receiver persists the verified Federated Work Bundle in a bounded immutable staging area before it exposes the pending Admission as resumable.
 The staged bundle is public verification material and may not contain credentials, environment values, or provider-private content.
@@ -43,6 +46,7 @@ The request carries only the approve or deny choice and a bounded human reason.
 
 The receiver can pause sensitive imports for human judgment without weakening immutable admission evidence.
 Approval and denial remain inspectable after policy rotation, restart, and exact retry.
+New decisions permanently prove which receiver review context the operator authorized, while legacy decisions remain explicitly distinguishable.
 No producer signature, trust policy, transparency proof, or blockchain anchor can supply local approval.
 The receiver must retain bounded staged bundles and append-only decision evidence until its evidence-retention policy removes the complete closed record set.
 

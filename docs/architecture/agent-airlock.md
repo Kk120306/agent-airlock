@@ -304,7 +304,9 @@ Phase 17 derives a decision-context digest from the immutable pending Admission 
 The decision API requires that opaque digest and compares it inside an Agent-scoped decision lock shared with Outcome Contract configuration before first-decision coordination or Candidate preparation.
 A mismatch returns a retryable conflict so the client can reload current review evidence while Canonical State and Run count remain unchanged.
 Once an immutable Approval Decision exists, exact retries continue through the original decision coordinator and are not invalidated by later contract rotation.
-The context digest is a freshness guard over explanatory review inputs, not a new authority record and not a substitute for the immutable Approval Decision.
+The context digest begins as a freshness guard over explanatory review inputs and is not authority by itself.
+Phase 18 commits that validated digest inside each new schema-version-2 immutable Approval Decision, making the decision itself permanent evidence of the reviewed context without turning the browser projection into authority.
+Schema-version-1 decisions remain valid historical authority but are explicitly unbound to a reviewed-context commitment.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -355,6 +357,8 @@ Schema evolution must increment the database version and include a tested migrat
 | Staged evidence is missing or changes before an operator requests review                                            | Fail the complete inbox request closed, render no partial review, create no Candidate, and leave Canonical State unchanged.                                                                                                                                      |
 | Metadata preflight predicts a receiver Outcome Contract blocker                                                     | Show the bounded prediction and deferred checks, retain the normal append-only decision path, create no Candidate during review, and let authoritative Candidate Validation own the final disposition after approval.                                               |
 | Receiver Outcome Contract changes after review but before the first operator decision                              | Reject the stale decision context before Candidate preparation, refresh current review evidence, preserve the operator's draft reason, create no Run, and leave Canonical State unchanged.                                                                         |
+| A retry presents a different reviewed context than the immutable schema-version-2 Approval Decision               | Reject the contradiction, preserve the first decision and its Candidate identity, dispatch no additional effect, and leave Canonical State unchanged.                                                                                                             |
+| A legacy schema-version-1 Approval Decision is recovered                                                           | Preserve and recover its original authority without fabricating a reviewed-context commitment, while all new decisions use schema version 2.                                                                                                                       |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 

@@ -716,6 +716,38 @@ Close the human time-of-check to time-of-use gap without turning a browser proje
 Implementation is tracked by [Wayfinder issue 25](https://github.com/Kk120306/agent-airlock/issues/25).
 The API freshness gate, automatic browser refresh, visible binding evidence, stale-policy negative proof, and exact-replay proof are delivered and hosted-release verified.
 
+### Phase 18: Durable reviewed-context evidence
+
+**Outcome**
+
+Every new immutable Federated Approval Decision permanently proves the exact receiver review context that the operator approved or denied.
+
+**Build**
+
+- Write schema-version-2 approval records that commit the validated decision-context digest.
+- Reject exact retries whose reviewed context contradicts the first immutable decision, including after Outcome Contract rotation.
+- Keep schema-version-1 journals readable and recoverable without fabricating evidence they never contained.
+- Validate reviewed-context integrity during restart reconciliation and expose the committed digest after the decision.
+- Lock compatibility, tamper, HTTP, production-browser, and two-instance behavior into the release audit.
+
+**Exit gate**
+
+- Approval and denial API responses carry the exact reviewed-context digest shown before the decision.
+- Restart returns the same record and Candidate identity without recomputing or replacing the commitment.
+- Changing the committed digest by one bit fails journal recovery before Candidate preparation.
+- A legacy schema-version-1 decision remains recoverable and is visibly identified as lacking a reviewed-context commitment.
+- The final revision passes local and hosted quality, production-browser, two-instance, and real CodeJam Runtime proof.
+
+**Beyond-expectations finish**
+
+Turn a time-of-check guard into durable, independently inspectable human-authorization evidence while preserving honest protocol evolution.
+
+**Current status**
+
+Implementation is tracked by [Wayfinder issue 26](https://github.com/Kk120306/agent-airlock/issues/26).
+The schema-version-2 record, legacy compatibility path, retry contradiction gate, operator-visible evidence, mobile proof, and real two-instance proof are implemented and locally release-verified.
+Hosted release verification is pending.
+
 ## Hackathon cut lines
 
 ### Qualifying proof
