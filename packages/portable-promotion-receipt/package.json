@@ -23,7 +23,9 @@
     "./authority-rotation-schema": "./schema/policy-authority-rotation.schema.json",
     "./signed-authority-rotation-schema": "./schema/signed-policy-authority-rotation.schema.json",
     "./evidence-packet-schema": "./schema/portable-evidence-packet.schema.json",
-    "./decision-chain-schema": "./schema/portable-decision-chain.schema.json"
+    "./decision-chain-schema": "./schema/portable-decision-chain.schema.json",
+    "./federated-work-bundle-schema": "./schema/federated-work-bundle.schema.json",
+    "./workspace-change-set-schema": "./schema/workspace-change-set.schema.json"
   },
   "files": [
     "dist",

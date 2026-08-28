@@ -227,6 +227,20 @@ A log history accepts exactly one checkpoint key identity, so transparency-key r
 The optional EVM reference is limited to a contract interface and offline payload encoder for one receipt digest.
 The demo prints payload bytes and the exact privacy and consistency claim, performs no RPC request, submits no transaction, deploys nothing, and spends no funds.
 
+## Federated workspace artifact boundary
+
+Phase 12 uses a separate `agent-airlock/workspace-change-set-envelope` to describe bounded workspace mutations without granting the producer a receiver filesystem capability.
+The artifact commits one base state digest, one result state digest, and a canonically ordered list of explicit add, modify, delete, or rename operations.
+Every embedded file carries canonical base64url bytes, a byte length, a media type, and a SHA-256 content digest.
+Modify, delete, and rename operations also commit the exact prior content they expect, so the receiver can fail closed on a stale or contradictory base.
+Paths are normalized relative POSIX NFC strings and reject absolute forms, traversal, platform separators, reserved Airlock or Git metadata segments, case-ambiguous targets, duplicate targets, and rename chains.
+The protocol parser and canonical encoder are pure and perform no filesystem mutation.
+Only a later receiver admission operation may materialize a verified artifact through the existing Candidate State constructor.
+The artifact digest is evidence input to the Federated Admission Policy and never carries Admission Authority or Promotion Authority.
+The transfer container is an `agent-airlock/federated-work-bundle` that binds the exact receipt digest, artifact digest, artifact protocol version, path semantics, and state transition under a domain-separated Ed25519 signature from the same key that signed the Promotion Receipt.
+The receiver verifies both signatures and requires the artifact base and result digests to match the signed receipt before and after composite hashes exactly.
+This binding prevents artifact or protocol substitution without treating the producer signature as local trust.
+
 ## Export boundary
 
 The server builds a portable receipt only from strictly parsed durable Run Transaction evidence.

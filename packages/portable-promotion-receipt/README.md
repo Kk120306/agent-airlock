@@ -57,6 +57,31 @@ Agent Launchpad exposes this verifier through the global `Verify a receipt` cont
 Files remain inside the browser and are capped at 1 MB for envelopes or 2 MB for packets before verification.
 The packet intentionally excludes trust policies and Authority Trust Roots so producer evidence cannot authorize its own signer.
 
+## Workspace change sets
+
+The Node.js export also defines `agent-airlock/workspace-change-set-envelope` for transferring bounded workspace mutations into a receiver-owned Candidate State.
+The envelope carries an RFC 8785 digest over one strict artifact with exact base and result state commitments.
+Operations are limited to explicit add, modify, delete, and rename records over normalized relative POSIX NFC paths.
+Embedded file bytes use canonical unpadded base64url with an exact SHA-256 digest and byte length.
+Absolute paths, traversal, Windows separators, reserved metadata directories, duplicate targets, case-ambiguous targets, rename chains, unknown fields, unordered operations, and digest contradictions fail before any filesystem access.
+The format does not authorize admission or Promotion and deliberately contains no filesystem materializer.
+`agent-airlock/federated-work-bundle` binds the exact artifact digest, protocol version, path semantics, and before/after state transition to a valid Promotion Receipt with a second domain-separated Ed25519 signature from the same receipt key.
+Substituting another internally valid artifact, signer, protocol, or state transition therefore fails before admission policy is evaluated.
+
+```ts
+import {
+  buildWorkspaceChangeSetEnvelope,
+  parseWorkspaceChangeSetEnvelopeJson,
+} from "@agent-airlock/portable-promotion-receipt";
+
+const envelope = buildWorkspaceChangeSetEnvelope({
+  baseStateDigest,
+  resultStateDigest,
+  operations,
+});
+const parsed = parseWorkspaceChangeSetEnvelopeJson(JSON.stringify(envelope));
+```
+
 ## Organizational signing-key trust
 
 Cryptographic validity proves which included key signed a receipt, but it does not decide whether a receiving organization trusts that key.
