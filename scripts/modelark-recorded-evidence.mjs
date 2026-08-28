@@ -1,6 +1,5 @@
 import { open } from "node:fs/promises";
 import path from "node:path";
-import { verifyPortableEvidencePacketJson } from "@agent-airlock/portable-promotion-receipt";
 import {
   liveModelArkEvidenceDirectoryName,
   liveModelArkLatestEvidenceName,
@@ -34,6 +33,9 @@ async function readBoundedRegularFile(filePath) {
 }
 
 export async function verifyRecordedLiveModelArkEvidence({ stateRoot }) {
+  const { verifyPortableEvidencePacketJson } = await import(
+    "@agent-airlock/portable-promotion-receipt"
+  );
   const source = await readBoundedRegularFile(
     recordedLiveModelArkEvidencePath(stateRoot),
   );
