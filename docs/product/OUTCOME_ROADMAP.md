@@ -745,8 +745,7 @@ Turn a time-of-check guard into durable, independently inspectable human-authori
 **Current status**
 
 Implementation is tracked by [Wayfinder issue 26](https://github.com/Kk120306/agent-airlock/issues/26).
-The schema-version-2 record, legacy compatibility path, retry contradiction gate, operator-visible evidence, mobile proof, and real two-instance proof are implemented and locally release-verified.
-Hosted release verification is pending.
+The schema-version-2 record, legacy compatibility path, retry contradiction gate, operator-visible evidence, mobile proof, and real two-instance proof are delivered and hosted-release verified.
 
 ## Hackathon cut lines
 
