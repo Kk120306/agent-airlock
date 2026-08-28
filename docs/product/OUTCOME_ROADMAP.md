@@ -714,7 +714,7 @@ Close the human time-of-check to time-of-use gap without turning a browser proje
 **Current status**
 
 Implementation is tracked by [Wayfinder issue 25](https://github.com/Kk120306/agent-airlock/issues/25).
-The API freshness gate, automatic browser refresh, visible binding evidence, and stale-policy negative proof are implemented and awaiting hosted release verification.
+The API freshness gate, automatic browser refresh, visible binding evidence, stale-policy negative proof, and exact-replay proof are delivered and hosted-release verified.
 
 ## Hackathon cut lines
 
