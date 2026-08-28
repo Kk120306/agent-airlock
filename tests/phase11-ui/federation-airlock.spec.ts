@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type {
   Agent,
   AgentRun,
+  FederatedAdmissionInboxItem,
   FederatedImportResult,
   SystemInfo,
 } from "../../apps/web/src/types";
@@ -329,6 +330,81 @@ test("resumes a pending Admission through the visible append-only operator gate"
   ]);
 });
 
+test("discovers and resolves a pending Admission after a full browser reload", async ({
+  page,
+}) => {
+  const decisionRequests: unknown[] = [];
+  const pendingInboxItem: FederatedAdmissionInboxItem = {
+    admission: pending.admission,
+    approval: null,
+    run: null,
+    state: "pending",
+  };
+  await serveProductionBundle(
+    page,
+    [],
+    pending,
+    { admission: pending.admission, approval, run: importedRun },
+    decisionRequests,
+    [pendingInboxItem],
+  );
+  await page.goto("http://airlock.local/");
+  await page.reload();
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+
+  await expect(
+    panel.getByRole("region", { name: "Federated approval inbox" }),
+  ).toContainText("1 local Admission");
+  await panel
+    .locator(".federation-inbox-list button")
+    .filter({ hasText: "judge-transfer-001" })
+    .click();
+  await expect(panel.getByRole("region", { name: "Local admission decision" }))
+    .toBeVisible();
+  await panel.getByLabel("Decision reason").fill(approval.reason);
+  await panel.getByRole("button", { name: "Approve into Candidate State" }).click();
+
+  await expect(panel.getByText("PROMOTED BY RECEIVER")).toBeVisible();
+  expect(decisionRequests).toEqual([
+    { choice: "approve", reason: approval.reason },
+  ]);
+});
+
+test("fails closed when a stale operator contradicts an append-only decision", async ({
+  page,
+}) => {
+  const pendingInboxItem: FederatedAdmissionInboxItem = {
+    admission: pending.admission,
+    approval: null,
+    run: null,
+    state: "pending",
+  };
+  await serveProductionBundle(
+    page,
+    [],
+    pending,
+    { status: 409, error: "Federated approval decision conflicts with its immutable record" },
+    [],
+    [pendingInboxItem],
+  );
+  await page.goto("http://airlock.local/");
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await panel
+    .locator(".federation-inbox-list button")
+    .filter({ hasText: "judge-transfer-001" })
+    .click();
+  await panel.getByLabel("Decision reason").fill("Contradictory stale review");
+  await panel.getByRole("button", { name: "Approve into Candidate State" }).click();
+
+  await expect(panel.getByRole("alert")).toContainText(
+    "conflicts with its immutable record",
+  );
+  await expect(panel.getByText("PROMOTED BY RECEIVER")).toHaveCount(0);
+  await expect(panel.getByText("unchanged", { exact: true })).toBeVisible();
+});
+
 test("shows a durable denial while Canonical State remains unchanged", async ({ page }) => {
   const deniedApproval = {
     ...approval,
@@ -497,12 +573,17 @@ type FederatedImportResponse =
   | FederatedImportResult
   | { status: number; error: string };
 
+type FederatedDecisionResponse =
+  | FederatedImportResult
+  | { status: number; error: string };
+
 async function serveProductionBundle(
   page: Page,
   importRequests: unknown[],
   importResult: FederatedImportResponse = promoted,
-  decisionResult?: FederatedImportResult,
+  decisionResult?: FederatedDecisionResponse,
   decisionRequests: unknown[] = [],
+  inboxItems: FederatedAdmissionInboxItem[] = [],
 ): Promise<void> {
   await page.route("http://airlock.local/**", async (route) => {
     const url = new URL(route.request().url());
@@ -539,11 +620,31 @@ async function serveProductionBundle(
     }
     if (
       url.pathname ===
+        "/api/agents/" + agent.id + "/federated-admissions" &&
+      route.request().method() === "GET"
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ admissions: inboxItems }),
+      });
+      return;
+    }
+    if (
+      url.pathname ===
         "/api/federation/admissions/" + pending.admission.admissionId + "/decision" &&
       route.request().method() === "POST" &&
       decisionResult
     ) {
       decisionRequests.push(route.request().postDataJSON());
+      if ("status" in decisionResult) {
+        await route.fulfill({
+          status: decisionResult.status,
+          contentType: "application/json",
+          body: JSON.stringify({ error: decisionResult.error }),
+        });
+        return;
+      }
       await route.fulfill({
         status: decisionResult.run ? 201 : 200,
         contentType: "application/json",

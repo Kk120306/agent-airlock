@@ -1551,6 +1551,101 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.federation-inbox {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d7e2e4;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.federation-inbox-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.federation-inbox-heading strong {
+  display: block;
+  margin-top: 3px;
+  color: #2e5259;
+  font-size: 10px;
+}
+
+.federation-inbox > p {
+  margin: 0;
+  color: #68787b;
+  font-size: 9px;
+}
+
+.federation-inbox-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.federation-inbox-list > button {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid #d7e2e4;
+  border-radius: 9px;
+  background: #f8fbfb;
+  color: #2e5259;
+  text-align: left;
+  cursor: pointer;
+}
+
+.federation-inbox-list > button:hover,
+.federation-inbox-list > button[aria-pressed="true"] {
+  border-color: #52a6b9;
+  box-shadow: 0 0 0 2px rgba(82, 166, 185, 0.12);
+}
+
+.federation-inbox-list > button[data-state="pending"] {
+  border-color: rgba(170, 115, 36, 0.45);
+  background: #fffaf0;
+}
+
+.federation-inbox-list > button[data-state="promoted"] {
+  border-color: #abd3c4;
+  background: #f1f9f5;
+}
+
+.federation-inbox-list > button[data-state="denied"],
+.federation-inbox-list > button[data-state="rejected"],
+.federation-inbox-list > button[data-state="failed"],
+.federation-inbox-list > button[data-state="quarantined"] {
+  border-color: #e8c0b8;
+  background: #fff6f3;
+}
+
+.federation-inbox-list span {
+  color: #718185;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.federation-inbox-list strong,
+.federation-inbox-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.federation-inbox-list strong {
+  font-size: 9px;
+}
+
+.federation-inbox-list small {
+  color: #718185;
+  font-size: 7px;
+}
+
 .federation-pipeline {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

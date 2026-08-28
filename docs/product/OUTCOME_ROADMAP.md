@@ -592,6 +592,39 @@ HTTP, journal, restart, production UI, mock browser, and real two-instance brows
 `npm run check:phase13` combines the full quality gate, adversarial production UI, two-instance approval journey, auto-selected Docker or Podman Runtime image build, real container browser proof, and release audit.
 The hosted Release proof calls the same Runtime sub-gate, and the release audit rejects removal of either the two-instance or real Runtime command.
 
+### Phase 14: Durable federation operations
+
+**Outcome**
+
+An operator can leave, reload, or hand off the receiver console without losing a pending federated decision or relying on transient browser state.
+
+**Build**
+
+- Project immutable Admission and Approval journals into a bounded Agent-scoped inbox.
+- Sort the projection deterministically and enforce a server-side result limit.
+- Return only decision evidence, safe Run identity, lifecycle state, and disposition.
+- Let an operator reopen a pending Admission after browser reload and apply an append-only approval or denial.
+- Resume a previously recorded approval with its exact operator identity, reason, and digest when Candidate preparation was interrupted.
+
+**Exit gate**
+
+- Browser reload and service restart preserve the same actionable pending Admission.
+- Another Agent cannot observe the Admission.
+- The response contains no staged bundle, trust policy, secret, private key, mutable path, or raw Validation output.
+- A stale contradictory decision receives a visible conflict and leaves Canonical State unchanged.
+- The real two-instance browser proof reloads the receiver before approval and still promotes the exact imported artifact.
+
+**Beyond-expectations finish**
+
+Turn crash-safe federation into an operator-ready workflow where durable evidence, not a lucky open tab, carries work across time and responsibility boundaries.
+
+**Current status**
+
+Implementation is tracked by [Wayfinder issue 22](https://github.com/Kk120306/agent-airlock/issues/22).
+The production API exposes a fixed safe projection with a bounded limit, and the Federation panel presents the same durable records after reload.
+HTTP coverage proves service-restart continuity and Agent scoping, while production-browser coverage proves reload recovery and fail-closed stale-operator conflicts.
+The two-instance release proof now reloads the receiving browser between pending Admission and local approval.
+
 ## Hackathon cut lines
 
 ### Qualifying proof

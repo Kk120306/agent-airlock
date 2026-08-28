@@ -167,6 +167,30 @@ for (const requiredCommand of [
 if (!trackedFiles.includes("scripts/check-phase-thirteen.mjs")) {
   failures.push("Missing tracked Phase 13 combined Runtime proof");
 }
+const federationUiProof = await readFile(
+  path.join(projectRoot, "tests/phase11-ui/federation-airlock.spec.ts"),
+  "utf8",
+);
+for (const requiredProof of [
+  "discovers and resolves a pending Admission after a full browser reload",
+  "fails closed when a stale operator contradicts an append-only decision",
+]) {
+  if (!federationUiProof.includes(requiredProof)) {
+    failures.push("Federation operator continuity proof is missing: " + requiredProof);
+  }
+}
+const federationRealProof = await readFile(
+  path.join(projectRoot, "tests/phase12-real/federated-browser.spec.ts"),
+  "utf8",
+);
+if (
+  !federationRealProof.includes("await page.reload()") ||
+  !federationRealProof.includes("Federated approval inbox")
+) {
+  failures.push(
+    "Two-instance federation proof must cross a receiver browser reload through the durable inbox",
+  );
+}
 
 if (failures.length > 0) {
   console.error("Release audit failed:\n" + failures.map((item) => "- " + item).join("\n"));

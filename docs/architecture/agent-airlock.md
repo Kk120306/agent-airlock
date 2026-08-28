@@ -290,6 +290,10 @@ Receipt and transparency private keys remain separate operator-owned files, and 
 Phase 12 persists immutable receiver policy generations, admission plans, Admission Records, and verified artifact staging outside the mutable application database.
 Phase 13 persists a separate immutable Federated Approval Decision plus a monotonic approval recovery plan.
 The pending Admission remains unchanged, and the federated-approval Promotion authority commits both the pending Admission digest and Approval Decision digest before any physical Promotion can recover.
+Phase 14 derives a read-only operator inbox from Admission Records, Approval Decision records, approval plans, and safe Run summaries.
+The projection is Agent-scoped, deterministically ordered, bounded by the server, and excludes staged bundles, trust policies, mutable paths, Runtime output, Validation output, and credentials.
+The inbox is never authority.
+An action selected from the inbox still passes through the same append-only decision coordinator and dual-authority Promotion path.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -335,6 +339,8 @@ Schema evolution must increment the database version and include a tested migrat
 | Approval-required bundle staging is missing, malformed, or contradicts the pending Admission                       | Create no Candidate State, preserve Canonical State, and refuse the operator decision.                                                                                                                                                                           |
 | A retry contradicts the first Federated Approval Decision                                                           | Preserve the immutable first decision and fail the retry closed.                                                                                                                                                                                                 |
 | Federated Approval recovery lacks either the pending Admission or Approval Decision authority                       | Refuse physical Promotion recovery, dispatch no effect, and surface a bounded recovery failure.                                                                                                                                                                  |
+| Browser state is lost or an operator opens the receiver on another client                                           | Reconstruct the bounded Agent-scoped inbox from durable journals and require the normal append-only decision path.                                                                                                                                                |
+| A stale operator submits a decision after another operator committed a contradiction                               | Return a visible conflict, retain the first immutable decision, create no additional Candidate, and leave Canonical State unchanged.                                                                                                                             |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 

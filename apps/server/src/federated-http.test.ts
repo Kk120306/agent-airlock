@@ -226,6 +226,97 @@ describe("federated HTTP execution", () => {
     await fixture.app.close();
   });
 
+  it("keeps a bounded approval inbox actionable across a service restart", async () => {
+    const fixture = await createFixture();
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-inbox-restart",
+        producerId: "producer-one",
+        bundle: fixture.bundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+
+    const beforeRestart = await fixture.app.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions`,
+    });
+    expect(beforeRestart.statusCode).toBe(200);
+    expect(beforeRestart.json()).toMatchObject({
+      admissions: [
+        {
+          state: "pending",
+          admission: { transferId: "transfer-inbox-restart" },
+          approval: null,
+          run: null,
+        },
+      ],
+    });
+    expect(beforeRestart.body).not.toContain("federated work");
+    expect(beforeRestart.body).not.toContain("privateKey");
+    const otherAgent = await fixture.service.createAgent({ name: "Other Receiver" });
+    const otherInbox = await fixture.app.inject({
+      method: "GET",
+      url: `/api/agents/${otherAgent.id}/federated-admissions?limit=1`,
+    });
+    expect(otherInbox.json()).toEqual({ admissions: [] });
+    const invalidLimit = await fixture.app.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions?limit=101`,
+    });
+    expect(invalidLimit.statusCode).toBe(400);
+    await fixture.app.close();
+
+    const restartedWorkspaces = new WorkspaceManager(
+      fixture.config.workspaceRoot,
+      fixture.config.codexHome,
+    );
+    const restartedService = new AgentService(
+      fixture.config,
+      new JsonStore(path.join(fixture.config.dataDirectory, "launchpad.json")),
+      restartedWorkspaces,
+      fixture.runner,
+    );
+    await restartedService.initialize();
+    const restartedApp = await createApp(fixture.config, restartedService);
+    const afterRestart = await restartedApp.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions`,
+    });
+    expect(afterRestart.json().admissions[0]).toMatchObject({
+      state: "pending",
+      admission: {
+        admissionId: imported.json().admission.admissionId,
+        recordDigest: imported.json().admission.recordDigest,
+      },
+    });
+
+    const approved = await restartedApp.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: { choice: "approve", reason: "Reviewed after operator handoff" },
+    });
+    expect(approved.statusCode).toBe(201);
+    const terminal = await restartedApp.inject({
+      method: "GET",
+      url: `/api/agents/${fixture.agentId}/federated-admissions`,
+    });
+    expect(terminal.json().admissions[0]).toMatchObject({
+      state: "promoted",
+      approval: { choice: "approve", reason: "Reviewed after operator handoff" },
+      run: { status: "completed", disposition: "promoted" },
+    });
+    await restartedApp.close();
+  });
+
   it("denies approval-required work without creating a Run or changing Canonical", async () => {
     const fixture = await createFixture();
     fixture.policy.producers[0]!.requireLocalApproval = true;

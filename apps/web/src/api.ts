@@ -4,6 +4,7 @@ import type {
   AssuranceProposal,
   CandidateSet,
   FederatedAdmissionPolicySummary,
+  FederatedAdmissionInboxItem,
   FederatedImportResult,
   Message,
   OutcomeContract,
@@ -146,6 +147,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  federatedAdmissions: (id: string) =>
+    request<{ admissions: FederatedAdmissionInboxItem[] }>(
+      "/api/agents/" + id + "/federated-admissions?limit=25",
+    ),
   decideFederatedAdmission: (
     admissionId: string,
     body: { choice: "approve" | "deny"; reason: string },

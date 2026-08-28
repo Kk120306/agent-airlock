@@ -25,6 +25,9 @@ const assuranceProposalIdParams = z.object({
 const federatedAdmissionIdParams = z.object({
   admissionId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
 });
+const federatedAdmissionInboxQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
 const createAgentBody = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().max(500).optional(),
@@ -246,6 +249,12 @@ export async function createApp(
   app.get("/api/agents/:id", async (request) => {
     const { id } = agentIdParams.parse(request.params);
     return { agent: service.getAgent(id) };
+  });
+
+  app.get("/api/agents/:id/federated-admissions", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    const { limit } = federatedAdmissionInboxQuery.parse(request.query);
+    return { admissions: await service.listFederatedAdmissions(id, limit) };
   });
 
   app.patch("/api/agents/:id", async (request) => {

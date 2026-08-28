@@ -608,6 +608,26 @@ export interface FederatedApprovalDecisionRecord {
   decidedAt: string;
   recordDigest: string;
 }
+
+export type FederatedAdmissionInboxState =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "promoted"
+  | "quarantined"
+  | "failed"
+  | "rejected";
+
+export interface FederatedAdmissionInboxItem {
+  admission: FederatedAdmissionRecord;
+  approval: FederatedApprovalDecisionRecord | null;
+  run: {
+    id: string;
+    status: AgentRun["status"];
+    disposition: RunTransaction["disposition"];
+  } | null;
+  state: FederatedAdmissionInboxState;
+}
 import type {
   PortableDecisionChain,
   PortableEvidencePacket,

@@ -144,6 +144,24 @@ export interface FederatedApprovalDecisionResult {
   run: AgentRun | null;
 }
 
+export type FederatedAdmissionInboxState =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "promoted"
+  | "quarantined"
+  | "failed"
+  | "rejected";
+
+export interface FederatedAdmissionInboxItem {
+  admission: FederatedAdmissionRecord;
+  approval: FederatedApprovalDecisionRecord | null;
+  run: Pick<AgentRun, "id" | "status"> & {
+    disposition: RunTransaction["disposition"];
+  } | null;
+  state: FederatedAdmissionInboxState;
+}
+
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
@@ -2695,6 +2713,70 @@ export class AgentService {
     policyDigest: ReceiptDigest;
   }> {
     return this.federatedAdmissionPolicies.readActive();
+  }
+
+  async listFederatedAdmissions(
+    agentId: string,
+    limit = 25,
+  ): Promise<FederatedAdmissionInboxItem[]> {
+    this.getAgent(agentId);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new HttpError(400, "Federated Admission inbox limit is invalid");
+    }
+    const admissions = (await this.federatedAdmissionJournal.listRecords())
+      .filter((admission) => admission.localAgentId === agentId)
+      .sort(
+        (left, right) =>
+          right.recordedAt.localeCompare(left.recordedAt) ||
+          right.admissionId.localeCompare(left.admissionId),
+      )
+      .slice(0, limit);
+    const snapshot = this.store.snapshot();
+    return Promise.all(
+      admissions.map(async (admission) => {
+        const approvalResult =
+          await this.federatedApprovalJournal.readResultByAdmissionId(
+            admission.admissionId,
+          );
+        const approval = approvalResult?.approval ?? null;
+        const runRecord = admission.candidateRunId
+          ? snapshot.runs.find((run) => run.id === admission.candidateRunId)
+          : approvalResult?.plan.candidateRunId
+            ? snapshot.runs.find(
+                (run) => run.id === approvalResult.plan.candidateRunId,
+              )
+            : undefined;
+        const run = runRecord
+          ? {
+              id: runRecord.id,
+              status: runRecord.status,
+              disposition: runRecord.transaction?.disposition ?? null,
+            }
+          : null;
+        const state: FederatedAdmissionInboxState =
+          admission.decision.decision === "reject"
+            ? "rejected"
+            : approval?.choice === "deny"
+              ? "denied"
+              : run?.disposition === "promoted"
+                ? "promoted"
+                : run?.disposition === "quarantined"
+                  ? "quarantined"
+                  : run?.status === "failed" ||
+                      run?.status === "cancelled"
+                    ? "failed"
+                    : approval?.choice === "approve" ||
+                        admission.decision.decision === "admit"
+                      ? "approved"
+                      : "pending";
+        return {
+          admission: structuredClone(admission),
+          approval: approval ? structuredClone(approval) : null,
+          run,
+          state,
+        };
+      }),
+    );
   }
 
   async importFederatedWork(

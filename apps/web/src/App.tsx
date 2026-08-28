@@ -26,6 +26,7 @@ import type {
   AssuranceOperation,
   AssuranceProposal,
   CandidateSet,
+  FederatedAdmissionInboxItem,
   FederatedImportResult,
   Message,
   OutcomeContractVersionRecord,
@@ -2648,12 +2649,34 @@ function FederationAirlock({
   const [trustPolicy, setTrustPolicy] = useState<unknown>(null);
   const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(null);
   const [result, setResult] = useState<FederatedImportResult | null>(null);
+  const [inbox, setInbox] = useState<FederatedAdmissionInboxItem[]>([]);
+  const [inboxBusy, setInboxBusy] = useState(false);
+  const [selectedInboxItem, setSelectedInboxItem] =
+    useState<FederatedAdmissionInboxItem | null>(null);
   const [busy, setBusy] = useState(false);
   const [decisionBusy, setDecisionBusy] = useState<"approve" | "deny" | null>(
     null,
   );
   const [approvalReason, setApprovalReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+
+  const loadInbox = useCallback(async () => {
+    setInboxBusy(true);
+    try {
+      const response = await api.federatedAdmissions(agent.id);
+      setInbox(response.admissions);
+      setSelectedInboxItem((current) =>
+        current
+          ? response.admissions.find(
+              (item) =>
+                item.admission.admissionId === current.admission.admissionId,
+            ) ?? null
+          : null,
+      );
+    } finally {
+      setInboxBusy(false);
+    }
+  }, [agent.id]);
 
   useEffect(() => {
     let active = true;
@@ -2675,10 +2698,19 @@ function FederationAirlock({
           );
         }
       });
+    void loadInbox().catch((reason) => {
+      if (active) {
+        setLocalError(
+          reason instanceof Error
+            ? reason.message
+            : "The federated approval inbox is unavailable.",
+        );
+      }
+    });
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadInbox]);
 
   const importWork = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2693,8 +2725,10 @@ function FederationAirlock({
         bundle,
         trustPolicy,
       });
+      setSelectedInboxItem(null);
       setResult(imported);
       await onImported(imported);
+      await loadInbox();
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -2711,8 +2745,10 @@ function FederationAirlock({
         result.admission.admissionId,
         { choice, reason: approvalReason.trim() },
       );
+      setSelectedInboxItem(null);
       setResult(decided);
       await onImported(decided);
+      await loadInbox();
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -2727,7 +2763,20 @@ function FederationAirlock({
   const receiverValidationPassed =
     requiredValidations.length > 0 &&
     requiredValidations.every((validation) => validation.status === "passed");
-  const disposition = transaction?.disposition ?? null;
+  const selectedTerminalValidation =
+    selectedInboxItem?.state === "promoted" ||
+    selectedInboxItem?.state === "quarantined";
+  const currentRunId =
+    result?.run?.id ??
+    selectedInboxItem?.run?.id ??
+    admission?.candidateRunId ??
+    null;
+  const disposition =
+    transaction?.disposition ??
+    (selectedInboxItem?.state === "promoted" ||
+    selectedInboxItem?.state === "quarantined"
+      ? selectedInboxItem.state
+      : null);
   const pipeline = [
     {
       label: "Verify",
@@ -2748,20 +2797,24 @@ function FederationAirlock({
     },
     {
       label: "Isolate",
-      detail: result?.run?.id || admission?.candidateRunId
-        ? "Receiver Candidate " + (result?.run?.id ?? admission!.candidateRunId!).slice(0, 12)
+      detail: currentRunId
+        ? "Receiver Candidate " + currentRunId.slice(0, 12)
         : "No mutable Canonical path enters the import Runtime",
-      state: result?.run?.id || admission?.candidateRunId ? "passed" : "waiting",
+      state: currentRunId ? "passed" : "waiting",
     },
     {
       label: "Validate",
       detail: transaction
         ? requiredValidations.length + " required receiver checks"
+        : selectedTerminalValidation
+          ? "Receiver checks completed; Run retains full evidence"
         : "Receiver Outcome Contract controls eligibility",
-      state: transaction
+      state: transaction || selectedTerminalValidation
         ? receiverValidationPassed
           ? "passed"
-          : "rejected"
+          : selectedInboxItem?.state === "promoted"
+            ? "passed"
+            : "rejected"
         : "waiting",
     },
     {
@@ -2803,6 +2856,56 @@ function FederationAirlock({
         </strong>
         <code>{policy?.policyDigest ?? "Policy is required before import"}</code>
       </div>
+
+      <section className="federation-inbox" aria-label="Federated approval inbox">
+        <div className="federation-inbox-heading">
+          <div>
+            <span className="eyebrow">Durable approval inbox</span>
+            <strong>{inbox.length} local Admission{inbox.length === 1 ? "" : "s"}</strong>
+          </div>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={inboxBusy}
+            onClick={() => void loadInbox().catch((reason) => setLocalError(String(reason)))}
+          >
+            {inboxBusy ? <Spinner /> : "Refresh inbox"}
+          </button>
+        </div>
+        {inbox.length === 0 ? (
+          <p>No receiver Admissions yet. Imported work will remain discoverable here after reload.</p>
+        ) : (
+          <div className="federation-inbox-list">
+            {inbox.map((item) => (
+              <button
+                type="button"
+                key={item.admission.admissionId}
+                data-state={item.state}
+                aria-pressed={
+                  selectedInboxItem?.admission.admissionId ===
+                  item.admission.admissionId
+                }
+                onClick={() => {
+                  setSelectedInboxItem(item);
+                  setResult({
+                    admission: item.admission,
+                    approval: item.approval ?? undefined,
+                    run: null,
+                  });
+                  setApprovalReason(item.approval?.reason ?? "");
+                  setLocalError(null);
+                }}
+              >
+                <span>{item.state.toUpperCase()}</span>
+                <strong>{item.admission.transferId}</strong>
+                <small>
+                  {item.admission.producerId} · {item.admission.recordedAt}
+                </small>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="federation-pipeline" aria-label="Federated import pipeline">
         {pipeline.map((stage, index) => (
@@ -2923,13 +3026,17 @@ function FederationAirlock({
           <dl>
             <div><dt>Admission</dt><dd>{admission.admissionId.slice(0, 19)}...</dd></div>
             <div><dt>Policy</dt><dd>generation {admission.decision.policyGeneration}</dd></div>
-            <div><dt>Run</dt><dd>{result.run?.id.slice(0, 16) ?? "none"}</dd></div>
+            <div><dt>Run</dt><dd>{result.run?.id.slice(0, 16) ?? selectedInboxItem?.run?.id.slice(0, 16) ?? "none"}</dd></div>
             <div><dt>Canonical</dt><dd>{disposition === "promoted" ? "advanced" : "unchanged"}</dd></div>
           </dl>
         </div>
       )}
 
-      {admission?.decision.decision === "pending" && !result?.approval && (
+      {admission?.decision.decision === "pending" &&
+        (!result?.approval ||
+          (result.approval.choice === "approve" &&
+            !result.run &&
+            selectedInboxItem?.state === "approved")) && (
         <section className="federation-approval" aria-label="Local admission decision">
           <div>
             <span className="eyebrow">Local operator gate</span>
@@ -2946,26 +3053,34 @@ function FederationAirlock({
               onChange={(event) => setApprovalReason(event.target.value)}
               maxLength={512}
               placeholder="Record why this exact transfer is safe or unsafe"
-              disabled={decisionBusy !== null}
+              disabled={decisionBusy !== null || result?.approval?.choice === "approve"}
               required
             />
           </label>
           <div className="federation-approval-actions">
-            <button
-              type="button"
-              className="button"
-              disabled={!approvalReason.trim() || decisionBusy !== null}
-              onClick={() => void decidePendingAdmission("deny")}
-            >
-              {decisionBusy === "deny" ? <Spinner /> : "Deny and preserve Canonical"}
-            </button>
+            {!result?.approval && (
+              <button
+                type="button"
+                className="button"
+                disabled={!approvalReason.trim() || decisionBusy !== null}
+                onClick={() => void decidePendingAdmission("deny")}
+              >
+                {decisionBusy === "deny" ? <Spinner /> : "Deny and preserve Canonical"}
+              </button>
+            )}
             <button
               type="button"
               className="button button-primary"
               disabled={!approvalReason.trim() || decisionBusy !== null}
               onClick={() => void decidePendingAdmission("approve")}
             >
-              {decisionBusy === "approve" ? <Spinner /> : "Approve into Candidate State"}
+              {decisionBusy === "approve" ? (
+                <Spinner />
+              ) : result?.approval?.choice === "approve" ? (
+                "Resume approved Candidate"
+              ) : (
+                "Approve into Candidate State"
+              )}
             </button>
           </div>
         </section>

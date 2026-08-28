@@ -155,6 +155,20 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
   expect((await receiverWhilePending.json()).agents[0].canonicalStateId).toBe(
     await canonicalBefore,
   );
+  await page.reload();
+  await page.getByRole("button", { name: "Federation" }).click();
+  await expect(
+    federationPanel.getByRole("region", { name: "Federated approval inbox" }),
+  ).toContainText("1 local Admission");
+  await federationPanel
+    .locator(".federation-inbox-list button")
+    .filter({ hasText: "browser-handoff-approved" })
+    .click();
+  await expect(
+    federationPanel.getByText(
+      "Canonical State is unchanged while this decision is pending.",
+    ),
+  ).toBeVisible();
   await federationPanel.getByLabel("Decision reason").fill(
     "Producer signature, policy scope, and exact artifact reviewed",
   );
