@@ -1,0 +1,400 @@
+import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+  Agent,
+  AgentRun,
+  FederatedImportResult,
+  SystemInfo,
+} from "../../apps/web/src/types";
+
+const repositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const webDist = path.join(repositoryRoot, "apps", "web", "dist");
+const timestamp = "2026-08-28T06:00:00.000Z";
+const digest = (character: string) => "sha256:" + character.repeat(64);
+
+const agent: Agent = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Receiver guardian",
+  description: "Validates work crossing an organizational boundary.",
+  instructions: "Never trust a producer's Promotion decision.",
+  status: "ready",
+  workspacePath: "/receiver/canonical",
+  canonicalStateId: "receiver-state-before",
+  outcomeContract: {
+    schemaVersion: 1,
+    version: 4,
+    requiredPaths: ["AGENTS.md", "release.json"],
+    protectedPaths: ["AGENTS.md"],
+    maxChangedFiles: 20,
+    maxAddedBytes: 65_536,
+    secretPatterns: [],
+    validationCommands: [],
+    createdAt: timestamp,
+  },
+  codexThreadId: "receiver-thread",
+  lastError: null,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+};
+
+const system = {
+  demoMode: false,
+  protocolFixtureMode: false,
+  modelArkDemoMode: false,
+  modelArkPreflight: null,
+  inferenceMode: "modelark",
+  arkConfigured: false,
+  arkBaseUrl: "https://ark.example.invalid",
+  arkModel: null,
+  codexAvailable: true,
+  codexSandboxMode: "workspace-write",
+  competingFutures: {
+    available: true,
+    tokenBudgetEnforcement: "provider-boundary",
+    reason: null,
+  },
+  portableTrust: {
+    available: true,
+    receiptSchema: "agent-airlock/portable-promotion-receipt@1",
+    signatureAlgorithm: "Ed25519",
+    verification: "offline-self-contained",
+    evidenceDisclosure: "selective-merkle-proof",
+    localTransparency: "optional",
+    evmPayload: "offline-digest-only",
+    networkRequired: false,
+  },
+  runtimeProvider: "local-process",
+  containerEngine: null,
+  runtime: "Federated receiver fixture",
+} satisfies SystemInfo;
+
+const importedRun = {
+  id: "federated-run-001",
+  agentId: agent.id,
+  candidateSetId: null,
+  competitorId: null,
+  status: "completed",
+  prompt: "Federated import from studio-blue",
+  output: "Receiver Validation passed and Candidate State was promoted.",
+  error: null,
+  usage: null,
+  startedAt: timestamp,
+  completedAt: timestamp,
+  createdAt: timestamp,
+  transaction: {
+    id: "federated-run-001",
+    status: "promoted",
+    disposition: "promoted",
+    candidateStateId: "candidate-federated-001",
+    canonicalStateIdBefore: "receiver-state-before",
+    canonicalStateIdAfter: "receiver-state-after",
+    canonicalContentHashBefore: "a".repeat(64),
+    canonicalContentHashAfter: "b".repeat(64),
+    outcomeContractVersion: 4,
+    outcomeContract: agent.outcomeContract,
+    resources: [
+      {
+        kind: "workspace",
+        label: "Workspace",
+        disposition: "promoted",
+        fingerprintBefore: digest("a"),
+        fingerprintAfter: digest("b"),
+        summary: "Federated Candidate installed by the receiver.",
+      },
+    ],
+    providerResources: [],
+    providerResourceEvents: [],
+    sqlite: null,
+    externalActions: {
+      outboxPath: ".airlock/external-actions.jsonl",
+      intents: [],
+      deliveredCount: 0,
+      bypassDisclosure: "No effect bypass is available.",
+    },
+    changes: {
+      files: [{ path: "release.json", kind: "added", addedBytes: 28 }],
+      totalChangedFiles: 1,
+      totalAddedBytes: 28,
+      truncated: false,
+    },
+    validations: [
+      {
+        name: "federated-receiver-import",
+        status: "passed",
+        required: true,
+        summary: "Receiver verified the imported Candidate without invoking a model.",
+        durationMs: 0,
+        output: null,
+      },
+      {
+        name: "required-paths",
+        status: "passed",
+        required: true,
+        summary: "Receiver required paths are present.",
+        durationMs: 2,
+        output: null,
+      },
+    ],
+    events: [
+      { status: "preparing", at: timestamp, summary: "Receiver admitted signed work." },
+      { status: "promoted", at: timestamp, summary: "Federated Promotion completed." },
+    ],
+    quarantinePath: null,
+    quarantineAvailable: false,
+    discardedAt: null,
+    lineage: {
+      rootRunId: "federated-run-001",
+      parentRunId: null,
+      depth: 0,
+      maxDepth: 3,
+    },
+    recovery: {
+      journalPhase: "completed",
+      recoveredAfterRestart: false,
+      recoveryError: null,
+    },
+    promotionReceipt: {
+      runTransactionId: "federated-run-001",
+      disposition: "promoted",
+      outcomeContractVersion: 4,
+      canonicalStateIdBefore: "receiver-state-before",
+      canonicalStateIdAfter: "receiver-state-after",
+      canonicalContentHashBefore: "a".repeat(64),
+      canonicalContentHashAfter: "b".repeat(64),
+      validationEvidenceHash: "c".repeat(64),
+      lineage: {
+        rootRunId: "federated-run-001",
+        parentRunId: null,
+        depth: 0,
+        maxDepth: 3,
+      },
+      createdAt: timestamp,
+    },
+  },
+} as AgentRun;
+
+const promoted: FederatedImportResult = {
+  admission: {
+    schema: "agent-airlock/federated-admission-record",
+    schemaVersion: 1,
+    admissionId: digest("1"),
+    importIdentifier: digest("2"),
+    transferId: "judge-transfer-001",
+    producerId: "studio-blue",
+    localAgentId: agent.id,
+    candidateRunId: importedRun.id,
+    decision: {
+      decision: "admit",
+      reason: "admitted",
+      policyId: "receiver-production",
+      policyGeneration: 7,
+      policyDigest: digest("3"),
+      producerId: "studio-blue",
+      receiptDigest: digest("4"),
+      artifactDigest: digest("5"),
+      evaluatedAt: timestamp,
+      detail: "Admission policy accepted the verified federated work bundle.",
+    },
+    recordedAt: timestamp,
+    recordDigest: digest("6"),
+  },
+  run: importedRun,
+};
+
+test("imports signed work through the visible receiver-owned Promotion path", async ({
+  page,
+}) => {
+  const importRequests: unknown[] = [];
+  await serveProductionBundle(page, importRequests);
+  await page.goto("http://airlock.local/");
+
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await expect(
+    panel.getByRole("heading", { name: "Import verified work, not remote authority" }),
+  ).toBeVisible();
+  await expect(panel.getByText("receiver-production · generation 7")).toBeVisible();
+  await expect(panel.getByText(/reruns its own Outcome Contract/)).toBeVisible();
+
+  await panel.getByLabel("Transfer identity").fill("judge-transfer-001");
+  await panel.getByLabel("Federated Work Bundle").setInputFiles({
+    name: "federated-work.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ schema: "agent-airlock/federated-work-bundle" })),
+  });
+  await panel.getByLabel("Signed Trust Policy").setInputFiles({
+    name: "trust-policy.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({ schema: "agent-airlock/signed-signing-key-trust-policy" }),
+    ),
+  });
+  await expect(panel.getByText("federated-work.json")).toBeVisible();
+  await expect(panel.getByText("trust-policy.json")).toBeVisible();
+  await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+
+  await expect(panel.getByText("PROMOTED BY RECEIVER")).toBeVisible();
+  await expect(panel.getByText("Bundle, receipt, authority, and signer scope verified"))
+    .toBeVisible();
+  await expect(panel.getByText("2 required receiver checks")).toBeVisible();
+  await expect(panel.getByText("Receiver Canonical State advanced atomically"))
+    .toBeVisible();
+  await expect(panel.getByText("No model call runs during import.")).toBeVisible();
+  expect(importRequests).toEqual([
+    {
+      transferId: "judge-transfer-001",
+      producerId: "studio-blue",
+      bundle: { schema: "agent-airlock/federated-work-bundle" },
+      trustPolicy: { schema: "agent-airlock/signed-signing-key-trust-policy" },
+    },
+  ]);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panel).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    390,
+  );
+});
+
+test("shows a receiver rejection without implying that Canonical State changed", async ({
+  page,
+}) => {
+  const rejected: FederatedImportResult = {
+    admission: {
+      ...promoted.admission,
+      candidateRunId: null,
+      decision: {
+        ...promoted.admission.decision,
+        decision: "reject",
+        reason: "authority-unpinned",
+        detail: "The producer trust-policy authority is not pinned by this receiver.",
+      },
+    },
+    run: null,
+  };
+  await serveProductionBundle(page, [], rejected);
+  await page.goto("http://airlock.local/");
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await panel.getByLabel("Transfer identity").fill("judge-rejected-001");
+  await panel.getByLabel("Federated Work Bundle").setInputFiles({
+    name: "untrusted-work.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ schema: "agent-airlock/federated-work-bundle" })),
+  });
+  await panel.getByLabel("Signed Trust Policy").setInputFiles({
+    name: "untrusted-policy.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({ schema: "agent-airlock/signed-signing-key-trust-policy" }),
+    ),
+  });
+  await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+
+  await expect(panel.getByText("REJECT")).toBeVisible();
+  await expect(
+    panel
+      .getByRole("status")
+      .getByText("The producer trust-policy authority is not pinned by this receiver."),
+  ).toBeVisible();
+  await expect(panel.getByText("unchanged", { exact: true })).toBeVisible();
+  await expect(panel.getByText("No mutable Canonical path enters the import Runtime"))
+    .toBeVisible();
+});
+
+async function serveProductionBundle(
+  page: Page,
+  importRequests: unknown[],
+  importResult: FederatedImportResult = promoted,
+): Promise<void> {
+  await page.route("http://airlock.local/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/") {
+      await route.fulfill({
+        contentType: "text/html",
+        body: await readFile(path.join(webDist, "index.html"), "utf8"),
+      });
+      return;
+    }
+    if (url.pathname.startsWith("/assets/")) {
+      await route.fulfill({ path: path.join(webDist, url.pathname) });
+      return;
+    }
+    if (
+      url.pathname === "/api/agents/" + agent.id + "/federated-imports" &&
+      route.request().method() === "POST"
+    ) {
+      importRequests.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: importResult.run ? 201 : 200,
+        contentType: "application/json",
+        body: JSON.stringify(importResult),
+      });
+      return;
+    }
+    const body = apiResponse(url.pathname);
+    if (body !== null) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: "not found" });
+  });
+}
+
+function apiResponse(pathname: string): unknown | null {
+  if (pathname === "/api/auth") return { required: false };
+  if (pathname === "/api/system") return system;
+  if (pathname === "/api/agents") return { agents: [agent] };
+  if (pathname === "/api/federation/policies/active") {
+    return {
+      policy: {
+        schema: "agent-airlock/federated-admission-policy",
+        schemaVersion: 1,
+        policyId: "receiver-production",
+        generation: 7,
+        activatedAt: timestamp,
+        receiverOrganizationId: "receiver-labs",
+        producers: [
+          {
+            producerId: "studio-blue",
+            disabled: false,
+            requireLocalApproval: false,
+          },
+        ],
+      },
+      policyDigest: digest("3"),
+    };
+  }
+  if (pathname === "/api/agents/" + agent.id + "/messages") return { messages: [] };
+  if (pathname === "/api/agents/" + agent.id + "/runs") return { runs: [] };
+  if (pathname === "/api/agents/" + agent.id + "/candidate-sets") {
+    return { candidateSets: [] };
+  }
+  if (pathname === "/api/agents/" + agent.id + "/assurance-proposals") {
+    return { proposals: [] };
+  }
+  if (pathname === "/api/agents/" + agent.id + "/outcome-contract/versions") {
+    return {
+      versions: [
+        {
+          schemaVersion: 1,
+          agentId: agent.id,
+          contract: agent.outcomeContract,
+          provenance: "created",
+          sourceProposalId: null,
+          rollbackFromVersion: null,
+        },
+      ],
+    };
+  }
+  return null;
+}

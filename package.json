@@ -50,6 +50,7 @@
     "check:phase11:core": "npm run check:phase10:core && npm run check:phase11:protocol && npm run check:phase11:trust && npm run test:phase11:ui",
     "check:phase11:clean-clone": "AIRLOCK_CLEAN_CLONE_PHASE=phase11 node scripts/check-phase-eight-clean-clone.mjs",
     "check:phase11": "npm run check:phase11:core && npm run check:phase11:docker && npm run check:phase11:clean-clone",
+    "check:phase12": "npm run check && npm run test:phase12:real",
     "audit:release": "node scripts/release-audit.mjs",
     "check:infra": "bash scripts/check-infrastructure.sh",
     "test:demo": "npm run build && node --test scripts/run-demo.test.mjs",
@@ -61,6 +62,7 @@
     "test:phase11:ui": "npm run test:phase11:ui:mock && npm run test:phase11:ui:real",
     "test:phase11:ui:mock": "npm run build && playwright test --config=playwright.phase11-ui.config.ts",
     "test:phase11:ui:real": "npm run build && playwright test --config=playwright.phase11-real.config.ts",
+    "test:phase12:real": "npm run build && playwright test --config=playwright.phase12-real.config.ts",
     "test:codex-session-container": "bash scripts/probe-codex-session.sh",
     "test:codex-protocol-container": "bash scripts/probe-codex-protocol.sh",
     "test:container-transaction": "npm run build && node scripts/check-container-transaction.mjs",
@@ -81,6 +83,7 @@
     "demo:phase9": "npm run build && node scripts/run-phase-nine-demo.mjs",
     "demo:phase10": "npm run build && node scripts/run-phase-ten-demo.mjs",
     "demo:phase11": "npm run build && node scripts/run-phase-eleven-demo.mjs",
+    "demo:phase12": "npm run build && playwright test --config=playwright.phase12-real.config.ts --headed",
     "start": "npm run start -w @launchpad/server"
   },
   "devDependencies": {

@@ -347,7 +347,9 @@ Phase 8 delivers the Transactional Resource SDK on the isolated post-hackathon b
 Phase 9 delivers competing Agent futures with deterministic one-winner Selection on the same branch.
 Phase 10 delivers deterministic, operator-controlled Adaptive Assurance on the same branch.
 Phase 11 delivers independently verifiable Portable Promotion Receipts on the same branch.
-Phase 12 is planned as receiver-controlled federated Candidate admission and is not yet delivered.
+Phase 12 delivers receiver-controlled federated Candidate admission on the post-hackathon branch.
+One Airlock can export a promoted workspace as a self-verifying signed bundle, while another independently configured Airlock applies its own durable trust policy, materializes only Candidate State, reruns its own Outcome Contract, and owns Promotion or Quarantine.
+The credential-free two-instance browser proof is automated by `npm run test:phase12:real`.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations

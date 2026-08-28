@@ -543,6 +543,55 @@ export interface PortableReceiptExport {
   packet: PortableEvidencePacket;
   decisionChain: PortableDecisionChain | null;
 }
+
+export type FederatedAdmissionDecision = "admit" | "reject" | "pending";
+
+export interface FederatedAdmissionPolicySummary {
+  policy: {
+    schema: "agent-airlock/federated-admission-policy";
+    schemaVersion: 1;
+    policyId: string;
+    generation: number;
+    activatedAt: string;
+    receiverOrganizationId: string;
+    producers: Array<{
+      producerId: string;
+      disabled: boolean;
+      requireLocalApproval: boolean;
+    }>;
+  };
+  policyDigest: string;
+}
+
+export interface FederatedAdmissionRecord {
+  schema: "agent-airlock/federated-admission-record";
+  schemaVersion: 1;
+  admissionId: string;
+  importIdentifier: string;
+  transferId: string;
+  producerId: string;
+  localAgentId: string;
+  candidateRunId: string | null;
+  decision: {
+    decision: FederatedAdmissionDecision;
+    reason: string;
+    policyId: string;
+    policyGeneration: number;
+    policyDigest: string;
+    producerId: string;
+    receiptDigest: string;
+    artifactDigest: string;
+    evaluatedAt: string;
+    detail: string;
+  };
+  recordedAt: string;
+  recordDigest: string;
+}
+
+export interface FederatedImportResult {
+  admission: FederatedAdmissionRecord;
+  run: AgentRun | null;
+}
 import type {
   PortableDecisionChain,
   PortableEvidencePacket,

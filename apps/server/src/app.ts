@@ -321,17 +321,21 @@ export async function createApp(
     return reply.code(202).send(result);
   });
 
-  app.post("/api/agents/:id/federated-imports", async (request, reply) => {
-    const { id } = agentIdParams.parse(request.params);
-    const body = federatedImportBody.parse(request.body);
-    const result = await service.importFederatedWork(id, {
-      transferId: body.transferId,
-      producerId: body.producerId,
-      bundle: body.bundle as FederatedWorkBundle,
-      trustPolicy: body.trustPolicy as SignedSigningKeyTrustPolicyEnvelope,
-    });
-    return reply.code(result.run ? 201 : 200).send(result);
-  });
+  app.post(
+    "/api/agents/:id/federated-imports",
+    { bodyLimit: 10 * 1_048_576 },
+    async (request, reply) => {
+      const { id } = agentIdParams.parse(request.params);
+      const body = federatedImportBody.parse(request.body);
+      const result = await service.importFederatedWork(id, {
+        transferId: body.transferId,
+        producerId: body.producerId,
+        bundle: body.bundle as FederatedWorkBundle,
+        trustPolicy: body.trustPolicy as SignedSigningKeyTrustPolicyEnvelope,
+      });
+      return reply.code(result.run ? 201 : 200).send(result);
+    },
+  );
 
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
@@ -342,6 +346,11 @@ export async function createApp(
     const { id } = runIdParams.parse(request.params);
     const body = portableReceiptBody.parse(request.body ?? {});
     return service.exportPortableReceipt(id, body);
+  });
+
+  app.post("/api/runs/:id/federated-work-bundle", async (request) => {
+    const { id } = runIdParams.parse(request.params);
+    return service.exportFederatedWorkBundle(id);
   });
 
   app.get("/api/candidate-sets/:id", async (request) => {

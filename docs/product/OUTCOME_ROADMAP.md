@@ -549,9 +549,11 @@ Turn Portable Promotion Receipts into a vendor-neutral admission protocol while 
 
 **Current status**
 
-The policy boundary is resolved in ADR 0018, and strict immutable receiver policy generations now evaluate signed workspace bundles across exact trust, scope, freshness, protocol, transparency, and approval rules.
-The receiver now persists immutable digest-protected Admission Records before Candidate materialization and recovers exact replay across every durable boundary without creating a second Candidate.
-Production workspace materialization, receiver-owned Validation and Promotion, and the two-instance browser journey remain outcome gates rather than delivered claims.
+The policy boundary is resolved in ADR 0018, and strict immutable receiver policy generations evaluate signed workspace bundles across exact trust, scope, freshness, protocol, transparency, and approval rules.
+The receiver persists immutable digest-protected Admission Records before Candidate materialization and recovers exact replay across every durable boundary without creating a second Candidate.
+Production WorkspaceManager materialization applies the verified artifact only inside isolated Candidate State.
+The receiver reruns its own Outcome Contract and uses the existing crash-recoverable Promotion path without invoking the producer model or treating the producer receipt as local authority.
+A real browser test downloads a self-verifying bundle from one independently configured Fastify instance, transfers it to another instance, and proves receiver-owned Promotion without ModelArk, a wallet, RPC, or paid inference.
 
 ## Hackathon cut lines
 

@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   sha256Digest,
   signPortableReceipt,
   signSigningKeyTrustPolicy,
+  verifyFederatedWorkBundle,
   type PortablePromotionEnvelope,
   type SigningKeyTrustPolicy,
 } from "@agent-airlock/portable-promotion-receipt";
@@ -37,6 +38,38 @@ afterEach(async () => {
 });
 
 describe("federated HTTP execution", () => {
+  it("exports a real promoted Run as a self-verifying Federated Work Bundle", async () => {
+    const fixture = await createFixture({ allowProducerRun: true });
+    const started = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/messages`,
+      payload: { content: "Prepare the bounded producer change." },
+    });
+    expect(started.statusCode).toBe(202);
+    const runId = started.json().run.id as string;
+    await waitForCompletedRun(fixture.service, runId);
+
+    const exported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/runs/${runId}/federated-work-bundle`,
+    });
+
+    expect(exported.statusCode).toBe(200);
+    const body = exported.json();
+    expect(body.verification.valid).toBe(true);
+    expect(verifyFederatedWorkBundle(body.bundle).valid).toBe(true);
+    expect(body.bundle.artifact.artifact.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: "add",
+          path: "producer-release.txt",
+        }),
+      ]),
+    );
+    expect(fixture.modelCalls()).toBe(1);
+    await fixture.app.close();
+  });
+
   it("admits, validates, and promotes remote work through receiver-owned authority", async () => {
     const fixture = await createFixture();
     const before = await fixture.workspaces.readCanonical(fixture.agentId);
@@ -251,7 +284,10 @@ describe("federated HTTP execution", () => {
 });
 
 async function createFixture(
-  options: { promotionFaultInjector?: PromotionFaultInjector } = {},
+  options: {
+    promotionFaultInjector?: PromotionFaultInjector;
+    allowProducerRun?: boolean;
+  } = {},
 ) {
   const root = await mkdtemp(path.join(os.tmpdir(), "airlock-federated-http-"));
   temporaryDirectories.push(root);
@@ -260,11 +296,25 @@ async function createFixture(
     APP_DATA_DIR: path.join(root, "data"),
     AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
     CODEX_HOME: path.join(root, "codex"),
+    ...(options.allowProducerRun
+      ? { ARK_API_KEY: "test-key", ARK_MODEL: "ep-test" }
+      : {}),
   });
   let calls = 0;
   const runner: AgentRunner = {
-    run: async () => {
+    run: async (request) => {
       calls += 1;
+      if (options.allowProducerRun) {
+        await writeFile(
+          path.join(request.workspacePath, "producer-release.txt"),
+          "portable producer work\n",
+        );
+        return {
+          output: "Producer Candidate completed.",
+          threadId: request.threadId,
+          usage: { inputTokens: 4, outputTokens: 3 },
+        };
+      }
       throw new Error("Federated import must not invoke the model Runtime");
     },
     cancel: async () => false,
@@ -404,4 +454,19 @@ async function createFixture(
     policy,
     modelCalls: () => calls,
   };
+}
+
+async function waitForCompletedRun(
+  service: AgentService,
+  runId: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const run = service.getRun(runId);
+    if (run.status === "completed") return;
+    if (run.status === "failed" || run.status === "cancelled") {
+      throw new Error(run.error ?? "Producer Run did not complete");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Producer Run did not complete before the test deadline");
 }

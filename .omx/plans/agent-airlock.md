@@ -340,9 +340,9 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Persist immutable receiver-controlled Federated Admission Policy generations with exact chained activation and deterministic fail-closed evaluation.
 - [x] Publish digest-protected Admission Records before Candidate materialization and pin redacted receiver evidence plus the evaluated policy generation.
 - [x] Recover plan, record publication, Candidate creation, Candidate journaling, and completed replay without creating a second Candidate.
-- [ ] Apply the verified workspace artifact through the production WorkspaceManager Candidate boundary.
-- [ ] Run receiver-owned Outcome Contract Validation and local Promotion for admitted work.
-- [ ] Prove credential-free export, transfer, admission, Validation, and Promotion between two independently configured Airlock instances through the browser.
+- [x] Apply the verified workspace artifact through the production WorkspaceManager Candidate boundary.
+- [x] Run receiver-owned Outcome Contract Validation and local Promotion for admitted work.
+- [x] Prove credential-free export, transfer, admission, Validation, and Promotion between two independently configured Airlock instances through the browser.
 
 ## Trust boundaries
 

@@ -19,11 +19,14 @@ import {
 import path from "node:path";
 import {
   assertWorkspaceChangeSetEnvelope,
+  buildWorkspaceChangeSetEnvelope,
   decodeWorkspaceFileContent,
+  sha256Digest,
   verifyFederatedWorkBundle,
   type FederatedWorkBundle,
   type ReceiptDigest,
   type WorkspaceChangeOperation,
+  type WorkspaceChangeSetEnvelope,
 } from "@agent-airlock/portable-promotion-receipt";
 import {
   parseResourceVersionReference,
@@ -407,6 +410,58 @@ export class WorkspaceManager {
     const canonical = await this.readCanonicalForProviderTransition(agentId);
     this.assertConfiguredProviderSet(canonical.providerVersions);
     return canonical;
+  }
+
+  async buildFederatedWorkspaceArtifact(input: {
+    agentId: string;
+    beforeStateId: string;
+    afterStateId: string;
+    baseStateDigest: ReceiptDigest;
+    resultStateDigest: ReceiptDigest;
+  }): Promise<WorkspaceChangeSetEnvelope> {
+    this.assertIdentifier(input.agentId, "Agent");
+    this.assertIdentifier(input.beforeStateId, "state");
+    this.assertIdentifier(input.afterStateId, "state");
+    const beforeRoot = this.versionWorkspacePath(
+      input.agentId,
+      input.beforeStateId,
+    );
+    const afterRoot = this.versionWorkspacePath(input.agentId, input.afterStateId);
+    const [before, after] = await Promise.all([
+      this.readPortableWorkspaceFiles(beforeRoot),
+      this.readPortableWorkspaceFiles(afterRoot),
+    ]);
+    const operations: WorkspaceChangeOperation[] = [];
+    const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
+    for (const relativePath of paths) {
+      const prior = before.get(relativePath);
+      const next = after.get(relativePath);
+      if (prior && next && prior.digest === next.digest) continue;
+      if (!next) {
+        if (!prior) throw new Error("Federated workspace diff lost its source file");
+        operations.push({
+          operation: "delete",
+          path: relativePath,
+          priorContentDigest: prior.digest,
+        });
+        continue;
+      }
+      operations.push({
+        operation: prior ? "modify" : "add",
+        path: relativePath,
+        mediaType: "application/octet-stream",
+        encoding: "base64url",
+        content: next.content.toString("base64url"),
+        contentDigest: next.digest,
+        byteLength: next.content.length,
+        priorContentDigest: prior?.digest ?? null,
+      });
+    }
+    return buildWorkspaceChangeSetEnvelope({
+      baseStateDigest: input.baseStateDigest,
+      resultStateDigest: input.resultStateDigest,
+      operations,
+    });
   }
 
   async verifyPortableStateProjection(
@@ -2950,6 +3005,49 @@ export class WorkspaceManager {
       throw new Error("Federated workspace content precondition failed: " + relativePath);
     }
     return resolved;
+  }
+
+  private async readPortableWorkspaceFiles(
+    root: string,
+  ): Promise<Map<string, { content: Buffer; digest: ReceiptDigest }>> {
+    const rootStats = await lstat(root);
+    if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+      throw new Error("Federated workspace export root is not a safe directory");
+    }
+    const result = new Map<
+      string,
+      { content: Buffer; digest: ReceiptDigest }
+    >();
+    const visit = async (directory: string, prefix: string): Promise<void> => {
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((left, right) => left.name.localeCompare(right.name));
+      for (const entry of entries) {
+        const relativePath = prefix ? prefix + "/" + entry.name : entry.name;
+        const target = path.join(directory, entry.name);
+        const stats = await lstat(target);
+        if (stats.isSymbolicLink()) {
+          throw new Error(
+            "Federated workspace export rejects symbolic links: " + relativePath,
+          );
+        }
+        if (stats.isDirectory()) {
+          await visit(target, relativePath);
+          continue;
+        }
+        if (!stats.isFile()) {
+          throw new Error(
+            "Federated workspace export rejects special files: " + relativePath,
+          );
+        }
+        const content = await readFile(target);
+        result.set(relativePath, {
+          content,
+          digest: sha256Digest(content),
+        });
+      }
+    };
+    await visit(root, "");
+    return result;
   }
 
   private federatedWorkspacePath(

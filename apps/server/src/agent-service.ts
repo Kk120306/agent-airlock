@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   LocalTransparencyLog,
+  buildFederatedWorkBundle,
   buildPortableDecisionChain,
   buildPortableEvidencePacket,
   evaluateSigningKeyTrust,
@@ -2075,6 +2076,63 @@ export class AgentService {
       };
     } finally {
       this.configuringAgents.delete(initial.agentId);
+    }
+  }
+
+  async exportFederatedWorkBundle(runId: string) {
+    const run = this.getRun(runId);
+    const transaction = run.transaction;
+    if (
+      run.status !== "completed" ||
+      transaction?.disposition !== "promoted" ||
+      !transaction.canonicalStateIdAfter ||
+      !transaction.canonicalContentHashAfter
+    ) {
+      throw new HttpError(
+        409,
+        "Federated export requires a completed local Promotion",
+      );
+    }
+    const receiptExport = await this.exportPortableReceipt(runId, {
+      disclosureIdentities: [],
+      includeAncestry: true,
+      localAnchor: false,
+      evmPayload: false,
+    });
+    let signingKey: Awaited<ReturnType<typeof loadOrCreatePortableSigningKey>>;
+    try {
+      signingKey = await loadOrCreatePortableSigningKey(
+        this.config.portableSigningKeyPath,
+      );
+    } catch {
+      throw new HttpError(503, "Federated export signing is unavailable");
+    }
+    try {
+      const artifact = await this.workspaces.buildFederatedWorkspaceArtifact({
+        agentId: run.agentId,
+        beforeStateId: transaction.canonicalStateIdBefore,
+        afterStateId: transaction.canonicalStateIdAfter,
+        baseStateDigest: receiptExport.envelope.receipt.state.before.compositeHash,
+        resultStateDigest: receiptExport.envelope.receipt.state.after.compositeHash,
+      });
+      const bundle = buildFederatedWorkBundle({
+        receipt: receiptExport.envelope,
+        artifact,
+        privateKey: signingKey.privateKeyPem,
+      });
+      const verification = verifyFederatedWorkBundle(bundle);
+      if (!verification.valid) {
+        throw new Error("Federated Work Bundle failed its own verification");
+      }
+      return { bundle, verification };
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(
+        409,
+        error instanceof Error
+          ? error.message
+          : "Federated workspace artifact is unavailable",
+      );
     }
   }
 

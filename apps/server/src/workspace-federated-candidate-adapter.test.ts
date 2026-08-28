@@ -40,6 +40,51 @@ afterEach(async () => {
 });
 
 describe("WorkspaceFederatedCandidateAdapter", () => {
+  it("exports an exact bounded artifact from immutable Canonical versions", async () => {
+    const fixture = await createFixture();
+    const before = await fixture.manager.readCanonical(fixture.agent.id);
+    const exportRun = "export-federated-work";
+    const candidate = await fixture.manager.prepareCandidate(
+      fixture.agent.id,
+      exportRun,
+    );
+    await Promise.all([
+      writeFile(path.join(candidate.workspacePath, "modify.txt"), "modified for export\n"),
+      writeFile(path.join(candidate.workspacePath, "added.txt"), "added for export\n"),
+      rm(path.join(candidate.workspacePath, "delete.txt")),
+    ]);
+    const after = await fixture.manager.promoteCandidate(fixture.agent.id, exportRun);
+
+    const artifact = await fixture.manager.buildFederatedWorkspaceArtifact({
+      agentId: fixture.agent.id,
+      beforeStateId: before.stateId,
+      afterStateId: after.stateId,
+      baseStateDigest: sha256Digest("whole-agent-before"),
+      resultStateDigest: sha256Digest("whole-agent-after"),
+    });
+
+    expect(artifact.artifact.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ operation: "add", path: "added.txt" }),
+        expect.objectContaining({ operation: "delete", path: "delete.txt" }),
+        expect.objectContaining({ operation: "modify", path: "modify.txt" }),
+      ]),
+    );
+    const modified = artifact.artifact.operations.find(
+      (operation) => operation.operation === "modify" && operation.path === "modify.txt",
+    );
+    expect(modified).toMatchObject({
+      priorContentDigest: sha256Digest("modify-before\n"),
+      contentDigest: sha256Digest("modified for export\n"),
+    });
+    expect(artifact.artifact.baseStateDigest).toBe(
+      sha256Digest("whole-agent-before"),
+    );
+    expect(artifact.artifact.resultStateDigest).toBe(
+      sha256Digest("whole-agent-after"),
+    );
+  });
+
   it("applies add, modify, delete, and rename only inside an atomic Candidate", async () => {
     const fixture = await createFixture();
     const canonicalBefore = await fixture.manager.readCanonical(fixture.agent.id);

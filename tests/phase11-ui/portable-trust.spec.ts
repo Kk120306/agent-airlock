@@ -239,6 +239,17 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   );
   expect(downloaded).not.toMatch(/Private operator objective|Private Runtime output|PRIVATE KEY/);
 
+  const federatedDownloadPromise = page.waitForEvent("download");
+  await panel.getByRole("button", { name: "Download federated work" }).click();
+  const federatedDownload = await federatedDownloadPromise;
+  expect(federatedDownload.suggestedFilename()).toBe(
+    "agent-airlock-federated-work-run-golden.json",
+  );
+  expect(JSON.parse(await readDownload(federatedDownload))).toEqual({
+    schema: "agent-airlock/federated-work-bundle",
+    schemaVersion: 1,
+  });
+
   const packetDownloadPromise = page.waitForEvent("download");
   await panel.getByRole("button", { name: "Download evidence packet" }).click();
   const packetDownload = await packetDownloadPromise;
@@ -580,6 +591,27 @@ async function serveProductionBundle(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(portableExport(body)),
+      });
+      return;
+    }
+    if (
+      route.request().method() === "POST" &&
+      url.pathname === "/api/runs/run-golden/federated-work-bundle"
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          bundle: {
+            schema: "agent-airlock/federated-work-bundle",
+            schemaVersion: 1,
+          },
+          verification: {
+            valid: true,
+            receiptDigest: goldenDocument.envelope.receiptDigest,
+            artifactDigest: "sha256:" + "f".repeat(64),
+          },
+        }),
       });
       return;
     }

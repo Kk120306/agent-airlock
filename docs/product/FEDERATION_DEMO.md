@@ -1,0 +1,35 @@
+# Federation Airlock demo
+
+## Fastest proof
+
+Run:
+
+```bash
+npm run test:phase12:real
+```
+
+This command builds the production application, starts two independently configured Fastify instances, and drives the complete transfer through a real Chrome browser.
+The producer completes a local Promotion and downloads a self-verifying Federated Work Bundle.
+The receiver installs its own organizational trust policy, accepts the downloaded bundle through the visible Federation Airlock, materializes isolated Candidate State, reruns its own Outcome Contract, and performs its own Promotion.
+No ModelArk request, wallet, RPC call, blockchain transaction, or paid inference is used.
+
+Run the same proof in a visible browser for a presentation:
+
+```bash
+npm run demo:phase12
+```
+
+## What to point out
+
+The producer's signature proves bundle integrity and key possession, but it does not grant authority on the receiver.
+The receiver selects the trusted producer and pinned policy generation before import.
+The four visible stages are cryptographic verification, Candidate isolation, receiver Validation, and receiver Promotion or Quarantine.
+The import path never invokes a model Runtime.
+An exact retry reuses one immutable Admission Record and one Candidate Run.
+A rejected authority or failed required Validation leaves receiver Canonical State unchanged.
+
+## Browser controls
+
+After any completed local Promotion, generate a Portable Trust receipt and choose **Download federated work**.
+On the receiving Agent, choose **Federation**, select the trusted producer, upload the Federated Work Bundle and signed organizational trust policy, and choose **Admit into Candidate State**.
+The resulting panel shows the durable Admission identity, policy generation, receiver Run, required Validation count, and whether Canonical State advanced.

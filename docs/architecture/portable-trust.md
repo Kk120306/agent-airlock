@@ -305,6 +305,10 @@ The implemented HTTP and CLI boundary is:
 
 ```text
 POST /api/runs/:runId/portable-receipt
+POST /api/runs/:runId/federated-work-bundle
+GET /api/federation/policies/active
+POST /api/federation/policies
+POST /api/agents/:agentId/federated-imports
 agent-airlock-receipt verify envelope.json
 agent-airlock-receipt verify-packet evidence-packet.json
 agent-airlock-receipt verify-anchor envelope.json anchor-proof.json

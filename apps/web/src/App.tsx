@@ -26,12 +26,16 @@ import type {
   AssuranceOperation,
   AssuranceProposal,
   CandidateSet,
+  FederatedImportResult,
   Message,
   OutcomeContractVersionRecord,
   PortableReceiptExport,
   RunTransaction,
   SystemInfo,
 } from "./types";
+
+const MAXIMUM_FEDERATED_BUNDLE_FILE_BYTES = 9 * 1_048_576;
+const MAXIMUM_TRUST_POLICY_FILE_BYTES = 262_144;
 
 const starterPrompts = [
   "Build a dependency-free Node.js OrderGuard CLI using only built-in modules and node:test. Do not run npm install or create node_modules. Read local JSON, reject invalid orders, summarize valid revenue by status, add sample data and tests, run the tests, and summarize the result.",
@@ -1295,6 +1299,7 @@ function PortableTrustExport({
   const [localAnchor, setLocalAnchor] = useState(false);
   const [evmPayload, setEvmPayload] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [federatedExportBusy, setFederatedExportBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const requestGeneration = useRef(0);
   const automaticGenerationRun = useRef<string | null>(null);
@@ -1340,6 +1345,24 @@ function PortableTrustExport({
       }
     } finally {
       if (requestGeneration.current === generation) setBusy(false);
+    }
+  };
+
+  const exportFederatedBundle = async () => {
+    setFederatedExportBusy(true);
+    try {
+      const exported = await api.exportFederatedWorkBundle(runId);
+      if (!exported.verification.valid) {
+        throw new Error("The federated bundle failed its server self-check.");
+      }
+      downloadJson(
+        exported.bundle,
+        `agent-airlock-federated-work-${runId}.json`,
+      );
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setFederatedExportBusy(false);
     }
   };
 
@@ -1625,6 +1648,16 @@ function PortableTrustExport({
                 disabled={dirty || !result.verification.valid}
               >
                 Download receipt JSON
+              </button>
+            )}
+            {!judgeProofMode && result.envelope.receipt.decision.disposition === "promoted" && (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => void exportFederatedBundle()}
+                disabled={dirty || !result.verification.valid || federatedExportBusy}
+              >
+                {federatedExportBusy ? <Spinner /> : "Download federated work"}
               </button>
             )}
             {(!judgeProofMode || !hasDecisionChain) && (
@@ -2572,6 +2605,313 @@ function AirlockEvidence({
   );
 }
 
+async function readFederationArtifact(
+  file: File,
+  maximumBytes: number,
+  label: string,
+): Promise<{ filename: string; value: unknown }> {
+  if (file.size === 0 || file.size > maximumBytes) {
+    throw new Error(
+      label + " must be non-empty and no larger than " + formatBytes(maximumBytes) + ".",
+    );
+  }
+  const source = await file.text();
+  try {
+    return { filename: file.name, value: JSON.parse(source) as unknown };
+  } catch {
+    throw new Error(label + " is not valid JSON.");
+  }
+}
+
+function FederationAirlock({
+  agent,
+  disabled,
+  onImported,
+}: {
+  agent: Agent;
+  disabled: boolean;
+  onImported: (result: FederatedImportResult) => Promise<void>;
+}) {
+  const [policy, setPolicy] = useState<Awaited<
+    ReturnType<typeof api.activeFederatedAdmissionPolicy>
+  > | null>(null);
+  const [producerId, setProducerId] = useState("");
+  const [transferId, setTransferId] = useState(() =>
+    "browser-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10),
+  );
+  const [bundle, setBundle] = useState<unknown>(null);
+  const [bundleFilename, setBundleFilename] = useState<string | null>(null);
+  const [trustPolicy, setTrustPolicy] = useState<unknown>(null);
+  const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(null);
+  const [result, setResult] = useState<FederatedImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .activeFederatedAdmissionPolicy()
+      .then((next) => {
+        if (!active) return;
+        setPolicy(next);
+        setProducerId(
+          next.policy.producers.find((producer) => !producer.disabled)?.producerId ?? "",
+        );
+      })
+      .catch((reason) => {
+        if (active) {
+          setLocalError(
+            reason instanceof Error
+              ? reason.message
+              : "The receiver admission policy is unavailable.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const importWork = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!bundle || !trustPolicy || !producerId || !transferId.trim()) return;
+    setBusy(true);
+    setLocalError(null);
+    setResult(null);
+    try {
+      const imported = await api.importFederatedWork(agent.id, {
+        transferId: transferId.trim(),
+        producerId,
+        bundle,
+        trustPolicy,
+      });
+      setResult(imported);
+      await onImported(imported);
+    } catch (reason) {
+      setLocalError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const admission = result?.admission;
+  const transaction = result?.run?.transaction;
+  const requiredValidations =
+    transaction?.validations.filter((validation) => validation.required) ?? [];
+  const receiverValidationPassed =
+    requiredValidations.length > 0 &&
+    requiredValidations.every((validation) => validation.status === "passed");
+  const disposition = transaction?.disposition ?? null;
+  const pipeline = [
+    {
+      label: "Verify",
+      detail: admission
+        ? admission.decision.decision === "admit"
+          ? "Bundle, receipt, authority, and signer scope verified"
+          : admission.decision.detail
+        : "Cryptographic bundle and organizational authority",
+      state: admission
+        ? admission.decision.decision === "admit"
+          ? "passed"
+          : admission.decision.decision
+        : "waiting",
+    },
+    {
+      label: "Isolate",
+      detail: admission?.candidateRunId
+        ? "Receiver Candidate " + admission.candidateRunId.slice(0, 12)
+        : "No mutable Canonical path enters the import Runtime",
+      state: admission?.candidateRunId ? "passed" : "waiting",
+    },
+    {
+      label: "Validate",
+      detail: transaction
+        ? requiredValidations.length + " required receiver checks"
+        : "Receiver Outcome Contract controls eligibility",
+      state: transaction
+        ? receiverValidationPassed
+          ? "passed"
+          : "rejected"
+        : "waiting",
+    },
+    {
+      label: disposition === "quarantined" ? "Quarantine" : "Promote",
+      detail:
+        disposition === "promoted"
+          ? "Receiver Canonical State advanced atomically"
+          : disposition === "quarantined"
+            ? "Canonical State remained unchanged"
+            : "Only validated Candidate State may become Canonical",
+      state:
+        disposition === "promoted"
+          ? "passed"
+          : disposition === "quarantined"
+            ? "rejected"
+            : "waiting",
+    },
+  ];
+
+  return (
+    <form className="federation-panel" onSubmit={importWork}>
+      <div className="federation-heading">
+        <div>
+          <span className="eyebrow">Federation Airlock</span>
+          <h3>Import verified work, not remote authority</h3>
+        </div>
+        <p>
+          Another organization can propose a signed state transition.
+          This receiver independently admits it into Candidate State, reruns its own Outcome Contract, and owns the final Promotion decision.
+        </p>
+      </div>
+
+      <div className="federation-policy" data-ready={policy !== null}>
+        <span>{policy ? "ACTIVE RECEIVER POLICY" : "RECEIVER POLICY"}</span>
+        <strong>
+          {policy
+            ? policy.policy.policyId + " · generation " + policy.policy.generation
+            : "Loading durable policy..."}
+        </strong>
+        <code>{policy?.policyDigest ?? "Policy is required before import"}</code>
+      </div>
+
+      <div className="federation-pipeline" aria-label="Federated import pipeline">
+        {pipeline.map((stage, index) => (
+          <div key={stage.label} data-state={stage.state}>
+            <span>{stage.state === "passed" ? "✓" : stage.state === "rejected" || stage.state === "reject" ? "!" : index + 1}</span>
+            <strong>{stage.label}</strong>
+            <small>{stage.detail}</small>
+          </div>
+        ))}
+      </div>
+
+      <div className="federation-inputs">
+        <label>
+          Trusted producer
+          <select
+            value={producerId}
+            onChange={(event) => setProducerId(event.target.value)}
+            disabled={!policy || busy}
+            required
+          >
+            <option value="">Choose a producer</option>
+            {policy?.policy.producers.map((producer) => (
+              <option
+                key={producer.producerId}
+                value={producer.producerId}
+                disabled={producer.disabled}
+              >
+                {producer.producerId}
+                {producer.disabled ? " (disabled)" : ""}
+                {producer.requireLocalApproval ? " (approval required)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Transfer identity
+          <input
+            value={transferId}
+            onChange={(event) => setTransferId(event.target.value)}
+            pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
+            maxLength={128}
+            disabled={busy}
+            required
+          />
+        </label>
+        <label className="federation-file" data-loaded={bundle !== null}>
+          <span>Federated Work Bundle</span>
+          <strong>{bundleFilename ?? "Choose signed bundle JSON"}</strong>
+          <input
+            type="file"
+            accept="application/json,.json"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              void readFederationArtifact(
+                file,
+                MAXIMUM_FEDERATED_BUNDLE_FILE_BYTES,
+                "Federated Work Bundle",
+              )
+                .then((artifact) => {
+                  setBundle(artifact.value);
+                  setBundleFilename(artifact.filename);
+                  setLocalError(null);
+                  setResult(null);
+                })
+                .catch((reason) => setLocalError(String(reason.message ?? reason)));
+            }}
+          />
+        </label>
+        <label className="federation-file" data-loaded={trustPolicy !== null}>
+          <span>Signed Trust Policy</span>
+          <strong>{trustPolicyFilename ?? "Choose authority policy JSON"}</strong>
+          <input
+            type="file"
+            accept="application/json,.json"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              void readFederationArtifact(
+                file,
+                MAXIMUM_TRUST_POLICY_FILE_BYTES,
+                "Signed Trust Policy",
+              )
+                .then((artifact) => {
+                  setTrustPolicy(artifact.value);
+                  setTrustPolicyFilename(artifact.filename);
+                  setLocalError(null);
+                  setResult(null);
+                })
+                .catch((reason) => setLocalError(String(reason.message ?? reason)));
+            }}
+          />
+        </label>
+      </div>
+
+      {localError && <div className="federation-error" role="alert">{localError}</div>}
+      {admission && (
+        <div
+          className="federation-verdict"
+          data-decision={admission.decision.decision}
+          data-disposition={disposition ?? "none"}
+          role="status"
+        >
+          <div>
+            <span>
+              {disposition === "promoted"
+                ? "PROMOTED BY RECEIVER"
+                : disposition === "quarantined"
+                  ? "QUARANTINED BY RECEIVER"
+                  : admission.decision.decision.toUpperCase()}
+            </span>
+            <strong>{admission.decision.detail}</strong>
+          </div>
+          <dl>
+            <div><dt>Admission</dt><dd>{admission.admissionId.slice(0, 19)}...</dd></div>
+            <div><dt>Policy</dt><dd>generation {admission.decision.policyGeneration}</dd></div>
+            <div><dt>Run</dt><dd>{result.run?.id.slice(0, 16) ?? "none"}</dd></div>
+            <div><dt>Canonical</dt><dd>{disposition === "promoted" ? "advanced" : "unchanged"}</dd></div>
+          </dl>
+        </div>
+      )}
+
+      <div className="federation-actions">
+        <span>No model call runs during import. Exact retries reuse one durable admission.</span>
+        <button
+          className="button button-primary"
+          disabled={
+            disabled || busy || !policy || !producerId || !transferId.trim() || !bundle || !trustPolicy
+          }
+        >
+          {busy ? <Spinner /> : "Admit into Candidate State"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2598,6 +2938,7 @@ export default function App() {
   >([]);
   const [showAssurance, setShowAssurance] = useState(false);
   const [showExplore, setShowExplore] = useState(false);
+  const [showFederation, setShowFederation] = useState(false);
   const [explorationObjective, setExplorationObjective] = useState(
     defaultExplorationObjective,
   );
@@ -2701,6 +3042,7 @@ export default function App() {
     setActiveRun(null);
     setActiveCandidateSet(null);
     setShowExplore(false);
+    setShowFederation(false);
     setShowAssurance(false);
     setShowSettings(false);
     if (!selectedId) {
@@ -3605,6 +3947,17 @@ export default function App() {
                     </h2>
                   </div>
                   <div className="playground-state">
+                    <button
+                      type="button"
+                      className="federation-toggle"
+                      onClick={() => setShowFederation((current) => !current)}
+                      disabled={demoActionBusy || selected.status === "stopped"}
+                      aria-expanded={showFederation}
+                      aria-controls="federation-airlock-panel"
+                    >
+                      <span aria-hidden="true">⇄</span>
+                      Federation
+                    </button>
                     {system?.protocolFixtureMode || system?.modelArkDemoMode ? (
                       <div className="proof-route" aria-label="Judge proof path">
                         <span>Run</span>
@@ -3665,6 +4018,26 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {showFederation && (
+                  <div id="federation-airlock-panel">
+                    <FederationAirlock
+                      key={selected.id}
+                      agent={selected}
+                      disabled={demoActionBusy || selected.status === "stopped"}
+                      onImported={async (imported) => {
+                        if (imported.run) {
+                          setActiveRun(imported.run);
+                          setRuns((current) => [
+                            imported.run!,
+                            ...current.filter((run) => run.id !== imported.run!.id),
+                          ]);
+                        }
+                        await refreshAgents();
+                      }}
+                    />
+                  </div>
+                )}
 
                 {showAssurance && (
                   <div id="assurance-inbox">

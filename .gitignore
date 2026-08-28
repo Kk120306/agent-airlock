@@ -11,6 +11,8 @@ dist/
 .e2e-phase8/
 .e2e-phase10/
 .e2e-phase11-real/
+.e2e-phase12-producer/
+.e2e-phase12-receiver/
 .local/
 data/
 workspaces/

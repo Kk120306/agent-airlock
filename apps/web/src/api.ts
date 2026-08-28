@@ -3,6 +3,8 @@ import type {
   AgentRun,
   AssuranceProposal,
   CandidateSet,
+  FederatedAdmissionPolicySummary,
+  FederatedImportResult,
   Message,
   OutcomeContract,
   OutcomeContractVersionRecord,
@@ -45,6 +47,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   auth: () => request<{ required: boolean }>("/api/auth"),
   system: () => request<SystemInfo>("/api/system"),
+  activeFederatedAdmissionPolicy: () =>
+    request<FederatedAdmissionPolicySummary>("/api/federation/policies/active"),
   listAgents: () => request<{ agents: Agent[] }>("/api/agents"),
   createAgent: (body: {
     name: string;
@@ -129,6 +133,19 @@ export const api = {
     request<{ candidateSets: CandidateSet[] }>(
       "/api/agents/" + id + "/candidate-sets",
     ),
+  importFederatedWork: (
+    id: string,
+    body: {
+      transferId: string;
+      producerId: string;
+      bundle: unknown;
+      trustPolicy: unknown;
+    },
+  ) =>
+    request<FederatedImportResult>("/api/agents/" + id + "/federated-imports", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   createCandidateSet: (
     id: string,
     body: {
@@ -175,6 +192,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  exportFederatedWorkBundle: (id: string) =>
+    request<{
+      bundle: unknown;
+      verification: { valid: boolean; receiptDigest: string | null; artifactDigest: string | null };
+    }>("/api/runs/" + id + "/federated-work-bundle", { method: "POST" }),
   repairRun: (id: string, objective?: string) =>
     request<{ run: AgentRun; message: Message }>("/api/runs/" + id + "/repair", {
       method: "POST",
