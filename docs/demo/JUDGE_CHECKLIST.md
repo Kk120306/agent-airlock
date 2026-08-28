@@ -28,6 +28,18 @@ Select `Repair retained Candidate` and show that a fresh real Codex Run uses the
 Show the full recovery verdict, then select `Generate and verify proof` to finish with a locally verified chain containing both signed decisions and their Canonical State handoff.
 This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
 
+When ModelArk free capacity is available, run the credentialed conformance proof:
+
+```bash
+npm run demo:modelark -- --reset
+```
+
+The command cannot inherit the generic preflight-skip escape hatch.
+It must complete a credential-safe live Responses request before it can start the application or display `LIVE MODELARK PROOF`.
+Open <http://127.0.0.1:3201> and select `Run live Candidate`.
+The seeded Outcome Contract requires `modelark-proof.txt` to contain exactly `modelark-live`, so the provider response cannot prove success by narration alone.
+Show the required content Validation, Canonical State fingerprint transition, and locally verified signed decision.
+
 ## Rubric evidence
 
 | Category | Weight | Live evidence | Automated evidence |
@@ -54,6 +66,9 @@ This path uses a local deterministic Responses fixture and visibly discloses tha
 - [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
 - [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
 - [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and presents an evidence-backed Candidate, Validation, Promotion, and independent-verification path.
+- [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
+- [ ] The live UI shows `LIVE MODELARK PROOF`, one seeded Agent, and one `Run live Candidate` action.
+- [ ] The live Candidate creates the exact required artifact, passes the required content Validation, advances Canonical State, and exports a locally verified signed decision.
 
 ## Falsifiable claims
 

@@ -250,6 +250,8 @@ This journey describes the complete product direction, including later roadmap p
 - The terminal, system API, and browser must distinguish fake deterministic execution, real Codex with local deterministic Responses, and live ModelArk inference.
 - The real-Codex judge path must prioritize its four proof stages, hide incompatible advanced controls, summarize only persisted Run evidence, and keep the complete evidence available for inspection.
 - A reviewer must be able to distinguish reproducible middleware proof from completed local live ModelArk conformance.
+- The guided live ModelArk judge launcher must force a successful provider preflight, must not inherit the generic preflight-skip escape hatch, and must not display live-proof mode before that preflight succeeds.
+- The guided live ModelArk judge launcher must seed exactly one Agent with a falsifiable required artifact and Validation command, preserve an exact persisted contract across restart, and refuse policy drift without an explicit reset.
 
 ## Reliability requirements
 

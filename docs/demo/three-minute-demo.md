@@ -125,6 +125,9 @@ Run `npm run test:container-browser` to prove the same real Codex Candidate and 
 Only HTTP 404 and 429 advance through the operator-approved list, and the first successful model becomes the Runtime's `ARK_MODEL`.
 Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.
 Keep Free Credits Only Mode enabled for every configured model.
-Run `npm run poc`, select an Agent, and execute one short safe Promotion through the same Playground.
-Confirm that model output, Candidate State, Validation, Promotion, and follow-up continuity use the same middleware boundary.
+Run `npm run demo:modelark -- --reset`.
+The guided launcher forces the live provider preflight even when the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch exists in the shell.
+Open <http://127.0.0.1:3201> and select `Run live Candidate`.
+Confirm that ModelArk directs the real Codex Runtime to create `modelark-proof.txt`, the trusted content Validation passes, Canonical State advances, and the signed decision verifies locally.
+The model response is supporting context, while the independently inspected Candidate artifact and durable Airlock evidence are the proof.
 Do not change the deterministic release gate or commit any credential-bearing output.

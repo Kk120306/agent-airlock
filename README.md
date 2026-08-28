@@ -246,7 +246,8 @@ For the guided judge flow, run:
 npm run demo:modelark -- --reset
 ```
 
-The launcher checks the live Responses API before building or starting the application, binds the control plane to loopback, uses a disposable container Runtime, and seeds one `Live ModelArk Proof` Agent.
+The launcher forces the live Responses API check before building or starting the application, binds the control plane to loopback, uses a disposable container Runtime, and seeds one `Live ModelArk Proof` Agent.
+It does not honor the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
 ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`.
 Airlock validates the actual Candidate file independently of the model response and advances Canonical State only when every required check passes.

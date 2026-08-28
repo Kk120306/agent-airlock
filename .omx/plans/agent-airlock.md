@@ -325,6 +325,8 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Seed one `Live ModelArk Proof` Agent with an exact file-content Outcome Contract.
 - [x] Add a one-action judge guide and reuse the compact independent proof surface after a terminal decision.
 - [x] Keep deterministic fixture proof and live provider proof visibly separate.
+- [x] Force the guided provider preflight even when the generic POC skip flag is present.
+- [x] Test exact Agent seeding, exact Outcome Contract installation, restart reuse, policy-drift refusal, and the one-click browser request.
 - [ ] Rerun the complete provider-backed browser transaction when free ModelArk capacity is available.
 
 ## Trust boundaries

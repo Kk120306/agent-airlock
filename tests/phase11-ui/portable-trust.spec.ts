@@ -289,6 +289,7 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
 test("presents the live ModelArk judge path as provider-backed and falsifiable", async ({
   page,
 }) => {
+  const liveRequests: Array<Record<string, unknown>> = [];
   const liveSystem: SystemInfo = {
     ...system,
     modelArkDemoMode: true,
@@ -298,7 +299,13 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     containerEngine: "docker",
     runtime: "Codex CLI in docker Runtime",
   };
-  await serveProductionBundle(page, [], { current: run }, undefined, liveSystem);
+  await serveProductionBundle(
+    page,
+    liveRequests,
+    { current: run },
+    undefined,
+    liveSystem,
+  );
   await page.goto("http://airlock.local/");
 
   await expect(page.getByText("LIVE MODELARK PROOF", { exact: true })).toBeVisible();
@@ -308,6 +315,13 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     .toBeVisible();
   await expect(guide.getByText("Provider-backed Promotion proven")).toBeVisible();
   await expect(page.getByText("Independent proof")).toBeVisible();
+
+  await guide.getByRole("button", { name: /Run another live Candidate/ }).click();
+  await expect.poll(() => liveRequests.length).toBe(1);
+  expect(liveRequests[0]).toEqual({
+    content:
+      "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Use no dependencies. Verify the file content before finishing.",
+  });
 });
 
 test("invalidates a generated receipt when the Run decision changes", async ({
@@ -417,6 +431,28 @@ async function serveProductionBundle(
     }
     if (
       route.request().method() === "POST" &&
+      url.pathname.endsWith("/messages")
+    ) {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      requests.push(body);
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          run: runState.current,
+          message: {
+            id: "message-live",
+            agentId: agent.id,
+            role: "user",
+            content: body.content,
+            createdAt: timestamp,
+          },
+        }),
+      });
+      return;
+    }
+    if (
+      route.request().method() === "POST" &&
       url.pathname === "/api/runs/run-golden/portable-receipt"
     ) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -473,6 +509,7 @@ function apiResponse(
   if (pathname === "/api/agents") return { agents: [agent] };
   if (pathname.endsWith("/messages")) return { messages: [] };
   if (pathname.endsWith("/runs")) return { runs: [activeRun] };
+  if (pathname === "/api/runs/run-golden") return { run: activeRun };
   if (pathname.endsWith("/candidate-sets")) return { candidateSets: [] };
   if (pathname.endsWith("/assurance-proposals")) return { proposals: [] };
   if (pathname.endsWith("/outcome-contract/versions")) return { versions: [] };

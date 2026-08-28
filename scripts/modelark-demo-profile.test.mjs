@@ -4,9 +4,12 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertSafeManagedRoot,
+  buildLiveModelArkDemoEnvironment,
   comparableContract,
+  liveModelArkAgentName,
   liveModelArkContract,
   liveModelArkPrompt,
+  seedLiveModelArkDemo,
 } from "./modelark-demo-profile.mjs";
 
 test("the live proof is observable and enforced independently of model narration", () => {
@@ -19,6 +22,81 @@ test("the live proof is observable and enforced independently of model narration
   assert.equal(liveModelArkContract.validationCommands[0].required, true);
   assert.match(liveModelArkContract.validationCommands[0].command, /modelark-live/);
   assert.deepEqual(comparableContract(liveModelArkContract), liveModelArkContract);
+});
+
+test("the guided launcher cannot inherit a provider-preflight bypass", () => {
+  const environment = buildLiveModelArkDemoEnvironment(
+    {
+      ARK_API_KEY: "hidden-test-key",
+      AIRLOCK_SKIP_MODELARK_PREFLIGHT: "true",
+      RUNTIME_PROVIDER: "local-process",
+    },
+    {
+      host: "127.0.0.1",
+      port: 3201,
+      stateRoot: "/tmp/agent-airlock-modelark-demo",
+    },
+  );
+  assert.equal(environment.AIRLOCK_SKIP_MODELARK_PREFLIGHT, "false");
+  assert.equal(environment.AIRLOCK_MODELARK_DEMO_MODE, "true");
+  assert.equal(environment.RUNTIME_PROVIDER, "container");
+  assert.equal(environment.CODEX_BIN, "codex");
+  assert.equal(environment.ARK_API_KEY, "hidden-test-key");
+});
+
+test("seeding creates exactly one Agent and installs the exact Outcome Contract", async () => {
+  const requests = [];
+  const fetchStub = async (url, options = {}) => {
+    requests.push({ url, options });
+    if (url.endsWith("/api/agents") && !options.method) {
+      return Response.json({ agents: [] });
+    }
+    if (url.endsWith("/api/agents") && options.method === "POST") {
+      return Response.json({ agent: { id: "agent-live" } }, { status: 201 });
+    }
+    if (url.endsWith("/api/agents/agent-live/outcome-contract")) {
+      return Response.json({ contract: liveModelArkContract });
+    }
+    return new Response("not found", { status: 404 });
+  };
+
+  const agent = await seedLiveModelArkDemo("http://127.0.0.1:3201", fetchStub);
+  assert.equal(agent.id, "agent-live");
+  assert.equal(requests.length, 3);
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    name: liveModelArkAgentName,
+    description: "Provider-backed inference, isolated Candidate, validated Promotion",
+    instructions:
+      "Work only in isolated Candidate State. Create the requested proof artifact, run the required verification, and report the observed result.",
+  });
+  assert.deepEqual(JSON.parse(requests[2].options.body), liveModelArkContract);
+});
+
+test("seeding preserves an exact Agent and rejects drifted policy", async () => {
+  const exactAgent = {
+    id: "agent-live",
+    name: liveModelArkAgentName,
+    outcomeContract: { ...liveModelArkContract, version: 2 },
+  };
+  const exactFetch = async () => Response.json({ agents: [exactAgent] });
+  assert.equal(
+    (await seedLiveModelArkDemo("http://127.0.0.1:3201", exactFetch)).id,
+    "agent-live",
+  );
+
+  const driftedFetch = async () =>
+    Response.json({
+      agents: [
+        {
+          ...exactAgent,
+          outcomeContract: { ...liveModelArkContract, requiredPaths: ["AGENTS.md"] },
+        },
+      ],
+    });
+  await assert.rejects(
+    seedLiveModelArkDemo("http://127.0.0.1:3201", driftedFetch),
+    /Outcome Contract changed/,
+  );
 });
 
 test("managed state refuses broad destructive roots", () => {
