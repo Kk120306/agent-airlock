@@ -146,6 +146,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  decideFederatedAdmission: (
+    admissionId: string,
+    body: { choice: "approve" | "deny"; reason: string },
+  ) =>
+    request<FederatedImportResult>(
+      "/api/federation/admissions/" + admissionId + "/decision",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   createCandidateSet: (
     id: string,
     body: {

@@ -678,6 +678,10 @@ function ReceiptVerifier({
   const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(null);
   const [trustPolicyError, setTrustPolicyError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState<"approve" | "deny" | null>(
+    null,
+  );
+  const [approvalReason, setApprovalReason] = useState("");
 
   const verifySource = useCallback(async (source: string, sourceName: string) => {
     setFilename(sourceName);
@@ -2645,6 +2649,10 @@ function FederationAirlock({
   const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(null);
   const [result, setResult] = useState<FederatedImportResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState<"approve" | "deny" | null>(
+    null,
+  );
+  const [approvalReason, setApprovalReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2694,6 +2702,24 @@ function FederationAirlock({
     }
   };
 
+  const decidePendingAdmission = async (choice: "approve" | "deny") => {
+    if (!result?.admission || !approvalReason.trim()) return;
+    setDecisionBusy(choice);
+    setLocalError(null);
+    try {
+      const decided = await api.decideFederatedAdmission(
+        result.admission.admissionId,
+        { choice, reason: approvalReason.trim() },
+      );
+      setResult(decided);
+      await onImported(decided);
+    } catch (reason) {
+      setLocalError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setDecisionBusy(null);
+    }
+  };
+
   const admission = result?.admission;
   const transaction = result?.run?.transaction;
   const requiredValidations =
@@ -2706,22 +2732,26 @@ function FederationAirlock({
     {
       label: "Verify",
       detail: admission
-        ? admission.decision.decision === "admit"
+        ? admission.decision.decision === "admit" || result?.approval?.choice === "approve"
           ? "Bundle, receipt, authority, and signer scope verified"
-          : admission.decision.detail
+          : result?.approval?.choice === "deny"
+            ? "Local operator denied the immutable pending Admission"
+            : admission.decision.detail
         : "Cryptographic bundle and organizational authority",
       state: admission
-        ? admission.decision.decision === "admit"
+        ? admission.decision.decision === "admit" || result?.approval?.choice === "approve"
           ? "passed"
+          : result?.approval?.choice === "deny"
+            ? "rejected"
           : admission.decision.decision
         : "waiting",
     },
     {
       label: "Isolate",
-      detail: admission?.candidateRunId
-        ? "Receiver Candidate " + admission.candidateRunId.slice(0, 12)
+      detail: result?.run?.id || admission?.candidateRunId
+        ? "Receiver Candidate " + (result?.run?.id ?? admission!.candidateRunId!).slice(0, 12)
         : "No mutable Canonical path enters the import Runtime",
-      state: admission?.candidateRunId ? "passed" : "waiting",
+      state: result?.run?.id || admission?.candidateRunId ? "passed" : "waiting",
     },
     {
       label: "Validate",
@@ -2884,9 +2914,11 @@ function FederationAirlock({
                 ? "PROMOTED BY RECEIVER"
                 : disposition === "quarantined"
                   ? "QUARANTINED BY RECEIVER"
+                  : result?.approval?.choice === "deny"
+                    ? "DENIED BY OPERATOR"
                   : admission.decision.decision.toUpperCase()}
             </span>
-            <strong>{admission.decision.detail}</strong>
+            <strong>{result?.approval?.reason ?? admission.decision.detail}</strong>
           </div>
           <dl>
             <div><dt>Admission</dt><dd>{admission.admissionId.slice(0, 19)}...</dd></div>
@@ -2897,8 +2929,59 @@ function FederationAirlock({
         </div>
       )}
 
+      {admission?.decision.decision === "pending" && !result?.approval && (
+        <section className="federation-approval" aria-label="Local admission decision">
+          <div>
+            <span className="eyebrow">Local operator gate</span>
+            <strong>Canonical State is unchanged while this decision is pending.</strong>
+            <p>
+              Review the verified producer, policy generation, and immutable Admission digest.
+              Your first decision is append-only and exact retries reuse it.
+            </p>
+          </div>
+          <label>
+            Decision reason
+            <textarea
+              value={approvalReason}
+              onChange={(event) => setApprovalReason(event.target.value)}
+              maxLength={512}
+              placeholder="Record why this exact transfer is safe or unsafe"
+              disabled={decisionBusy !== null}
+              required
+            />
+          </label>
+          <div className="federation-approval-actions">
+            <button
+              type="button"
+              className="button"
+              disabled={!approvalReason.trim() || decisionBusy !== null}
+              onClick={() => void decidePendingAdmission("deny")}
+            >
+              {decisionBusy === "deny" ? <Spinner /> : "Deny and preserve Canonical"}
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={!approvalReason.trim() || decisionBusy !== null}
+              onClick={() => void decidePendingAdmission("approve")}
+            >
+              {decisionBusy === "approve" ? <Spinner /> : "Approve into Candidate State"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {result?.approval && (
+        <div className="federation-decision-evidence" data-choice={result.approval.choice}>
+          <span>{result.approval.choice === "approve" ? "APPROVED" : "DENIED"}</span>
+          <strong>{result.approval.reason}</strong>
+          <code>{result.approval.recordDigest}</code>
+          <small>Recorded by {result.approval.operatorId}</small>
+        </div>
+      )}
+
       <div className="federation-actions">
-        <span>No model call runs during import. Exact retries reuse one durable admission.</span>
+        <span>No model call runs during import. Exact retries reuse durable admission and decision evidence.</span>
         <button
           className="button button-primary"
           disabled={

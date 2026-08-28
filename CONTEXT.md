@@ -148,6 +148,11 @@ _Avoid_: Producer allowlist, receipt authority, automatic federation
 The immutable local evidence of one admission evaluation, including the exact policy snapshot, receipt and artifact commitments, replay identity, decision, and stable reason.
 _Avoid_: Import log, trust cache, upstream approval
 
+**Federated Approval Decision**:
+The separate immutable receiver-controlled approve or deny decision bound to one pending Federated Admission Record and one receiver-derived operator identity.
+It may authorize Candidate preparation but never authorizes Promotion by itself.
+_Avoid_: Mutated admission, producer approval, browser identity claim
+
 **Policy Authority**:
 The separate Ed25519 identity that signs a canonical Signing-Key Trust Policy without becoming a receipt signer or Promotion authority.
 _Avoid_: Included-key trust, receipt authority, blockchain owner

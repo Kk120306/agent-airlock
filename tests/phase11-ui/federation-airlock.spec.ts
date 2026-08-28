@@ -206,6 +206,35 @@ const promoted: FederatedImportResult = {
   run: importedRun,
 };
 
+const pending: FederatedImportResult = {
+  admission: {
+    ...promoted.admission,
+    candidateRunId: null,
+    decision: {
+      ...promoted.admission.decision,
+      decision: "pending",
+      reason: "approval-required",
+      detail: "Verified work requires a local operator decision.",
+    },
+  },
+  run: null,
+};
+
+const approval = {
+  schema: "agent-airlock/federated-approval-decision" as const,
+  schemaVersion: 1 as const,
+  approvalId: digest("7"),
+  admissionId: pending.admission.admissionId,
+  importIdentifier: pending.admission.importIdentifier,
+  pendingRecordDigest: pending.admission.recordDigest,
+  localAgentId: agent.id,
+  operatorId: "local-control-plane",
+  choice: "approve" as const,
+  reason: "Release evidence and scope verified",
+  decidedAt: timestamp,
+  recordDigest: digest("8"),
+};
+
 test("imports signed work through the visible receiver-owned Promotion path", async ({
   page,
 }) => {
@@ -259,6 +288,80 @@ test("imports signed work through the visible receiver-owned Promotion path", as
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     390,
   );
+});
+
+test("resumes a pending Admission through the visible append-only operator gate", async ({
+  page,
+}) => {
+  const decisionRequests: unknown[] = [];
+  await serveProductionBundle(page, [], pending, {
+    admission: pending.admission,
+    approval,
+    run: importedRun,
+  }, decisionRequests);
+  await page.goto("http://airlock.local/");
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await panel.getByLabel("Transfer identity").fill("judge-pending-001");
+  await panel.getByLabel("Federated Work Bundle").setInputFiles({
+    name: "pending-work.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ schema: "agent-airlock/federated-work-bundle" })),
+  });
+  await panel.getByLabel("Signed Trust Policy").setInputFiles({
+    name: "pending-policy.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ schema: "agent-airlock/signed-signing-key-trust-policy" })),
+  });
+  await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+
+  await expect(panel.getByRole("region", { name: "Local admission decision" }))
+    .toBeVisible();
+  await expect(panel.getByText(/Canonical State is unchanged/)).toBeVisible();
+  await panel.getByLabel("Decision reason").fill(approval.reason);
+  await panel.getByRole("button", { name: "Approve into Candidate State" }).click();
+
+  await expect(panel.getByText("PROMOTED BY RECEIVER")).toBeVisible();
+  await expect(panel.getByText(approval.recordDigest)).toBeVisible();
+  await expect(panel.getByText("Recorded by local-control-plane")).toBeVisible();
+  expect(decisionRequests).toEqual([
+    { choice: "approve", reason: approval.reason },
+  ]);
+});
+
+test("shows a durable denial while Canonical State remains unchanged", async ({ page }) => {
+  const deniedApproval = {
+    ...approval,
+    choice: "deny" as const,
+    reason: "Release scope exceeds receiver policy",
+  };
+  await serveProductionBundle(page, [], pending, {
+    admission: pending.admission,
+    approval: deniedApproval,
+    run: null,
+  });
+  await page.goto("http://airlock.local/");
+  await page.getByRole("button", { name: "Federation" }).click();
+  const panel = page.locator("#federation-airlock-panel");
+  await panel.getByLabel("Transfer identity").fill("judge-denied-001");
+  await panel.getByLabel("Federated Work Bundle").setInputFiles({
+    name: "denied-work.json",
+    mimeType: "application/json",
+    buffer: Buffer.from("{}"),
+  });
+  await panel.getByLabel("Signed Trust Policy").setInputFiles({
+    name: "denied-policy.json",
+    mimeType: "application/json",
+    buffer: Buffer.from("{}"),
+  });
+  await panel.getByRole("button", { name: "Admit into Candidate State" }).click();
+  await panel.getByLabel("Decision reason").fill(deniedApproval.reason);
+  await panel.getByRole("button", { name: "Deny and preserve Canonical" }).click();
+
+  await expect(panel.getByText("DENIED BY OPERATOR")).toBeVisible();
+  await expect(panel.getByText("unchanged", { exact: true })).toBeVisible();
+  await expect(panel.getByText(deniedApproval.recordDigest)).toBeVisible();
+  await expect(panel.getByText("PROMOTED BY RECEIVER")).toHaveCount(0);
 });
 
 const operatorVisibleRejections = [
@@ -398,6 +501,8 @@ async function serveProductionBundle(
   page: Page,
   importRequests: unknown[],
   importResult: FederatedImportResponse = promoted,
+  decisionResult?: FederatedImportResult,
+  decisionRequests: unknown[] = [],
 ): Promise<void> {
   await page.route("http://airlock.local/**", async (route) => {
     const url = new URL(route.request().url());
@@ -429,6 +534,20 @@ async function serveProductionBundle(
         status: importResult.run ? 201 : 200,
         contentType: "application/json",
         body: JSON.stringify(importResult),
+      });
+      return;
+    }
+    if (
+      url.pathname ===
+        "/api/federation/admissions/" + pending.admission.admissionId + "/decision" &&
+      route.request().method() === "POST" &&
+      decisionResult
+    ) {
+      decisionRequests.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: decisionResult.run ? 201 : 200,
+        contentType: "application/json",
+        body: JSON.stringify(decisionResult),
       });
       return;
     }

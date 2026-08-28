@@ -123,7 +123,7 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
           logKeyIds: [],
           pinnedCheckpointDigest: null,
         },
-        requireLocalApproval: false,
+        requireLocalApproval: true,
       },
     ],
   };
@@ -138,10 +138,28 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
   const federationPanel = page.locator("#federation-airlock-panel");
   await expect(federationPanel.getByText("receiver-browser-policy · generation 1"))
     .toBeVisible();
-  await federationPanel.getByLabel("Transfer identity").fill("browser-handoff-001");
+  const receiverBefore = await request.get(receiverUrl + "/api/agents");
+  expect(receiverBefore.ok()).toBe(true);
+  const canonicalBefore = receiverBefore.json().then(
+    (body) => body.agents[0].canonicalStateId as string,
+  );
+  await federationPanel.getByLabel("Transfer identity").fill("browser-handoff-approved");
   await federationPanel.getByLabel("Federated Work Bundle").setInputFiles(bundlePath);
   await federationPanel.getByLabel("Signed Trust Policy").setInputFiles(trustPolicyPath);
   await federationPanel.getByRole("button", { name: "Admit into Candidate State" }).click();
+
+  await expect(federationPanel.getByText("Canonical State is unchanged while this decision is pending."))
+    .toBeVisible();
+  const receiverWhilePending = await request.get(receiverUrl + "/api/agents");
+  expect(receiverWhilePending.ok()).toBe(true);
+  expect((await receiverWhilePending.json()).agents[0].canonicalStateId).toBe(
+    await canonicalBefore,
+  );
+  await federationPanel.getByLabel("Decision reason").fill(
+    "Producer signature, policy scope, and exact artifact reviewed",
+  );
+  await federationPanel.getByRole("button", { name: "Approve into Candidate State" })
+    .click();
 
   await expect(federationPanel.getByText("PROMOTED BY RECEIVER"))
     .toBeVisible({ timeout: 15_000 });
@@ -149,6 +167,11 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
     .toBeVisible();
   await expect(federationPanel.getByText("No model call runs during import."))
     .toBeVisible();
-  const receiverRun = await request.get(receiverUrl + "/api/agents");
-  expect(receiverRun.ok()).toBe(true);
+  await expect(federationPanel.getByText("Recorded by local-control-plane"))
+    .toBeVisible();
+  const receiverAfterApproval = await request.get(receiverUrl + "/api/agents");
+  expect(receiverAfterApproval.ok()).toBe(true);
+  expect((await receiverAfterApproval.json()).agents[0].canonicalStateId).not.toBe(
+    await canonicalBefore,
+  );
 });

@@ -287,6 +287,9 @@ One immutable Candidate Set Decision Authority is captured before mutable Select
 Immutable historical Canonical manifests let export recompute the complete physical Whole-Agent state for every referenced accepted state identifier.
 Terminal progress is withheld until the child Run and corresponding lifecycle projection are ready, while the Agent remains busy until its aggregate Candidate Set finishes Selection, winner Promotion, and loser cleanup.
 Receipt and transparency private keys remain separate operator-owned files, and the optional transparency log persists only portable receipt digests and signed checkpoint evidence.
+Phase 12 persists immutable receiver policy generations, admission plans, Admission Records, and verified artifact staging outside the mutable application database.
+Phase 13 persists a separate immutable Federated Approval Decision plus a monotonic approval recovery plan.
+The pending Admission remains unchanged, and the federated-approval Promotion authority commits both the pending Admission digest and Approval Decision digest before any physical Promotion can recover.
 
 Schema evolution must increment the database version and include a tested migration path from the starter kit's version 1 data.
 
@@ -329,6 +332,9 @@ Schema evolution must increment the database version and include a tested migrat
 | Portable Decision Authority or a historical Canonical manifest is missing or contradictory                         | Fail export closed without reconstructing authority from mutable database content.                                                                                                                                                                               |
 | Portable signing identity is missing, substituted, malformed, or weakly permissioned                               | Fail export closed without revealing a local path or silently rotating the identity.                                                                                                                                                                             |
 | Optional transparency state is malformed                                                                           | Fail anchored export closed while leaving signature-only export available.                                                                                                                                                                                       |
+| Approval-required bundle staging is missing, malformed, or contradicts the pending Admission                       | Create no Candidate State, preserve Canonical State, and refuse the operator decision.                                                                                                                                                                           |
+| A retry contradicts the first Federated Approval Decision                                                           | Preserve the immutable first decision and fail the retry closed.                                                                                                                                                                                                 |
+| Federated Approval recovery lacks either the pending Admission or Approval Decision authority                       | Refuse physical Promotion recovery, dispatch no effect, and surface a bounded recovery failure.                                                                                                                                                                  |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 
@@ -343,6 +349,7 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - A Repair Runtime may read a disposable canonical workspace copy, but it never receives a writable path to the real Canonical State.
 - Validation code from the candidate project is untrusted and runs from a disposable copy inside a constrained container.
 - The Fastify control plane and Airlock state manager form the trusted POC boundary.
+- Federated operator identity comes from trusted receiver configuration or authenticated control-plane context and never from the decision request body.
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
 - The implemented outbox protects only external actions routed through its interface.
 - The platform-owned mock delivery store is never mounted into the Runtime.

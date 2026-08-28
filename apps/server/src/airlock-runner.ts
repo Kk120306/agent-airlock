@@ -77,6 +77,8 @@ export interface FederatedRunIdentity {
   recordDigest: string;
   producerId: string;
   policyDigest: string;
+  pendingRecordDigest?: string;
+  approvalDecisionDigest?: string;
 }
 
 export interface PromotionRecoveryAuthorityContext {
@@ -1105,8 +1107,10 @@ export class AirlockRunner {
     transaction = await this.transition(
       transaction,
       "promoting",
-      authority.kind === "federated-admission"
-        ? "Federated Admission authority and every receiver Validation were reverified"
+      authority.kind === "federated-approval"
+        ? "Pending Admission, operator decision, and every receiver Validation were reverified"
+        : authority.kind === "federated-admission"
+          ? "Federated Admission authority and every receiver Validation were reverified"
         : "Selected Candidate seal and every required Validation were reverified",
       onProgress,
     );
@@ -1242,7 +1246,7 @@ export class AirlockRunner {
       transaction = this.recordTransition(
         transaction,
         "promoted",
-        authority.kind === "federated-admission"
+        isFederatedPromotionAuthority(authority)
           ? "Receiver-approved federated Candidate State is now Canonical State"
           : "Selected Candidate State is now Canonical State",
       );
@@ -1407,6 +1411,8 @@ export class AirlockRunner {
               importIdentifier: identity.importIdentifier,
               producerId: identity.producerId,
               policyDigest: identity.policyDigest,
+              pendingRecordDigest: identity.pendingRecordDigest ?? null,
+              approvalDecisionDigest: identity.approvalDecisionDigest ?? null,
             },
             null,
             2,
@@ -1502,15 +1508,7 @@ export class AirlockRunner {
         seal,
         transaction,
         result,
-        {
-          schemaVersion: 1,
-          kind: "federated-admission",
-          admissionId: identity.admissionId,
-          importIdentifier: identity.importIdentifier,
-          recordDigest: identity.recordDigest,
-          producerId: identity.producerId,
-          policyDigest: identity.policyDigest,
-        },
+        federatedPromotionAuthority(identity),
         onProgress,
       );
     } catch (error) {
@@ -2297,7 +2295,7 @@ function assertRecoveryAuthority(
     }
     return;
   }
-  if (record.authority.kind === "federated-admission") {
+  if (isFederatedPromotionAuthority(record.authority)) {
     if (
       !expectedFederated ||
       canonicalJson(record.authority) !== canonicalJson(expectedFederated)
@@ -2318,6 +2316,53 @@ function assertRecoveryAuthority(
       "Candidate Set Promotion journal contradicts its persisted winner authority",
     );
   }
+}
+
+function isFederatedPromotionAuthority(
+  authority: PromotionAuthority,
+): authority is Extract<
+  PromotionAuthority,
+  { kind: "federated-admission" | "federated-approval" }
+> {
+  return (
+    authority.kind === "federated-admission" ||
+    authority.kind === "federated-approval"
+  );
+}
+
+function federatedPromotionAuthority(
+  identity: FederatedRunIdentity,
+): Extract<
+  PromotionAuthority,
+  { kind: "federated-admission" | "federated-approval" }
+> {
+  const hasApproval =
+    identity.pendingRecordDigest !== undefined ||
+    identity.approvalDecisionDigest !== undefined;
+  if (hasApproval) {
+    if (!identity.pendingRecordDigest || !identity.approvalDecisionDigest) {
+      throw new Error("Federated approval authority evidence is incomplete");
+    }
+    return {
+      schemaVersion: 1,
+      kind: "federated-approval",
+      admissionId: identity.admissionId,
+      importIdentifier: identity.importIdentifier,
+      pendingRecordDigest: identity.pendingRecordDigest,
+      approvalDecisionDigest: identity.approvalDecisionDigest,
+      producerId: identity.producerId,
+      policyDigest: identity.policyDigest,
+    };
+  }
+  return {
+    schemaVersion: 1,
+    kind: "federated-admission",
+    admissionId: identity.admissionId,
+    importIdentifier: identity.importIdentifier,
+    recordDigest: identity.recordDigest,
+    producerId: identity.producerId,
+    policyDigest: identity.policyDigest,
+  };
 }
 
 export function finalizeResources(

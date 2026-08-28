@@ -161,6 +161,105 @@ describe("federated HTTP execution", () => {
     await fixture.app.close();
   });
 
+  it("resumes approval-required work through immutable local operator authority", async () => {
+    const fixture = await createFixture();
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const before = await fixture.workspaces.readCanonical(fixture.agentId);
+
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-needs-approval",
+        producerId: "producer-one",
+        bundle: fixture.bundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json()).toMatchObject({
+      admission: {
+        decision: { decision: "pending", reason: "approval-required" },
+      },
+      run: null,
+    });
+    expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(before);
+
+    const approved = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: { choice: "approve", reason: "Verified producer evidence" },
+    });
+    expect(approved.statusCode).toBe(201);
+    expect(approved.json()).toMatchObject({
+      approval: {
+        choice: "approve",
+        operatorId: "local-control-plane",
+      },
+      run: {
+        status: "completed",
+        transaction: { status: "promoted", disposition: "promoted" },
+      },
+    });
+    const after = await fixture.workspaces.readCanonical(fixture.agentId);
+    expect(after.stateId).not.toBe(before.stateId);
+    await expect(readFile(path.join(after.workspacePath, "federated.txt"), "utf8"))
+      .resolves.toBe("federated work\n");
+
+    const replay = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: { choice: "approve", reason: "Verified producer evidence" },
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json().approval.recordDigest).toBe(
+      approved.json().approval.recordDigest,
+    );
+    expect(fixture.service.getRuns(fixture.agentId)).toHaveLength(1);
+    await fixture.app.close();
+  });
+
+  it("denies approval-required work without creating a Run or changing Canonical", async () => {
+    const fixture = await createFixture();
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const before = await fixture.workspaces.readCanonical(fixture.agentId);
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-denied-locally",
+        producerId: "producer-one",
+        bundle: fixture.bundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+
+    const denied = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: { choice: "deny", reason: "Unexpected release scope" },
+    });
+    expect(denied.statusCode).toBe(200);
+    expect(denied.json()).toMatchObject({
+      approval: { choice: "deny", operatorId: "local-control-plane" },
+      run: null,
+    });
+    expect(fixture.service.getRuns(fixture.agentId)).toHaveLength(0);
+    expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(before);
+    await fixture.app.close();
+  });
+
   it("quarantines admitted work that fails the receiver Outcome Contract", async () => {
     const fixture = await createFixture();
     await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
@@ -280,6 +379,71 @@ describe("federated HTTP execution", () => {
     const after = await recoveredWorkspaces.readCanonical(fixture.agentId);
     await expect(readFile(path.join(after.workspacePath, "federated.txt"), "utf8"))
       .resolves.toBe("federated work\n");
+  });
+
+  it("recovers approved Promotion only with both pending Admission and operator decision", async () => {
+    let interrupted = false;
+    const fixture = await createFixture({
+      promotionFaultInjector: (point) => {
+        if (point === "after-validated" && !interrupted) {
+          interrupted = true;
+          throw new Error("simulated approved receiver restart");
+        }
+      },
+    });
+    fixture.policy.producers[0]!.requireLocalApproval = true;
+    await fixture.service.installFederatedAdmissionPolicy(fixture.policy);
+    const before = await fixture.workspaces.readCanonical(fixture.agentId);
+    const imported = await fixture.app.inject({
+      method: "POST",
+      url: `/api/agents/${fixture.agentId}/federated-imports`,
+      payload: {
+        transferId: "transfer-approved-recovery",
+        producerId: "producer-one",
+        bundle: fixture.bundle,
+        trustPolicy: fixture.trustPolicy,
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+
+    const failed = await fixture.app.inject({
+      method: "POST",
+      url:
+        "/api/federation/admissions/" +
+        imported.json().admission.admissionId +
+        "/decision",
+      payload: { choice: "approve", reason: "Recovery authority reviewed" },
+    });
+    expect(failed.statusCode).toBe(500);
+    expect(await fixture.workspaces.readCanonical(fixture.agentId)).toEqual(before);
+    const failedRun = fixture.service.getRuns(fixture.agentId)[0]!;
+    expect(failedRun).toMatchObject({
+      transaction: { recovery: { journalPhase: "validated" } },
+    });
+    await fixture.app.close();
+
+    const recoveredWorkspaces = new WorkspaceManager(
+      fixture.config.workspaceRoot,
+      fixture.config.codexHome,
+    );
+    const recoveredService = new AgentService(
+      fixture.config,
+      new JsonStore(path.join(fixture.config.dataDirectory, "launchpad.json")),
+      recoveredWorkspaces,
+      fixture.runner,
+    );
+    await recoveredService.initialize();
+
+    expect(recoveredService.getRun(failedRun.id)).toMatchObject({
+      status: "completed",
+      transaction: {
+        status: "promoted",
+        disposition: "promoted",
+        recovery: { recoveredAfterRestart: true, journalPhase: "completed" },
+      },
+    });
+    const after = await recoveredWorkspaces.readCanonical(fixture.agentId);
+    expect(after.stateId).not.toBe(before.stateId);
   });
 });
 

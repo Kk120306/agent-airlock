@@ -73,6 +73,16 @@ export type PromotionAuthority =
       recordDigest: string;
       producerId: string;
       policyDigest: string;
+    }
+  | {
+      schemaVersion: 1;
+      kind: "federated-approval";
+      admissionId: string;
+      importIdentifier: string;
+      pendingRecordDigest: string;
+      approvalDecisionDigest: string;
+      producerId: string;
+      policyDigest: string;
     };
 
 export interface PromotionJournalScanError {
@@ -417,6 +427,34 @@ function validatePromotionAuthority(record: PromotionJournalRecord): void {
       !/^sha256:[a-f0-9]{64}$/.test(authority.policyDigest)
     ) {
       throw new Error("Federated Admission Promotion authority is invalid");
+    }
+    return;
+  }
+  if (authority.kind === "federated-approval") {
+    assertExactKeys(
+      authority,
+      [
+        "schemaVersion",
+        "kind",
+        "admissionId",
+        "importIdentifier",
+        "pendingRecordDigest",
+        "approvalDecisionDigest",
+        "producerId",
+        "policyDigest",
+      ],
+      "Federated Approval Promotion authority",
+    );
+    if (
+      authority.schemaVersion !== 1 ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.admissionId) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.importIdentifier) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.pendingRecordDigest) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.approvalDecisionDigest) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(authority.producerId) ||
+      !/^sha256:[a-f0-9]{64}$/.test(authority.policyDigest)
+    ) {
+      throw new Error("Federated Approval Promotion authority is invalid");
     }
     return;
   }

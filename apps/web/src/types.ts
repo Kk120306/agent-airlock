@@ -590,7 +590,23 @@ export interface FederatedAdmissionRecord {
 
 export interface FederatedImportResult {
   admission: FederatedAdmissionRecord;
+  approval?: FederatedApprovalDecisionRecord;
   run: AgentRun | null;
+}
+
+export interface FederatedApprovalDecisionRecord {
+  schema: "agent-airlock/federated-approval-decision";
+  schemaVersion: 1;
+  approvalId: string;
+  admissionId: string;
+  importIdentifier: string;
+  pendingRecordDigest: string;
+  localAgentId: string;
+  operatorId: string;
+  choice: "approve" | "deny";
+  reason: string;
+  decidedAt: string;
+  recordDigest: string;
 }
 import type {
   PortableDecisionChain,

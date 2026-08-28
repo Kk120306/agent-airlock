@@ -67,6 +67,12 @@ import {
   type FederatedAdmissionPolicy,
 } from "./federated-admission-policy.js";
 import {
+  FederatedApprovalCoordinator,
+  FederatedApprovalJournal,
+  type FederatedApprovalChoice,
+  type FederatedApprovalDecisionRecord,
+} from "./federated-approval-journal.js";
+import {
   createDefaultOutcomeContract,
   createNextOutcomeContract,
 } from "./outcome-contract.js";
@@ -132,6 +138,12 @@ export interface FederatedImportResult {
   run: AgentRun | null;
 }
 
+export interface FederatedApprovalDecisionResult {
+  admission: FederatedAdmissionRecord;
+  approval: FederatedApprovalDecisionRecord;
+  run: AgentRun | null;
+}
+
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
   private readonly cancellationRequests = new Set<string>();
@@ -146,6 +158,8 @@ export class AgentService {
   private readonly federatedAdmissionPolicies: FederatedAdmissionPolicyStore;
   private readonly federatedAdmissionJournal: FederatedAdmissionJournal;
   private readonly federatedAdmissionCoordinator: FederatedAdmissionCoordinator;
+  private readonly federatedApprovalJournal: FederatedApprovalJournal;
+  private readonly federatedApprovalCoordinator: FederatedApprovalCoordinator;
   private readonly runnerEnforcesTokenBudgets: boolean;
   private transparencyOperation: Promise<void> = Promise.resolve();
   private providerRegistryReady = false;
@@ -188,6 +202,14 @@ export class AgentService {
       this.federatedAdmissionJournal,
       new WorkspaceFederatedCandidateAdapter(workspaces),
     );
+    this.federatedApprovalJournal = new FederatedApprovalJournal(
+      path.join(config.dataDirectory, "federated-approval-journal"),
+    );
+    this.federatedApprovalCoordinator = new FederatedApprovalCoordinator(
+      this.federatedAdmissionJournal,
+      this.federatedApprovalJournal,
+      new WorkspaceFederatedCandidateAdapter(workspaces),
+    );
     this.runner = new AirlockRunner(
       runner,
       workspaces,
@@ -215,6 +237,7 @@ export class AgentService {
     await this.agentDeletionJournal.initialize();
     await this.federatedAdmissionPolicies.initialize();
     await this.federatedAdmissionJournal.initialize();
+    await this.federatedApprovalJournal.initialize();
     await this.reconcileAgentDeletions();
     await this.workspaces.recoverProviderRegistryTransitions();
     const registryDescriptors = this.resourceCoordinator.registryDescriptors();
@@ -2736,16 +2759,103 @@ export class AgentService {
     if (!plan?.candidateRunId || !plan.candidateStateId) {
       throw new Error("Admitted federated transfer has no prepared Candidate State");
     }
+    const run = await this.executeFederatedCandidate({
+      admission,
+      candidateRunId: plan.candidateRunId,
+      candidateStateId: plan.candidateStateId,
+      authority: { recordDigest: admission.recordDigest },
+      createdAt: admission.recordedAt,
+      decisionSummary:
+        "Receiver admitted verified work into isolated Candidate State under " +
+        admission.decision.policyId +
+        " generation " +
+        admission.decision.policyGeneration,
+    });
+    return { admission, run };
+  }
+
+  async decideFederatedAdmission(
+    admissionId: ReceiptDigest,
+    input: { choice: FederatedApprovalChoice; reason: string },
+  ): Promise<FederatedApprovalDecisionResult> {
+    this.assertProviderRegistryReady();
+    if (!/^sha256:[a-f0-9]{64}$/.test(admissionId)) {
+      throw new HttpError(400, "Federated Admission identity is invalid");
+    }
+    if (input.choice !== "approve" && input.choice !== "deny") {
+      throw new HttpError(400, "Federated approval choice is invalid");
+    }
+    const admission = await this.federatedAdmissionJournal.readRecordByAdmissionId(
+      admissionId,
+    );
+    if (!admission) {
+      throw new HttpError(404, "Federated Admission not found");
+    }
+    this.getAgent(admission.localAgentId);
+    let decision;
+    try {
+      decision = await this.federatedApprovalCoordinator.decide({
+        pending: admission,
+        operatorId: this.config.operatorId,
+        choice: input.choice,
+        reason: input.reason,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/invalid|not awaiting|conflicts/.test(message)) {
+        throw new HttpError(409, message);
+      }
+      throw error;
+    }
+    if (decision.approval.choice === "deny") {
+      return { admission, approval: decision.approval, run: null };
+    }
+    if (!decision.plan.candidateRunId || !decision.plan.candidateStateId) {
+      throw new Error("Approved federated transfer has no prepared Candidate State");
+    }
+    const run = await this.executeFederatedCandidate({
+      admission,
+      candidateRunId: decision.plan.candidateRunId,
+      candidateStateId: decision.plan.candidateStateId,
+      authority: {
+        pendingRecordDigest: admission.recordDigest,
+        approvalDecisionDigest: decision.approval.recordDigest,
+      },
+      createdAt: decision.approval.decidedAt,
+      decisionSummary:
+        "Operator " +
+        decision.approval.operatorId +
+        " approved pending federated work after reviewing receiver evidence",
+    });
+    return { admission, approval: decision.approval, run };
+  }
+
+  private async executeFederatedCandidate(input: {
+    admission: FederatedAdmissionRecord;
+    candidateRunId: string;
+    candidateStateId: string;
+    authority:
+      | { recordDigest: ReceiptDigest }
+      | {
+          pendingRecordDigest: ReceiptDigest;
+          approvalDecisionDigest: ReceiptDigest;
+        };
+    createdAt: string;
+    decisionSummary: string;
+  }): Promise<AgentRun> {
+    const { admission } = input;
+    const agentId = admission.localAgentId;
+    const agent = this.getAgent(agentId);
     const existing = this.store
       .snapshot()
-      .runs.find((candidate) => candidate.id === plan.candidateRunId);
+      .runs.find((candidate) => candidate.id === input.candidateRunId);
     if (existing) {
-      return { admission, run: structuredClone(existing) };
+      return structuredClone(existing);
     }
     const canonical = await this.workspaces.readCanonical(agentId);
     const timestamp = now();
     const transaction = createRunTransaction(
-      plan.candidateRunId,
+      input.candidateRunId,
       canonical,
       agent.outcomeContract,
       this.config.maxRepairDepth,
@@ -2753,15 +2863,11 @@ export class AgentService {
     transaction.events[0] = {
       status: "preparing",
       at: timestamp,
-      summary:
-        "Receiver admitted verified work into isolated Candidate State under " +
-        admission.decision.policyId +
-        " generation " +
-        admission.decision.policyGeneration,
+      summary: input.decisionSummary,
     };
-    transaction.candidateStateId = plan.candidateStateId;
+    transaction.candidateStateId = input.candidateStateId;
     const run: AgentRun = {
-      id: plan.candidateRunId,
+      id: input.candidateRunId,
       agentId,
       candidateSetId: null,
       competitorId: null,
@@ -2777,7 +2883,7 @@ export class AgentService {
       transaction,
       startedAt: timestamp,
       completedAt: null,
-      createdAt: admission.recordedAt,
+      createdAt: input.createdAt,
     };
     await this.store.mutate((database) => {
       const storedAgent = database.agents.find((candidate) => candidate.id === agentId);
@@ -2820,6 +2926,7 @@ export class AgentService {
           recordDigest: admission.recordDigest,
           producerId: admission.producerId,
           policyDigest: admission.decision.policyDigest,
+          ...(input.authority),
         },
         async (progress) => {
           await this.persistRunProgress(run.id, progress);
@@ -2849,7 +2956,7 @@ export class AgentService {
         }
         storedAgent.updatedAt = completedAt;
       });
-      return { admission, run: this.getRun(run.id) };
+      return this.getRun(run.id);
     } catch (error) {
       const completedAt = now();
       const terminal =
@@ -3406,6 +3513,34 @@ export class AgentService {
         recordDigest: record.recordDigest,
         producerId: record.producerId,
         policyDigest: record.decision.policyDigest,
+      });
+    }
+    for (const approval of await this.federatedApprovalJournal.listRecords()) {
+      if (approval.choice !== "approve") continue;
+      const result = await this.federatedApprovalJournal.readResultByAdmissionId(
+        approval.admissionId,
+      );
+      const admission = await this.federatedAdmissionJournal.readRecordByAdmissionId(
+        approval.admissionId,
+      );
+      if (
+        !result ||
+        result.plan.phase !== "completed" ||
+        !result.plan.candidateRunId ||
+        !admission ||
+        admission.recordDigest !== approval.pendingRecordDigest
+      ) {
+        continue;
+      }
+      expectedFederatedAuthorities.set(result.plan.candidateRunId, {
+        schemaVersion: 1,
+        kind: "federated-approval",
+        admissionId: admission.admissionId,
+        importIdentifier: admission.importIdentifier,
+        pendingRecordDigest: admission.recordDigest,
+        approvalDecisionDigest: approval.recordDigest,
+        producerId: admission.producerId,
+        policyDigest: admission.decision.policyDigest,
       });
     }
     for (const run of runs) {

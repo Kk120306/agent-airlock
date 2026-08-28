@@ -195,6 +195,19 @@ npm run check:phase9:boundaries
 These tests cover strict database parsing, deterministic replay, sibling isolation, aggregate token reservation, scoped over-budget Runtime cancellation, terminal pre-decision cancellation with portable receipts, immutable Selection restoration, exact terminal Quarantine replay, all-invalid completion, selected-winner seal tampering, Candidate Set versus Promotion-journal authority contradiction, exact-winner restart recovery, idempotent loser cleanup, older-generation provider recovery, Registry Transition blocking, and exactly one supported winner effect without a ModelArk credential or paid request.
 Agent deletion refuses unresolved Promotion recovery or retained Quarantine, while successful archival writes only bounded lifecycle identifiers, dispositions, and cryptographic evidence digests to its tombstone.
 
+Federated approval recovery uses two immutable authorities.
+The original approval-required Federated Admission Record remains pending and binds the exact verified staged bundle, policy generation, and receiver evidence.
+The Federated Approval Decision separately binds the receiver-derived operator, approve or deny choice, reason, and pending Admission digest.
+An approval plan may advance only from decision publication to one prepared Candidate and completion, while a denial advances directly to completion without a Candidate identity.
+Startup reconstructs a missing mutable plan from the immutable decision, inspects the deterministic Candidate Run identity before preparation, and refuses Promotion recovery unless the Promotion journal matches both immutable digests.
+
+Run the approval journal, HTTP, and browser recovery proof with:
+
+```bash
+npm run test -w @launchpad/server -- --run src/federated-approval-journal.test.ts src/federated-http.test.ts
+npm run test:phase12:real
+```
+
 Run the Adaptive Assurance and Agent deletion recovery matrix with:
 
 ```bash

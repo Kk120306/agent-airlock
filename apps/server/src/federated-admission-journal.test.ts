@@ -268,6 +268,22 @@ describe("FederatedAdmissionCoordinator", () => {
     expect(pending.decision).toMatchObject({ decision: "pending", reason: "approval-required" });
     expect(pending.candidateRunId).toBeNull();
     expect(pendingState.candidates.prepareCount).toBe(0);
+    await expect(pendingState.journal.readPendingBundle(pending)).resolves.toEqual(
+      pendingInput.bundle,
+    );
+
+    const stagedBundlePath = path.join(
+      pendingState.root,
+      "journal",
+      "pending-bundles",
+      `${pending.importIdentifier.slice("sha256:".length)}.json`,
+    );
+    const staged = JSON.parse(await readFile(stagedBundlePath, "utf8"));
+    staged.artifact.artifactDigest = sha256Digest("tampered-staged-artifact");
+    await writeFile(stagedBundlePath, canonicalize(staged) + "\n", "utf8");
+    await expect(pendingState.journal.readPendingBundle(pending)).rejects.toThrow(
+      /invalid/,
+    );
   });
 
   it("pins the original decision across policy changes and rejects transfer reuse", async () => {

@@ -556,6 +556,40 @@ The receiver reruns its own Outcome Contract and uses the existing crash-recover
 A real browser test downloads a self-verifying bundle from one independently configured Fastify instance, transfers it to another instance, and proves receiver-owned Promotion without ModelArk, a wallet, RPC, or paid inference.
 The hosted release workflow runs that same two-instance browser proof on every pull request after the full quality gate.
 
+### Phase 13: Resumable local federation decisions
+
+**Outcome**
+
+A receiver can pause verified external work for human judgment, then approve or deny it without rewriting the original machine decision or weakening Promotion recovery.
+
+**Build**
+
+- Stage the exact verified Federated Work Bundle before exposing an approval-required Admission.
+- Record the first receiver-derived operator decision as immutable append-only evidence with a bounded reason.
+- Resume approval through a separate monotonic recovery plan that prepares exactly one Candidate State.
+- Bind Promotion authority to both the pending Admission digest and the Federated Approval Decision digest.
+- Expose the pending, approved, and denied states through the production browser journey.
+
+**Exit gate**
+
+- A pending Admission leaves Canonical State unchanged and creates no Candidate State.
+- Approval, denial, exact retry, policy rotation, process interruption, contradictory retry, and evidence tampering have deterministic automated coverage.
+- A denied transfer creates no Run and cannot later be approved under the same Admission identity.
+- An approved transfer passes receiver Validation and can recover interrupted Promotion only when both immutable authorities match.
+- The real two-instance browser proof visibly pauses for local approval before receiver-owned Promotion.
+
+**Beyond-expectations finish**
+
+Turn human review from a mutable UI flag into portable, inspectable receiver authority with the same crash guarantees as automated admission.
+
+**Current status**
+
+ADR 0019 defines the append-only decision and recovery boundary.
+The receiver durably stages bounded verified bundles, preserves the original pending Admission forever, derives operator identity from trusted configuration, and rejects contradictory decisions.
+Approval prepares one isolated Candidate State, while denial prepares none.
+Promotion journals distinguish automated Federated Admission authority from human Federated Approval authority and fail recovery closed when either committed digest is missing or contradictory.
+HTTP, journal, restart, production UI, mock browser, and real two-instance browser proofs cover the complete path without paid inference.
+
 ## Hackathon cut lines
 
 ### Qualifying proof

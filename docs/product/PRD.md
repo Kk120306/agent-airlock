@@ -350,6 +350,8 @@ Phase 11 delivers independently verifiable Portable Promotion Receipts on the sa
 Phase 12 delivers receiver-controlled federated Candidate admission on the post-hackathon branch.
 One Airlock can export a promoted workspace as a self-verifying signed bundle, while another independently configured Airlock applies its own durable trust policy, materializes only Candidate State, reruns its own Outcome Contract, and owns Promotion or Quarantine.
 The credential-free two-instance browser proof is automated by `npm run test:phase12:real`.
+Phase 13 adds resumable approval-required Admissions without mutating the original machine decision.
+A separate immutable Federated Approval Decision binds receiver-derived operator identity and reason to the exact pending Admission, and approved Promotion recovery requires both digests.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations
@@ -378,5 +380,6 @@ Canonical portable receipts, key identity, selective disclosure, and optional an
 The closed [post-hackathon Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/10) and [trust-boundary ratification](https://github.com/Kk120306/agent-airlock/issues/11) bind the evidence to published release commit `cb9b63f9caa4ad9ade6d9d76d99d604edcba0d84`.
 Authority-first Selection, exact terminal replay, and append-only transparency lock turns are resolved locally in [ADR 0014](../adr/0014-publish-selection-and-terminal-authority-before-mutable-projections.md).
 Receiver-controlled federated admission policy, replay identity, current distrust, transparency requirements, and non-authoritative Candidate entry are resolved locally in [ADR 0018](../adr/0018-make-federated-admission-local-versioned-and-non-authoritative.md).
+Append-only local approval and denial, immutable bundle staging, deterministic Candidate resume, and dual-authority Promotion recovery are resolved in [ADR 0019](../adr/0019-resume-pending-federated-admissions-with-append-only-local-decisions.md).
 
 The [implementation Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) and [post-hackathon trust-protocol map](https://github.com/Kk120306/agent-airlock/issues/10) are the canonical indexes for these decisions.

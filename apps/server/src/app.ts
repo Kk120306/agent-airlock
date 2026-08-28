@@ -11,6 +11,7 @@ import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
 import type {
   FederatedWorkBundle,
+  ReceiptDigest,
   SignedSigningKeyTrustPolicyEnvelope,
 } from "@agent-airlock/portable-promotion-receipt";
 import type { FederatedAdmissionPolicy } from "./federated-admission-policy.js";
@@ -20,6 +21,9 @@ const runIdParams = z.object({ id: z.string().uuid() });
 const candidateSetIdParams = z.object({ id: z.string().uuid() });
 const assuranceProposalIdParams = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
+});
+const federatedAdmissionIdParams = z.object({
+  admissionId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
 });
 const createAgentBody = z.object({
   name: z.string().trim().min(1).max(80),
@@ -147,6 +151,12 @@ const federatedImportBody = z
     trustPolicy: z.unknown(),
   })
   .strict();
+const federatedApprovalDecisionBody = z
+  .object({
+    choice: z.enum(["approve", "deny"]),
+    reason: z.string().trim().min(1).max(512),
+  })
+  .strict();
 
 export async function createApp(
   config: AppConfig,
@@ -211,6 +221,19 @@ export async function createApp(
     );
     return reply.code(201).send(result);
   });
+
+  app.post(
+    "/api/federation/admissions/:admissionId/decision",
+    async (request, reply) => {
+      const { admissionId } = federatedAdmissionIdParams.parse(request.params);
+      const body = federatedApprovalDecisionBody.parse(request.body);
+      const result = await service.decideFederatedAdmission(
+        admissionId as ReceiptDigest,
+        body,
+      );
+      return reply.code(result.run ? 201 : 200).send(result);
+    },
+  );
 
   app.get("/api/agents", async () => ({ agents: service.listAgents() }));
 

@@ -5,6 +5,7 @@ import {
   canonicalize,
   parseCanonicalJson,
   sha256Digest,
+  verifyFederatedWorkBundle,
   type FederatedWorkBundle,
   type ReceiptDigest,
 } from "@agent-airlock/portable-promotion-receipt";
@@ -17,6 +18,7 @@ import {
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAXIMUM_RECORD_BYTES = 262_144;
+const MAXIMUM_STAGED_BUNDLE_BYTES = 10 * 1_048_576;
 
 export type FederatedAdmissionPhase =
   | "planned"
@@ -106,6 +108,7 @@ export class FederatedAdmissionJournal {
       mkdir(this.planRoot(), { recursive: true, mode: 0o700 }),
       mkdir(this.recordRoot(), { recursive: true, mode: 0o700 }),
       mkdir(this.transferRoot(), { recursive: true, mode: 0o700 }),
+      mkdir(this.pendingBundleRoot(), { recursive: true, mode: 0o700 }),
     ]);
     await this.reconcileTransferPointers();
   }
@@ -291,6 +294,66 @@ export class FederatedAdmissionJournal {
     return records;
   }
 
+  async readRecordByAdmissionId(
+    admissionId: ReceiptDigest,
+  ): Promise<FederatedAdmissionRecord | null> {
+    validateDigest(admissionId, "admission identity");
+    const matches = (await this.listRecords()).filter(
+      (record) => record.admissionId === admissionId,
+    );
+    if (matches.length > 1) {
+      throw new Error("Federated admission identity is not unique");
+    }
+    return matches[0] ?? null;
+  }
+
+  async stagePendingBundle(
+    record: FederatedAdmissionRecord,
+    bundle: FederatedWorkBundle,
+  ): Promise<void> {
+    validateRecord(record);
+    if (
+      record.decision.decision !== "pending" ||
+      record.decision.reason !== "approval-required" ||
+      record.candidateRunId !== null
+    ) {
+      throw new Error("Only an approval-pending Admission may stage a bundle");
+    }
+    assertBundleMatchesPendingRecord(record, bundle);
+    const source = canonicalize(bundle) + "\n";
+    if (Buffer.byteLength(source, "utf8") > MAXIMUM_STAGED_BUNDLE_BYTES) {
+      throw new Error("Approval-pending Federated Work Bundle is too large");
+    }
+    await publishImmutableJson(
+      this.pendingBundlePath(record.importIdentifier),
+      bundle,
+    );
+  }
+
+  async readPendingBundle(
+    record: FederatedAdmissionRecord,
+  ): Promise<FederatedWorkBundle | null> {
+    validateRecord(record);
+    let source: string;
+    try {
+      source = await readFile(
+        this.pendingBundlePath(record.importIdentifier),
+        "utf8",
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    const parsed = parseCanonicalJson(source, MAXIMUM_STAGED_BUNDLE_BYTES);
+    const bundle = parsed as unknown as FederatedWorkBundle;
+    const verification = verifyFederatedWorkBundle(bundle);
+    if (!verification.valid) {
+      throw new Error("Staged Federated Work Bundle is invalid");
+    }
+    assertBundleMatchesPendingRecord(record, bundle);
+    return structuredClone(bundle);
+  }
+
   private async advance(
     importIdentifier: ReceiptDigest,
     phase: FederatedAdmissionPhase,
@@ -425,8 +488,12 @@ export class FederatedAdmissionJournal {
   private planRoot(): string { return path.join(this.root, "plans"); }
   private recordRoot(): string { return path.join(this.root, "records"); }
   private transferRoot(): string { return path.join(this.root, "transfers"); }
+  private pendingBundleRoot(): string { return path.join(this.root, "pending-bundles"); }
   private planPath(digest: ReceiptDigest): string { return path.join(this.planRoot(), `${digest.slice(7)}.json`); }
   private recordPath(digest: ReceiptDigest): string { return path.join(this.recordRoot(), `${digest.slice(7)}.json`); }
+  private pendingBundlePath(digest: ReceiptDigest): string {
+    return path.join(this.pendingBundleRoot(), `${digest.slice(7)}.json`);
+  }
   private transferPath(transferId: string): string {
     return path.join(this.transferRoot(), `${sha256Digest(`agent-airlock/transfer-id/v1\n${transferId}`).slice(7)}.json`);
   }
@@ -509,6 +576,9 @@ export class FederatedAdmissionCoordinator {
       const existingRecord = await this.journal.readRecord(plan.importIdentifier);
       if (plan.phase === "completed") {
         if (!existingRecord) throw new Error("Completed federated admission has no immutable record");
+        if (existingRecord.decision.decision === "pending") {
+          await this.journal.stagePendingBundle(existingRecord, input.bundle);
+        }
         result = existingRecord;
         return;
       }
@@ -520,6 +590,9 @@ export class FederatedAdmissionCoordinator {
       }
       if (!record) {
         throw new Error("Federated journal references a missing immutable record");
+      }
+      if (record.decision.decision === "pending") {
+        await this.journal.stagePendingBundle(record, input.bundle);
       }
       if (plan.decision.decision === "admit" && plan.phase === "record-published") {
         if (!plan.candidateRunId) throw new Error("Admitted plan has no Candidate Run identity");
@@ -658,6 +731,24 @@ function validateTransferPointer(value: unknown): asserts value is TransferPoint
   if (pointer.schemaVersion !== 1) throw new Error("Federated transfer pointer version is invalid");
   validateIdentifier(pointer.transferId, "transfer identity");
   validateDigest(pointer.importIdentifier, "import identity");
+}
+
+function assertBundleMatchesPendingRecord(
+  record: FederatedAdmissionRecord,
+  bundle: FederatedWorkBundle,
+): void {
+  const verification = verifyFederatedWorkBundle(bundle);
+  if (!verification.valid) {
+    throw new Error("Approval-pending Federated Work Bundle is invalid");
+  }
+  if (
+    bundle.receipt.receiptDigest !== record.decision.receiptDigest ||
+    bundle.artifact.artifactDigest !== record.decision.artifactDigest
+  ) {
+    throw new Error(
+      "Approval-pending bundle contradicts its immutable Admission Record",
+    );
+  }
 }
 
 function validateDecision(value: unknown): asserts value is FederatedAdmissionPolicyDecision {
