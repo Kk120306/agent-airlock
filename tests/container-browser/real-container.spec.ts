@@ -504,8 +504,17 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .getByRole("button", { name: "Run complete safety loop" })
     .click();
   await expect(
-    automatedGuide.getByText("Full recovery loop proven", { exact: true }),
+    automatedGuide.getByText("Full signed recovery proof verified", { exact: true }),
   ).toBeVisible({ timeout: 45_000 });
+  await expect(
+    automatedGuide.getByText("Signed recovery verified", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    automatedGuide.getByText(
+      "Two signed decisions, their parent link, and every Canonical State handoff verified locally without an upload.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await expect(
     automatedGuide.getByText("Safe future promoted", { exact: true }),
   ).toBeVisible();

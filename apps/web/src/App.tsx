@@ -274,12 +274,18 @@ function ProtocolScenarioGuide({
   onRun,
   onRepair,
   onRequestProof,
+  automaticProof,
 }: {
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => Promise<AgentRun | null>;
   onRepair: (runId: string) => Promise<AgentRun | null>;
   onRequestProof: (runId: string) => void;
+  automaticProof: {
+    runId: string;
+    status: "requested" | "verified" | "failed";
+    error?: string;
+  } | null;
 }) {
   const [automationStage, setAutomationStage] = useState<
     "promote" | "quarantine" | "repair" | "verify" | null
@@ -303,6 +309,23 @@ function ProtocolScenarioGuide({
   );
   const pairedComplete = promoted?.transaction && quarantined?.transaction;
   const complete = pairedComplete && repaired?.transaction;
+  const repairedProofStatus = repaired && automaticProof?.runId === repaired.id
+    ? automaticProof.status
+    : null;
+
+  useEffect(() => {
+    if (repairedProofStatus === "verified") {
+      setAutomationStage(null);
+      setAutomationError(null);
+    } else if (repairedProofStatus === "failed") {
+      setAutomationStage(null);
+      setAutomationError(
+        automaticProof?.error ??
+          "Recovery completed, but the signed decision chain did not verify.",
+      );
+    }
+  }, [automaticProof?.error, repairedProofStatus]);
+
   const runCompleteLoop = async () => {
     setAutomationError(null);
     setAutomationStage("promote");
@@ -340,7 +363,7 @@ function ProtocolScenarioGuide({
         onRequestProof(repairRun.id);
       }
     } finally {
-      setAutomationStage(null);
+      setAutomationStage((current) => current === "verify" ? current : null);
     }
   };
   const automationLabel = automationStage === "promote"
@@ -360,7 +383,9 @@ function ProtocolScenarioGuide({
           <span className="eyebrow">Full safety loop</span>
           <strong>Promote. Reject. Repair. Verify.</strong>
         </div>
-        {complete ? (
+        {repairedProofStatus === "verified" ? (
+          <span>Signed recovery verified</span>
+        ) : complete && repairedProofStatus !== "requested" ? (
           <span>Recovery proven</span>
         ) : (
           <button
@@ -433,9 +458,19 @@ function ProtocolScenarioGuide({
         <div className="protocol-paired-verdict" role="status">
           <span aria-hidden="true">✓</span>
           <div>
-            <strong>{complete ? "Full recovery loop proven" : "Airlock controlled both outcomes"}</strong>
+            <strong>
+              {repairedProofStatus === "verified"
+                ? "Full signed recovery proof verified"
+                : complete
+                  ? repairedProofStatus === "requested"
+                    ? "Verifying signed recovery chain"
+                    : "Full recovery loop proven"
+                  : "Airlock controlled both outcomes"}
+            </strong>
             <small>
-              {complete
+              {repairedProofStatus === "verified"
+                ? "Two signed decisions, their parent link, and every Canonical State handoff verified locally without an upload."
+                : complete
                 ? "The rejected parent and promoted repair child now form one decision lineage ready for signed, independent verification."
                 : "The valid Candidate advanced Canonical State. The invalid Candidate left its fingerprint unchanged."}
             </small>
@@ -1201,6 +1236,7 @@ function PortableTrustExport({
   autoGenerateProof = false,
   onError,
   onVerifyArtifact,
+  onAutomaticProofResult,
 }: {
   runId: string;
   evidenceRevision: string;
@@ -1208,6 +1244,7 @@ function PortableTrustExport({
   autoGenerateProof?: boolean;
   onError: (message: string) => void;
   onVerifyArtifact?: (artifact: PortableVerifierArtifact) => void;
+  onAutomaticProofResult?: (runId: string, valid: boolean, error?: string) => void;
 }) {
   const [result, setResult] = useState<PortableReceiptExport | null>(null);
   const [availableDisclosures, setAvailableDisclosures] = useState<
@@ -1247,9 +1284,18 @@ function PortableTrustExport({
       setResult(exported);
       setAvailableDisclosures(exported.availableDisclosures);
       setDirty(false);
+      onAutomaticProofResult?.(
+        runId,
+        exported.verification.valid,
+        exported.verification.valid
+          ? undefined
+          : "The generated decision chain failed local verification.",
+      );
     } catch (reason) {
       if (requestGeneration.current === generation) {
-        onError(reason instanceof Error ? reason.message : String(reason));
+        const message = reason instanceof Error ? reason.message : String(reason);
+        onError(message);
+        onAutomaticProofResult?.(runId, false, message);
       }
     } finally {
       if (requestGeneration.current === generation) setBusy(false);
@@ -1923,6 +1969,7 @@ function AirlockEvidence({
   autoGenerateProof,
   onPortableError,
   onVerifyArtifact,
+  onAutomaticProofResult,
 }: {
   run: AgentRun;
   actionBusy: boolean;
@@ -1933,6 +1980,7 @@ function AirlockEvidence({
   autoGenerateProof: boolean;
   onPortableError: (message: string) => void;
   onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
+  onAutomaticProofResult: (runId: string, valid: boolean, error?: string) => void;
 }) {
   const transaction = run.transaction;
   if (!transaction) return null;
@@ -2403,6 +2451,7 @@ function AirlockEvidence({
               autoGenerateProof={autoGenerateProof}
               onError={onPortableError}
               onVerifyArtifact={onVerifyArtifact}
+              onAutomaticProofResult={onAutomaticProofResult}
             />
           )}
         </>
@@ -2419,7 +2468,11 @@ export default function App() {
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
   const [verifierArtifact, setVerifierArtifact] =
     useState<PortableVerifierArtifact | null>(null);
-  const [automaticProofRunId, setAutomaticProofRunId] = useState<string | null>(null);
+  const [automaticProof, setAutomaticProof] = useState<{
+    runId: string;
+    status: "requested" | "verified" | "failed";
+    error?: string;
+  } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -3602,7 +3655,10 @@ export default function App() {
                     busy={demoActionBusy}
                     onRun={runPrompt}
                     onRepair={repairActiveRun}
-                    onRequestProof={setAutomaticProofRunId}
+                    onRequestProof={(runId) => {
+                      setAutomaticProof({ runId, status: "requested" });
+                    }}
+                    automaticProof={automaticProof}
                   />
                 ) : null}
                 {system?.modelArkDemoMode ? (
@@ -3694,11 +3750,25 @@ export default function App() {
                       system?.protocolFixtureMode === true ||
                       system?.modelArkDemoMode === true
                     }
-                    autoGenerateProof={activeRun.id === automaticProofRunId}
+                    autoGenerateProof={
+                      activeRun.id === automaticProof?.runId &&
+                      automaticProof.status === "requested"
+                    }
                     onPortableError={setError}
                     onVerifyArtifact={(artifact) => {
                       setVerifierArtifact(artifact);
                       setShowReceiptVerifier(true);
+                    }}
+                    onAutomaticProofResult={(runId, valid, proofError) => {
+                      setAutomaticProof((current) =>
+                        current?.runId === runId
+                          ? {
+                              runId,
+                              status: valid ? "verified" : "failed",
+                              error: proofError,
+                            }
+                          : current,
+                      );
                     }}
                   />
                 )}
