@@ -127,14 +127,21 @@ const server = createServer(async (request, response) => {
     latestInput?.type === "custom_tool_call_output";
   const toolCallId =
     typeof latestInput?.call_id === "string" ? latestInput.call_id : null;
-  const requestText = JSON.stringify(input);
+  let latestUserInput = null;
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    if (input[index]?.role === "user") {
+      latestUserInput = input[index];
+      break;
+    }
+  }
+  const currentUserText = JSON.stringify(latestUserInput ?? latestInput ?? "");
   const mode = hasToolResult
     ? toolCallId !== null
       ? toolCallModes.get(toolCallId) ?? "safe"
       : "safe"
-    : /Agent Airlock Repair Run for quarantined transaction/i.test(requestText)
+    : /Agent Airlock Repair Run for quarantined transaction/i.test(currentUserText)
       ? "repair"
-      : /unsafe protocol change|rejection proof/i.test(requestText)
+      : /unsafe protocol change|rejection proof/i.test(currentUserText)
         ? "unsafe"
         : "safe";
   if (hasToolResult && toolCallId !== null) toolCallModes.delete(toolCallId);

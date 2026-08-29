@@ -10,28 +10,41 @@ Rejected futures remain inspectable, cannot alter Canonical State, and can seed 
 
 ```bash
 npm install
-npm run demo -- --reset
+npm run prove:runtime -- --reset --headed
 ```
 
-Open <http://127.0.0.1:3199> and follow the four numbered `Judge path` controls.
-This is a production-build, deterministic local fixture with no ModelArk request or paid inference.
-
-When a container engine is available, also run the real Runtime proof:
+Phase 22 passed on this release candidate through `npm run prove:runtime -- --reset --headed`, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
+For a persistent stage-by-stage rehearsal, start the same product path manually:
 
 ```bash
 npm run demo:runtime -- --reset
 ```
 
-Open <http://127.0.0.1:3200>, select `Run passing Candidate`, and show the four-stage compact proof that real Codex used isolated Candidate State, passed every required Validation, promoted all four resources together, and released exactly one effect afterward.
-Alternatively, select `Run complete safety loop` to execute Promotion, rejection, and Repair in order with live stage status, then automatically generate and locally verify the repaired Run's signed two-decision chain.
-The guide must remain in its signed-lineage verification stage until the final `Full signed recovery proof verified` verdict appears.
-Select `Run failing Candidate` and show that the same real Runtime path now quarantines the invalid file while the canonical fingerprint remains unchanged.
-Select `Repair retained Candidate` and show that a fresh real Codex Run uses the retained failure evidence, links back to the rejected parent, passes all ten required Validations, and advances Canonical State only after validation.
-Show the full recovery verdict after Airlock automatically verifies two signed decisions and their intact Canonical State handoff.
-Reload once and require the same verdict to reappear only after the chain is regenerated and verified from durable Run authority.
-The guided result exposes one primary `Download verified decision chain` action, while advanced export variants remain outside judge mode.
-Select `Inspect in zero-upload verifier` and show `0 API calls`, `2 signed decisions linked`, and the intact parent and Canonical State handoff checks without manually importing the file.
-This path uses a local deterministic Responses fixture and visibly discloses that it is not live ModelArk inference.
+The canonical command uses deadline-aware presentation pacing under a hard 180-second recording budget.
+A successful headed proof preserves the full 15-second opening, 85-second desktop Outcome Brief, and 25-second desktop verifier dwells plus a 5-second browser-close reserve.
+Run completion is capped early enough to leave that full 115-second post-Run presentation tail and 15-second release headroom, and an insufficient remainder returns `recording-timeout` instead of shortening narration.
+The deadline remains armed through browser shutdown and the actual atomic latest-pointer commit, so a late proof cannot publish.
+It opens production Chrome, keeps the desktop recording at 1280 by 720 through browser close, and presents one primary action, `Prove this release is safe`.
+Do not select it during the canonical headed recording.
+The runner invokes it exactly once at 0:15 and requires exactly three fresh Runs after proof start: one valid Promotion, one destructive Quarantine, and one promoted Repair from the retained Quarantine.
+Use `npm run demo:runtime -- --reset` when rehearsing the human-click path.
+Do not accept evidence from a prior run, browser-local fixture state, prompt text, or Runtime narration.
+The Outcome Brief must derive its claims from persisted Run evidence and show the three Run identifiers, four-resource dispositions, Canonical fingerprint transitions, failed and passed Validations, post-Promotion effects, and Repair lineage.
+The final success verdict must remain unavailable until the quarantined parent and promoted Repair form a locally verified signed two-decision chain.
+Select `Inspect in zero-upload verifier` and show `0 API calls`, `2 signed decisions linked`, both signatures, the exact parent link, and the intact Canonical State handoff.
+While the desktop browser remains at 1280 by 720, the runner must start a separate headless 390 by 844 read-only replay from the exact three persisted Run identifiers.
+That replay must create no Run and independently regenerate the same signed chain and zero-upload verifier evidence.
+The runner must produce only a content-addressed immutable result capsule plus its exact content-addressed signed chain, with mutable latest state retained only as a convenience pointer.
+This path uses real Codex in a disposable Runtime container with a local deterministic Responses fixture, so it never depends on live provider capacity or claims live ModelArk conformance.
+
+Use the deterministic fallback only when a container engine is unavailable:
+
+```bash
+npm run demo -- --reset
+```
+
+Open <http://127.0.0.1:3199> and follow the four numbered controls.
+This remains a production-build regression and fallback fixture rather than the canonical recording.
 
 When ModelArk free capacity is available, run the credentialed conformance proof:
 
@@ -53,32 +66,39 @@ If live interaction must remain manual, use `npm run demo:modelark -- --reset` a
 
 | Category | Weight | Live evidence | Automated evidence |
 | --- | ---: | --- | --- |
-| End-to-end middleware behavior | 40% | The starter Playground invokes a Run that mutates four Candidate resources, promotes a valid future, quarantines a destructive future, repairs it, and resumes the repaired Agent session. | `npm run test:demo:e2e` asserts the four-step browser story, `npm run test:container-browser` proves real Chrome-to-Codex container Promotion, Quarantine, Repair, and signed decision-chain export, and `npm run test:container-transaction` adds restart and continuity evidence. |
+| End-to-end middleware behavior | 40% | One action invokes real Codex for exactly three fresh Runs that promote a valid future, quarantine a destructive future, and repair the retained failure across four Candidate resources. | The Phase 22 recording gate must prove the exact fresh-Run sequence through production Chrome, while `npm run test:container-browser` and `npm run test:container-transaction` retain the underlying Runtime, restart, and continuity evidence. |
 | Technical design and integration | 25% | The one-page architecture identifies the untrusted Runtime, trusted Airlock decision boundary, versioned Outcome Contract, monotonic journal, atomic canonical manifest, bounded Repair lineage, and post-Promotion dispatcher. | Server tests exercise the `AgentRunner`, `WorkspaceManager`, journal, validator, outbox, JSON store, HTTP API, and startup reconciliation seams. |
-| Verification and robustness | 20% | The destructive attempt visibly leaves Canonical State unchanged, Repair reuses failure evidence, and one evidence packet verifies the receipt plus every selected optional proof locally. | `npm run check:phase7` covers transactional failure seams, while `npm run check:phase11:protocol` and `npm run test:phase11:ui` cover cross-process and zero-upload browser verification, tampering, trust roots, and optional-proof binding. |
-| Demo and reproducibility | 15% | One command seeds the Agent, prints the URL and disclosure, preserves restart state, and gives the judge a four-step guided story. | Launcher integration verifies reset, restart, shutdown, port conflicts, and seeding; the release audit checks tracked and untracked release files for high-confidence secrets, merge conflicts, and broken relative Markdown targets. |
+| Verification and robustness | 20% | The Outcome Brief proves harmless rejection, bounded Repair, effect ordering, and a signed two-decision chain before opening the same artifact in a zero-upload verifier. | Existing transactional and Portable Trust gates remain required, and Phase 22 must add safe-capsule, chain, viewport, fresh-Run, failure-class, and cleanup coverage. |
+| Demo and reproducibility | 15% | One command opens the 1280 by 720 recording, one action runs the complete story, and a separate read-only replay proves the result at 390 by 844. | The Phase 22 runner must enforce the hard 180-second budget and fail closed on startup, browser, Run, replay, evidence, viewport, timeout, and interruption faults without overwriting the last successful immutable artifact pair. |
 
 ## Acceptance checklist
 
-- [ ] The Web UI visibly says `FREE LOCAL DEMO` and `No ModelArk request or paid inference is active.`
-- [ ] `Airlock Demo` is already selected and its lifecycle state is controllable.
-- [ ] Step 1 ends in `Promoted`, `Journal completed`, four promoted resources, and one delivered effect.
-- [ ] Step 2 ends in `Quarantined`, identifies the decisive protected-path failure, and shows identical before and after Canonical fingerprints.
-- [ ] The rejected SQLite value and unsafe notification do not reach accepted state.
-- [ ] Step 3 ends in a promoted child with `Repair 1 of 2`, parent lineage, a fresh accepted effect, and four promoted resources.
-- [ ] Step 4 resumes `baseline-thread` from repaired Canonical State.
-- [ ] The repaired Run downloads one complete decision chain and the independent browser verifier reports `2 signed decisions linked` with zero API calls or uploads.
-- [ ] Reload preserves the seeded Agent and complete evidence.
-- [ ] The [three-minute narration](three-minute-demo.md) and [one-page architecture](architecture-one-page.md) use the same state names and guarantees as the product.
-- [ ] `npm run check:phase7` passes from a clean clone.
-- [ ] `npm run check:phase11:protocol` and `npm run test:phase11:ui` pass without ModelArk credentials, a wallet, RPC, or funds.
-- [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
-- [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
-- [ ] `npm run demo:runtime -- --reset` shows `REAL RUNTIME PROOF`, uses real Codex in a disposable container, and presents an evidence-backed Candidate, Validation, Promotion, and independent-verification path.
-- [ ] The launcher reports `7/7` credential-safe readiness checks, and `npm run demo:readiness` reproduces the same local evidence digest without returning provider values.
-- [ ] `Run complete safety loop` executes the three real-Runtime stages in order, stops immediately if an expected disposition is not produced, and automatically verifies the signed Repair lineage.
-- [ ] The guide reports `Full signed recovery proof verified` only after both signatures, the parent link, and every Canonical State handoff pass local verification.
-- [ ] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.
+- [x] On the exact submission revision, `npm run prove:runtime -- --reset --headed` finishes under the hard 180-second recording budget, keeps production Chrome at 1280 by 720, and exposes one primary `Prove this release is safe` action.
+- [x] The UI visibly says `REAL RUNTIME PROOF`, identifies the local deterministic Responses fixture, and makes no ModelArk or paid-inference claim.
+- [x] One action creates exactly three fresh Runs after proof start and never reuses old evidence.
+- [x] Run 1 ends in `Promoted`, `Journal completed`, four promoted resources, and one delivered effect after Promotion.
+- [x] Run 2 ends in `Quarantined`, identifies the decisive required Validation failure, and shows identical before and after Canonical fingerprints.
+- [x] The rejected SQLite value and unsafe notification do not reach accepted state.
+- [x] Run 3 ends in a promoted child with bounded parent lineage, a fresh accepted effect, and four promoted resources.
+- [x] The evidence-derived Outcome Brief names all three fresh Run identifiers and does not rely on Runtime narration or staged frontend state.
+- [x] The final verdict appears only after the signed two-decision chain verifies both signatures, parent linkage, and Canonical State handoff.
+- [x] `Inspect in zero-upload verifier` reports `2 signed decisions linked` while a deny-all HTTP and WebSocket boundary proves zero API calls or uploads from before the first verifier opening through browser close.
+- [x] The successful runner installs an owner-only content-addressed immutable result capsule and signed chain, then atomically commits mutable `real-runtime-proof.latest.json` only as a convenience pointer while proof ownership remains held.
+- [x] The hosted release resolver validates the latest pointer and uploads only the exact immutable capsule and chain it identifies.
+- [x] Every failure class returns nonzero, closes owned processes, persists no false success, and preserves the last successful artifact pair.
+- [x] Existing proof leases and legacy publication locks fail closed without stale-path deletion, while a post-rename ownership cleanup warning cannot revoke the committed valid pair.
+- [x] Reset cleanup removes only descriptor-anchored, marker-matching sessions whose recorded owner is no longer alive.
+- [x] While the desktop browser remains at 1280 by 720, a separate headless 390 by 844 read-only replay creates no Run and independently regenerates the same signed chain and zero-upload verifier evidence without horizontal overflow or hidden actions.
+- [x] The [three-minute narration](three-minute-demo.md) and [one-page architecture](architecture-one-page.md) use the same state names and guarantees as the product.
+- [x] `npm run check:phase7` passes from a clean clone.
+- [x] `npm run check:phase11:protocol` and `npm run test:phase11:ui` pass without ModelArk credentials, a wallet, RPC, or funds.
+- [x] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
+- [x] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
+- [x] `npm run demo:runtime -- --reset` remains available as the persistent manual inspection and rehearsal path.
+- [x] The launcher reports `7/7` credential-safe readiness checks, and `npm run demo:readiness` reproduces the same local evidence digest without returning provider values.
+- [x] `Run complete safety loop` executes the three real-Runtime stages in order, stops immediately if an expected disposition is not produced, and automatically verifies the signed Repair lineage.
+- [x] The guide reports `Full signed recovery proof verified` only after both signatures, the parent link, and every Canonical State handoff pass local verification.
+- [x] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.
 - [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
 - [ ] The live UI shows `LIVE MODELARK PROOF`, fresh generated-output preflight evidence, one seeded Agent, and one `Run live Candidate` action.
 - [ ] A complete live Promotion automatically records one private signed evidence packet with the safe ModelArk execution-profile disclosure, and `npm run verify:modelark-evidence` validates it offline.
@@ -86,6 +106,9 @@ If live interaction must remain manual, use `npm run demo:modelark -- --reset` a
 - [ ] Provider HTTP 429 returns the safe `provider-unavailable` class without a live-proof UI, paid fallback, credential disclosure, or overwritten successful capsule.
 - [ ] Recorded evidence is labelled historical and is never presented as a substitute for a current live preflight.
 - [ ] The live Candidate creates the exact artifact, updates SQLite, submits one typed intent, passes the required state Validation, promotes all four resources, delivers exactly one effect after Promotion, and exports a locally verified signed decision.
+
+The Phase 22 checklist passed from fresh canonical headed, headless, and JSON evidence on this release candidate.
+The other unchecked items are optional live ModelArk conformance steps that require provider capacity at judging time.
 
 ## Falsifiable claims
 
@@ -107,6 +130,8 @@ Each claim is asserted through server or production-browser tests and is visible
 - Ordinary containers are not hardened multi-tenant isolation.
 - The deterministic fixture and real-Codex local protocol transaction are reproducible judging proofs, while live ModelArk conformance must be rerun because provider capacity changes over time.
 - Live credentials and raw provider output are never stored as release evidence.
+- The core recording adds no new authority and does not require federation, receiver custody, blockchain publication, Competing Futures, or Adaptive Assurance.
+- The signed chain proves mathematical integrity and lineage, not organizational trust, Runtime correctness, or policy sufficiency by itself.
 
 ## Submission artifacts
 

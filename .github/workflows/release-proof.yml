@@ -96,7 +96,7 @@ jobs:
     name: Real CodeJam Runtime proof
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out the exact revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,6 +117,24 @@ jobs:
 
       - name: Build and prove browser to real Runtime to Promotion
         run: npm run check:phase13:runtime
+
+      - name: Record a fresh self-verifying Runtime safety proof
+        run: npm run prove:runtime -- --reset --json
+
+      - name: Resolve the exact verified artifact pair
+        id: runtime-proof-artifacts
+        run: node scripts/resolve-runtime-proof-artifacts.mjs --github-output "$GITHUB_OUTPUT"
+
+      - name: Preserve verified Runtime proof artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: real-runtime-verified-artifacts
+          path: |
+            ${{ steps.runtime-proof-artifacts.outputs.result_path }}
+            ${{ steps.runtime-proof-artifacts.outputs.chain_path }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Preserve Runtime failure evidence
         if: failure()

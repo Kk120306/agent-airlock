@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 test("the browser proves real Codex Promotion, Quarantine, and Repair against one Canonical State", async ({
+  browser,
   page,
   request,
 }) => {
@@ -132,6 +133,15 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(judgeProof.getByText("1 typed effect delivered only after Canonical State advanced."))
     .toBeVisible();
+  const judgeProofItems = judgeProof.locator("li");
+  await expect(judgeProofItems).toHaveCount(4);
+  expect(
+    new Set(
+      await judgeProofItems.evaluateAll((items) =>
+        items.map((item) => Math.round(item.getBoundingClientRect().top)),
+      ),
+    ).size,
+  ).toBe(1);
 
   await evidence.getByText("Inspect complete transaction evidence", { exact: true })
     .click();
@@ -325,8 +335,12 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .getByRole("button", { name: "Inspect in zero-upload verifier" })
     .click();
   const verifier = page.getByRole("dialog", { name: "Verify trust without trusting this server" });
-  await expect(verifier.getByText("0 API calls · 0 uploads · 16 MB custody / 4 MB other proofs"))
-    .toBeVisible();
+  await expect(
+    verifier.getByText(
+      "0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await expect(
     verifier.getByText("Verified directly from the exact generated artifact", {
       exact: true,
@@ -392,6 +406,35 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBe("normal");
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
+
+  let historicalReceiptRequests = 0;
+  const trackHistoricalReceiptRequests = (browserRequest: {
+    method: () => string;
+    url: () => string;
+  }) => {
+    if (
+      browserRequest.method() === "POST" &&
+      new URL(browserRequest.url()).pathname.endsWith("/portable-receipt")
+    ) {
+      historicalReceiptRequests += 1;
+    }
+  };
+  page.on("request", trackHistoricalReceiptRequests);
+  await page.goto("/?recording=1");
+  const historicalRecordingGuide = page.getByRole("region", {
+    name: "Full safety loop",
+  });
+  await expect(
+    page.getByRole("region", { name: "Verified Outcome Brief" }),
+  ).toHaveCount(0);
+  await expect(
+    historicalRecordingGuide.getByRole("button", {
+      name: "Prove this release is safe",
+    }),
+  ).toBeEnabled();
+  await page.waitForTimeout(750);
+  expect(historicalReceiptRequests).toBe(0);
+  page.off("request", trackHistoricalReceiptRequests);
 
   const runsResponse = await request.get(`/api/agents/${agentId}/runs`);
   const runs = (await runsResponse.json()) as {
@@ -610,55 +653,138 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   );
   expect(automatedContractResponse.ok()).toBe(true);
 
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.reload();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/?recording=1");
+  await expect(page).toHaveTitle("Agent Airlock");
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    "Agent Airlock validates isolated Agent futures before they can become Canonical State.",
+  );
+  await expect(page.getByRole("button", { name: "Create Agent" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Settings" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Federation" })).not.toBeVisible();
+  const recordingContext = page.getByLabel("Recording Agent context");
   await expect(
-    page.getByRole("heading", { name: "Automated Loop Proof", exact: true }),
+    recordingContext.getByText("Automated Loop Proof", { exact: true }),
   ).toBeVisible();
+  await expect(recordingContext.locator(".status")).toBeVisible();
+  await expect(recordingContext.getByText(/Outcome Contract v\d+/)).toBeVisible();
   const automatedGuide = page.getByRole("region", { name: "Full safety loop" });
-  await automatedGuide
-    .getByRole("button", { name: "Run complete safety loop" })
-    .click();
-  await expect(
-    automatedGuide.getByText("Full signed recovery proof verified", { exact: true }),
-  ).toBeVisible({ timeout: 45_000 });
-  await expect(
-    automatedGuide.getByText("Signed recovery verified", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    automatedGuide.getByText(
-      "Two signed decisions, their parent link, and every Canonical State handoff verified locally without an upload.",
-      { exact: true },
-    ),
-  ).toBeVisible();
-  await expect(
-    automatedGuide.getByText("Safe future promoted", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    automatedGuide.getByText("Unsafe future quarantined", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    automatedGuide.getByText("Rejected future safely repaired", { exact: true }),
-  ).toBeVisible();
-
-  const automatedEvidence = page.getByRole("article", {
-    name: "Agent Airlock evidence",
+  const proveReleaseButton = automatedGuide.getByRole("button", {
+    name: "Prove this release is safe",
   });
   await expect(
-    automatedEvidence.getByText("Signed proof verified locally", { exact: true }),
-  ).toBeVisible({ timeout: 15_000 });
+    page.getByRole("region", { name: "Verified Outcome Brief" }),
+  ).toHaveCount(0);
+  expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
+
+  const mobileContext = await browser.newContext({
+    serviceWorkers: "block",
+    viewport: { width: 390, height: 844 },
+  });
+  const mobilePage = await mobileContext.newPage();
+  await mobilePage.goto(page.url());
+  const mobileProveButton = mobilePage
+    .getByRole("region", { name: "Full safety loop" })
+    .getByRole("button", { name: "Prove this release is safe" });
+  await mobileProveButton.scrollIntoViewIfNeeded();
+  const mobileProveButtonBox = await mobileProveButton.boundingBox();
+  expect(mobileProveButtonBox).not.toBeNull();
+  expect(mobileProveButtonBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mobileProveButtonBox!.x + mobileProveButtonBox!.width)
+    .toBeLessThanOrEqual(390);
+  expect(mobileProveButtonBox!.height).toBeGreaterThanOrEqual(38);
+  expect(
+    await mobilePage.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+
+  const primaryReceiptResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.endsWith("/portable-receipt") &&
+      response.ok(),
+  );
+  await proveReleaseButton.click();
+
+  const outcomeBrief = page.getByRole("region", {
+    name: "Verified Outcome Brief",
+  });
   await expect(
-    automatedEvidence.getByText(
-      "2 signed decisions verified locally with every Canonical State handoff intact.",
+    outcomeBrief.getByRole("heading", {
+      name: "One release. Three futures. Only validated reality moves.",
+    }),
+  ).toBeVisible({ timeout: 45_000 });
+  await expect(
+    outcomeBrief.getByText("Release proven safe", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    outcomeBrief.getByText("Disclosed execution boundary", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    outcomeBrief.getByText(
+      `${system.runtime} · local deterministic Responses fixture · no ModelArk request or paid inference`,
       { exact: true },
     ),
   ).toBeVisible();
+  const visibleRunLabels = await outcomeBrief
+    .locator(".recording-outcome-grid article > header > span")
+    .allTextContents();
+  expect(visibleRunLabels.filter((label) => /RUN [a-f0-9]{8}$/i.test(label)))
+    .toHaveLength(3);
+  const promotedOutcome = outcomeBrief.locator('article[data-outcome="promoted"]');
+  await expect(promotedOutcome.getByText("9/9", { exact: true })).toBeVisible();
+  await expect(promotedOutcome.getByText("4/4 + 1", { exact: true })).toBeVisible();
+  await expect(promotedOutcome.getByText("resources promoted + post-Promotion effect", { exact: true }))
+    .toBeVisible();
+  await expect(promotedOutcome.getByText("Canonical fingerprint advanced", {
+    exact: true,
+  })).toBeVisible();
+  const quarantinedOutcome = outcomeBrief.locator(
+    'article[data-outcome="quarantined"]',
+  );
   await expect(
-    automatedEvidence.getByRole("button", {
-      name: "Download verified decision chain",
-    }),
-  ).toBeEnabled();
-  await automatedEvidence
+    quarantinedOutcome.getByText("1 failed · 4/4 quarantined", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    quarantinedOutcome.getByText(
+      "required Validation blocked every resource",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(quarantinedOutcome.getByText("identical Canonical fingerprint", {
+    exact: true,
+  })).toBeVisible();
+  await expect(quarantinedOutcome.getByText("0", { exact: true })).toBeVisible();
+  await expect(quarantinedOutcome.getByText("effects delivered", { exact: true }))
+    .toBeVisible();
+  const repairedOutcome = outcomeBrief.locator('article[data-outcome="repaired"]');
+  await expect(repairedOutcome.getByText("10/10 passed · Depth 1", { exact: true }))
+    .toBeVisible();
+  await expect(repairedOutcome.getByText("4/4 + 1", { exact: true })).toBeVisible();
+  await expect(repairedOutcome.getByText("Canonical fingerprint advanced", {
+    exact: true,
+  })).toBeVisible();
+  const verifiedOutcome = outcomeBrief.locator('article[data-outcome="verified"]');
+  await expect(verifiedOutcome.getByText("signed decisions linked", { exact: true }))
+    .toBeVisible();
+  await expect(verifiedOutcome.getByText("browser cryptographic check passed", {
+    exact: true,
+  })).toBeVisible();
+  const outcomeBox = await outcomeBrief.boundingBox();
+  expect(outcomeBox).not.toBeNull();
+  expect(outcomeBox!.y + outcomeBox!.height).toBeLessThanOrEqual(720);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight))
+    .toBeLessThanOrEqual(720);
+  expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
+
+  const primaryReceiptPayload = (await (
+    await primaryReceiptResponsePromise
+  ).json()) as { decisionChain: unknown };
+  const primaryChainSource = JSON.stringify(
+    primaryReceiptPayload.decisionChain,
+  );
+
+  await outcomeBrief
     .getByRole("button", { name: "Inspect in zero-upload verifier" })
     .click();
   const automatedVerifier = page.getByRole("dialog", {
@@ -679,6 +805,185 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await automatedVerifier
     .getByRole("button", { name: "Close receipt verifier" })
     .click();
+
+  const threeRunResponse = await request.get(
+    `/api/agents/${automatedAgent.agent.id}/runs`,
+  );
+  const threeRunPayload = (await threeRunResponse.json()) as {
+    runs: Array<{
+      id: string;
+      candidateSetId: string | null;
+      transaction: {
+        disposition: string;
+        lineage: { depth: number };
+      };
+    }>;
+  };
+  const ordinaryRuns = threeRunPayload.runs.filter(
+    (run) => run.candidateSetId === null,
+  );
+  expect(ordinaryRuns).toHaveLength(3);
+  const safeReplayRun = ordinaryRuns.find(
+    (run) =>
+      run.transaction.disposition === "promoted" &&
+      run.transaction.lineage.depth === 0,
+  );
+  const unsafeReplayRun = ordinaryRuns.find(
+    (run) => run.transaction.disposition === "quarantined",
+  );
+  const repairedReplayRun = ordinaryRuns.find(
+    (run) =>
+      run.transaction.disposition === "promoted" &&
+      run.transaction.lineage.depth === 1,
+  );
+  expect(safeReplayRun).toBeDefined();
+  expect(unsafeReplayRun).toBeDefined();
+  expect(repairedReplayRun).toBeDefined();
+
+  let mobileReceiptRequests = 0;
+  mobilePage.on("request", (browserRequest) => {
+    if (
+      browserRequest.method() === "POST" &&
+      new URL(browserRequest.url()).pathname.endsWith("/portable-receipt")
+    ) {
+      mobileReceiptRequests += 1;
+    }
+  });
+  const mobileReceiptResponsePromise = mobilePage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.endsWith("/portable-receipt") &&
+      response.ok(),
+  );
+  const replayUrl = new URL(page.url());
+  replayUrl.search = "";
+  replayUrl.searchParams.set("recording", "1");
+  replayUrl.searchParams.set("recordingSafeRunId", safeReplayRun!.id);
+  replayUrl.searchParams.set("recordingUnsafeRunId", unsafeReplayRun!.id);
+  replayUrl.searchParams.set("recordingRepairRunId", repairedReplayRun!.id);
+  await mobilePage.goto(replayUrl.toString());
+  const mobileOutcomeBrief = mobilePage.getByRole("region", {
+    name: "Verified Outcome Brief",
+  });
+  await expect(mobileOutcomeBrief).toBeVisible({ timeout: 30_000 });
+  const mobileReceiptPayload = (await (
+    await mobileReceiptResponsePromise
+  ).json()) as { decisionChain: unknown };
+  expect(mobileReceiptRequests).toBe(1);
+  expect(JSON.stringify(mobileReceiptPayload.decisionChain)).toBe(
+    primaryChainSource,
+  );
+  expect(
+    await mobilePage.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  const mobileOutcomeCardsFit = await mobileOutcomeBrief
+    .locator(".recording-outcome-grid article")
+    .evaluateAll((cards) =>
+      cards.every((card) => {
+        const rect = card.getBoundingClientRect();
+        return rect.left >= 0 && rect.right <= window.innerWidth && rect.width > 0;
+      }),
+    );
+  expect(mobileOutcomeCardsFit).toBe(true);
+
+  const mobileVerifierButton = mobileOutcomeBrief.getByRole("button", {
+    name: "Inspect in zero-upload verifier",
+  });
+  await mobileVerifierButton.scrollIntoViewIfNeeded();
+  const mobileVerifierButtonBox = await mobileVerifierButton.boundingBox();
+  expect(mobileVerifierButtonBox).not.toBeNull();
+  expect(mobileVerifierButtonBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mobileVerifierButtonBox!.x + mobileVerifierButtonBox!.width)
+    .toBeLessThanOrEqual(390);
+  expect(mobileVerifierButtonBox!.height).toBeGreaterThanOrEqual(44);
+  await mobileVerifierButton.click();
+  const mobileVerifier = mobilePage.getByRole("dialog", {
+    name: "Verify trust without trusting this server",
+  });
+  await expect(
+    mobileVerifier.getByText("Cryptographic proof valid", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    mobileVerifier.getByText("2 signed decisions linked", { exact: true }),
+  ).toBeVisible();
+  await expect(mobileVerifier.getByText(/0 API calls/)).toBeVisible();
+  const mobileVerifierBox = await mobileVerifier.boundingBox();
+  expect(mobileVerifierBox).not.toBeNull();
+  expect(mobileVerifierBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mobileVerifierBox!.x + mobileVerifierBox!.width).toBeLessThanOrEqual(390);
+  expect(
+    await mobilePage.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await mobileVerifier
+    .getByRole("button", { name: "Close receipt verifier" })
+    .click();
+
+  expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
+  await expect(outcomeBrief).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(1280);
+
+  const malformedReplayUrl = new URL(replayUrl);
+  malformedReplayUrl.searchParams.delete("recordingRepairRunId");
+  await mobilePage.goto(malformedReplayUrl.toString());
+  await expect(
+    mobilePage.getByRole("region", { name: "Verified Outcome Brief" }),
+  ).toHaveCount(0);
+  await expect(
+    mobilePage.getByRole("button", { name: "Loading read-only proof" }),
+  ).toBeDisabled();
+  await mobilePage.waitForTimeout(250);
+  expect(mobileReceiptRequests).toBe(1);
+  const replayRunResponse = await request.get(
+    `/api/agents/${automatedAgent.agent.id}/runs`,
+  );
+  const replayRunPayload = (await replayRunResponse.json()) as {
+    runs: unknown[];
+  };
+  expect(replayRunPayload.runs).toHaveLength(3);
+  await mobileContext.close();
+
+  let replayedReceiptRequests = 0;
+  const trackReplayedReceiptRequests = (browserRequest: {
+    method: () => string;
+    url: () => string;
+  }) => {
+    if (
+      browserRequest.method() === "POST" &&
+      new URL(browserRequest.url()).pathname.endsWith("/portable-receipt")
+    ) {
+      replayedReceiptRequests += 1;
+    }
+  };
+  page.on("request", trackReplayedReceiptRequests);
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Verified Outcome Brief" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Prove this release is safe" }),
+  ).toBeEnabled();
+  await page.waitForTimeout(750);
+  expect(replayedReceiptRequests).toBe(0);
+  page.off("request", trackReplayedReceiptRequests);
+
+  await page.route("**/api/system", async (route) => {
+    const response = await route.fetch();
+    const reportedSystem = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...reportedSystem,
+        protocolFixtureMode: false,
+        inferenceMode: "modelark",
+      },
+    });
+  });
+  await page.reload();
+  await expect(page.locator(".recording-mode")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create Agent" })).toBeVisible();
+  await page.unroute("**/api/system");
 
   const automatedRunsResponse = await request.get(
     `/api/agents/${automatedAgent.agent.id}/runs`,
@@ -702,4 +1007,67 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     ["quarantined", 0],
     ["promoted", 0],
   ]);
+
+  const offlineVerifierContext = await browser.newContext({
+    serviceWorkers: "block",
+    viewport: { width: 1280, height: 720 },
+  });
+  const offlineVerifierPage = await offlineVerifierContext.newPage();
+  const offlineReceiptResponsePromise = offlineVerifierPage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.endsWith("/portable-receipt") &&
+      response.ok(),
+  );
+  await offlineVerifierPage.goto(replayUrl.toString());
+  await offlineReceiptResponsePromise;
+  const offlineOutcomeBrief = offlineVerifierPage.getByRole("region", {
+    name: "Verified Outcome Brief",
+  });
+  await expect(offlineOutcomeBrief).toBeVisible({ timeout: 30_000 });
+  const offlineVerifierButton = offlineOutcomeBrief.getByRole("button", {
+    name: "Inspect in zero-upload verifier",
+  });
+  await expect(offlineVerifierButton).toBeEnabled();
+  await offlineVerifierPage.waitForLoadState("networkidle");
+
+  const deniedPostArmHttpRequests: Array<{ method: string; url: string }> = [];
+  const deniedPostArmWebSockets: string[] = [];
+  await offlineVerifierContext.route(/^https?:\/\//, async (route) => {
+    deniedPostArmHttpRequests.push({
+      method: route.request().method(),
+      url: route.request().url(),
+    });
+    await route.abort("internetdisconnected");
+  });
+  await offlineVerifierContext.routeWebSocket(/^wss?:\/\//, async (webSocket) => {
+    deniedPostArmWebSockets.push(webSocket.url());
+    await webSocket.close({
+      code: 1008,
+      reason: "Offline verifier network boundary",
+    });
+  });
+  await offlineVerifierButton.click();
+
+  const guardedOfflineVerifier = offlineVerifierPage.getByRole("dialog", {
+    name: "Verify trust without trusting this server",
+  });
+  await expect(
+    guardedOfflineVerifier.getByText("Cryptographic proof valid", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    guardedOfflineVerifier.getByText("2 signed decisions linked", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(guardedOfflineVerifier.getByText(/0 API calls/)).toBeVisible();
+  await guardedOfflineVerifier
+    .getByRole("button", { name: "Close receipt verifier" })
+    .click();
+  await offlineVerifierContext.close();
+
+  expect(deniedPostArmHttpRequests).toEqual([]);
+  expect(deniedPostArmWebSockets).toEqual([]);
 });

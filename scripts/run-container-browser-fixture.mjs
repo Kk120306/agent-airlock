@@ -1,5 +1,5 @@
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import {
   assertJudgeReadiness,
   inspectJudgeReadiness,
 } from "./judge-readiness.mjs";
+import { stopRuntimeProofChild } from "./runtime-proof-terminal.mjs";
 
 const execFile = promisify(execFileCallback);
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -28,6 +29,35 @@ if ((resetRequested || ephemeralRequested) && !demoRequested) {
 }
 if (resetRequested && ephemeralRequested) {
   throw new Error("--reset and --ephemeral are mutually exclusive");
+}
+const configuredProofRoot =
+  process.env.AIRLOCK_RUNTIME_PROOF_ROOT?.trim() || null;
+const configuredProofSessionRoot =
+  process.env.AIRLOCK_RUNTIME_PROOF_SESSION_ROOT?.trim() || null;
+const configuredProofSessionNonce =
+  process.env.AIRLOCK_RUNTIME_PROOF_SESSION_NONCE?.trim() || null;
+const configuredProofOwnerPid = Number(
+  process.env.AIRLOCK_RUNTIME_PROOF_OWNER_PID ?? "",
+);
+if (
+  [
+    configuredProofRoot,
+    configuredProofSessionRoot,
+    configuredProofSessionNonce,
+    process.env.AIRLOCK_RUNTIME_PROOF_OWNER_PID,
+  ].some(Boolean) &&
+  (!demoRequested ||
+    !ephemeralRequested ||
+    !configuredProofRoot ||
+    !configuredProofSessionRoot ||
+    !configuredProofSessionNonce ||
+    !/^[a-f0-9-]{36}$/.test(configuredProofSessionNonce) ||
+    !Number.isInteger(configuredProofOwnerPid) ||
+    configuredProofOwnerPid < 1)
+) {
+  throw new Error(
+    "A managed Runtime proof root, session root, and nonce require --demo --ephemeral together",
+  );
 }
 const port = Number(
   demoRequested
@@ -55,14 +85,111 @@ for (const [name, value] of [
 if (port === fixturePort) {
   throw new Error("The control-plane and Responses fixture ports must be distinct");
 }
-const stateRoot = path.resolve(
-  repoRoot,
-  demoRequested
-    ? ephemeralRequested
-      ? ".e2e-container-demo"
-      : ".local/airlock-container-demo"
-    : process.env.AIRLOCK_CONTAINER_BROWSER_DATA_ROOT ?? ".e2e-container-browser",
-);
+const stateRoot = configuredProofSessionRoot
+  ? path.resolve(configuredProofSessionRoot)
+  : path.resolve(
+      repoRoot,
+      demoRequested
+        ? ephemeralRequested
+          ? ".e2e-container-demo"
+          : ".local/airlock-container-demo"
+        : process.env.AIRLOCK_CONTAINER_BROWSER_DATA_ROOT ??
+            ".e2e-container-browser",
+    );
+
+function isStrictDescendant(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(".." + path.sep) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+async function assertManagedProofSession() {
+  if (
+    !configuredProofRoot ||
+    !configuredProofSessionRoot ||
+    !configuredProofSessionNonce
+  ) {
+    return;
+  }
+  const proofRoot = path.resolve(configuredProofRoot);
+  const localRoot = path.join(repoRoot, ".local");
+  const sessionsRoot = path.join(proofRoot, "sessions");
+  if (
+    proofRoot === localRoot ||
+    !isStrictDescendant(localRoot, proofRoot) ||
+    !isStrictDescendant(sessionsRoot, stateRoot)
+  ) {
+    throw new Error("The managed Runtime proof session path is outside its owner root");
+  }
+  const [proofStatus, sessionsStatus, rootStatus] = await Promise.all([
+    lstat(proofRoot),
+    lstat(sessionsRoot),
+    lstat(stateRoot),
+  ]);
+  if (
+    !proofStatus.isDirectory() ||
+    proofStatus.isSymbolicLink() ||
+    !sessionsStatus.isDirectory() ||
+    sessionsStatus.isSymbolicLink() ||
+    !rootStatus.isDirectory() ||
+    rootStatus.isSymbolicLink()
+  ) {
+    throw new Error("The managed Runtime proof session root is unsafe");
+  }
+  const [realRepoRoot, realProofRoot, realSessionsRoot, realStateRoot] =
+    await Promise.all([
+      realpath(repoRoot),
+      realpath(proofRoot),
+      realpath(sessionsRoot),
+      realpath(stateRoot),
+    ]);
+  const realLocalRoot = path.join(realRepoRoot, ".local");
+  if (
+    realProofRoot === realLocalRoot ||
+    !isStrictDescendant(realLocalRoot, realProofRoot) ||
+    path.dirname(realSessionsRoot) !== realProofRoot ||
+    !isStrictDescendant(realSessionsRoot, realStateRoot)
+  ) {
+    throw new Error("The managed Runtime proof session path is unsafe");
+  }
+  if (
+    !(await lstat(
+      path.join(proofRoot, ".agent-airlock-runtime-proof-root"),
+    )).isFile() ||
+    (await readFile(
+      path.join(proofRoot, ".agent-airlock-runtime-proof-root"),
+      "utf8",
+    )) !== "Agent Airlock real Runtime proof artifacts\n"
+  ) {
+    throw new Error("The managed Runtime proof owner marker is invalid");
+  }
+  const sessionMarkerPath = path.join(
+    stateRoot,
+    ".agent-airlock-runtime-proof-session.json",
+  );
+  const sessionMarkerStatus = await lstat(sessionMarkerPath);
+  if (!sessionMarkerStatus.isFile() || sessionMarkerStatus.isSymbolicLink()) {
+    throw new Error("The managed Runtime proof session marker is invalid");
+  }
+  const marker = JSON.parse(
+    await readFile(sessionMarkerPath, "utf8"),
+  );
+  const actualKeys = Object.keys(marker).sort();
+  const expectedKeys = ["nonce", "ownerPid", "schema", "schemaVersion"].sort();
+  if (
+    JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys) ||
+    marker.schema !== "agent-airlock/runtime-proof-session" ||
+    marker.schemaVersion !== 1 ||
+    marker.nonce !== configuredProofSessionNonce ||
+    marker.ownerPid !== configuredProofOwnerPid
+  ) {
+    throw new Error("The managed Runtime proof session marker is invalid");
+  }
+}
 
 function safeHostEnvironment() {
   const environment = {};
@@ -95,16 +222,6 @@ async function detectEngine() {
     if (await commandWorks(candidate)) return candidate;
   }
   throw new Error("A running Docker or Podman engine is required");
-}
-
-async function stopChild(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    new Promise((resolve) => setTimeout(resolve, 5_000)),
-  ]);
-  if (child.exitCode === null) child.kill("SIGKILL");
 }
 
 async function waitForReady(url, label) {
@@ -194,20 +311,24 @@ async function seedProtocolDemo(baseUrl) {
   return agent;
 }
 
-const expectedRoot = path.join(
-  repoRoot,
-  demoRequested
-    ? ephemeralRequested
-      ? ".e2e-container-demo"
-      : ".local/airlock-container-demo"
-    : ".e2e-container-browser",
-);
+const expectedRoot = configuredProofSessionRoot
+  ? stateRoot
+  : path.join(
+      repoRoot,
+      demoRequested
+        ? ephemeralRequested
+          ? ".e2e-container-demo"
+          : ".local/airlock-container-demo"
+        : ".e2e-container-browser",
+    );
 if (stateRoot !== expectedRoot) {
   throw new Error(
     "Container fixture state must resolve to its dedicated managed root",
   );
 }
-if (!demoRequested || resetRequested || ephemeralRequested) {
+if (configuredProofSessionRoot) {
+  await assertManagedProofSession();
+} else if (!demoRequested || resetRequested || ephemeralRequested) {
   await rm(stateRoot, { recursive: true, force: true });
 }
 await mkdir(stateRoot, { recursive: true });
@@ -260,9 +381,23 @@ let stopping = false;
 async function shutdown(exitCode = 0) {
   if (stopping) return;
   stopping = true;
-  await stopChild(app);
-  await stopChild(fixture);
-  if (!demoRequested || ephemeralRequested) {
+  let childCleanupFailed = false;
+  for (const child of [app, fixture]) {
+    try {
+      await stopRuntimeProofChild(child, {
+        gracefulTimeoutMs: 5_000,
+        forcedTimeoutMs: 5_000,
+      });
+    } catch {
+      childCleanupFailed = true;
+      exitCode = 1;
+    }
+  }
+  if (
+    (!demoRequested || ephemeralRequested) &&
+    !childCleanupFailed &&
+    !configuredProofSessionRoot
+  ) {
     await rm(stateRoot, { recursive: true, force: true });
   }
   process.exit(exitCode);

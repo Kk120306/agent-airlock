@@ -2,7 +2,7 @@
 
 **Status:** Outcome-gated product strategy
 
-**Delivered:** Phases 0 through 20, with the Phase 21 live ModelArk proof runner under hosted release and provider-capacity verification
+**Delivered:** Phases 0 through 20 and Phase 22, with Phase 21 still under provider-capacity verification
 
 **North-star promise:** Agents may explore many futures, but only validated futures become reality.
 
@@ -841,8 +841,58 @@ Turn the fragile moment in a live AI demo into a portable conformance capsule th
 
 The outcome is tracked by [Wayfinder: Make live ModelArk proof one-command and self-verifying](https://github.com/Kk120306/agent-airlock/issues/32).
 The orchestration, authority, failure, privacy, and release boundaries are defined in [Bounded live ModelArk proof runner](../research/live-modelark-proof-runner.md).
-The runner, deterministic failure matrix, production-browser brand guard, complete local quality gate, real disposable-container transaction, and two-Airlock signed transfer are green locally.
+The runner, deterministic failure matrix, production-browser brand guard, complete local quality gate, real disposable-container transaction, two-Airlock signed transfer, and exact hosted release workflow are green on the delivered Phase 21 revision.
 The current credentialed preflight reaches the provider but returns HTTP 429 at the free-only capacity boundary, so no live conformance success is claimed.
+
+### Phase 22: Canonical real Runtime recording proof
+
+**Outcome**
+
+A reviewer can run one provider-independent headed command, select one primary action, and record a complete evidence-backed safety story in under three minutes.
+
+**Build**
+
+- Make `npm run prove:runtime -- --reset --headed` the canonical recording entry point while preserving `npm run demo:runtime -- --reset` as the persistent manual inspection path.
+- Open production Chrome at 1280 by 720 and keep a separate 390 CSS pixel responsive gate.
+- Present one primary `Prove this release is safe` action that starts exactly three fresh Runs after proof start.
+- Require the ordered dispositions valid Promotion, destructive Quarantine, and promoted Repair from the retained Quarantine.
+- Derive one Outcome Brief from persisted Run authority and verified artifacts rather than prompts, Runtime narration, or browser-local staging.
+- Show the three Run identifiers, required Validation outcomes, four-resource dispositions, Canonical fingerprint transitions, post-Promotion effects, and bounded Repair lineage.
+- Withhold the final verdict until the quarantined parent and promoted Repair verify as one signed two-decision chain with an intact Canonical State handoff.
+- Pass that exact chain directly into the existing zero-upload verifier, arm a deny-all HTTP and WebSocket boundary before its first opening, retain it through browser close, and expose `0 API calls` plus `2 signed decisions linked`.
+- Install the signed chain at an owner-only content-addressed path, then atomically replace one bounded credential-free safe capsule that names that exact chain while retaining the proof lease through the commit.
+- Resolve and upload only the validated current capsule and its exact immutable chain in the hosted release proof.
+- Keep startup, preparation timeout, browser, Run timeout, disposition, evidence, viewport, and interruption failures distinct while preserving the last successful artifact pair.
+- Close only browser and server processes owned by the runner on success, failure, timeout, or signal.
+- Fail closed without deleting an existing proof lease or legacy publication lock, and never revoke a valid capsule after its atomic rename because later proof-ownership cleanup failed.
+- Keep the absolute recording deadline armed through browser shutdown and atomic pointer-outcome reconciliation.
+- Preserve 15 seconds of release headroom beyond the maximum Run polling and full visible-frame commitments.
+- Remove abandoned proof sessions only after descriptor-anchored marker validation confirms that the recorded owner is no longer alive.
+
+**Exit gate**
+
+- The exact headed command completes from a reset state and produces exactly three fresh terminal Runs with the required ordered dispositions.
+- The 1280 by 720 recording path and 390 CSS pixel responsive path expose every required action, stage, Outcome Brief fact, and verifier verdict without horizontal overflow.
+- The Outcome Brief agrees with durable Run authority, the signed chain verifies independently, and the zero-upload verifier consumes the same artifact without a manual file round trip.
+- Deterministic tests cover old-Run rejection, wrong Run count or order, wrong disposition, missing resource evidence, early effects, broken lineage, invalid chain, deny-all verifier networking, viewport failure, preparation and Run timeouts, interruption on both sides of the exact rename boundary, redaction, permissions, concurrent immutable-chain publication, stale-lease preservation, atomic capsule commit, lease ordering, exact artifact resolution, physical chain-directory containment, and owned-process cleanup.
+- `npm run check`, the production browser proof, the real CodeJam Runtime proof, and existing Portable Trust gates remain green on the final revision.
+- The recording completes without ModelArk credentials, provider capacity, a wallet, RPC, funds, public-chain access, or federation infrastructure.
+
+**Beyond-expectations finish**
+
+Turn a complex middleware system into one falsifiable visual argument whose portable evidence remains useful after the browser and server are gone.
+
+**Scope cut**
+
+The core recording introduces no new Promotion, Run, receipt, trust, or organizational authority.
+Federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, and live ModelArk capacity remain outside the three-minute story.
+Existing signed receipts and chains supply evidence only and do not authorize Promotion or establish organizational trust by themselves.
+
+**Current status**
+
+The recording boundary is resolved by [Define the recording-grade real Runtime proof contract](https://github.com/Kk120306/agent-airlock/issues/36).
+Implementation and acceptance passed under [Build the recording-grade real Runtime proof path](https://github.com/Kk120306/agent-airlock/issues/37).
+The delivered proof passed every exit gate above through production Chrome, the real CodeJam container Runtime, independent chain verification, and owner-safe cleanup.
 
 ## Hackathon cut lines
 
@@ -907,15 +957,15 @@ The final polish phase protects the remaining 15% instead of treating presentati
 
 ## The three-minute hero scenario
 
-1. Select an existing Agent with a visible Outcome Contract.
-2. Ask it to update application code, migrate SQLite data, and prepare a mock deployment notification.
-3. Trigger a controlled mistake that deletes a required file.
-4. Show the candidate diff, failed Validation, quarantined database change, deferred notification, and unchanged canonical fingerprint.
-5. Start a Repair Run using the captured failure evidence.
-6. Show every required Validation pass and promote the repaired workspace, session, database, and notification intent.
-7. Send a follow-up message that proves the Agent continues from the promoted state.
+1. Run `npm run prove:runtime -- --reset --headed` and point to the real Runtime disclosure, selected Agent, and Outcome Contract.
+2. Let the canonical headed runner invoke `Prove this release is safe` exactly once at 0:15, or use the persistent demo command for a human-click rehearsal.
+3. Show the first fresh Run promote workspace, Codex session, SQLite, and one deferred action under one decision.
+4. Show the second fresh Run fail required Validation, quarantine all four resources, and leave the Canonical fingerprint unchanged.
+5. Show the third fresh Run repair the retained failure, use a fresh outbox, pass every required Validation, and promote.
+6. Read the evidence-derived Outcome Brief and require its signed two-decision chain verdict.
+7. Open that exact chain in the zero-upload verifier and show `0 API calls`, `2 signed decisions linked`, and the intact Canonical State handoff.
 
-This one scenario demonstrates useful behavior, a trusted boundary, an Agent-specific failure, recovery, multiple resources, evidence, and continuity without changing the starter kit's core experience.
+This one scenario demonstrates the starter-kit integration, real container Runtime, trusted boundary, harmless failure, recovery, multiple resources, effect ordering, durable evidence, and independent verification without depending on provider capacity or later-phase breadth.
 
 ## Product scorecard
 
@@ -938,6 +988,8 @@ A phase does not advance while any critical row is red.
 - Airlock wins through transactional Agent state, not through blockchain, generic authorization, or a broad observability dashboard.
 - The POC uses local containers because the track rewards the smallest infrastructure that proves the middleware.
 - UI work exists to reveal real backend behavior and evidence, not to replace it.
+- The canonical recording proves existing authority through fresh evidence and does not create a new authority layer.
+- Federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, and live provider capacity remain outside the core three-minute recording.
 - SQLite and the mock outbox are proof of abstraction, not separate product directions.
 - Repair is the hackathon's highest-value stretch because it turns containment into productive recovery.
 - Competing futures are the strongest post-hackathon expansion because they convert the same isolation boundary into a quality optimizer.

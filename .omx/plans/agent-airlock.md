@@ -377,8 +377,32 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Add deterministic tests for success, Quarantine, timeout, browser failure, invalid evidence, interruption, redaction, permissions, and preservation of prior success.
 - [x] Align the visible product brand with Agent Airlock for recording consistency.
 - [x] Pass the complete local quality and real Runtime regression gates.
-- [ ] Pass the exact hosted release workflow on the final revision.
+- [x] Pass the exact hosted release workflow on the delivered Phase 21 revision.
 - [ ] Complete the live provider-backed browser proof while Free Credits Only Mode has available capacity.
+
+## Phase 22 canonical real Runtime recording proof
+
+The recording boundary is resolved by [Define the recording-grade real Runtime proof contract](https://github.com/Kk120306/agent-airlock/issues/36).
+Implementation and acceptance are tracked by [Build the recording-grade real Runtime proof path](https://github.com/Kk120306/agent-airlock/issues/37).
+
+- [x] Fix the core story on the existing real Codex container Runtime with a local deterministic Responses fixture.
+- [x] Keep the recording independent of ModelArk capacity, federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, and every new authority.
+- [x] Add `npm run prove:runtime -- --reset --headed` as the canonical recording entry point without replacing the persistent `npm run demo:runtime -- --reset` path.
+- [x] Open production Chrome at 1280 by 720 and present one primary `Prove this release is safe` action.
+- [x] Snapshot durable Run authority at proof start and require exactly three fresh Runs afterward.
+- [x] Require the ordered dispositions valid Promotion, destructive Quarantine, and promoted Repair from that retained Quarantine.
+- [x] Derive the Outcome Brief only from persisted Run evidence, four-resource dispositions, Validation results, Canonical fingerprints, effect receipts, and Repair lineage.
+- [x] Withhold the final verdict until the quarantined parent and promoted Repair verify as one signed two-decision chain with an intact Canonical State handoff.
+- [x] Open that exact chain in the existing zero-upload verifier, deny every HTTP and WebSocket request from before its first opening through browser close, and prove `0 API calls` plus `2 signed decisions linked` without a manual file round trip.
+- [x] Install one owner-only content-addressed signed chain, then atomically commit the bounded credential-free safe capsule that names it while retaining proof ownership through publication.
+- [x] Reject reused Runs, wrong Run count or order, wrong disposition, missing resource evidence, early effects, broken lineage, invalid chain, viewport failure, timeout, and interruption without overwriting the last successful artifact pair.
+- [x] Close only runner-owned browser and server processes on success, failure, timeout, or signal.
+- [x] Fail closed without deleting an existing proof lease or legacy publication lock, and preserve a valid capsule when proof-ownership cleanup fails after its atomic rename.
+- [x] Keep the absolute recording deadline armed through browser shutdown and exact pointer-outcome reconciliation.
+- [x] Preserve 15 seconds of release headroom beyond the maximum Run polling and full visible-frame commitments.
+- [x] Purge abandoned proof sessions only through descriptor-anchored validation and deletion after confirming their recorded owner is no longer alive.
+- [x] Prove every required action and verdict at 1280 by 720 and 390 CSS pixels without horizontal overflow.
+- [x] Pass focused runner and browser tests, `npm run check`, the real CodeJam Runtime proof, and existing Portable Trust gates on the final revision.
 
 ## Trust boundaries
 

@@ -9,26 +9,59 @@ Rejected work remains inspectable and can be repaired without contaminating acce
 Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
-## Free one-command demo
+## Canonical three-minute recording
 
-The judge-ready demo uses the real production React, Fastify, Airlock, workspace, SQLite, outbox, journal, and persistence paths with a deterministic local Codex protocol fixture.
-It binds only to loopback and makes no ModelArk request or paid inference call.
+The canonical judge recording uses production React and Fastify, the actual pinned Codex CLI, a disposable container Runtime, isolated Candidate State, constrained Validation, the Promotion journal, and durable Portable Trust evidence.
+Only the Responses provider is deterministic and local, so the proof requires no ModelArk credential, provider capacity, wallet, blockchain, or paid inference.
 
 ```bash
 npm install
+npm run prove:runtime -- --reset --headed
+```
+
+Phase 22 passed on this release candidate through the full headed command above, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
+Use `npm run demo:runtime -- --reset` at <http://127.0.0.1:3200> when a persistent stage-by-stage rehearsal is more useful than the bounded canonical proof.
+
+The headed proof uses deadline-aware presentation pacing under a hard 180-second recording budget.
+Success preserves the full 15-second opening, 85-second desktop Outcome Brief, and 25-second desktop verifier dwells plus a 5-second browser-close reserve.
+Run completion is capped early enough to leave that full 115-second post-Run presentation tail and 15-second release headroom, and the proof returns `recording-timeout` instead of shortening narration when the complete sequence cannot fit.
+The canonical headed runner shows the primary action for the opening narration and invokes it automatically at 0:15, so the presenter must not click it.
+Use `npm run demo:runtime -- --reset` for the human-click rehearsal path.
+The deadline remains armed through browser shutdown and the actual atomic latest-pointer commit, so a late proof cannot publish.
+The desktop recording remains at 1280 by 720 and presents one primary action, `Prove this release is safe`.
+That action must create exactly three fresh Runs: a valid Promotion, a destructive Quarantine, and a promoted Repair from the retained failure.
+Its Outcome Brief must derive every claim from those persisted Runs, require all four resources to receive one disposition, show effect timing and Canonical fingerprint transitions, and withhold success until a signed two-decision chain verifies locally.
+The completed brief opens that exact chain in the zero-upload verifier, where the judge can see two valid signatures, the parent link, the Canonical State handoff, `0 API calls`, and `2 signed decisions linked`.
+The recording runner arms a deny-all HTTP and WebSocket boundary before that verifier first opens and keeps it active through browser close.
+While the desktop recording remains at 1280 by 720, a separate headless 390 by 844 read-only replay starts from the same three persisted Run identifiers, creates no Run, and independently regenerates the same signed chain and zero-upload verifier evidence.
+The runner publishes an owner-only content-addressed immutable result capsule plus its exact content-addressed signed chain, and it retains proof ownership through publication.
+The mutable `real-runtime-proof.latest.json` file is only a convenience pointer to that immutable pair and is never decision or trust authority.
+It closes owned browser and Runtime resources before publication, fails closed on an existing proof lease, and never revokes a valid capsule because ownership cleanup fails after the atomic rename.
+Reset cleanup accepts only marker-matching sessions whose recorded owner is no longer alive and removes them through descriptor-anchored operations.
+The hosted release resolver validates the mutable latest pointer and uploads only the exact immutable capsule and chain it identifies.
+Startup, browser, Run, disposition, evidence, viewport, timeout, and interruption failures remain distinct, return nonzero, clean up owned processes, and never overwrite the last successful artifact pair.
+
+The core recording does not add or depend on federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, new decision authority, or live provider capacity.
+Existing signatures remain evidence rather than Promotion authority or proof of organizational trust.
+See the [three-minute narration](docs/demo/three-minute-demo.md) and [judge checklist](docs/demo/JUDGE_CHECKLIST.md) before recording.
+
+## Deterministic no-container fallback
+
+Use the production browser path with a deterministic Agent fixture when a container engine is unavailable.
+It binds only to loopback and makes no ModelArk request or paid inference call.
+
+```bash
 npm run demo -- --reset
 ```
 
 Open <http://127.0.0.1:3199> and follow the numbered buttons in the `Judge path` strip.
-The complete path promotes a four-resource release, quarantines a destructive future, repairs that retained future, and proves session continuity from the repaired Canonical State.
-Restart with `npm run demo` to preserve the story, or use `npm run demo -- --reset` for a clean rehearsal.
+The path promotes a four-resource release, quarantines a destructive future, repairs that retained future, and proves session continuity from repaired Canonical State.
+This fixture remains the fastest deterministic regression and fallback demonstration, but it is not the canonical Phase 22 recording.
+The project will not silently switch it to paid inference.
 
-ModelArk credentials are needed only for the separate live conformance path described below.
-The project will not silently switch the deterministic demo to paid inference.
+## Real Runtime manual proof
 
-## Real Runtime no-cost proof
-
-Use the second judge path when Docker, Colima, or Podman is available and you want to prove the actual pinned Codex CLI and Responses tool protocol without spending ModelArk quota.
+Use the persistent manual path to inspect or rehearse each real Runtime stage independently.
 
 ```bash
 npm run demo:runtime -- --reset
@@ -36,24 +69,11 @@ npm run demo:runtime -- --reset
 
 The launcher fails closed unless seven credential-safe checks prove the local health boundary, intended demo profile, disposable Codex Runtime, offline receipt verifier, unique managed Agent, exact Outcome Contract, and ready lifecycle state.
 While the demo is running, rerun the proof with `npm run demo:readiness` or emit bounded machine-readable evidence with `npm run demo:readiness -- --json`.
-The readiness report commits its safe checks to a SHA-256 evidence digest and never returns ModelArk credentials, base URLs, model identifiers, or environment values.
-Open <http://127.0.0.1:3200> and use the three `Full safety loop` controls.
-For the fastest judge path, select `Run complete safety loop` to execute the same three ordered actions automatically, generate the repaired Run's signed two-decision chain, and verify every Canonical State handoff locally while each stage remains independently visible and rerunnable during rehearsal.
-The guide withholds its final signed-recovery verdict until that local cryptographic verification succeeds, and surfaces a retryable error if proof generation fails.
-Real Codex runs inside a disposable container against isolated Candidate State, calls the execution tool, and changes an exact file, SQLite row, and typed outbox intent only in that Candidate.
-The passing Candidate satisfies the required file-and-database command, promotes all four resources, advances Canonical State, and delivers exactly one effect afterward.
-The failing Candidate writes deliberately invalid file and database values plus an unsafe intent, fails that same command, remains inspectable in Quarantine, and leaves the canonical fingerprint, accepted database, and delivery count unchanged.
-The third control starts a real Repair Run from the retained Quarantine, uses bounded failed-Validation evidence, and promotes only after every required check passes.
-The focused judge view presents four immediately visible proof stages: Candidate isolation, Outcome Contract enforcement, four-resource disposition, and post-Promotion effect gating.
-It keeps Quarantine ancestry, canonical fingerprints, and complete forensic evidence one inspection control away.
-After all three controls complete, the recovery verdict proves that the same Agent and Outcome Contract controlled Promotion, rejection, and repair.
-The repaired Run automatically produces and locally verifies a complete two-decision chain containing the quarantined parent and promoted repair child.
-Reloading the page regenerates that chain from durable Run authority and withholds every signed-recovery claim until local verification succeeds again.
-The guided proof then offers one primary artifact, `Download verified decision chain`, instead of competing raw-receipt and packet downloads.
-Select `Inspect in zero-upload verifier` to pass that exact generated chain directly into the browser-local verifier and show both signatures, the parent link, and the Canonical State handoff without an API call or manual file round trip.
-The download remains the cross-machine artifact and the in-app verifier remains a network-free consumer of the same portable JSON.
+Open <http://127.0.0.1:3200> and use the existing Promotion, rejection, and Repair controls.
+Real Codex runs inside a disposable container against isolated Candidate State while the UI derives its evidence from persisted Run results.
+After Repair, generate the signed two-decision chain and select `Inspect in zero-upload verifier` to check the same portable JSON without an API call or manual upload.
 The UI and terminal explicitly identify the local deterministic Responses fixture and state that no ModelArk request or paid inference occurs.
-Run `npm run demo:runtime` without `--reset` to prove restart persistence.
+Run `npm run demo:runtime` without `--reset` to inspect restart persistence.
 
 > [!WARNING]
 > This is a single-user proof of concept, not a production multi-tenant sandbox.
@@ -188,7 +208,7 @@ npm run check:phase11
 
 These commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
 
-## Screenshots
+## Deterministic fallback screenshots
 
 ### Four-step judge path
 
@@ -224,6 +244,8 @@ These commands require no ModelArk key, paid inference, provider purchase, walle
 - Crash-recoverable Agent deletion with credential-free Run, Candidate Set, Assurance, contract-history, and receipt digests
 - Strict canonical Portable Promotion Envelopes with Ed25519 signatures and independent offline verification
 - Browser-local Web Crypto receipt verification with zero API calls, explicit tamper failure, and responsive proof reporting
+- Canonical real Runtime recording target with one primary action, exactly three fresh Runs, and an evidence-derived Outcome Brief
+- Atomic credential-free recording capsule plus the same signed two-decision chain consumed by the zero-upload verifier
 - Immutable Candidate Set Selection authority and exact terminal Run replay across authority-to-store crash windows
 - Private-by-default Merkle evidence disclosure with exact Candidate Selection, accepted Assurance, and Repair ancestry commitments
 - Fail-closed signing-key identity markers, historical rotation verification, and an operator rotation and compromise runbook
@@ -235,6 +257,7 @@ These commands require no ModelArk key, paid inference, provider purchase, walle
 ## Requirements
 
 - Free demo: Node.js 22+, npm 10+, and installed Google Chrome for browser verification.
+- Canonical recording: the free-demo requirements plus Docker, Colima, or Podman for the disposable real Codex Runtime.
 - Live ModelArk POC: the free-demo requirements plus Docker, Colima, or Podman and a ModelArk API key for an activated Responses-compatible model.
 
 Codex CLI is included in the Runtime image and is not required on the host for the credentialed container path.
@@ -573,6 +596,7 @@ Use `npm run check:phase11:protocol` for cross-process signature, tamper, transp
 Use `npm run test:phase11:ui` for complete desktop and 390-pixel mobile export, download, and independent verification journeys.
 Use `npm run check:phase11:docker` for the production image, non-root UID, writable-data, package-resolution, and live-health proof.
 Use `npm run check:phase11` for the complete inherited core, Docker, and exact clean-clone release gate.
+Phase 22 adds `npm run prove:runtime -- --reset --headed` as the delivered canonical recording gate with exact fresh-Run, signed-chain, immutable-capsule, hard 180-second budget, 1280 by 720 desktop, and independent 390 by 844 read-only replay requirements.
 Build `volc-agent-runtime:local` from `Dockerfile.runtime` before running either container proof.
 The network-disabled Codex probe proves that a copied `CODEX_HOME` resumes the accepted thread without mutating its source and that an empty home cannot resume it.
 The validation-container test proves a real validation container has a read-only root, no Ark key, and only a disposable validation copy as its writable project mount.
@@ -584,7 +608,7 @@ The browser SOP above is the repeatable live conformance path and does not store
 - [Architecture](docs/ARCHITECTURE.md)
 - [Agent Airlock architecture](docs/architecture/agent-airlock.md)
 - [One-page judging architecture](docs/demo/architecture-one-page.md)
-- [Three-minute live demo](docs/demo/three-minute-demo.md)
+- [Canonical three-minute recording](docs/demo/three-minute-demo.md)
 - [Judge checklist](docs/demo/JUDGE_CHECKLIST.md)
 - [Product requirements](docs/product/PRD.md)
 - [Outcome roadmap](docs/product/OUTCOME_ROADMAP.md)

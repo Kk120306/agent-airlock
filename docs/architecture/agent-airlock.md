@@ -359,6 +359,10 @@ Schema evolution must increment the database version and include a tested migrat
 | Receiver Outcome Contract changes after review but before the first operator decision                              | Reject the stale decision context before Candidate preparation, refresh current review evidence, preserve the operator's draft reason, create no Run, and leave Canonical State unchanged.                                                                         |
 | A retry presents a different reviewed context than the immutable schema-version-2 Approval Decision               | Reject the contradiction, preserve the first decision and its Candidate identity, dispatch no additional effect, and leave Canonical State unchanged.                                                                                                             |
 | A legacy schema-version-1 Approval Decision is recovered                                                           | Preserve and recover its original authority without fabricating a reviewed-context commitment, while all new decisions use schema version 2.                                                                                                                       |
+| The recording runner observes an old Run, the wrong number of new Runs, or an unexpected disposition              | Return a bounded nonzero failure, persist no new success capsule, and preserve every Run and the last successful artifact pair.                                                                                                                                    |
+| The recording Outcome Brief contradicts durable Run authority or omits required resource or effect evidence        | Withhold the success verdict and signed-chain handoff, then return an evidence failure without changing Canonical State.                                                                                                                                           |
+| The recording chain fails signature, lineage, or Canonical State handoff verification                              | Keep the invalid result out of the zero-upload success story and return a distinct evidence failure.                                                                                                                                                               |
+| The recording browser, viewport, timeout, or process lifecycle fails                                                | Close only owned browser and server processes, return the matching safe failure class, and preserve the last successful artifact pair.                                                                                                                             |
 
 The exact recovery sequence and fault matrix are documented in the [recovery guide](../RECOVERY.md).
 
@@ -366,6 +370,68 @@ The implemented Phase 9 split between reversible Candidate evaluation, determini
 The implemented Phase 10 separation between evidence-backed assurance advice and operator policy authority is documented in the [Adaptive Assurance architecture](adaptive-assurance.md) and ADR 0012.
 The implemented Phase 11 signed receipt and optional anchoring protocol is documented in the [Portable Trust architecture](portable-trust.md) and ADR 0013.
 The authority-first Selection, terminal replay, and append-only transparency lock-turn decisions are documented in [ADR 0014](../adr/0014-publish-selection-and-terminal-authority-before-mutable-projections.md).
+
+## Phase 22 recording proof boundary
+
+Phase 22 composes existing production paths into a bounded recording proof and introduces no new transaction authority.
+The canonical command is `npm run prove:runtime -- --reset --headed`, and the persistent manual inspection path remains `npm run demo:runtime -- --reset`.
+
+```mermaid
+flowchart LR
+    Runner["Bounded recording runner"] --> Launcher["Existing real Runtime launcher"]
+    Launcher --> Chrome["Production Chrome at 1280 by 720"]
+    Chrome --> Action["Prove this release is safe"]
+    Action --> Runs["Exactly three fresh durable Runs"]
+    Runs --> Brief["Evidence-derived Outcome Brief"]
+    Runs --> Chain["Signed two-decision chain"]
+    Chain --> Verifier["Existing zero-upload verifier"]
+    Brief --> Capsule["Non-authoritative safe capsule"]
+    Verifier --> Capsule
+    Runner --> Mobile["Separate 390 CSS pixel gate"]
+```
+
+The recording coordinator must:
+
+1. Start the existing loopback real Runtime launcher with reset state and wait for its credential-safe readiness boundary.
+2. Open production Chrome at 1280 by 720 and expose one primary `Prove this release is safe` action.
+3. Snapshot the durable Run boundary before interaction.
+4. Require exactly three fresh Runs after that boundary in the order valid Promotion, destructive Quarantine, and promoted Repair from the retained Quarantine.
+5. Build the Outcome Brief only from persisted Run evidence, resource dispositions, Validation results, Canonical fingerprints, effect receipts, and Repair lineage.
+6. Generate and locally verify the signed two-decision chain for the quarantined parent and promoted Repair.
+7. Pass that exact artifact to the existing zero-upload verifier without reconstructing or weakening it in the browser.
+8. Gate the same required controls and verdicts at a separate 390 CSS pixel viewport.
+9. Close the owned browser, launcher, Runtime containers, and proof session, then persist the signed chain at its immutable digest-derived path, atomically replace the owner-only safe capsule that names that exact chain, and release proof ownership.
+
+The safe capsule is a bounded non-authoritative index.
+It may contain the three fresh Run identifiers, closed gate results, final verdict, chain digest, and relative chain filename.
+It must exclude prompts, Runtime output, raw Validation output, environment values, credentials, provider URLs, model identifiers, local absolute paths, and signing material.
+The proof lease remains held while the immutable chain is installed and while the capsule crosses its single atomic rename commit point.
+Before that rename, the prior capsule still names its prior immutable chain, and after that rename, the new capsule names the already-complete new chain.
+An interruption before the rename preserves the prior pair, while an interruption after the rename cannot revoke the committed result even if proof-lease cleanup remains incomplete.
+If the parent loses the worker response at that boundary, it reconciles the anchored destination and treats the exact installed pointer as the irreversible outcome.
+An existing proof lease or legacy publication lock fails closed without deleting or replacing that path.
+Reset cleanup validates the session marker and dead owner through stable descriptors, then purges only through that anchored session directory.
+The absolute recording deadline remains armed until the pointer outcome is reconciled and accepted.
+The browser arms a context-wide deny-all HTTP and WebSocket boundary before the first verifier opening and retains it through both verifier views, the final headed dwell, and browser close.
+The signed Portable Decision Chain remains the independent evidence and the durable Run, journal, and Portable Decision authorities remain unchanged.
+
+The recording success state requires all of the following facts to agree:
+
+- Three and only three fresh terminal Runs exist after proof start.
+- The first Run promotes all four resources and releases its supported effect only after Canonical State advances.
+- The second Run quarantines all four resources and preserves the exact Canonical fingerprint.
+- The third Run is the bounded Repair child of the second, uses a fresh outbox, passes required Validation, and promotes all four resources.
+- The Outcome Brief is a projection of those durable facts rather than a new decision record.
+- The signed two-decision chain verifies both signatures, exact parent linkage, and Canonical State continuity.
+- The zero-upload verifier consumes the same chain and reports no API calls or uploads.
+- The 1280 by 720 view retains every required control and verdict without document overflow.
+- The 390 CSS pixel view retains every required control and verdict without horizontal overflow, with the complete proof reachable through normal vertical scrolling.
+
+The core recording excludes federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, live ModelArk capacity, and every new Promotion, Run, receipt, trust, or organizational authority.
+Existing Portable Trust signatures provide mathematical evidence and do not establish organizational trust or authorize Promotion by themselves.
+The local deterministic Responses fixture exercises real Codex and the CodeJam Runtime protocol without making a live-provider claim.
+
+The boundary is resolved by [Define the recording-grade real Runtime proof contract](https://github.com/Kk120306/agent-airlock/issues/36), and implementation is tracked by [Build the recording-grade real Runtime proof path](https://github.com/Kk120306/agent-airlock/issues/37).
 
 ## Trust boundaries
 

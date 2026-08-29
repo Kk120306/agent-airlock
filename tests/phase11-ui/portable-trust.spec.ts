@@ -485,6 +485,143 @@ test("invalidates a generated receipt when the Run decision changes", async ({
   ).toHaveCount(0);
 });
 
+test("focuses a historical repaired Run and retries its proof after a transient failure", async ({
+  page,
+}) => {
+  const safeRun = structuredClone(run);
+  safeRun.id = "run-safe";
+  safeRun.createdAt = "2026-08-26T02:00:00.000Z";
+  safeRun.transaction!.id = "transaction-safe";
+  safeRun.transaction!.lineage = {
+    rootRunId: safeRun.id,
+    parentRunId: null,
+    depth: 0,
+    maxDepth: 3,
+  };
+  const resourceKinds: Array<
+    NonNullable<AgentRun["transaction"]>["resources"][number]["kind"]
+  > = [
+    "workspace",
+    "codex-session",
+    "sqlite",
+    "external-actions",
+  ];
+  safeRun.transaction!.resources = resourceKinds.map((kind) => ({
+    kind,
+    label: kind,
+    disposition: "promoted" as const,
+    fingerprintBefore: "sha256:" + "a".repeat(64),
+    fingerprintAfter: "sha256:" + "b".repeat(64),
+    summary: `${kind} promoted.`,
+  }));
+  safeRun.transaction!.sqlite = {
+    databasePath: ".airlock/demo.sqlite",
+    integrity: "passed",
+    before: null,
+    candidate: null,
+    after: {
+      contentHash: "sha256:" + "b".repeat(64),
+      rowCount: 1,
+      rows: [
+        {
+          id: "demo",
+          value: "candidate-only",
+          updatedAt: timestamp,
+        },
+      ],
+    },
+  };
+  safeRun.transaction!.externalActions = {
+    outboxPath: "outbox/intents.jsonl",
+    intents: [
+      {
+        id: "safe-effect",
+        type: "demo.notification.requested",
+        destination: "demo-console",
+        subject: "Safe release",
+        idempotencyKey: "safe-effect-key",
+        status: "delivered",
+        deliveredAt: timestamp,
+      },
+    ],
+    deliveredCount: 1,
+    bypassDisclosure: "No effect bypass is available.",
+  };
+
+  const unsafeRun = structuredClone(run);
+  unsafeRun.id = "run-unsafe";
+  unsafeRun.createdAt = "2026-08-26T02:00:01.000Z";
+  unsafeRun.transaction!.id = "transaction-unsafe";
+  unsafeRun.transaction!.status = "quarantined";
+  unsafeRun.transaction!.disposition = "quarantined";
+  unsafeRun.transaction!.canonicalStateIdAfter =
+    unsafeRun.transaction!.canonicalStateIdBefore;
+  unsafeRun.transaction!.canonicalContentHashAfter =
+    unsafeRun.transaction!.canonicalContentHashBefore;
+  unsafeRun.transaction!.quarantineAvailable = true;
+  unsafeRun.transaction!.lineage = {
+    rootRunId: unsafeRun.id,
+    parentRunId: null,
+    depth: 0,
+    maxDepth: 3,
+  };
+
+  const repairedRun = structuredClone(run);
+  repairedRun.id = "run-repaired";
+  repairedRun.createdAt = "2026-08-26T02:00:02.000Z";
+  repairedRun.transaction!.id = "transaction-repaired";
+  repairedRun.transaction!.lineage = {
+    rootRunId: unsafeRun.id,
+    parentRunId: unsafeRun.id,
+    depth: 1,
+    maxDepth: 3,
+  };
+
+  const requests: Array<Record<string, unknown>> = [];
+  const transientFailures = { remaining: 1 };
+  await serveProductionBundle(
+    page,
+    requests,
+    { current: safeRun },
+    undefined,
+    {
+      ...system,
+      protocolFixtureMode: true,
+      inferenceMode: "local-responses-protocol-fixture",
+    },
+    {
+      origin: "http://localhost",
+      runs: [safeRun, repairedRun, unsafeRun],
+      portableReceiptFailures: transientFailures,
+    },
+  );
+  await page.goto("http://localhost/");
+
+  const guide = page.getByRole("region", { name: "Full safety loop" });
+  await expect.poll(() => requests.length).toBe(0);
+  await expect(
+    guide.getByRole("button", { name: "Verify signed recovery" }),
+  ).toBeVisible();
+
+  await guide.getByRole("button", { name: "Verify signed recovery" }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  await expect(
+    guide.getByRole("button", { name: "Retry signed verification" }),
+  ).toBeVisible();
+
+  await guide.getByRole("button", { name: "Retry signed verification" }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(guide.getByText("Signed recovery verified", { exact: true }))
+    .toBeVisible();
+  await expect(
+    page.getByText("Portable proof service is temporarily unavailable.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.waitForTimeout(250);
+  expect(requests).toHaveLength(2);
+});
+
 test("ignores a delayed receipt response after the Run decision changes", async ({
   page,
 }) => {
@@ -544,8 +681,14 @@ async function serveProductionBundle(
   runState: { current: AgentRun } = { current: run },
   exportGate?: Promise<void>,
   systemState: SystemInfo = system,
+  options: {
+    origin?: string;
+    runs?: AgentRun[];
+    portableReceiptFailures?: { remaining: number };
+  } = {},
 ): Promise<void> {
-  await page.route("http://airlock.local/**", async (route) => {
+  const origin = options.origin ?? "http://airlock.local";
+  await page.route(`${origin}/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/") {
       await route.fulfill({
@@ -580,12 +723,29 @@ async function serveProductionBundle(
       });
       return;
     }
+    const portableReceiptRunIds = new Set(
+      (options.runs ?? [runState.current]).map((candidate) => candidate.id),
+    );
+    const portableReceiptRunId = url.pathname.match(
+      /^\/api\/runs\/([^/]+)\/portable-receipt$/,
+    )?.[1];
     if (
       route.request().method() === "POST" &&
-      url.pathname === "/api/runs/run-golden/portable-receipt"
+      portableReceiptRunId !== undefined &&
+      portableReceiptRunIds.has(portableReceiptRunId)
     ) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       requests.push(body);
+      const portableReceiptFailures = options.portableReceiptFailures;
+      if (portableReceiptFailures && portableReceiptFailures.remaining > 0) {
+        portableReceiptFailures.remaining -= 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Portable proof service is temporarily unavailable." }),
+        });
+        return;
+      }
       await exportGate;
       await route.fulfill({
         status: 200,
@@ -636,7 +796,12 @@ async function serveProductionBundle(
       });
       return;
     }
-    const response = apiResponse(url.pathname, runState.current, systemState);
+    const response = apiResponse(
+      url.pathname,
+      runState.current,
+      systemState,
+      options.runs,
+    );
     if (response) {
       await route.fulfill({
         status: 200,
@@ -653,13 +818,14 @@ function apiResponse(
   pathname: string,
   activeRun: AgentRun,
   systemState: SystemInfo,
+  runs: AgentRun[] = [activeRun],
 ): unknown {
   if (pathname === "/api/auth") return { required: false };
   if (pathname === "/api/system") return systemState;
   if (pathname === "/api/agents") return { agents: [agent] };
   if (pathname.endsWith("/messages")) return { messages: [] };
-  if (pathname.endsWith("/runs")) return { runs: [activeRun] };
-  if (pathname === "/api/runs/run-golden") return { run: activeRun };
+  if (pathname.endsWith("/runs")) return { runs };
+  if (pathname === `/api/runs/${activeRun.id}`) return { run: activeRun };
   if (pathname.endsWith("/candidate-sets")) return { candidateSets: [] };
   if (pathname.endsWith("/assurance-proposals")) return { proposals: [] };
   if (pathname.endsWith("/outcome-contract/versions")) return { versions: [] };

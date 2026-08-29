@@ -2,141 +2,164 @@
 
 ## Demo promise
 
-Agent Airlock lets an Agent attempt changes to files, memory, SQLite data, and supported external actions without allowing a rejected attempt to change accepted reality.
-The complete judge path runs through the starter kit's production React Playground and Fastify control plane.
-The deterministic protocol fixture replaces only paid model inference, and both the terminal and Web UI disclose that boundary.
+Agent Airlock lets an Agent attempt one Whole-Agent future across files, memory, SQLite data, and supported external actions without allowing a rejected attempt to change accepted reality.
+The canonical recording path uses the starter kit's production React Playground, Fastify control plane, pinned Codex CLI, disposable Runtime container, isolated Candidate State, constrained Validation, Promotion journal, and persisted Run authority.
+Only the Responses provider is deterministic and local, so the recording needs no ModelArk credential, provider capacity, wallet, blockchain, or paid inference.
 
 ## Rehearse from a clean state
 
 ```bash
 npm install
-npm run demo -- --reset
+npm run prove:runtime -- --reset --headed
 ```
 
-Open <http://127.0.0.1:3199>.
-Do not create an Agent or type prompts manually.
-The launcher seeds `Airlock Demo`, and the `Judge path` strip stages every required action.
+Phase 22 passed on this release candidate through `npm run prove:runtime -- --reset --headed`, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
+It uses deadline-aware presentation pacing under a hard 180-second recording budget.
+A successful headed proof preserves the complete 15-second opening, 85-second desktop Outcome Brief, and 25-second desktop verifier dwells plus a 5-second browser-close reserve.
+Run completion is capped early enough to leave that full 115-second post-Run presentation tail and 15-second release headroom, and the runner returns `recording-timeout` instead of shortening narration when the complete sequence cannot fit.
+The deadline remains armed through browser shutdown and the actual atomic latest-pointer commit, so a late proof cannot publish.
+Headless JSON proof adds no narration delay while retaining the same evidence gates.
+Use `npm run demo:runtime -- --reset` when a persistent stage-by-stage rehearsal is preferable to the bounded canonical proof.
+The canonical runner opens production Chrome at 1280 by 720, keeps the desktop recording at that viewport through browser close, seeds exactly one recording Agent, and presents one primary action:
 
-The launcher binds only to loopback and configures an unreachable loopback model URL.
-No ModelArk request or paid inference occurs in this path.
-ModelArk credentials remain confined to the separate live conformance path and must never appear in the repository, terminal capture, browser, screenshots, or Promotion Receipt evidence.
+> Prove this release is safe
+
+The action must create exactly three fresh Runs after the recording starts.
+It must never reuse an earlier terminal Run, signed packet, or browser-only result.
+The final Outcome Brief must be derived from those three persisted Runs and independently verified artifacts rather than from prompts, Runtime narration, or staged frontend state.
+While the desktop browser remains at 1280 by 720, a separate headless 390 by 844 read-only replay hydrates from those exact persisted Run identifiers.
+The replay creates no Run and independently regenerates the same signed chain and zero-upload verifier evidence before the proof may publish success.
 
 ## Timeline
 
-### 0:00 to 0:25 - Establish the guarantee
+### 0:00 to 0:15 - Establish the guarantee
 
-Point to the `FREE LOCAL DEMO` disclosure, the selected `Airlock Demo` Agent, and `Outcome Contract v1`.
+Point to `REAL RUNTIME PROOF`, the selected recording Agent, and its visible versioned Outcome Contract.
 State the falsifiable guarantee: the Runtime may mutate only Candidate State, and only Airlock may advance the atomic Canonical State manifest after every required Validation passes.
+Point out that real Codex is running inside a disposable container while a local deterministic Responses fixture removes provider capacity from the recording risk.
 
-### 0:25 to 0:55 - Promote one coherent future
+### 0:15 to 0:50 - Start one proof
 
-Select `01 Promote release`, then send the staged prompt.
-The deterministic Agent edits the workspace, updates SQLite, advances Agent memory, and requests one typed mock notification.
-Show `Promoted`, `Journal completed`, `one decision across 4 resources`, the advanced Canonical fingerprint, SQLite value `shipped`, and `1 delivered`.
+Do not select `Prove this release is safe` during the canonical headed recording.
+The runner invokes it exactly once at 0:15 after the opening guarantee is visible for the full 15 seconds.
+Use `npm run demo:runtime -- --reset` for a human-click rehearsal.
+The guided proof must start exactly three fresh Runs in order: a valid Candidate, a destructive Candidate, and a Repair Run from the retained Quarantine.
+Keep the recording on the three-step progress guide while the Runs complete.
+After signed verification succeeds, the final evidence-derived Outcome Brief replaces the working view and becomes the single frame for the evidence walk-through.
 
-Explain that the journal records the approved decision before installation, canonical advancement, effect dispatch, and final completion.
+### 0:50 to 1:15 - Promote one coherent future
 
-### 0:55 to 1:30 - Quarantine a destructive future
+On the completed Outcome Brief, show the first fresh Run as `Promotion` only after every required Validation passes.
+Point to the visible passed-Validation count, four promoted resources, advanced Canonical fingerprint, and exactly one post-Promotion effect.
+Explain that the persisted transaction evidence also records the accepted SQLite value and ordered Promotion journal without crowding the compact recording brief.
 
-Select `02 Challenge safety`, then send the staged destructive prompt.
-The Agent deletes protected `AGENTS.md`, creates `damage.txt`, changes SQLite to `rejected`, mutates rejected memory, and requests an unsafe notification inside Candidate State.
+### 1:15 to 1:40 - Quarantine the destructive future
 
-Show `Quarantined`, `Canonical State unchanged`, the decisive `protected-paths` failure, and all four resources marked `quarantined`.
-Compare the before and after Canonical fingerprints.
-They are identical, the canonical database still says `shipped`, and the delivery count remains one.
+On the completed Outcome Brief, show the second fresh Run as `Quarantine` after its required Validation rejects the deliberately invalid result.
+Point to the visible failed-Validation count, four quarantined resources, and the identical before and after Canonical fingerprints.
+Explain that the unchanged fingerprint and zero effects prove the rejected attempt did not reach accepted reality.
 
-### 1:30 to 2:15 - Repair the retained future
+### 1:40 to 2:05 - Repair retained work
 
-Select `03 Repair future`.
-This control starts a bounded Repair Run directly from retained Quarantine evidence.
-The repair receives the rejected workspace and memory, a verified disposable reference to exact Canonical State, the original Outcome Contract, and a fresh empty outbox.
+On the completed Outcome Brief, show the third fresh Run as a promoted Repair child of the retained Quarantine with bounded parent and root lineage.
+The Repair Run must receive the rejected workspace and memory, a verified disposable reference to exact Canonical State, the original Outcome Contract, and a fresh empty outbox.
+Show every required Validation pass, all four resources promote together, and one fresh repair effect dispatch only after Canonical State advances.
 
-Show the repaired child restore protected `AGENTS.md`, preserve useful `damage.txt`, set SQLite to `repaired`, intentionally request `repair-ready`, and promote.
-Point to `Repair 1 of 2`, the parent and root lineage, `Journal completed`, four promoted resources, and the second delivered mock effect.
+### 2:05 to 2:15 - Read the Outcome Brief
 
-### 2:15 to 2:40 - Prove continuity
+The Outcome Brief must name the three fresh Run identifiers and summarize only persisted facts.
+Show the valid Promotion, harmless rejection, promoted Repair, Canonical fingerprint transitions, four-resource dispositions, post-Promotion effects, and locally verified signed lineage.
+Require the final verdict to remain unavailable until Airlock verifies the two-decision chain from quarantined parent to promoted repair child.
 
-Select `04 Prove continuity`, then send the staged prompt.
-Show `Session connected` and the response that continues `baseline-thread` from repaired Canonical State.
-Explain that rejected memory never became accepted, while repaired memory and files advanced together.
+### 2:15 to 2:40 - Verify beyond the running app
 
-### 2:40 to 3:00 - Close on the boundary
-
-Open the [one-page architecture](architecture-one-page.md).
-Summarize the trusted boundary: the Runtime proposes a Whole-Agent future, deterministic Validations decide its disposition, the journal reconciles approved decisions forward after interruption, and only the canonical manifest defines accepted reality.
-
+Select `Inspect in zero-upload verifier` from the completed Outcome Brief.
+Show `0 API calls`, `2 signed decisions linked`, valid signatures, the exact parent link, and the intact Canonical State handoff.
 Close with the product line:
 
 > Agents may explore many futures, but only validated futures become reality.
 
-## Optional 60-second trust encore
-
-Open Portable Trust on the repaired Run, select the local transparency proof and offline EVM payload, and generate the receipt.
-Download the single `agent-airlock-decision-chain-*.json` file.
-Open `Verify a receipt` and import that chain.
-Point to `0 API calls`, `2 signed decisions linked`, and the independent PASS results for every receipt, parent digest, Canonical State handoff, transparency proof, and digest-only EVM payload.
-Explain that the chain intentionally excludes organizational trust policy and trust roots, so producer evidence cannot authorize its own signer.
+The runner reserves 2:40 to 2:45 for browser close and 2:45 to 3:00 as release headroom without asking the presenter to rush a visible frame.
 
 ## Required visible proof
 
-- The starter-kit frontend selects and invokes a runnable Agent.
-- The production backend and Runtime seam execute real workspace, SQLite, memory, and outbox mutations.
-- Promotion advances all four resources under one decision.
-- Destructive rejection advances none of them.
-- The Canonical fingerprint is identical before and after rejection.
-- Repair uses the retained failed future and bounded lineage instead of starting over.
-- A fresh repair outbox prevents the rejected intent from replaying.
-- The repaired future promotes and the next turn resumes its accepted session.
-- The UI and terminal clearly identify deterministic fixture mode and no paid inference.
+- Production Chrome invokes the starter-kit frontend, control plane, and real container Runtime.
+- One primary action creates exactly three fresh Runs after the proof starts.
+- The first Run promotes workspace, Codex session, SQLite, and outbox together.
+- The second Run quarantines all four resources and leaves Canonical State unchanged.
+- The third Run repairs retained work through bounded lineage and a fresh outbox.
+- Supported effects dispatch only after the matching Promotion.
+- The Outcome Brief is derived from persisted Run and verification evidence.
+- A signed two-decision chain proves the rejected parent, promoted Repair, and Canonical State handoff.
+- The browser-local verifier checks that chain with zero uploads and zero API calls.
+- The desktop recording remains 1280 by 720, while an independent headless 390 by 844 read-only replay regenerates the same chain and verifier evidence without creating a Run.
+- The terminal and browser identify real Codex with a local deterministic Responses fixture and do not imply live ModelArk inference.
 
-## Automated proof
+## Recording artifacts
+
+The runner publishes exactly two immutable judge-facing artifacts for a successful recording:
+
+1. A bounded credential-free content-addressed immutable result capsule with the three fresh Run identifiers, gate results, final verdict, relative chain filename, and chain digest.
+2. The signed Portable Decision Chain that the zero-upload verifier consumes independently.
+
+The safe capsule is a convenience index and never becomes Promotion, Run, receipt, or trust authority.
+The signed chain remains the independently verifiable evidence.
+The runner installs both the result capsule and signed chain at owner-only content-addressed immutable paths before atomically replacing the owner-only `real-runtime-proof.latest.json` convenience pointer.
+That mutable latest file is never uploaded as the result artifact and is never decision or trust authority.
+The proof lease stays held through that pointer commit, and the hosted release resolver validates it before uploading only the exact immutable capsule and chain it identifies.
+A failure before the latest pointer commit leaves the prior current pair unchanged.
+A deny-all browser boundary arms immediately before the first verifier opening, blocks every later HTTP and WebSocket request, and remains active through both verifier views, the final recording dwell, and browser close.
+The runner closes its owned browser, launcher, Runtime containers, and proof session before publication begins.
+An existing proof lease or legacy publication lock fails startup closed and is never reclaimed by deleting a possibly replaced pathname.
+A reset removes only marker-matching sessions whose recorded owner is no longer alive, using descriptor-anchored validation and deletion throughout.
+A proof-ownership cleanup failure after the capsule rename produces a fixed warning but cannot turn the already committed valid pair into a failed proof.
+
+## Automated proof target
 
 ```bash
-npm run test:demo
-npm run test:demo:e2e
-npm run check:phase7
-npm run check:phase11:protocol
-npm run test:phase11:ui
+npm run prove:runtime -- --reset --headed
+npm run check
 ```
 
-The browser test asserts the complete story through production Chrome in under 180 seconds and checks the 390-pixel layout for page overflow.
-The full Phase 7 gate also runs prior server, browser, container, crash-recovery, retention, path-safety, dependency, and release-audit evidence.
-The Phase 11 gates exercise the one-file packet across a separate CLI process and a real zero-upload browser, including altered optional-proof rejection.
+Phase 22 gates a desktop recording that stays at 1280 by 720 without document overflow and a separate headless 390 by 844 read-only replay without horizontal overflow or hidden proof actions.
+The runner requires exactly three fresh terminal Runs, the evidence-derived Outcome Brief, the signed two-decision chain, successful desktop zero-upload verification, and independently regenerated mobile replay evidence before returning success.
+The full repository gate must preserve the existing deterministic browser, server, container, recovery, Portable Trust, and release-audit coverage.
 
-## Honest scope boundary
+## Failure semantics
 
+- Readiness, startup, browser, Run, disposition, evidence, viewport, timeout, and interruption failures must remain distinct.
+- Any unexpected Run count, Run reuse, wrong disposition, missing resource evidence, early effect, broken lineage, or verifier failure must return nonzero.
+- A failed proof must not display or persist a success verdict.
+- A failed proof must preserve the last successful safe capsule and signed chain.
+- The runner gives application and Runtime-image preparation their own bounded deadlines and keeps those failures distinct from the hard 180-second browser recording deadline.
+- Deadline-aware presentation pacing must preserve every successful headed dwell in full or return `recording-timeout` rather than shorten narration.
+- The recording deadline must remain enforceable through browser close and the atomic latest-pointer commit.
+- The runner must close only the browser and server processes it owns on success, failure, timeout, or signal.
+- Any browser request or WebSocket traffic after the offline verifier boundary arms must be blocked and must fail the verifier gate.
+- A stale proof lease or legacy publication lock must remain untouched and fail startup closed.
+- Bounded terminal output and the safe capsule must never contain credentials, environment values, provider URLs, raw model output, prompts, or local absolute paths.
+
+## Honest recording boundary
+
+The core three-minute recording demonstrates transactional Agent execution, not every later product capability.
+It does not introduce new authority, federation, receiver custody, blockchain publication, Competing Futures, or Adaptive Assurance.
+Existing Portable Trust signatures are evidence, not Promotion authority and not proof of organizational trust in the signer.
+The local deterministic Responses fixture proves the real Runtime protocol and Airlock middleware path, not live ModelArk availability or model quality.
+Live ModelArk conformance remains a separate optional command because provider capacity is external and time-varying.
 Exactly-once delivery is claimed only inside the atomic local mock consumer.
 Unrestricted Runtime networking can bypass the typed outbox.
 The Promotion journal is designed for one local control-plane process and does not claim distributed coordination or power-loss durability.
 Ordinary containers are not hardened multi-tenant sandboxes.
-The deterministic fixture remains the reproducible judging proof.
-Live ModelArk conformance must be proven again at judging time because free provider capacity is external and time-varying.
+
+## Deterministic fallback
+
+Use `npm run demo -- --reset` when no container engine is available.
+That four-step fixture remains the fastest deterministic regression and fallback demonstration, but it is not the canonical Phase 22 recording.
+Its UI and terminal must continue to disclose that paid model inference was replaced.
 
 ## Live ModelArk conformance
 
-Configure `ARK_API_KEY`, `ARK_MODEL`, and the region-matching `ARK_BASE_URL` only in the local `.env` file.
-Optionally configure up to three activated free-quota models in `ARK_MODEL_FALLBACKS`.
-Confirm that each configured model visibly has remaining free quota in Model activation.
-Run `npm run check:modelark` to fail fast with minimal credential-safe Responses API requests.
-The guided launcher carries a fresh redacted generated-output preflight handoff into server admission and rejects missing, stale, wrong-model, or wrong-origin handoffs.
-Run `npm run poc:doctor` to prove provider and container readiness as independent checks.
-The doctor also drives the pinned real Codex CLI through a local two-turn Responses tool-call fixture, but that protocol proof never substitutes for the separate live ModelArk check.
-Run `npm run test:container-transaction` to extend that proof through the production CodeJam HTTP control plane, required Validation, Promotion, independent receipt verification, restart, and accepted-session continuation.
-Run `npm run test:container-browser` to prove the same real Codex Candidate and Promotion path through Chrome.
-Only HTTP 404 and 429 advance through the operator-approved list, and the first successful model becomes the Runtime's `ARK_MODEL`.
-Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.
-Keep Free Credits Only Mode enabled for every configured model.
-Run `npm run demo:modelark -- --reset`.
-The guided launcher forces the live provider preflight even when the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch exists in the shell.
-Open <http://127.0.0.1:3201> and select `Run live Candidate`.
-Point to the live banner showing that fresh preflight generated assistant output and that output and credentials remain private.
-Confirm that ModelArk directs the real Codex Runtime to create the exact `modelark-proof.txt`, update Candidate SQLite to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
-Show that the required execution-profile and state Validations pass, all four resources promote together, the effect dispatches only after Canonical State advances, and the signed decision verifies locally.
-Point out that the model endpoint appears only as a SHA-256 commitment inside the trusted execution-profile evidence and that the receipt commits to that Validation through its Merkle root.
-State the limit precisely: Airlock attests its configured execution path, while BytePlus does not independently sign this receipt.
-The model response is supporting context, while the independently inspected Candidate artifact and durable Airlock evidence are the proof.
-Do not change the deterministic release gate or commit any credential-bearing output.
-
-For a recording rehearsal, run `npm run prove:modelark -- --reset --headed` instead.
-That command drives the same production browser action, requires the exact persisted Whole-Agent Promotion, waits for signed packet capture, verifies it offline, and cleans up the owned browser and server.
-If the free-only provider boundary returns HTTP 429, record the deterministic real Runtime proof and retry live conformance later rather than disabling Free Credits Only Mode.
+Use `npm run prove:modelark -- --reset --headed` only as an optional provider-backed conformance encore.
+That path requires `ARK_API_KEY`, `ARK_MODEL`, a region-matching `ARK_BASE_URL`, an activated Responses-compatible model, and available free-only capacity.
+It must fail safely on provider unavailability and must never disable Free Credits Only Mode or fall back to a paid path.
+Its successful signed evidence is useful additional context, but provider capacity is not part of the core recording exit gate.

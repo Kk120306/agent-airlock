@@ -1,6 +1,6 @@
 # Agent Airlock Product Requirements Document
 
-**Status:** Phases 0 through 20 delivered and regression-locked; the Phase 21 one-command live ModelArk proof is under hosted release and provider-capacity verification
+**Status:** Phases 0 through 20 and Phase 22 delivered and regression-locked; Phase 21 remains under provider-capacity verification
 
 **Product:** Agent Airlock middleware for the CodeJam starter kit
 
@@ -28,6 +28,7 @@ Positive Candidate and Quarantine retention windows remove only expired mutable 
 The judge-ready release adds a loopback-only deterministic launcher, one seeded hero Agent, a four-step guided Playground story, restart-safe fixture state, a dedicated production Chrome acceptance path, and an automated release audit.
 The deterministic fixture replaces only paid model inference and is disclosed in the terminal, system API, sidebar, and main UI.
 The real Runtime proof presents a compact evidence-derived verdict before the complete transaction record and ends with a locally verified signed decision chain from quarantined parent to promoted repair child.
+Phase 22 standardizes that real Runtime proof as the canonical three-minute recording through one headed command, one primary action, exactly three fresh Runs, an evidence-derived Outcome Brief, and a zero-upload verification finish.
 The Phase 8 release candidate adds a provider-neutral SDK, strict Capability Claims, a shared executable conformance suite, and a credential-free remote versioned-object provider.
 Registered provider state now participates in the same Candidate preparation, required Validation, Promotion journal, Quarantine, Discard, Repair, canonical fingerprint, and restart-reconciliation decision as built-in resources.
 Existing deployments add providers through a verified, additive, crash-recoverable Registry Transition, and Airlock commits a registry generation only after every Agent converges.
@@ -68,6 +69,7 @@ Operators currently cannot answer these questions before accepting a Run:
 7. Let a developer add a capability-checked Transactional Resource Provider without editing core Run Transaction lifecycle branches.
 8. Let an operator compare bounded isolated futures and promote exactly one reproducible valid winner.
 9. Let an independent verifier check a bounded Promotion decision after it crosses a machine, team, or organization boundary.
+10. Give a judge one provider-independent recording action whose success is supported by fresh persisted Runs and portable signed evidence.
 
 ## Non-goals
 
@@ -79,6 +81,8 @@ Operators currently cannot answer these questions before accepting a Run:
 - Distributed transactions across unrelated external providers.
 - BytePlus ECS deployment as a judging requirement.
 - Required public-blockchain deployment, wallet custody, token issuance, or on-chain execution.
+- New Promotion or Run authority created only for the recording experience.
+- Federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, or live provider capacity as dependencies of the core recording.
 
 ## Target product journey
 
@@ -264,6 +268,26 @@ This journey describes the complete product direction, including later roadmap p
 - The runner must return success only after the exact live Whole-Agent Promotion, private signed packet capture, and offline packet verification all pass.
 - Provider capacity, startup, browser, Run, evidence, timeout, and interruption failures must remain distinct and must never overwrite the latest successful result.
 - The runner result must be credential-free, owner-only, atomic, explicitly non-authoritative, and limited to safe gate results plus the signed receipt digest and relative packet filename.
+- `npm run prove:runtime -- --reset --headed` must be the canonical three-minute recording command once the Phase 22 gate passes.
+- The recording path must use production Chrome, the real pinned Codex CLI, a disposable Runtime container, and the existing local deterministic Responses fixture without claiming live ModelArk inference.
+- The canonical desktop viewport must be 1280 by 720, and a separate automated 390 CSS pixel gate must prove that every required action and verdict remains usable without horizontal overflow.
+- The recording UI must present one primary action named `Prove this release is safe`.
+- One invocation must create exactly three fresh Runs after proof start in the order valid Promotion, destructive Quarantine, and promoted Repair from that Quarantine.
+- No stage may reuse an earlier terminal Run, packet, chain, safe capsule, or browser-local result as current proof.
+- The Outcome Brief must derive every claim from persisted Run evidence and locally verified artifacts, name the three fresh Run identifiers, and show four-resource dispositions, Canonical fingerprint transitions, Validation outcomes, effect ordering, and Repair lineage.
+- A successful verdict must remain unavailable until the quarantined parent and promoted Repair form a valid signed two-decision chain with an intact Canonical State handoff.
+- The completed brief must pass that exact chain into the existing zero-upload verifier without a manual file round trip, arm a deny-all HTTP and WebSocket boundary before its first opening, and retain that boundary through the final verifier dwell and browser close.
+- A successful recording may write only a bounded safe capsule and the signed chain as judge-facing artifacts.
+- The capsule must be credential-free, owner-only, atomic, non-authoritative, and limited to safe gate results, the three Run identifiers, chain digest, and relative chain filename.
+- The signed chain must be installed first at an owner-only content-addressed path, and the proof lease must remain held until the capsule atomically commits its pointer to that exact chain.
+- Browser, launcher, Runtime container, and proof-session cleanup must finish before artifact publication begins, while a proof-ownership cleanup failure observed after the capsule rename must not revoke the committed valid pair.
+- An existing proof lease or legacy publication lock must fail closed without PID-based deletion or stale-path reclamation.
+- Reset cleanup must accept only descriptor-anchored, marker-matching sessions whose recorded owner is no longer alive.
+- The absolute recording deadline must remain enforceable through browser shutdown, pointer commit, and commit-outcome reconciliation.
+- The fixed recording allocation must preserve at least 15 seconds of release headroom after the maximum Run polling and visible-frame commitments.
+- Hosted release publication must resolve the capsule once, validate its chain digest and path, and upload only that exact pair.
+- Startup, browser, Run, disposition, evidence, viewport, timeout, and interruption failures must remain distinct, return nonzero, clean up only owned processes, persist no success, and preserve the last successful artifact pair.
+- The core recording must add no authority and must not depend on federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, or live ModelArk capacity.
 
 ## Reliability requirements
 
@@ -326,6 +350,8 @@ This journey describes the complete product direction, including later roadmap p
 ## Later-phase success metrics
 
 - The complete success, rejection, repair, and continuity story finishes in 6.3 seconds under deterministic production-browser automation and fits in a rehearsed three-minute live demonstration.
+- The Phase 22 target completes the real Runtime Promotion, Quarantine, and Repair story from one action, with exactly three fresh Runs and a verified signed chain, inside a three-minute 1280 by 720 recording.
+- The same Outcome Brief and verifier controls remain complete and usable at 390 CSS pixels.
 
 ## Release scope
 
@@ -369,6 +395,7 @@ The receiver exposes the committed digest after approval or denial, rejects cont
 Phase 19 closes the producer-to-receiver path in one receiver-signed custody packet that independently verifies the source work, Admission, optional Approval, receiver authority, terminal Validation commitment, and Canonical State disposition.
 Phase 20 turns that packet into a zero-upload proof room with a five-node verified story, separate producer and receiver trust roots, and disposable tamper attacks that never mutate the original evidence.
 Phase 21 turns the manual live ModelArk journey into one bounded browser-driven proof command whose success requires the complete Promotion plus independently verified signed evidence.
+Phase 22 turns the reproducible real Runtime proof into the canonical recording path without importing provider capacity or later-phase product breadth into the core story.
 These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 
 ## Known limitations
@@ -400,3 +427,4 @@ Receiver-controlled federated admission policy, replay identity, current distrus
 Append-only local approval and denial, immutable bundle staging, deterministic Candidate resume, and dual-authority Promotion recovery are resolved in [ADR 0019](../adr/0019-resume-pending-federated-admissions-with-append-only-local-decisions.md).
 
 The [implementation Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) and [post-hackathon trust-protocol map](https://github.com/Kk120306/agent-airlock/issues/10) are the canonical indexes for these decisions.
+The Phase 22 recording boundary is resolved by [Define the recording-grade real Runtime proof contract](https://github.com/Kk120306/agent-airlock/issues/36), and its implementation is tracked by [Build the recording-grade real Runtime proof path](https://github.com/Kk120306/agent-airlock/issues/37).

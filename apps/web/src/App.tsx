@@ -28,6 +28,20 @@ import type {
   TrustPolicyVerificationReport,
 } from "@agent-airlock/portable-promotion-receipt";
 import { api, ApiError, setAuthToken } from "./api";
+import {
+  advancesCanonicalState,
+  deriveRecordingReplayHydration,
+  hasDistinctRepairEffectKey,
+  hasExactRecordingDecisionChain,
+  hasExactRecordingEffect,
+  hasExactRecordingResources,
+  hasExactFreshRecordingRunIds,
+  hasRepairRecordingLineage,
+  hasRootRecordingLineage,
+  hasValidTerminalRecordingRun,
+  parseRecordingReplayRunIds,
+  type RecordingReplayRunIds,
+} from "./recording-outcome-policy";
 import type {
   Agent,
   AgentRun,
@@ -74,7 +88,10 @@ const protocolFixturePrompts = {
 const liveModelArkPrompt =
   "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.";
 
-function provesWholeAgentPromotion(run: AgentRun, expectedDatabaseValue: string) {
+function provesWholeAgentPromotion(
+  run: AgentRun,
+  expectedDatabaseValue: string,
+) {
   const transaction = run.transaction;
   if (!transaction || transaction.disposition !== "promoted") return false;
   const databaseValue = transaction.sqlite?.after?.rows.find(
@@ -197,6 +214,39 @@ function Spinner() {
   return <span className="spinner" aria-label="Loading" />;
 }
 
+type PortableVerifierArtifact =
+  | PortablePromotionEnvelope
+  | PortableEvidencePacket
+  | PortableDecisionChain
+  | ReceiverCustodyPacket;
+
+type AutomaticProofState = {
+  runId: string;
+  requestNonce: number;
+  status: "requested" | "verified" | "failed";
+  error?: string;
+  artifact?: PortableVerifierArtifact;
+  decisionCount?: number;
+  leafReceiptDigest?: ReceiptDigest | null;
+};
+
+type AutomaticProofVerification = {
+  valid: boolean;
+  error?: string;
+  artifact?: PortableVerifierArtifact;
+  decisionCount: number;
+  leafReceiptDigest?: ReceiptDigest | null;
+};
+
+type RecordingAttemptRunIds = RecordingReplayRunIds;
+
+type RecordingAttempt = {
+  baselineRunIds: string[];
+  agentId: string;
+  canonicalStateId: string;
+  runIds: RecordingAttemptRunIds | null;
+};
+
 function JudgeProofSummary({
   transaction,
 }: {
@@ -230,7 +280,8 @@ function JudgeProofSummary({
   ];
   const coherentResourceCount = builtInResourceKinds.filter((kind) =>
     transaction.resources.some(
-      (resource) => resource.kind === kind && resource.disposition === disposition,
+      (resource) =>
+        resource.kind === kind && resource.disposition === disposition,
     ),
   ).length;
   const deliveredEffects = transaction.externalActions.deliveredCount;
@@ -260,7 +311,9 @@ function JudgeProofSummary({
         <li data-state={candidatePrepared || terminal ? "passed" : "active"}>
           <span>{candidatePrepared || terminal ? "✓" : "1"}</span>
           <div>
-            <strong>{repaired ? "Quarantine lineage retained" : "Candidate isolated"}</strong>
+            <strong>
+              {repaired ? "Quarantine lineage retained" : "Candidate isolated"}
+            </strong>
             <small>
               {repaired
                 ? `Repair ${transaction.lineage.depth} is linked to rejected Run ${transaction.lineage.parentRunId?.slice(0, 8)}.`
@@ -281,16 +334,22 @@ function JudgeProofSummary({
         </li>
         <li
           data-state={
-            promoted || quarantined ? "passed" : terminal ? "blocked" : "pending"
+            promoted || quarantined
+              ? "passed"
+              : terminal
+                ? "blocked"
+                : "pending"
           }
         >
           <span>{promoted ? "✓" : terminal ? "✓" : "3"}</span>
           <div>
-            <strong>{promoted || quarantined
+            <strong>
+              {promoted || quarantined
               ? `${coherentResourceCount}/4 resources ${promoted ? "promoted" : "quarantined"}`
               : terminal
                 ? "Canonical State unchanged"
-                : "Promotion decision"}</strong>
+                  : "Promotion decision"}
+            </strong>
             <small>
               {promoted
                 ? `Workspace, session, SQLite, and outbox advanced together. Canonical State ${shortHash(transaction.canonicalContentHashBefore)} to ${shortHash(transaction.canonicalContentHashAfter)}.`
@@ -303,7 +362,11 @@ function JudgeProofSummary({
         <li data-state={promoted || terminal ? "passed" : "pending"}>
           <span>{promoted || terminal ? "✓" : "4"}</span>
           <div>
-            <strong>{promoted ? "Effect released after Promotion" : "External effects held back"}</strong>
+            <strong>
+              {promoted
+                ? "Effect released after Promotion"
+                : "External effects held back"}
+            </strong>
             <small>
               {promoted
                 ? `${deliveredEffects} typed effect${deliveredEffects === 1 ? "" : "s"} delivered only after Canonical State advanced.`
@@ -325,33 +388,51 @@ function ProtocolScenarioGuide({
   onRepair,
   onRequestProof,
   automaticProof,
+  recordingMode = false,
+  readOnlyReplayMode = false,
+  recordingRunIds = null,
+  onRecordingAttemptStart,
+  onRecordingAttemptComplete,
 }: {
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => Promise<AgentRun | null>;
   onRepair: (runId: string) => Promise<AgentRun | null>;
   onRequestProof: (runId: string) => void;
-  automaticProof: {
-    runId: string;
-    status: "requested" | "verified" | "failed";
-    error?: string;
-  } | null;
+  automaticProof: AutomaticProofState | null;
+  recordingMode?: boolean;
+  readOnlyReplayMode?: boolean;
+  recordingRunIds?: RecordingAttemptRunIds | null;
+  onRecordingAttemptStart?: () => void;
+  onRecordingAttemptComplete?: (runIds: RecordingAttemptRunIds) => void;
 }) {
   const [automationStage, setAutomationStage] = useState<
     "promote" | "quarantine" | "repair" | "verify" | null
   >(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
-  const promoted = runs.find(
+  const scenarioRuns = recordingMode
+    ? recordingRunIds
+      ? runs.filter((run) =>
+          [
+            recordingRunIds.safeRunId,
+            recordingRunIds.unsafeRunId,
+            recordingRunIds.repairedRunId,
+          ].includes(run.id),
+        )
+      : []
+    : runs;
+  const promoted = scenarioRuns.find(
     (run) =>
       !run.candidateSetId &&
       run.transaction?.disposition === "promoted" &&
       run.transaction.lineage.depth === 0 &&
       provesWholeAgentPromotion(run, "candidate-only"),
   );
-  const quarantined = runs.find(
-    (run) => !run.candidateSetId && run.transaction?.disposition === "quarantined",
+  const quarantined = scenarioRuns.find(
+    (run) =>
+      !run.candidateSetId && run.transaction?.disposition === "quarantined",
   );
-  const repaired = runs.find(
+  const repaired = scenarioRuns.find(
     (run) =>
       !run.candidateSetId &&
       run.transaction?.disposition === "promoted" &&
@@ -359,9 +440,10 @@ function ProtocolScenarioGuide({
   );
   const pairedComplete = promoted?.transaction && quarantined?.transaction;
   const complete = pairedComplete && repaired?.transaction;
-  const repairedProofStatus = repaired && automaticProof?.runId === repaired.id
-    ? automaticProof.status
-    : null;
+  const repairedProofStatus =
+    repaired && automaticProof?.runId === repaired.id
+      ? automaticProof.status
+      : null;
 
   useEffect(() => {
     if (repairedProofStatus === "verified") {
@@ -377,10 +459,14 @@ function ProtocolScenarioGuide({
   }, [automaticProof?.error, repairedProofStatus]);
 
   const runCompleteLoop = async () => {
+    if (readOnlyReplayMode) return;
+    if (recordingMode) onRecordingAttemptStart?.();
     setAutomationError(null);
     setAutomationStage("promote");
     try {
-      const safeRun = promoted ?? await onRun(protocolFixturePrompts.promote);
+      const safeRun = recordingMode
+        ? await onRun(protocolFixturePrompts.promote)
+        : (promoted ?? (await onRun(protocolFixturePrompts.promote)));
       if (!safeRun || !provesWholeAgentPromotion(safeRun, "candidate-only")) {
         setAutomationError(
           "Safety loop stopped: the passing Candidate did not produce the required Whole-Agent Promotion.",
@@ -389,7 +475,9 @@ function ProtocolScenarioGuide({
       }
 
       setAutomationStage("quarantine");
-      const rejectedRun = quarantined ?? await onRun(protocolFixturePrompts.challenge);
+      const rejectedRun = recordingMode
+        ? await onRun(protocolFixturePrompts.challenge)
+        : (quarantined ?? (await onRun(protocolFixturePrompts.challenge)));
       if (rejectedRun?.transaction?.disposition !== "quarantined") {
         setAutomationError(
           "Safety loop stopped: the invalid Candidate did not produce the required Quarantine decision.",
@@ -397,7 +485,7 @@ function ProtocolScenarioGuide({
         return;
       }
 
-      if (!repaired) {
+      if (recordingMode || !repaired) {
         setAutomationStage("repair");
         const repairRun = await onRepair(rejectedRun.id);
         if (
@@ -410,21 +498,33 @@ function ProtocolScenarioGuide({
           return;
         }
         setAutomationStage("verify");
+        if (recordingMode) {
+          onRecordingAttemptComplete?.({
+            safeRunId: safeRun.id,
+            unsafeRunId: rejectedRun.id,
+            repairedRunId: repairRun.id,
+          });
+        }
         onRequestProof(repairRun.id);
       }
     } finally {
-      setAutomationStage((current) => current === "verify" ? current : null);
+      setAutomationStage((current) => (current === "verify" ? current : null));
     }
   };
-  const automationLabel = automationStage === "promote"
-    ? "Running safe Candidate"
-    : automationStage === "quarantine"
-      ? "Proving rejection"
-      : automationStage === "repair"
-        ? "Repairing retained Candidate"
-        : automationStage === "verify"
-          ? "Verifying signed lineage"
-        : "Run complete safety loop";
+  const automationLabel =
+    automationStage === "promote"
+      ? "Running safe Candidate"
+      : automationStage === "quarantine"
+        ? "Proving rejection"
+        : automationStage === "repair"
+          ? "Repairing retained Candidate"
+          : automationStage === "verify"
+            ? "Verifying signed lineage"
+            : readOnlyReplayMode
+              ? "Loading read-only proof"
+              : recordingMode
+                ? "Prove this release is safe"
+                : "Run complete safety loop";
 
   return (
     <section className="protocol-scenario-guide" aria-label="Full safety loop">
@@ -445,7 +545,7 @@ function ProtocolScenarioGuide({
               onClick={() => repaired && onRequestProof(repaired.id)}
               disabled={busy || automationStage !== null || !repaired}
             >
-              <span aria-hidden="true">↻</span>
+              {!recordingMode && <span aria-hidden="true">↻</span>}
               {repairedProofStatus === "failed"
                 ? "Retry signed verification"
                 : "Verify signed recovery"}
@@ -456,9 +556,13 @@ function ProtocolScenarioGuide({
             type="button"
             className="button button-primary protocol-run-all"
             onClick={() => void runCompleteLoop()}
-            disabled={busy || automationStage !== null}
+            disabled={readOnlyReplayMode || busy || automationStage !== null}
           >
-            {automationStage ? <Spinner /> : <span aria-hidden="true">▶</span>}
+            {automationStage ? (
+              <Spinner />
+            ) : !recordingMode ? (
+              <span aria-hidden="true">▶</span>
+            ) : null}
             {automationLabel}
           </button>
         )}
@@ -471,12 +575,16 @@ function ProtocolScenarioGuide({
             setAutomationError(null);
             void onRun(protocolFixturePrompts.promote);
           }}
-          disabled={busy || automationStage !== null}
+          disabled={recordingMode || busy || automationStage !== null}
         >
           <span>{promoted ? "✓" : "1"}</span>
           <div>
-            <strong>{promoted ? "Safe future promoted" : "Run passing Candidate"}</strong>
-            <small>Code, memory, SQLite, and one deferred effect promote together.</small>
+            <strong>
+              {promoted ? "Safe future promoted" : "Run passing Candidate"}
+            </strong>
+            <small>
+              Code, memory, SQLite, and one deferred effect promote together.
+            </small>
           </div>
         </button>
         <button
@@ -486,14 +594,20 @@ function ProtocolScenarioGuide({
             setAutomationError(null);
             void onRun(protocolFixturePrompts.challenge);
           }}
-          disabled={busy || automationStage !== null || !promoted}
+          disabled={
+            recordingMode || busy || automationStage !== null || !promoted
+          }
         >
           <span>{quarantined ? "✓" : "2"}</span>
           <div>
             <strong>
-              {quarantined ? "Unsafe future quarantined" : "Run failing Candidate"}
+              {quarantined
+                ? "Unsafe future quarantined"
+                : "Run failing Candidate"}
             </strong>
-            <small>One required Validation fails and accepted reality does not move.</small>
+            <small>
+              One required Validation fails and accepted reality does not move.
+            </small>
           </div>
         </button>
         <button
@@ -503,12 +617,24 @@ function ProtocolScenarioGuide({
             setAutomationError(null);
             if (quarantined) void onRepair(quarantined.id);
           }}
-          disabled={busy || automationStage !== null || !quarantined || Boolean(repaired)}
+          disabled={
+            recordingMode ||
+            busy ||
+            automationStage !== null ||
+            !quarantined ||
+            Boolean(repaired)
+          }
         >
           <span>{repaired ? "✓" : "3"}</span>
           <div>
-            <strong>{repaired ? "Rejected future safely repaired" : "Repair retained Candidate"}</strong>
-            <small>Bounded failure evidence guides a fresh isolated Repair Run.</small>
+            <strong>
+              {repaired
+                ? "Rejected future safely repaired"
+                : "Repair retained Candidate"}
+            </strong>
+            <small>
+              Bounded failure evidence guides a fresh isolated Repair Run.
+            </small>
           </div>
         </button>
       </div>
@@ -544,10 +670,423 @@ function ProtocolScenarioGuide({
             </small>
           </div>
           <code>
-            {shortHash(quarantined.transaction!.canonicalContentHashBefore)} = {shortHash(quarantined.transaction!.canonicalContentHashAfter)}
+            {shortHash(quarantined.transaction!.canonicalContentHashBefore)} ={" "}
+            {shortHash(quarantined.transaction!.canonicalContentHashAfter)}
           </code>
         </div>
       )}
+    </section>
+  );
+}
+
+type RecordingOutcome = {
+  safe: AgentRun & { transaction: RunTransaction };
+  unsafe: AgentRun & { transaction: RunTransaction };
+  repaired: AgentRun & { transaction: RunTransaction };
+  safeRequired: { passed: number; total: number };
+  unsafeRequired: { passed: number; total: number };
+  repairedRequired: { passed: number; total: number };
+};
+
+function requiredValidationResult(transaction: RunTransaction) {
+  const required = transaction.validations.filter(
+    (validation) => validation.required,
+  );
+  return {
+    passed: required.filter((validation) => validation.status === "passed")
+      .length,
+    total: required.length,
+  };
+}
+
+function deriveRecordingOutcome(
+  runs: AgentRun[],
+  automaticProof: AutomaticProofState | null,
+  recordingAttempt: RecordingAttempt | null,
+): RecordingOutcome | null {
+  if (
+    !recordingAttempt?.runIds ||
+    automaticProof?.status !== "verified" ||
+    automaticProof.decisionCount !== 2 ||
+    automaticProof.artifact?.schema !==
+      "agent-airlock/portable-decision-chain" ||
+    automaticProof.artifact.packets.length !== 2 ||
+    !automaticProof.leafReceiptDigest
+  ) {
+    return null;
+  }
+
+  const { safeRunId, unsafeRunId, repairedRunId } = recordingAttempt.runIds;
+  const attemptRunIds = [safeRunId, unsafeRunId, repairedRunId];
+  if (
+    new Set(attemptRunIds).size !== 3 ||
+    !hasExactFreshRecordingRunIds(
+      runs.map((run) => run.id),
+      recordingAttempt.baselineRunIds,
+      attemptRunIds,
+    ) ||
+    automaticProof.runId !== repairedRunId
+  ) {
+    return null;
+  }
+
+  const repairedCandidate = runs.find((run) => run.id === repairedRunId);
+  if (!repairedCandidate?.transaction) return null;
+  const repaired = repairedCandidate as RecordingOutcome["repaired"];
+
+  const unsafeCandidate = runs.find((run) => run.id === unsafeRunId);
+  if (!unsafeCandidate?.transaction) return null;
+  const unsafe = unsafeCandidate as RecordingOutcome["unsafe"];
+
+  const safeCandidate = runs.find((run) => run.id === safeRunId);
+  if (!safeCandidate?.transaction) return null;
+  const safe = safeCandidate as RecordingOutcome["safe"];
+
+  const safeRequired = requiredValidationResult(safe.transaction);
+  const unsafeRequired = requiredValidationResult(unsafe.transaction);
+  const unsafeFailedRequired = unsafe.transaction.validations.some(
+    (validation) =>
+      validation.name === "command:protocol-content" &&
+      validation.required &&
+      validation.status === "failed",
+  );
+  const repairedRequired = requiredValidationResult(repaired.transaction);
+  const contractIdentity = JSON.stringify(safe.transaction.outcomeContract);
+  const safeSqliteCandidate = safe.transaction.sqlite?.candidate?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const safeSqliteAfter = safe.transaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const unsafeSqliteCandidate = unsafe.transaction.sqlite?.candidate?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const unsafeSqliteAfter = unsafe.transaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const repairedSqliteCandidate =
+    repaired.transaction.sqlite?.candidate?.rows.find(
+      (row) => row.id === "demo",
+    );
+  const repairedSqliteAfter = repaired.transaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const safeCreatedAt = Date.parse(safe.createdAt);
+  const unsafeCreatedAt = Date.parse(unsafe.createdAt);
+  const repairedCreatedAt = Date.parse(repaired.createdAt);
+  const coherent =
+    [safe, unsafe, repaired].every(
+      (run) =>
+        run.status === "completed" &&
+        run.candidateSetId === null &&
+        run.competitorId === null,
+    ) &&
+    safe.agentId === recordingAttempt.agentId &&
+    safe.agentId === unsafe.agentId &&
+    safe.agentId === repaired.agentId &&
+    safe.transaction.canonicalStateIdBefore ===
+      recordingAttempt.canonicalStateId &&
+    hasValidTerminalRecordingRun(safe, "promoted") &&
+    hasValidTerminalRecordingRun(unsafe, "quarantined") &&
+    hasValidTerminalRecordingRun(repaired, "promoted") &&
+    [safeCreatedAt, unsafeCreatedAt, repairedCreatedAt].every(
+      Number.isFinite,
+    ) &&
+    safeCreatedAt < unsafeCreatedAt &&
+    unsafeCreatedAt < repairedCreatedAt &&
+    safe.transaction.disposition === "promoted" &&
+    hasRootRecordingLineage(safe) &&
+    advancesCanonicalState(safe.transaction) &&
+    safeRequired.total > 0 &&
+    safeRequired.passed === safeRequired.total &&
+    unsafe.transaction.disposition === "quarantined" &&
+    hasRootRecordingLineage(unsafe) &&
+    unsafeFailedRequired &&
+    repaired.transaction.disposition === "promoted" &&
+    hasRepairRecordingLineage(repaired, unsafe) &&
+    advancesCanonicalState(repaired.transaction) &&
+    repairedRequired.total > 0 &&
+    repairedRequired.passed === repairedRequired.total &&
+    safe.transaction.outcomeContractVersion ===
+      unsafe.transaction.outcomeContractVersion &&
+    safe.transaction.outcomeContractVersion ===
+      repaired.transaction.outcomeContractVersion &&
+    JSON.stringify(unsafe.transaction.outcomeContract) === contractIdentity &&
+    JSON.stringify(repaired.transaction.outcomeContract) === contractIdentity &&
+    hasExactRecordingResources(safe.transaction, "promoted") &&
+    hasExactRecordingResources(unsafe.transaction, "quarantined") &&
+    hasExactRecordingResources(repaired.transaction, "promoted") &&
+    safe.transaction.canonicalStateIdAfter ===
+      unsafe.transaction.canonicalStateIdBefore &&
+    safe.transaction.canonicalContentHashAfter ===
+      unsafe.transaction.canonicalContentHashBefore &&
+    unsafe.transaction.canonicalStateIdAfter ===
+      unsafe.transaction.canonicalStateIdBefore &&
+    unsafe.transaction.canonicalContentHashAfter ===
+      unsafe.transaction.canonicalContentHashBefore &&
+    unsafe.transaction.canonicalStateIdAfter ===
+      repaired.transaction.canonicalStateIdBefore &&
+    unsafe.transaction.canonicalContentHashAfter ===
+      repaired.transaction.canonicalContentHashBefore &&
+    hasExactRecordingEffect(safe.transaction, {
+      id: "protocol-release-ready",
+      status: "delivered",
+      deliveredCount: 1,
+    }) &&
+    safe.transaction.recovery.journalPhase === "completed" &&
+    safeSqliteCandidate?.value === "candidate-only" &&
+    safeSqliteAfter?.value === "candidate-only" &&
+    hasExactRecordingEffect(unsafe.transaction, {
+      id: "protocol-unsafe",
+      status: "rejected",
+      deliveredCount: 0,
+    }) &&
+    unsafeSqliteCandidate?.value === "unsafe-candidate" &&
+    unsafeSqliteAfter?.value === "candidate-only" &&
+    hasExactRecordingEffect(repaired.transaction, {
+      id: "protocol-repair-ready",
+      status: "delivered",
+      deliveredCount: 1,
+    }) &&
+    repaired.transaction.recovery.journalPhase === "completed" &&
+    repairedSqliteCandidate?.value === "candidate-only" &&
+    repairedSqliteAfter?.value === "candidate-only" &&
+    hasDistinctRepairEffectKey(
+      safe.transaction,
+      unsafe.transaction,
+      repaired.transaction,
+    ) &&
+    hasExactRecordingDecisionChain(
+      automaticProof.artifact,
+      unsafe,
+      repaired,
+      automaticProof.leafReceiptDigest,
+    );
+
+  return coherent
+    ? { safe, unsafe, repaired, safeRequired, unsafeRequired, repairedRequired }
+    : null;
+}
+
+function RecordingOutcomeBrief({
+  outcome,
+  system,
+  onOpenVerifier,
+}: {
+  outcome: RecordingOutcome;
+  system: SystemInfo;
+  onOpenVerifier: () => void;
+}) {
+  const safeTransaction = outcome.safe.transaction;
+  const unsafeTransaction = outcome.unsafe.transaction;
+  const repairedTransaction = outcome.repaired.transaction;
+
+  return (
+    <section className="recording-outcome" aria-label="Verified Outcome Brief">
+      <header className="recording-outcome-heading">
+        <div>
+          <span className="eyebrow">Verified Outcome Brief</span>
+          <h1>One release. Three futures. Only validated reality moves.</h1>
+          <p>
+            Every result below is reconstructed from persisted Run transactions
+            and the independently verified signed decision chain.
+          </p>
+        </div>
+        <span className="recording-verdict">Release proven safe</span>
+      </header>
+
+      <div className="recording-boundary" role="note">
+        <div>
+          <strong>Disclosed execution boundary</strong>
+          <p>
+            {system.runtime} · local deterministic Responses fixture · no
+            ModelArk request or paid inference
+          </p>
+        </div>
+      </div>
+
+      <div className="recording-outcome-grid">
+        <article data-outcome="promoted">
+          <header>
+            <span>01 · SAFE ROOT · RUN {outcome.safe.id.slice(0, 8)}</span>
+            <strong>Promotion</strong>
+          </header>
+          <h2>A valid future became accepted reality.</h2>
+          <ul>
+            <li>
+              <strong>
+                {outcome.safeRequired.passed}/{outcome.safeRequired.total}
+              </strong>
+              <span>required Validations passed</span>
+            </li>
+            <li>
+              <strong>
+                {safeTransaction.resources.length}/4 +{" "}
+                {safeTransaction.externalActions.deliveredCount}
+              </strong>
+              <span>resources promoted + post-Promotion effect</span>
+            </li>
+            <li>
+              <strong>
+                {shortHash(safeTransaction.canonicalContentHashBefore).slice(
+                  0,
+                  8,
+                )}{" "}
+                →{" "}
+                {shortHash(safeTransaction.canonicalContentHashAfter).slice(
+                  0,
+                  8,
+                )}
+              </strong>
+              <span>Canonical fingerprint advanced</span>
+            </li>
+          </ul>
+          <div
+            className="recording-exact-run"
+            data-recording-run-id={outcome.safe.id}
+          >
+            <span>Exact evidence</span>
+            <code>Run {outcome.safe.id}</code>
+          </div>
+        </article>
+
+        <article data-outcome="quarantined">
+          <header>
+            <span>
+              02 · UNSAFE FUTURE · RUN {outcome.unsafe.id.slice(0, 8)}
+            </span>
+            <strong>Quarantine</strong>
+          </header>
+          <h2>An invalid future was retained, never accepted.</h2>
+          <ul>
+            <li>
+              <strong>
+                {outcome.unsafeRequired.total - outcome.unsafeRequired.passed}{" "}
+                failed · {unsafeTransaction.resources.length}/4 quarantined
+              </strong>
+              <span>required Validation blocked every resource</span>
+            </li>
+            <li>
+              <strong>
+                {shortHash(unsafeTransaction.canonicalContentHashBefore).slice(
+                  0,
+                  8,
+                )}{" "}
+                ={" "}
+                {shortHash(unsafeTransaction.canonicalContentHashAfter).slice(
+                  0,
+                  8,
+                )}
+              </strong>
+              <span>identical Canonical fingerprint</span>
+            </li>
+            <li>
+              <strong>
+                {unsafeTransaction.externalActions.deliveredCount}
+              </strong>
+              <span>effects delivered</span>
+            </li>
+          </ul>
+          <div
+            className="recording-exact-run"
+            data-recording-run-id={outcome.unsafe.id}
+          >
+            <span>Exact evidence</span>
+            <code>Run {outcome.unsafe.id}</code>
+          </div>
+        </article>
+
+        <article data-outcome="repaired">
+          <header>
+            <span>
+              03 · REPAIRED CHILD · RUN {outcome.repaired.id.slice(0, 8)}
+            </span>
+            <strong>Promotion</strong>
+          </header>
+          <h2>Bounded failure evidence guided a safe new future.</h2>
+          <ul>
+            <li>
+              <strong>
+                {outcome.repairedRequired.passed}/
+                {outcome.repairedRequired.total} passed · Depth{" "}
+                {repairedTransaction.lineage.depth}
+              </strong>
+              <span>
+                required Validations · parent{" "}
+                {repairedTransaction.lineage.parentRunId!.slice(0, 8)}
+              </span>
+            </li>
+            <li>
+              <strong>
+                {repairedTransaction.resources.length}/4 +{" "}
+                {repairedTransaction.externalActions.deliveredCount}
+              </strong>
+              <span>resources promoted + fresh effect</span>
+            </li>
+            <li>
+              <strong>
+                {shortHash(
+                  repairedTransaction.canonicalContentHashBefore,
+                ).slice(0, 8)}{" "}
+                →{" "}
+                {shortHash(repairedTransaction.canonicalContentHashAfter).slice(
+                  0,
+                  8,
+                )}
+              </strong>
+              <span>Canonical fingerprint advanced</span>
+            </li>
+          </ul>
+          <div
+            className="recording-exact-run recording-exact-run-lineage"
+            data-recording-run-id={outcome.repaired.id}
+            data-recording-parent-id={
+              repairedTransaction.lineage.parentRunId ?? undefined
+            }
+          >
+            <span>Exact evidence</span>
+            <code>Run {outcome.repaired.id}</code>
+            <code>Parent {repairedTransaction.lineage.parentRunId}</code>
+          </div>
+        </article>
+
+        <article data-outcome="verified">
+          <header>
+            <span>04 · PORTABLE TRUST</span>
+            <strong>Verified</strong>
+          </header>
+          <h2>An independent verifier can check the recovery chain.</h2>
+          <ul>
+            <li>
+              <strong>2</strong>
+              <span>signed decisions linked</span>
+            </li>
+            <li>
+              <strong>Local</strong>
+              <span>browser cryptographic check passed</span>
+            </li>
+            <li>
+              <strong>All</strong>
+              <span>parent links and state handoffs verified</span>
+            </li>
+          </ul>
+          <button
+            type="button"
+            className="button button-primary recording-verifier-button"
+            onClick={onOpenVerifier}
+          >
+            Inspect in zero-upload verifier
+          </button>
+        </article>
+      </div>
+
+      <footer>
+        <span>
+          Candidate State (attempted future) → Outcome Contract → Canonical
+          State (accepted reality) or Quarantine
+        </span>
+        <strong>No trust claim depends on chat text.</strong>
+      </footer>
     </section>
   );
 }
@@ -563,8 +1102,7 @@ function LiveModelArkGuide({
 }) {
   const promoted = runs.find(
     (run) =>
-      !run.candidateSetId &&
-      provesWholeAgentPromotion(run, "modelark-live"),
+      !run.candidateSetId && provesWholeAgentPromotion(run, "modelark-live"),
   );
   const partialPromotion = runs.find(
     (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
@@ -576,7 +1114,10 @@ function LiveModelArkGuide({
   const preflightBound = hasBoundModelArkPreflight(executionProfile);
 
   return (
-    <section className="protocol-scenario-guide modelark-live-guide" aria-label="Live ModelArk proof">
+    <section
+      className="protocol-scenario-guide modelark-live-guide"
+      aria-label="Live ModelArk proof"
+    >
       <header>
         <div>
           <span className="eyebrow">Provider proof</span>
@@ -599,8 +1140,12 @@ function LiveModelArkGuide({
         >
           <span>{completed ? "✓" : "1"}</span>
           <div>
-            <strong>{completed ? "Run another live Candidate" : "Run live Candidate"}</strong>
-            <small>ModelArk must prepare code, data, memory, and one deferred effect.</small>
+            <strong>
+              {completed ? "Run another live Candidate" : "Run live Candidate"}
+            </strong>
+            <small>
+              ModelArk must prepare code, data, memory, and one deferred effect.
+            </small>
           </div>
         </button>
       </div>
@@ -619,7 +1164,9 @@ function LiveModelArkGuide({
                 : "Isolated Candidate passed the required state check and advanced Canonical State."}
             </small>
           </div>
-          <code>{shortHash(promoted.transaction.canonicalContentHashAfter)}</code>
+          <code>
+            {shortHash(promoted.transaction.canonicalContentHashAfter)}
+          </code>
         </div>
       )}
     </section>
@@ -663,12 +1210,6 @@ function PortableProofDetails({
     </details>
   );
 }
-
-type PortableVerifierArtifact =
-  | PortablePromotionEnvelope
-  | PortableEvidencePacket
-  | PortableDecisionChain
-  | ReceiverCustodyPacket;
 
 const custodyNonClaims = [
   "This proof does not establish that Runtime isolation was sufficient.",
@@ -758,7 +1299,9 @@ function CustodyPolicyControl({
     if (!file) return;
     setError(null);
     if (file.size < 1 || file.size > maximumBytes) {
-      setError(`${role} ${kind} file is empty or exceeds its local byte limit.`);
+      setError(
+        `${role} ${kind} file is empty or exceeds its local byte limit.`,
+      );
       return;
     }
     try {
@@ -771,7 +1314,9 @@ function CustodyPolicyControl({
         setPolicySource(source);
       }
     } catch {
-      setError(`The browser could not read the ${role.toLowerCase()} ${kind} file.`);
+      setError(
+        `The browser could not read the ${role.toLowerCase()} ${kind} file.`,
+      );
     }
   };
 
@@ -779,7 +1324,9 @@ function CustodyPolicyControl({
     <section
       className="custody-trust-domain"
       aria-label={`${role} organizational trust policy`}
-      data-state={policyReport?.valid ? "verified" : policyReport ? "rejected" : "empty"}
+      data-state={
+        policyReport?.valid ? "verified" : policyReport ? "rejected" : "empty"
+      }
     >
       <div className="custody-trust-domain-heading">
         <span>{role}</span>
@@ -803,23 +1350,31 @@ function CustodyPolicyControl({
         />
       </label>
       <div className="custody-trust-files">
-        <label className="verifier-policy-file" data-loaded={rotationSource !== null}>
+        <label
+          className="verifier-policy-file"
+          data-loaded={rotationSource !== null}
+        >
           <input
             type="file"
             aria-label={`Import ${role.toLowerCase()} authority rotation`}
             accept="application/json,.json"
             onChange={(event) =>
-              void readArtifact(event.target.files?.[0], 65_536, "rotation")}
+              void readArtifact(event.target.files?.[0], 65_536, "rotation")
+            }
           />
           <span>{rotationFilename ?? "Optional rotation"}</span>
         </label>
-        <label className="verifier-policy-file" data-loaded={policySource !== null}>
+        <label
+          className="verifier-policy-file"
+          data-loaded={policySource !== null}
+        >
           <input
             type="file"
             aria-label={`Import ${role.toLowerCase()} signed policy`}
             accept="application/json,.json"
             onChange={(event) =>
-              void readArtifact(event.target.files?.[0], 131_072, "policy")}
+              void readArtifact(event.target.files?.[0], 131_072, "policy")
+            }
           />
           <span>{policyFilename ?? "Import signed policy"}</span>
         </label>
@@ -832,7 +1387,9 @@ function CustodyPolicyControl({
         </small>
       )}
       {policyReport && !policyReport.valid && (
-        <small>{policyReport.checks.find((check) => !check.valid)?.detail}</small>
+        <small>
+          {policyReport.checks.find((check) => !check.valid)?.detail}
+        </small>
       )}
       {error && <small role="alert">{error}</small>}
     </section>
@@ -896,7 +1453,9 @@ function CustodyProofRoom({
     setTamperAttack(attack);
     try {
       const copy = createReceiverCustodyTamperedCopy(packet, attack);
-      setTamperReport(await verifyReceiverCustodyPacketJsonInBrowser(JSON.stringify(copy)));
+      setTamperReport(
+        await verifyReceiverCustodyPacketJsonInBrowser(JSON.stringify(copy)),
+      );
       window.setTimeout(() => tamperRef.current?.focus(), 0);
     } finally {
       setTamperBusy(false);
@@ -904,19 +1463,29 @@ function CustodyProofRoom({
   };
 
   const story = report.story;
-  const failedCheck = tamperReport?.checks.find((check) => !check.valid) ?? null;
-  const trustComplete = trustReport?.policiesDistinct === true &&
-    trustReport.producer?.trusted === true && trustReport.receiver?.trusted === true;
+  const failedCheck =
+    tamperReport?.checks.find((check) => !check.valid) ?? null;
+  const trustComplete =
+    trustReport?.policiesDistinct === true &&
+    trustReport.producer?.trusted === true &&
+    trustReport.receiver?.trusted === true;
 
   if (!report.valid || !story) {
     const failed = report.checks.find((check) => !check.valid);
     return (
       <div className="custody-proof-room" data-valid="false">
-        <div className="verifier-verdict" ref={verdictRef} tabIndex={-1} role="alert">
+        <div
+          className="verifier-verdict"
+          ref={verdictRef}
+          tabIndex={-1}
+          role="alert"
+        >
           <span aria-hidden="true">!</span>
           <div>
             <strong>Custody proof rejected</strong>
-            <small>{failed?.detail ?? "Do not rely on this custody evidence."}</small>
+            <small>
+              {failed?.detail ?? "Do not rely on this custody evidence."}
+            </small>
           </div>
         </div>
         <details className="custody-proof-details">
@@ -925,7 +1494,10 @@ function CustodyProofRoom({
             {report.checks.map((check) => (
               <div key={check.name} data-valid={check.valid}>
                 <span>{check.valid ? "PASS" : "FAIL"}</span>
-                <div><strong>{check.name}</strong><small>{check.detail}</small></div>
+                <div>
+                  <strong>{check.name}</strong>
+                  <small>{check.detail}</small>
+                </div>
               </div>
             ))}
           </div>
@@ -944,7 +1516,10 @@ function CustodyProofRoom({
       detail: `Admission ${compactProofId(story.authority.admissionId)}`,
     },
     {
-      name: story.approval === "operator-approved" ? "Local operator approved" : "Local policy admitted automatically",
+      name:
+        story.approval === "operator-approved"
+          ? "Local operator approved"
+          : "Local policy admitted automatically",
       detail: story.authority.decisionContextDigest
         ? `Review ${compactProofId(story.authority.decisionContextDigest)}`
         : "No human Approval Decision was required",
@@ -954,8 +1529,12 @@ function CustodyProofRoom({
       detail: `Evidence ${compactProofId(story.authority.validationEvidenceRoot)}`,
     },
     {
-      name: story.disposition === "promoted" ? "Canonical State advanced" : "Candidate quarantined",
-      detail: story.disposition === "promoted"
+      name:
+        story.disposition === "promoted"
+          ? "Canonical State advanced"
+          : "Candidate quarantined",
+      detail:
+        story.disposition === "promoted"
         ? `Accepted ${story.state.afterStateId}`
         : `Canonical State remained at ${story.state.beforeStateId}`,
     },
@@ -963,7 +1542,12 @@ function CustodyProofRoom({
 
   return (
     <div className="custody-proof-room" data-valid="true">
-      <div className="custody-primary-verdict" ref={verdictRef} tabIndex={-1} role="status">
+      <div
+        className="custody-primary-verdict"
+        ref={verdictRef}
+        tabIndex={-1}
+        role="status"
+      >
         <span aria-hidden="true">✓</span>
         <div>
           <strong>
@@ -977,9 +1561,16 @@ function CustodyProofRoom({
               : "Canonical State remained at the verified before-state."}
           </small>
         </div>
-        <div className="custody-verdict-pills" aria-label="Independent verdicts">
+        <div
+          className="custody-verdict-pills"
+          aria-label="Independent verdicts"
+        >
           <span data-state="valid">Cryptographically valid</span>
-          <span data-state={trustComplete ? "valid" : trustReport ? "failed" : "neutral"}>
+          <span
+            data-state={
+              trustComplete ? "valid" : trustReport ? "failed" : "neutral"
+            }
+          >
             {trustComplete
               ? "Both trust domains authorized"
               : trustReport && !trustReport.policiesDistinct
@@ -989,16 +1580,24 @@ function CustodyProofRoom({
         </div>
       </div>
 
-      <section className="custody-story" aria-label="Verified receiver custody path">
+      <section
+        className="custody-story"
+        aria-label="Verified receiver custody path"
+      >
         <div>
           <span className="eyebrow">Verified causal path</span>
-          <strong>One signed handoff, five independently checked custody hops</strong>
+          <strong>
+            One signed handoff, five independently checked custody hops
+          </strong>
         </div>
         <ol>
           {nodes.map((node, index) => (
             <li key={node.name}>
               <span>{String(index + 1).padStart(2, "0")}</span>
-              <div><strong>{node.name}</strong><small>{node.detail}</small></div>
+              <div>
+                <strong>{node.name}</strong>
+                <small>{node.detail}</small>
+              </div>
             </li>
           ))}
         </ol>
@@ -1007,8 +1606,9 @@ function CustodyProofRoom({
       <details className="custody-trust" open={false}>
         <summary>Evaluate organizational trust</summary>
         <p>
-          Supply producer and receiver policy roots separately. The packet cannot
-          authorize either signer or prefill either evaluator-controlled root.
+          Supply producer and receiver policy roots separately. The packet
+          cannot authorize either signer or prefill either evaluator-controlled
+          root.
         </p>
         <div className="custody-trust-grid">
           <CustodyPolicyControl role="Producer" onPolicy={onProducerPolicy} />
@@ -1018,7 +1618,12 @@ function CustodyProofRoom({
           {(["producer", "receiver"] as const).map((role) => {
             const result = trustReport?.[role] ?? null;
             return (
-              <div key={role} data-state={result ? result.trusted ? "valid" : "failed" : "neutral"}>
+              <div
+                key={role}
+                data-state={
+                  result ? (result.trusted ? "valid" : "failed") : "neutral"
+                }
+              >
                 <strong>{role === "producer" ? "Producer" : "Receiver"}</strong>
                 <small>{result?.detail ?? "Trust not evaluated"}</small>
               </div>
@@ -1027,30 +1632,70 @@ function CustodyProofRoom({
         </div>
       </details>
 
-      <section className="custody-tamper-lab" aria-label="Disposable custody proof attacks">
+      <section
+        className="custody-tamper-lab"
+        aria-label="Disposable custody proof attacks"
+      >
         <div>
           <span className="eyebrow">Tamper lab</span>
           <strong>Attack a disposable copy</strong>
-          <small>The imported original remains verified and unchanged in memory.</small>
+          <small>
+            The imported original remains verified and unchanged in memory.
+          </small>
         </div>
         <div className="custody-attack-actions">
-          <button type="button" disabled={tamperBusy} onClick={() => void runAttack("remove-admission")}>Remove Admission</button>
-          <button type="button" disabled={tamperBusy} onClick={() => void runAttack("alter-reviewed-evidence")}>Alter reviewed evidence</button>
-          <button type="button" disabled={tamperBusy} onClick={() => void runAttack("rewrite-disposition")}>Rewrite disposition</button>
+          <button
+            type="button"
+            disabled={tamperBusy}
+            onClick={() => void runAttack("remove-admission")}
+          >
+            Remove Admission
+          </button>
+          <button
+            type="button"
+            disabled={tamperBusy}
+            onClick={() => void runAttack("alter-reviewed-evidence")}
+          >
+            Alter reviewed evidence
+          </button>
+          <button
+            type="button"
+            disabled={tamperBusy}
+            onClick={() => void runAttack("rewrite-disposition")}
+          >
+            Rewrite disposition
+          </button>
         </div>
         {tamperReport && (
-          <div className="custody-attack-result" ref={tamperRef} tabIndex={-1} role="status">
+          <div
+            className="custody-attack-result"
+            ref={tamperRef}
+            tabIndex={-1}
+            role="status"
+          >
             <span aria-hidden="true">!</span>
             <div>
-              <strong>Attack detected at {failedCheck?.name ?? "custody boundary"}</strong>
-              <small>{failedCheck?.detail ?? "The disposable copy was rejected."}</small>
-              <button type="button" onClick={() => { setTamperAttack(null); setTamperReport(null); }}>
+              <strong>
+                Attack detected at {failedCheck?.name ?? "custody boundary"}
+              </strong>
+              <small>
+                {failedCheck?.detail ?? "The disposable copy was rejected."}
+              </small>
+              <button
+                type="button"
+                onClick={() => {
+                  setTamperAttack(null);
+                  setTamperReport(null);
+                }}
+              >
                 Reset disposable copy
               </button>
             </div>
           </div>
         )}
-        {tamperAttack && !tamperReport && <small>Verifying disposable attack locally…</small>}
+        {tamperAttack && !tamperReport && (
+          <small>Verifying disposable attack locally…</small>
+        )}
       </section>
 
       <details className="custody-proof-details">
@@ -1059,21 +1704,40 @@ function CustodyProofRoom({
           {report.checks.map((check) => (
             <div key={check.name} data-valid={check.valid}>
               <span>PASS</span>
-              <div><strong>{check.name}</strong><small>{check.detail}</small></div>
+              <div>
+                <strong>{check.name}</strong>
+                <small>{check.detail}</small>
+              </div>
             </div>
           ))}
         </div>
         <div className="verifier-identities">
-          <div><span>Producer receipt</span><code>{story.producer.receiptDigest}</code></div>
-          <div><span>Receiver receipt</span><code>{story.receiver.receiptDigest}</code></div>
-          <div><span>Before state</span><code>{story.state.beforeCompositeHash}</code></div>
-          <div><span>After state</span><code>{story.state.afterCompositeHash}</code></div>
+          <div>
+            <span>Producer receipt</span>
+            <code>{story.producer.receiptDigest}</code>
+          </div>
+          <div>
+            <span>Receiver receipt</span>
+            <code>{story.receiver.receiptDigest}</code>
+          </div>
+          <div>
+            <span>Before state</span>
+            <code>{story.state.beforeCompositeHash}</code>
+          </div>
+          <div>
+            <span>After state</span>
+            <code>{story.state.afterCompositeHash}</code>
+          </div>
         </div>
       </details>
 
       <details className="verifier-limitations">
         <summary>What this proof does not establish</summary>
-        <ul>{custodyNonClaims.map((claim) => <li key={claim}>{claim}</li>)}</ul>
+        <ul>
+          {custodyNonClaims.map((claim) => (
+            <li key={claim}>{claim}</li>
+          ))}
+        </ul>
       </details>
     </div>
   );
@@ -1094,26 +1758,35 @@ function ReceiptVerifier({
     useState<PortableDecisionChainVerificationReport | null>(null);
   const [decisionChain, setDecisionChain] =
     useState<PortableDecisionChain | null>(null);
-  const [envelope, setEnvelope] = useState<PortablePromotionEnvelope | null>(null);
+  const [envelope, setEnvelope] = useState<PortablePromotionEnvelope | null>(
+    null,
+  );
   const [custodyPacket, setCustodyPacket] =
     useState<ReceiverCustodyPacket | null>(null);
   const [custodyReport, setCustodyReport] =
     useState<ReceiverCustodyVerificationReport | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [trustPolicySource, setTrustPolicySource] = useState<string | null>(null);
+  const [trustPolicySource, setTrustPolicySource] = useState<string | null>(
+    null,
+  );
   const [trustPolicyReport, setTrustPolicyReport] =
     useState<TrustPolicyVerificationReport | null>(null);
   const [authorityFingerprint, setAuthorityFingerprint] = useState("");
-  const [authorityRotationSource, setAuthorityRotationSource] =
-    useState<string | null>(null);
+  const [authorityRotationSource, setAuthorityRotationSource] = useState<
+    string | null
+  >(null);
   const [authorityRotationReport, setAuthorityRotationReport] =
     useState<PolicyAuthorityRotationVerificationReport | null>(null);
-  const [authorityRotationFilename, setAuthorityRotationFilename] =
-    useState<string | null>(null);
-  const [authorityRotationError, setAuthorityRotationError] =
-    useState<string | null>(null);
-  const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(null);
+  const [authorityRotationFilename, setAuthorityRotationFilename] = useState<
+    string | null
+  >(null);
+  const [authorityRotationError, setAuthorityRotationError] = useState<
+    string | null
+  >(null);
+  const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(
+    null,
+  );
   const [trustPolicyError, setTrustPolicyError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [decisionBusy, setDecisionBusy] = useState<"approve" | "deny" | null>(
@@ -1121,7 +1794,8 @@ function ReceiptVerifier({
   );
   const [approvalReason, setApprovalReason] = useState("");
 
-  const verifySource = useCallback(async (source: string, sourceName: string) => {
+  const verifySource = useCallback(
+    async (source: string, sourceName: string) => {
     setFilename(sourceName);
     setReport(null);
     setPacketReport(null);
@@ -1134,7 +1808,9 @@ function ReceiptVerifier({
     setBusy(true);
     try {
       const parsed = JSON.parse(source) as PortableVerifierArtifact;
-      if (parsed.schema === "agent-airlock/portable-receiver-chain-of-custody") {
+        if (
+          parsed.schema === "agent-airlock/portable-receiver-chain-of-custody"
+        ) {
         const nextCustodyReport =
           await verifyReceiverCustodyPacketJsonInBrowser(source);
         setCustodyPacket(parsed);
@@ -1159,7 +1835,8 @@ function ReceiptVerifier({
         setReport(nextPacketReport.receipt);
         if (nextPacketReport.valid) setEnvelope(parsed.envelope);
       } else {
-        const nextReport = await verifyPortablePromotionEnvelopeJsonInBrowser(source);
+          const nextReport =
+            await verifyPortablePromotionEnvelopeJsonInBrowser(source);
         setReport(nextReport);
         if (nextReport.valid) setEnvelope(parsed);
       }
@@ -1168,10 +1845,13 @@ function ReceiptVerifier({
     } finally {
       setBusy(false);
     }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
-    openerRef.current = document.activeElement instanceof HTMLElement
+    openerRef.current =
+      document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
     const previousOverflow = document.body.style.overflow;
@@ -1189,11 +1869,13 @@ function ReceiptVerifier({
 
   useEffect(() => {
     if (!initialArtifact) return;
-    const sourceName = initialArtifact.schema === "agent-airlock/portable-decision-chain"
+    const sourceName =
+      initialArtifact.schema === "agent-airlock/portable-decision-chain"
       ? "Generated decision chain"
       : initialArtifact.schema === "agent-airlock/portable-evidence-packet"
         ? "Generated evidence packet"
-        : initialArtifact.schema === "agent-airlock/portable-receiver-chain-of-custody"
+          : initialArtifact.schema ===
+              "agent-airlock/portable-receiver-chain-of-custody"
           ? "Generated receiver custody proof"
           : "Generated receipt";
     void verifySource(JSON.stringify(initialArtifact), sourceName);
@@ -1255,7 +1937,9 @@ function ReceiptVerifier({
   const verifyFile = async (file: File | undefined) => {
     if (!file) return;
     if (file.size < 1 || file.size > 16 * 1_048_576) {
-      setError("Choose a non-empty receiver custody proof no larger than 16 MB, or another portable proof no larger than 4 MB.");
+      setError(
+        "Choose a non-empty receiver custody proof no larger than 16 MB, or another portable proof no larger than 4 MB.",
+      );
       return;
     }
     try {
@@ -1272,14 +1956,18 @@ function ReceiptVerifier({
     setTrustPolicyReport(null);
     setTrustPolicyError(null);
     if (file.size < 1 || file.size > 131_072) {
-      setTrustPolicyError("Choose a non-empty signed trust policy no larger than 128 KB.");
+      setTrustPolicyError(
+        "Choose a non-empty signed trust policy no larger than 128 KB.",
+      );
       return;
     }
     try {
       setTrustPolicySource(await file.text());
     } catch (reason) {
       setTrustPolicyError(
-        reason instanceof Error ? reason.message : "The trust policy is invalid.",
+        reason instanceof Error
+          ? reason.message
+          : "The trust policy is invalid.",
       );
     }
   };
@@ -1312,17 +2000,23 @@ function ReceiptVerifier({
     : false;
   const organizationalTrustEvaluations =
     report && envelope && trustPolicyReport?.valid && trustPolicyReport.policy
-      ? (decisionChain?.packets.map((packet) => packet.envelope) ?? [envelope]).map(
-          (candidateEnvelope) =>
-            evaluateSigningKeyTrust(candidateEnvelope, trustPolicyReport.policy!, {
+      ? (
+          decisionChain?.packets.map((packet) => packet.envelope) ?? [envelope]
+        ).map((candidateEnvelope) =>
+          evaluateSigningKeyTrust(
+            candidateEnvelope,
+            trustPolicyReport.policy!,
+            {
               cryptographicValid: evidenceValid,
-            }),
+            },
+          ),
         )
       : [];
   const failedOrganizationalTrust = organizationalTrustEvaluations.find(
     (evaluation) => !evaluation.trusted,
   );
-  const organizationalTrust = organizationalTrustEvaluations.length > 0
+  const organizationalTrust =
+    organizationalTrustEvaluations.length > 0
     ? {
         trusted: failedOrganizationalTrust === undefined,
         detail: failedOrganizationalTrust
@@ -1332,6 +2026,11 @@ function ReceiptVerifier({
             : organizationalTrustEvaluations[0]!.detail,
         policyId: organizationalTrustEvaluations[0]!.policyId,
       }
+    : null;
+  const recordingChainRoot = decisionChain?.packets[0]?.envelope ?? null;
+  const recordingChainLeaf = decisionChain?.packets.at(-1)?.envelope ?? null;
+  const recordingHandoffHash = recordingChainRoot
+    ? shortHash(recordingChainRoot.receipt.state.after.compositeHash)
     : null;
 
   return (
@@ -1346,30 +2045,88 @@ function ReceiptVerifier({
         <header className="receipt-verifier-heading">
           <div>
             <span className="eyebrow">Independent verifier</span>
-            <h2 id="receipt-verifier-title">Verify trust without trusting this server</h2>
+            <h2 id="receipt-verifier-title">
+              Verify trust without trusting this server
+            </h2>
             <p>
-              Your file stays in this browser. Web Crypto checks the canonical SHA-256
-              digest, Ed25519 signature, included key identity, disclosed Merkle proofs,
-              complete Repair lineage, transparency inclusion, and digest-only calldata
-              when present.
+              Your file stays in this browser. Web Crypto checks the canonical
+              SHA-256 digest, Ed25519 signature, included key identity,
+              disclosed Merkle proofs, complete Repair lineage, transparency
+              inclusion, and digest-only calldata when present.
             </p>
           </div>
-          <button type="button" aria-label="Close receipt verifier" onClick={onClose}>×</button>
+          <button
+            type="button"
+            aria-label="Close receipt verifier"
+            onClick={onClose}
+          >
+            ×
+          </button>
         </header>
 
         <div className="verifier-boundary" role="note">
           <span>LOCAL ONLY</span>
-          <strong>0 API calls · 0 uploads · 16 MB custody / 4 MB other proofs</strong>
+          <strong>
+            0 API calls · 0 uploads
+            {chainReport?.valid
+              ? ` · ${chainReport.packets.length} signed decisions linked`
+              : ""}
+            {" · 16 MB custody / 4 MB other proofs"}
+          </strong>
         </div>
 
-        <label className="receipt-dropzone" data-loaded={filename !== null}>
+        {chainReport?.valid && recordingChainRoot && recordingChainLeaf && (
+          <section
+            className="verifier-recording-proof"
+            aria-label="Verified chain summary"
+          >
+            <div data-recording-proof="signatures">
+              <span>Signatures</span>
+              <strong>
+                {chainReport.packets.filter((packet) => packet.valid).length}/
+                {chainReport.packets.length} valid
+              </strong>
+            </div>
+            <div data-recording-proof="parent-digest">
+              <span>Parent receipt digest link</span>
+              <strong>PASS</strong>
+            </div>
+            <div data-recording-proof="state-handoff">
+              <span>Canonical State handoff</span>
+              <code>
+                {recordingHandoffHash?.slice(0, 12)} ={" "}
+                {shortHash(
+                  recordingChainLeaf.receipt.state.before.compositeHash,
+                ).slice(0, 12)}
+              </code>
+            </div>
+            <div data-recording-proof="exact-lineage">
+              <span>Exact parent link</span>
+              <code>
+                Parent {recordingChainRoot.receipt.decision.runId} → Repair{" "}
+                {recordingChainLeaf.receipt.decision.runId}
+              </code>
+            </div>
+          </section>
+        )}
+
+        <label
+          className="receipt-dropzone"
+          data-loaded={filename !== null}
+          data-generated={initialArtifact !== null}
+        >
           <input
             type="file"
             accept="application/json,.json"
             onChange={(event) => void verifyFile(event.target.files?.[0])}
           />
           <span aria-hidden="true">⌁</span>
-          <strong>{filename ?? "Choose a receipt, custody proof, packet, or decision chain"}</strong>
+          <strong>
+            {initialArtifact
+              ? "Generated decision chain loaded"
+              : (filename ??
+                "Choose a receipt, custody proof, packet, or decision chain")}
+          </strong>
           <small>
             {busy
               ? "Verifying locally…"
@@ -1379,7 +2136,11 @@ function ReceiptVerifier({
           </small>
         </label>
 
-        {error && <div className="verifier-error" role="alert">{error}</div>}
+        {error && (
+          <div className="verifier-error" role="alert">
+            {error}
+          </div>
+        )}
 
         {custodyPacket && custodyReport && (
           <CustodyProofRoom packet={custodyPacket} report={custodyReport} />
@@ -1390,7 +2151,11 @@ function ReceiptVerifier({
             <div className="verifier-verdict">
               <span aria-hidden="true">{evidenceValid ? "✓" : "!"}</span>
               <div>
-                <strong>{evidenceValid ? "Cryptographic proof valid" : "Verification failed"}</strong>
+                <strong>
+                  {evidenceValid
+                    ? "Cryptographic proof valid"
+                    : "Verification failed"}
+                </strong>
                 <small>
                   {evidenceValid
                     ? packetReport
@@ -1403,8 +2168,26 @@ function ReceiptVerifier({
               </div>
             </div>
 
-            <div className="verifier-checks" aria-label="Receipt verification checks">
-              {report.checks.map((check) => (
+            {chainReport && (
+              <section
+                className="verifier-packet"
+                aria-label="Decision chain checks"
+              >
+                <div>
+                  <span className="eyebrow">Complete decision chain</span>
+                  <strong>
+                    {chainReport.valid
+                      ? `${chainReport.packets.length} signed decisions linked`
+                      : "Decision chain broken"}
+                  </strong>
+                  <small>
+                    The browser independently checks every receipt, exact parent
+                    digest, lineage depth, and Canonical State handoff from root
+                    to leaf.
+                  </small>
+                </div>
+                <div className="verifier-checks">
+                  {chainReport.checks.map((check) => (
                 <div key={check.name} data-valid={check.valid}>
                   <span>{check.valid ? "PASS" : "FAIL"}</span>
                   <div>
@@ -1414,23 +2197,14 @@ function ReceiptVerifier({
                 </div>
               ))}
             </div>
+              </section>
+            )}
 
-            {packetReport && (
-              <section className="verifier-packet" aria-label="Evidence packet checks">
-                <div>
-                  <span className="eyebrow">Evidence packet</span>
-                  <strong>
-                    {packetReport.valid
-                      ? "Every included proof matches"
-                      : "Bundled proof mismatch"}
-                  </strong>
-                  <small>
-                    Optional proofs are never silently ignored. Any included invalid proof
-                    rejects the packet.
-                  </small>
-                </div>
-                <div className="verifier-checks">
-                  {packetReport.checks.map((check) => (
+            <div
+              className="verifier-checks"
+              aria-label="Receipt verification checks"
+            >
+              {report.checks.map((check) => (
                     <div key={check.name} data-valid={check.valid}>
                       <span>{check.valid ? "PASS" : "FAIL"}</span>
                       <div>
@@ -1440,25 +2214,26 @@ function ReceiptVerifier({
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
 
-            {chainReport && (
-              <section className="verifier-packet" aria-label="Decision chain checks">
+            {packetReport && (
+              <section
+                className="verifier-packet"
+                aria-label="Evidence packet checks"
+              >
                 <div>
-                  <span className="eyebrow">Complete decision chain</span>
+                  <span className="eyebrow">Evidence packet</span>
                   <strong>
-                    {chainReport.valid
-                      ? `${chainReport.packets.length} signed decisions linked`
-                      : "Decision chain broken"}
+                    {packetReport.valid
+                      ? "Every included proof matches"
+                      : "Bundled proof mismatch"}
                   </strong>
                   <small>
-                    The browser independently checks every receipt, exact parent digest,
-                    lineage depth, and Canonical State handoff from root to leaf.
+                    Optional proofs are never silently ignored. Any included
+                    invalid proof rejects the packet.
                   </small>
                 </div>
                 <div className="verifier-checks">
-                  {chainReport.checks.map((check) => (
+                  {packetReport.checks.map((check) => (
                     <div key={check.name} data-valid={check.valid}>
                       <span>{check.valid ? "PASS" : "FAIL"}</span>
                       <div>
@@ -1505,13 +2280,16 @@ function ReceiptVerifier({
                     </div>
                     <div>
                       <dt>Parent Run</dt>
-                      <dd><code>{envelope.receipt.ancestry.parentRunId}</code></dd>
+                      <dd>
+                        <code>{envelope.receipt.ancestry.parentRunId}</code>
+                      </dd>
                     </div>
                     <div>
                       <dt>Prior receipt</dt>
                       <dd>
                         <code>
-                          {envelope.receipt.ancestry.previousReceiptDigest ?? "unavailable"}
+                          {envelope.receipt.ancestry.previousReceiptDigest ??
+                            "unavailable"}
                         </code>
                       </dd>
                     </div>
@@ -1520,7 +2298,10 @@ function ReceiptVerifier({
               )}
 
             {evidenceValid && (
-              <section className="verifier-trust-policy" aria-label="Organizational trust policy">
+              <section
+                className="verifier-trust-policy"
+                aria-label="Organizational trust policy"
+              >
                 <div>
                   <span className="eyebrow">Optional second verdict</span>
                   <strong>
@@ -1529,9 +2310,9 @@ function ReceiptVerifier({
                       : "Does your organization trust this signer?"}
                   </strong>
                   <small>
-                    Pin the authority fingerprint received out of band, optionally prove
-                    continuity to a rotated key, then import its signed policy. No file can
-                    authorize itself.
+                    Pin the authority fingerprint received out of band,
+                    optionally prove continuity to a rotated key, then import
+                    its signed policy. No file can authorize itself.
                   </small>
                 </div>
                 <div className="verifier-trust-inputs">
@@ -1540,7 +2321,9 @@ function ReceiptVerifier({
                     <input
                       type="text"
                       value={authorityFingerprint}
-                      onChange={(event) => setAuthorityFingerprint(event.target.value)}
+                      onChange={(event) =>
+                        setAuthorityFingerprint(event.target.value)
+                      }
                       placeholder="sha256: authority fingerprint"
                       spellCheck={false}
                       autoComplete="off"
@@ -1559,7 +2342,8 @@ function ReceiptVerifier({
                       }
                     />
                     <span>
-                      {authorityRotationFilename ?? "Optional authority rotation"}
+                      {authorityRotationFilename ??
+                        "Optional authority rotation"}
                     </span>
                   </label>
                   <label
@@ -1570,7 +2354,9 @@ function ReceiptVerifier({
                       type="file"
                       aria-label="Import signed policy"
                       accept="application/json,.json"
-                      onChange={(event) => void importTrustPolicy(event.target.files?.[0])}
+                      onChange={(event) =>
+                        void importTrustPolicy(event.target.files?.[0])
+                      }
                     />
                     <span>{trustPolicyFilename ?? "Import signed policy"}</span>
                   </label>
@@ -1579,7 +2365,9 @@ function ReceiptVerifier({
             )}
 
             {trustPolicyError && (
-              <div className="verifier-error" role="alert">{trustPolicyError}</div>
+              <div className="verifier-error" role="alert">
+                {trustPolicyError}
+              </div>
             )}
 
             {authorityRotationError && (
@@ -1602,8 +2390,9 @@ function ReceiptVerifier({
                 <small>
                   {authorityRotationReport.valid
                     ? "The pinned authority signed an effective transition to the policy's authority key."
-                    : authorityRotationReport.checks.find((check) => !check.valid)
-                        ?.detail}
+                    : authorityRotationReport.checks.find(
+                        (check) => !check.valid,
+                      )?.detail}
                 </small>
               </div>
             )}
@@ -1622,7 +2411,8 @@ function ReceiptVerifier({
                 <small>
                   {trustPolicyReport.valid
                     ? "Its digest, Ed25519 signature, and pinned authority fingerprint all match."
-                    : trustPolicyReport.checks.find((check) => !check.valid)?.detail}
+                    : trustPolicyReport.checks.find((check) => !check.valid)
+                        ?.detail}
                 </small>
               </div>
             )}
@@ -1633,7 +2423,9 @@ function ReceiptVerifier({
                 data-trusted={organizationalTrust.trusted}
                 role="status"
               >
-                <span aria-hidden="true">{organizationalTrust.trusted ? "✓" : "!"}</span>
+                <span aria-hidden="true">
+                  {organizationalTrust.trusted ? "✓" : "!"}
+                </span>
                 <div>
                   <strong>
                     {organizationalTrust.trusted
@@ -1649,7 +2441,10 @@ function ReceiptVerifier({
             )}
 
             {trustPolicyReport && (
-              <section className="verifier-trust-chain" aria-label="Verified trust chain">
+              <section
+                className="verifier-trust-chain"
+                aria-label="Verified trust chain"
+              >
                 <div className="verifier-chain-heading">
                   <span className="eyebrow">Decision path</span>
                   <strong>
@@ -1691,10 +2486,14 @@ function ReceiptVerifier({
                     className="verifier-chain-node"
                     data-valid={trustPolicyReport.valid}
                   >
-                    <span>{authorityRotationSource !== null ? "03" : "02"}</span>
+                    <span>
+                      {authorityRotationSource !== null ? "03" : "02"}
+                    </span>
                     <strong>Signed policy</strong>
                     <small>
-                      {trustPolicyReport.valid ? "Authority verified" : "Rejected"}
+                      {trustPolicyReport.valid
+                        ? "Authority verified"
+                        : "Rejected"}
                     </small>
                   </div>
                   <i aria-hidden="true">→</i>
@@ -1702,7 +2501,9 @@ function ReceiptVerifier({
                     className="verifier-chain-node"
                     data-valid={organizationalTrust?.trusted === true}
                   >
-                    <span>{authorityRotationSource !== null ? "04" : "03"}</span>
+                    <span>
+                      {authorityRotationSource !== null ? "04" : "03"}
+                    </span>
                     <strong>
                       {decisionChain
                         ? `${decisionChain.packets.length} receipt signers`
@@ -1723,7 +2524,9 @@ function ReceiptVerifier({
             <details className="verifier-limitations">
               <summary>What this proof does not establish</summary>
               <ul>
-                {report.unsupportedClaims.map((claim) => <li key={claim}>{claim}</li>)}
+                {report.unsupportedClaims.map((claim) => (
+                  <li key={claim}>{claim}</li>
+                ))}
               </ul>
             </details>
           </div>
@@ -1737,7 +2540,7 @@ function PortableTrustExport({
   runId,
   evidenceRevision,
   judgeProofMode = false,
-  autoGenerateProof = false,
+  automaticProofRequestNonce = null,
   onError,
   onVerifyArtifact,
   onAutomaticProofResult,
@@ -1745,10 +2548,13 @@ function PortableTrustExport({
   runId: string;
   evidenceRevision: string;
   judgeProofMode?: boolean;
-  autoGenerateProof?: boolean;
+  automaticProofRequestNonce?: number | null;
   onError: (message: string) => void;
   onVerifyArtifact?: (artifact: PortableVerifierArtifact) => void;
-  onAutomaticProofResult?: (runId: string, valid: boolean, error?: string) => void;
+  onAutomaticProofResult?: (
+    runId: string,
+    verification: AutomaticProofVerification,
+  ) => void;
 }) {
   const [result, setResult] = useState<PortableReceiptExport | null>(null);
   const [availableDisclosures, setAvailableDisclosures] = useState<
@@ -1761,7 +2567,7 @@ function PortableTrustExport({
   const [federatedExportBusy, setFederatedExportBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const requestGeneration = useRef(0);
-  const automaticGenerationRun = useRef<string | null>(null);
+  const automaticGenerationRequest = useRef<string | null>(null);
 
   useEffect(() => {
     requestGeneration.current += 1;
@@ -1785,22 +2591,41 @@ function PortableTrustExport({
         localAnchor,
         evmPayload,
       });
+      const artifact = exported.decisionChain ?? exported.packet;
+      const browserReport = exported.decisionChain
+        ? await verifyPortableDecisionChainJsonInBrowser(
+            JSON.stringify(exported.decisionChain),
+          )
+        : await verifyPortableEvidencePacketJsonInBrowser(
+            JSON.stringify(exported.packet),
+          );
       if (requestGeneration.current !== generation) return;
       setResult(exported);
       setAvailableDisclosures(exported.availableDisclosures);
       setDirty(false);
-      onAutomaticProofResult?.(
-        runId,
-        exported.verification.valid,
-        exported.verification.valid
+      const valid = exported.verification.valid && browserReport.valid;
+      onAutomaticProofResult?.(runId, {
+        valid,
+        error: valid
           ? undefined
-          : "The generated decision chain failed local verification.",
-      );
+          : "The generated decision chain failed local browser verification.",
+        artifact,
+        decisionCount: exported.decisionChain?.packets.length ?? 1,
+        leafReceiptDigest: exported.decisionChain
+          ? (browserReport as PortableDecisionChainVerificationReport)
+              .leafReceiptDigest
+          : null,
+      });
     } catch (reason) {
       if (requestGeneration.current === generation) {
-        const message = reason instanceof Error ? reason.message : String(reason);
+        const message =
+          reason instanceof Error ? reason.message : String(reason);
         onError(message);
-        onAutomaticProofResult?.(runId, false, message);
+        onAutomaticProofResult?.(runId, {
+          valid: false,
+          error: message,
+          decisionCount: 0,
+        });
       }
     } finally {
       if (requestGeneration.current === generation) setBusy(false);
@@ -1826,13 +2651,12 @@ function PortableTrustExport({
   };
 
   useEffect(() => {
-    if (
-      !autoGenerateProof ||
-      automaticGenerationRun.current === runId
-    ) return;
-    automaticGenerationRun.current = runId;
+    if (automaticProofRequestNonce === null) return;
+    const requestIdentity = `${runId}:${automaticProofRequestNonce}`;
+    if (automaticGenerationRequest.current === requestIdentity) return;
+    automaticGenerationRequest.current = requestIdentity;
     void generate();
-  }, [autoGenerateProof, runId]);
+  }, [automaticProofRequestNonce, runId]);
 
   const invalidatePendingExport = () => {
     requestGeneration.current += 1;
@@ -1879,8 +2703,8 @@ function PortableTrustExport({
           <span>
             <strong>Append to local transparency log</strong>
             <small>
-              Lets cooperating observers retain checkpoints and detect later log rewrites.
-              Receipt validity never depends on it.
+              Lets cooperating observers retain checkpoints and detect later log
+              rewrites. Receipt validity never depends on it.
             </small>
           </span>
         </label>
@@ -1896,16 +2720,18 @@ function PortableTrustExport({
           <span>
             <strong>Prepare digest-only EVM calldata</strong>
             <small>
-              For mutually distrusting organizations that need shared publication evidence.
-              No chain call, wallet, RPC, or funds are used.
+              For mutually distrusting organizations that need shared
+              publication evidence. No chain call, wallet, RPC, or funds are
+              used.
             </small>
           </span>
         </label>
       </div>
       <p className="portable-trust-levels">
-        A signature is sufficient for ordinary offline verification. A retained checkpoint
-        adds rewrite detection, while a public anchor only adds shared publication evidence.
-        Neither makes a false statement true or grants the signer authority.
+        A signature is sufficient for ordinary offline verification. A retained
+        checkpoint adds rewrite detection, while a public anchor only adds
+        shared publication evidence. Neither makes a false statement true or
+        grants the signer authority.
       </p>
     </>
   );
@@ -1919,11 +2745,12 @@ function PortableTrustExport({
   const requiredDisclosureIdentities = availableDisclosures
     .filter((disclosure) => disclosure.required)
     .map((disclosure) => disclosure.identity);
-  const selectedRequiredCount = requiredDisclosureIdentities.filter((identity) =>
-    selectedDisclosures.includes(identity),
+  const selectedRequiredCount = requiredDisclosureIdentities.filter(
+    (identity) => selectedDisclosures.includes(identity),
   ).length;
   const allRequiredSelected =
-    requiredDisclosureCount > 0 && selectedRequiredCount === requiredDisclosureCount;
+    requiredDisclosureCount > 0 &&
+    selectedRequiredCount === requiredDisclosureCount;
 
   const evidenceCommitmentLabel = (identity: string) => {
     const separator = identity.lastIndexOf(":");
@@ -1970,9 +2797,10 @@ function PortableTrustExport({
           </p>
           {!judgeProofMode && (
             <p>
-              Always included: stable Run and Agent identifiers, timestamps, state and resource
-              fingerprints, and evidence hashes. Raw prompts, outputs, credentials, and local
-              paths always stay out. Only bounded redacted Validation leaves are opt-in.
+              Always included: stable Run and Agent identifiers, timestamps,
+              state and resource fingerprints, and evidence hashes. Raw prompts,
+              outputs, credentials, and local paths always stay out. Only
+              bounded redacted Validation leaves are opt-in.
             </p>
           )}
         </div>
@@ -1982,17 +2810,23 @@ function PortableTrustExport({
           onClick={() => void generate()}
           disabled={busy}
         >
-          {busy
-            ? <Spinner />
-            : result
-              ? judgeProofMode
-                ? proofVerified
-                  ? "Reverify proof"
-                  : "Regenerate proof"
-                : "Regenerate receipt"
-              : judgeProofMode
-                ? "Generate and verify proof"
-                : "Generate receipt"}
+          {busy ? (
+            <Spinner />
+          ) : result ? (
+            judgeProofMode ? (
+              proofVerified ? (
+                "Reverify proof"
+              ) : (
+                "Regenerate proof"
+              )
+            ) : (
+              "Regenerate receipt"
+            )
+          ) : judgeProofMode ? (
+            "Generate and verify proof"
+          ) : (
+            "Generate receipt"
+          )}
         </button>
       </header>
 
@@ -2001,7 +2835,9 @@ function PortableTrustExport({
           <summary>Add transparency or blockchain publication evidence</summary>
           {optionalPublicationControls}
         </details>
-      ) : optionalPublicationControls}
+      ) : (
+        optionalPublicationControls
+      )}
 
       {availableDisclosures.length > 0 && (
         <details className="portable-disclosures">
@@ -2010,17 +2846,24 @@ function PortableTrustExport({
             {availableDisclosures.length} selected)
           </summary>
           <p>
-            The signed Merkle root commits to {availableDisclosures.length} Validation
-            {availableDisclosures.length === 1 ? " leaf" : " leaves"}: {requiredDisclosureCount}
-            {" required and "}{optionalDisclosureCount} optional. Only selected redacted
-            leaves and their inclusion proofs enter the downloaded envelope.
+            The signed Merkle root commits to {availableDisclosures.length}{" "}
+            Validation
+            {availableDisclosures.length === 1 ? " leaf" : " leaves"}:{" "}
+            {requiredDisclosureCount}
+            {" required and "}
+            {optionalDisclosureCount} optional. Only selected redacted leaves
+            and their inclusion proofs enter the downloaded envelope.
           </p>
           <div className="portable-disclosure-actions">
             <span>
               <strong>
-                {selectedRequiredCount}/{requiredDisclosureCount} required selected
+                {selectedRequiredCount}/{requiredDisclosureCount} required
+                selected
               </strong>
-              <small>Nothing is disclosed unless you deliberately select and regenerate it.</small>
+              <small>
+                Nothing is disclosed unless you deliberately select and
+                regenerate it.
+              </small>
             </span>
             <div>
               <button
@@ -2053,7 +2896,8 @@ function PortableTrustExport({
                 />
                 <span>
                   <strong>
-                    {evidenceCommitmentLabel(disclosure.identity)} · {disclosure.status}{" "}
+                    {evidenceCommitmentLabel(disclosure.identity)} ·{" "}
+                    {disclosure.status}{" "}
                     {disclosure.required ? "required" : "optional"}
                   </strong>
                   <small>{disclosure.summary ?? disclosure.category}</small>
@@ -2067,7 +2911,9 @@ function PortableTrustExport({
       {result && (
         <div className="portable-result" data-valid={result.verification.valid}>
           <div className="portable-result-status">
-            <span aria-hidden="true">{result.verification.valid ? "✓" : "!"}</span>
+            <span aria-hidden="true">
+              {result.verification.valid ? "✓" : "!"}
+            </span>
             <div>
               <strong>
                 {result.verification.valid
@@ -2109,14 +2955,21 @@ function PortableTrustExport({
                 Download receipt JSON
               </button>
             )}
-            {!judgeProofMode && result.envelope.receipt.decision.disposition === "promoted" && (
+            {!judgeProofMode &&
+              result.envelope.receipt.decision.disposition === "promoted" && (
               <button
                 type="button"
                 className="button button-ghost"
                 onClick={() => void exportFederatedBundle()}
-                disabled={dirty || !result.verification.valid || federatedExportBusy}
+                  disabled={
+                    dirty || !result.verification.valid || federatedExportBusy
+                  }
               >
-                {federatedExportBusy ? <Spinner /> : "Download federated work"}
+                  {federatedExportBusy ? (
+                    <Spinner />
+                  ) : (
+                    "Download federated work"
+                  )}
               </button>
             )}
             {(!judgeProofMode || !hasDecisionChain) && (
@@ -2131,7 +2984,9 @@ function PortableTrustExport({
                 }
                 disabled={dirty || !result.verification.valid}
               >
-                {judgeProofMode ? "Download verified evidence packet" : "Download evidence packet"}
+                {judgeProofMode
+                  ? "Download verified evidence packet"
+                  : "Download evidence packet"}
               </button>
             )}
             {hasDecisionChain && (
@@ -2146,7 +3001,9 @@ function PortableTrustExport({
                 }
                 disabled={dirty || !result.verification.valid}
               >
-                {judgeProofMode ? "Download verified decision chain" : "Download complete decision chain"}
+                {judgeProofMode
+                  ? "Download verified decision chain"
+                  : "Download complete decision chain"}
               </button>
             )}
             {judgeProofMode && onVerifyArtifact && (
@@ -2196,7 +3053,8 @@ function PortableTrustExport({
               {result.anchor && (
                 <div>
                   <span>
-                    Local checkpoint {result.anchor.checkpoint.checkpoint.treeSize} ·{" "}
+                      Local checkpoint{" "}
+                      {result.anchor.checkpoint.checkpoint.treeSize} ·{" "}
                     {shortHash(result.anchor.checkpoint.checkpoint.root)}
                   </span>
                   <button
@@ -2282,16 +3140,22 @@ function AssuranceInbox({
           <span className="eyebrow">Adaptive Assurance</span>
           <h3>Evidence can recommend. Only you can change policy.</h3>
           <p>
-            Deterministic suggestions use bounded Run evidence and simulate history without reopening Candidate State.
+            Deterministic suggestions use bounded Run evidence and simulate
+            history without reopening Candidate State.
           </p>
         </div>
-        <button className="button button-primary" onClick={onDerive} disabled={busy}>
+        <button
+          className="button button-primary"
+          onClick={onDerive}
+          disabled={busy}
+        >
           {busy ? <Spinner /> : "Scan retained evidence"}
         </button>
       </header>
       {proposals.length === 0 ? (
         <div className="assurance-empty">
-          No proposal is ready. Three independent supporting lineages are required for the first rules.
+          No proposal is ready. Three independent supporting lineages are
+          required for the first rules.
         </div>
       ) : (
         <div className="assurance-list">
@@ -2302,7 +3166,8 @@ function AssuranceInbox({
                   (result) =>
                     result.classification === "exact" &&
                     result.counterfactualDisposition !== null &&
-                    result.counterfactualDisposition !== result.priorDisposition,
+                    result.counterfactualDisposition !==
+                      result.priorDisposition,
                 )
                 .map((result) => result.runId),
             ).size;
@@ -2310,13 +3175,24 @@ function AssuranceInbox({
               (result) => result.classification === "unknown",
             ).length;
             return (
-              <article className="assurance-card" key={proposal.id} data-state={proposal.state}>
+              <article
+                className="assurance-card"
+                key={proposal.id}
+                data-state={proposal.state}
+              >
                 <div className="assurance-card-title">
                   <div>
-                    <span className={"assurance-state assurance-state-" + proposal.state}>
+                    <span
+                      className={
+                        "assurance-state assurance-state-" + proposal.state
+                      }
+                    >
                       {proposal.state}
                     </span>
-                    <strong>Proposal against Outcome Contract v{proposal.baseContractVersion}</strong>
+                    <strong>
+                      Proposal against Outcome Contract v
+                      {proposal.baseContractVersion}
+                    </strong>
                   </div>
                   <code>{shortHash(proposal.proposalDigest)}</code>
                 </div>
@@ -2329,9 +3205,24 @@ function AssuranceInbox({
                   ))}
                 </ul>
                 <div className="assurance-impact">
-                  <div><strong>{new Set(proposal.citations.map((item) => item.rootRunId)).size}</strong><span>supporting lineages</span></div>
-                  <div><strong>{exactChanges}</strong><span>historical outcomes changed</span></div>
-                  <div><strong>{unknown}</strong><span>unknown, never guessed</span></div>
+                  <div>
+                    <strong>
+                      {
+                        new Set(
+                          proposal.citations.map((item) => item.rootRunId),
+                        ).size
+                      }
+                    </strong>
+                    <span>supporting lineages</span>
+                  </div>
+                  <div>
+                    <strong>{exactChanges}</strong>
+                    <span>historical outcomes changed</span>
+                  </div>
+                  <div>
+                    <strong>{unknown}</strong>
+                    <span>unknown, never guessed</span>
+                  </div>
                 </div>
                 <details className="assurance-proof">
                   <summary>Inspect citations and simulation proof</summary>
@@ -2340,7 +3231,10 @@ function AssuranceInbox({
                       <p key={citation.operationKey + citation.runId}>
                         <code>{citation.runId}</code>
                         <span>{citation.evidenceSelector}</span>
-                        <small>{shortHash(citation.evidenceHash)} · {citation.derivationRule}</small>
+                        <small>
+                          {shortHash(citation.evidenceHash)} ·{" "}
+                          {citation.derivationRule}
+                        </small>
                       </p>
                     ))}
                   </section>
@@ -2368,21 +3262,34 @@ function AssuranceInbox({
                     ))}
                   </section>
                   <footer>
-                    Simulation {proposal.simulation.engineVersion} · {proposal.simulation.results.length} bounded results · {shortHash(proposal.simulation.digest)}
+                    Simulation {proposal.simulation.engineVersion} ·{" "}
+                    {proposal.simulation.results.length} bounded results ·{" "}
+                    {shortHash(proposal.simulation.digest)}
                   </footer>
                 </details>
                 {proposal.decision && (
                   <p className="assurance-decision">
-                    {proposal.decision.action} {formatTime(proposal.decision.decidedAt)}
-                    {proposal.decision.reason ? " · " + proposal.decision.reason : ""}
+                    {proposal.decision.action}{" "}
+                    {formatTime(proposal.decision.decidedAt)}
+                    {proposal.decision.reason
+                      ? " · " + proposal.decision.reason
+                      : ""}
                   </p>
                 )}
                 {proposal.state === "ready" && (
                   <footer className="assurance-actions">
-                    <button className="button button-ghost" onClick={() => onReject(proposal)} disabled={busy}>
+                    <button
+                      className="button button-ghost"
+                      onClick={() => onReject(proposal)}
+                      disabled={busy}
+                    >
                       Reject
                     </button>
-                    <button className="button button-primary" onClick={() => onAccept(proposal)} disabled={busy}>
+                    <button
+                      className="button button-primary"
+                      onClick={() => onAccept(proposal)}
+                      disabled={busy}
+                    >
                       Review and accept
                     </button>
                   </footer>
@@ -2423,7 +3330,8 @@ function CandidateSetEvidence({
     <article
       className={
         "candidate-set-card" +
-        (candidateSet.phase === "recovery-error" || candidateSet.phase === "stale"
+        (candidateSet.phase === "recovery-error" ||
+        candidateSet.phase === "stale"
           ? " candidate-set-attention"
           : "")
       }
@@ -2445,7 +3353,10 @@ function CandidateSetEvidence({
         <div className="candidate-set-phase">
           {!terminal && <Spinner />}
           <strong>{candidateSet.phase.replaceAll("-", " ")}</strong>
-          <span>{candidateSet.competitors.length} siblings · {candidateSet.maxConcurrency} concurrent</span>
+          <span>
+            {candidateSet.competitors.length} siblings ·{" "}
+            {candidateSet.maxConcurrency} concurrent
+          </span>
         </div>
       </header>
 
@@ -2456,7 +3367,9 @@ function CandidateSetEvidence({
         </div>
         <div>
           <span>Snapshotted policy</span>
-          <strong>Outcome Contract v{candidateSet.outcomeContract.version}</strong>
+          <strong>
+            Outcome Contract v{candidateSet.outcomeContract.version}
+          </strong>
         </div>
         <div>
           <span>Loser policy</span>
@@ -2479,10 +3392,16 @@ function CandidateSetEvidence({
             >
               <header>
                 <div>
-                  <span>{score?.rank ? "Rank " + score.rank : "Candidate"}</span>
+                  <span>
+                    {score?.rank ? "Rank " + score.rank : "Candidate"}
+                  </span>
                   <strong>{competitor.id}</strong>
                 </div>
-                <span className={"candidate-status candidate-status-" + competitor.status}>
+                <span
+                  className={
+                    "candidate-status candidate-status-" + competitor.status
+                  }
+                >
                   {isWinner ? "winner" : competitor.status}
                 </span>
               </header>
@@ -2492,7 +3411,8 @@ function CandidateSetEvidence({
                   {score.components.map((component) => (
                     <div key={component.kind}>
                       <span>
-                        {component.kind.replaceAll("-", " ")} · {component.direction}
+                        {component.kind.replaceAll("-", " ")} ·{" "}
+                        {component.direction}
                       </span>
                       <strong>
                         raw {component.rawValue.toLocaleString()} · normalized{" "}
@@ -2509,7 +3429,8 @@ function CandidateSetEvidence({
                 </div>
               ) : (
                 <div className="candidate-pending">
-                  <span className="pulse" /> Required Validations and scores are pending
+                  <span className="pulse" /> Required Validations and scores are
+                  pending
                 </div>
               )}
               {competitor.loserDisposition !== "pending" &&
@@ -2527,10 +3448,13 @@ function CandidateSetEvidence({
             <span className="eyebrow">Deterministic decision</span>
             <strong>
               {candidateSet.selectionDecision.winnerCompetitorId
-                ? candidateSet.selectionDecision.winnerCompetitorId + " selected"
+                ? candidateSet.selectionDecision.winnerCompetitorId +
+                  " selected"
                 : "No eligible Candidate"}
             </strong>
-            <p>Lexicographic normalized scores, then ascending competitor ID.</p>
+            <p>
+              Lexicographic normalized scores, then ascending competitor ID.
+            </p>
           </div>
           <code className="selection-digest">
             {candidateSet.selectionDecision.decisionDigest}
@@ -2538,7 +3462,9 @@ function CandidateSetEvidence({
         </footer>
       )}
       {candidateSet.recoveryError && (
-        <p className="candidate-set-error" role="alert">{candidateSet.recoveryError}</p>
+        <p className="candidate-set-error" role="alert">
+          {candidateSet.recoveryError}
+        </p>
       )}
       {portableTrustAvailable &&
         candidateSet.phase === "completed" &&
@@ -2556,7 +3482,9 @@ function CandidateSetEvidence({
           onClick={onCancel}
           disabled={actionBusy || candidateSet.cancellationRequested}
         >
-          {candidateSet.cancellationRequested ? "Cancellation requested" : "Cancel exploration"}
+          {candidateSet.cancellationRequested
+            ? "Cancellation requested"
+            : "Cancel exploration"}
         </button>
       )}
     </article>
@@ -2570,7 +3498,7 @@ function AirlockEvidence({
   onDiscard,
   portableTrustAvailable,
   judgeProofMode,
-  autoGenerateProof,
+  automaticProofRequestNonce,
   onPortableError,
   onVerifyArtifact,
   onAutomaticProofResult,
@@ -2581,10 +3509,13 @@ function AirlockEvidence({
   onDiscard: () => void;
   portableTrustAvailable: boolean;
   judgeProofMode: boolean;
-  autoGenerateProof: boolean;
+  automaticProofRequestNonce: number | null;
   onPortableError: (message: string) => void;
   onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
-  onAutomaticProofResult: (runId: string, valid: boolean, error?: string) => void;
+  onAutomaticProofResult: (
+    runId: string,
+    verification: AutomaticProofVerification,
+  ) => void;
 }) {
   const transaction = run.transaction;
   if (!transaction) return null;
@@ -2603,8 +3534,7 @@ function AirlockEvidence({
       transaction.providerResources.some((resource) => !resource.quarantine));
   const compactJudgeEvidence =
     judgeProofMode && ["promoted", "quarantined"].includes(disposition);
-  const title =
-    recoveryFailed
+  const title = recoveryFailed
       ? "Recovery needs attention"
       : disposition === "promoted"
       ? "Promoted"
@@ -2615,8 +3545,7 @@ function AirlockEvidence({
         : disposition === "cancelled"
           ? "Cancelled"
           : "Airlock evaluating";
-  const outcome =
-    recoveryFailed
+  const outcome = recoveryFailed
       ? "Airlock found contradictory recovery evidence and failed closed"
       : disposition === "promoted"
       ? "Candidate became Canonical State"
@@ -2705,11 +3634,10 @@ function AirlockEvidence({
             </button>
           </div>
         )}
-        {disposition === "quarantined" &&
-          providerRepairUnavailable && (
+          {disposition === "quarantined" && providerRepairUnavailable && (
             <p className="repair-limit" role="status">
-              A provider retained this Candidate for cleanup only. Discard it after the
-              provider recovers.
+              A provider retained this Candidate for cleanup only. Discard it
+              after the provider recovers.
             </p>
           )}
         {disposition === "quarantined" &&
@@ -2724,7 +3652,9 @@ function AirlockEvidence({
             <div
               className={
                 "journal-proof" +
-                (transaction.recovery.recoveryError ? " journal-proof-error" : "")
+                  (transaction.recovery.recoveryError
+                    ? " journal-proof-error"
+                    : "")
               }
               role={transaction.recovery.recoveryError ? "alert" : "status"}
             >
@@ -2738,7 +3668,8 @@ function AirlockEvidence({
               </strong>
               <p>
                 {transaction.recovery.recoveryError ??
-                  "Phase " + transaction.recovery.journalPhase.replaceAll("-", " ")}
+                    "Phase " +
+                      transaction.recovery.journalPhase.replaceAll("-", " ")}
               </p>
             </div>
           )}
@@ -2760,29 +3691,44 @@ function AirlockEvidence({
             {transaction.canonicalContentHashAfter ===
             transaction.canonicalContentHashBefore
               ? "unchanged"
-              : "advanced from " + shortHash(transaction.canonicalContentHashBefore)}
+                : "advanced from " +
+                  shortHash(transaction.canonicalContentHashBefore)}
           </small>
         </div>
         <div>
           <span>Changed files</span>
-          <strong>{transaction.changes?.totalChangedFiles ?? "pending"}</strong>
-          <small>{formatBytes(transaction.changes?.totalAddedBytes ?? 0)} changed payload</small>
+            <strong>
+              {transaction.changes?.totalChangedFiles ?? "pending"}
+            </strong>
+            <small>
+              {formatBytes(transaction.changes?.totalAddedBytes ?? 0)} changed
+              payload
+            </small>
         </div>
         <div>
           <span>Validation result</span>
           <strong>
-            {transaction.validations.filter((item) => item.status === "passed").length}/
-            {transaction.validations.length || "pending"}
+              {
+                transaction.validations.filter(
+                  (item) => item.status === "passed",
+                ).length
+              }
+              /{transaction.validations.length || "pending"}
           </strong>
           <small>required failures block Promotion</small>
         </div>
       </div>
 
       {transaction.resources.length > 0 && (
-        <section className="resource-ledger" aria-label="Transactional resources">
+          <section
+            className="resource-ledger"
+            aria-label="Transactional resources"
+          >
           <div className="resource-ledger-heading">
             <h4>Whole-Agent state</h4>
-            <span>one decision across {transaction.resources.length} resources</span>
+              <span>
+                one decision across {transaction.resources.length} resources
+              </span>
           </div>
           <div className="resource-ledger-grid">
             {transaction.resources.map((resource) => (
@@ -2816,7 +3762,8 @@ function AirlockEvidence({
           </div>
           <div className="provider-resource-grid">
             {transaction.providerResources.map((resource) => {
-              const providerEvents = transaction.providerResourceEvents.filter(
+                const providerEvents =
+                  transaction.providerResourceEvents.filter(
                 (event) => event.providerId === resource.providerId,
               );
               const target = resource.installedVersion ?? resource.source;
@@ -2828,7 +3775,9 @@ function AirlockEvidence({
                 <article key={resource.providerId}>
                   <header>
                     <div>
-                      <span className="provider-kind">{resource.resourceKind}</span>
+                        <span className="provider-kind">
+                          {resource.resourceKind}
+                        </span>
                       <strong>{resource.label}</strong>
                       <code>{resource.providerId}</code>
                     </div>
@@ -2860,14 +3809,22 @@ function AirlockEvidence({
                     </code>
                   </div>
                   <div className="provider-guarantees">
-                    <span>{resource.required ? "required-v1" : "optional"}</span>
+                      <span>
+                        {resource.required ? "required-v1" : "optional"}
+                      </span>
                     <span>{resource.capabilities.isolation}</span>
                     <span>{resource.capabilities.promotionVisibility}</span>
                     <span>{resource.capabilities.runtimeAccess}</span>
                     <span>{resource.capabilities.reconciliation}</span>
                   </div>
                   <p>{resource.summary}</p>
-                  <p className={degraded ? "provider-caveat degraded" : "provider-caveat"}>
+                    <p
+                      className={
+                        degraded
+                          ? "provider-caveat degraded"
+                          : "provider-caveat"
+                      }
+                    >
                     {degraded
                       ? "This provider declares degraded guarantees and cannot silently claim all-or-nothing Promotion."
                       : "Canonical manifest acceptance is authoritative; distributed atomic commit is not claimed."}
@@ -2875,7 +3832,8 @@ function AirlockEvidence({
                   <details>
                     <summary>
                       Inspect {resource.validations.length} Validation
-                      {resource.validations.length === 1 ? "" : "s"} and {providerEvents.length}
+                        {resource.validations.length === 1 ? "" : "s"} and{" "}
+                        {providerEvents.length}
                       {" lifecycle events"}
                     </summary>
                     <div className="provider-details-grid">
@@ -2886,8 +3844,8 @@ function AirlockEvidence({
                         ) : (
                           resource.validations.map((validation) => (
                             <p key={validation.name}>
-                              <strong>{validation.status}</strong> {validation.name} -{" "}
-                              {validation.summary}
+                                <strong>{validation.status}</strong>{" "}
+                                {validation.name} - {validation.summary}
                             </p>
                           ))
                         )}
@@ -2896,7 +3854,8 @@ function AirlockEvidence({
                         <span className="eyebrow">Lifecycle evidence</span>
                         {providerEvents.map((event, index) => (
                           <p key={event.stage + event.at + index}>
-                            <strong>{event.status}</strong> {event.stage} - {event.summary}
+                              <strong>{event.status}</strong> {event.stage} -{" "}
+                              {event.summary}
                           </p>
                         ))}
                       </div>
@@ -2909,8 +3868,12 @@ function AirlockEvidence({
         </section>
       )}
 
-      {(transaction.sqlite || transaction.externalActions.intents.length > 0) && (
-        <section className="multi-resource-disposition" aria-label="Data and effects evidence">
+        {(transaction.sqlite ||
+          transaction.externalActions.intents.length > 0) && (
+          <section
+            className="multi-resource-disposition"
+            aria-label="Data and effects evidence"
+          >
           <article>
             <span className="eyebrow">SQLite snapshot</span>
             <div className="disposition-title">
@@ -2921,7 +3884,9 @@ function AirlockEvidence({
                     (transaction.sqlite.after.rowCount === 1 ? "" : "s")
                   : "pending"}
               </strong>
-              <code>{shortHash(transaction.sqlite?.after?.contentHash ?? null)}</code>
+                <code>
+                  {shortHash(transaction.sqlite?.after?.contentHash ?? null)}
+                </code>
             </div>
             <p>
               {transaction.sqlite?.candidate && transaction.sqlite.before
@@ -2943,14 +3908,20 @@ function AirlockEvidence({
           <article>
             <span className="eyebrow">Deferred effects</span>
             <div className="disposition-title">
-              <strong>{transaction.externalActions.deliveredCount} delivered</strong>
-              <span>{transaction.externalActions.intents.length} requested</span>
+                <strong>
+                  {transaction.externalActions.deliveredCount} delivered
+                </strong>
+                <span>
+                  {transaction.externalActions.intents.length} requested
+                </span>
             </div>
             <p>
               Effects are claimed only after the Canonical manifest advances.
             </p>
             {transaction.externalActions.intents.length === 0 ? (
-              <div className="effect-row"><span>No intent requested</span></div>
+                <div className="effect-row">
+                  <span>No intent requested</span>
+                </div>
             ) : (
               transaction.externalActions.intents.map((intent) => (
                 <div className="effect-row" key={intent.idempotencyKey}>
@@ -2991,18 +3962,25 @@ function AirlockEvidence({
         <section className="evidence-section">
           <h4>Validation evidence</h4>
           {transaction.validations.length === 0 ? (
-            <p className="evidence-empty">Validations begin after Runtime execution.</p>
+              <p className="evidence-empty">
+                Validations begin after Runtime execution.
+              </p>
           ) : (
             <ul className="validation-list">
               {transaction.validations.map((validation) => (
-                <li key={validation.name} className={"validation-" + validation.status}>
+                  <li
+                    key={validation.name}
+                    className={"validation-" + validation.status}
+                  >
                   <span className="validation-icon">
                     {validation.status === "passed" ? "✓" : "!"}
                   </span>
                   <div>
                     <div className="validation-name">
                       <strong>{validation.name}</strong>
-                      <span>{validation.required ? "required" : "optional"}</span>
+                        <span>
+                          {validation.required ? "required" : "optional"}
+                        </span>
                     </div>
                     <p>{validation.summary}</p>
                     {validation.output && <pre>{validation.output}</pre>}
@@ -3023,7 +4001,9 @@ function AirlockEvidence({
           <ul>
             {transaction.changes.files.map((change) => (
               <li key={change.path}>
-                <span className={"change-kind change-" + change.kind}>{change.kind}</span>
+                  <span className={"change-kind change-" + change.kind}>
+                    {change.kind}
+                  </span>
                 <code>{change.path}</code>
                 <small>{formatBytes(change.addedBytes)}</small>
               </li>
@@ -3040,7 +4020,9 @@ function AirlockEvidence({
         <>
           <footer className="receipt-row">
             <span>Promotion Receipt</span>
-            <code>{shortHash(transaction.promotionReceipt.validationEvidenceHash)}</code>
+            <code>
+              {shortHash(transaction.promotionReceipt.validationEvidenceHash)}
+            </code>
             <small>{transaction.promotionReceipt.disposition}</small>
           </footer>
           {portableTrustAvailable && !recoveryFailed && (
@@ -3052,7 +4034,7 @@ function AirlockEvidence({
                 transaction.promotionReceipt.validationEvidenceHash,
               ].join(":")}
               judgeProofMode={judgeProofMode}
-              autoGenerateProof={autoGenerateProof}
+              automaticProofRequestNonce={automaticProofRequestNonce}
               onError={onPortableError}
               onVerifyArtifact={onVerifyArtifact}
               onAutomaticProofResult={onAutomaticProofResult}
@@ -3071,7 +4053,10 @@ async function readFederationArtifact(
 ): Promise<{ filename: string; value: unknown }> {
   if (file.size === 0 || file.size > maximumBytes) {
     throw new Error(
-      label + " must be non-empty and no larger than " + formatBytes(maximumBytes) + ".",
+      label +
+        " must be non-empty and no larger than " +
+        formatBytes(maximumBytes) +
+        ".",
     );
   }
   const source = await file.text();
@@ -3097,13 +4082,19 @@ function FederationAirlock({
     ReturnType<typeof api.activeFederatedAdmissionPolicy>
   > | null>(null);
   const [producerId, setProducerId] = useState("");
-  const [transferId, setTransferId] = useState(() =>
-    "browser-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10),
+  const [transferId, setTransferId] = useState(
+    () =>
+      "browser-" +
+      Date.now().toString(36) +
+      "-" +
+      Math.random().toString(36).slice(2, 10),
   );
   const [bundle, setBundle] = useState<unknown>(null);
   const [bundleFilename, setBundleFilename] = useState<string | null>(null);
   const [trustPolicy, setTrustPolicy] = useState<unknown>(null);
-  const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(null);
+  const [trustPolicyFilename, setTrustPolicyFilename] = useState<string | null>(
+    null,
+  );
   const [result, setResult] = useState<FederatedImportResult | null>(null);
   const [inbox, setInbox] = useState<FederatedAdmissionInboxItem[]>([]);
   const [inboxBusy, setInboxBusy] = useState(false);
@@ -3128,10 +4119,10 @@ function FederationAirlock({
       setInbox(response.admissions);
       setSelectedInboxItem((current) =>
         current
-          ? response.admissions.find(
+          ? (response.admissions.find(
               (item) =>
                 item.admission.admissionId === current.admission.admissionId,
-            ) ?? null
+            ) ?? null)
           : null,
       );
       return response.admissions;
@@ -3148,7 +4139,8 @@ function FederationAirlock({
         if (!active) return;
         setPolicy(next);
         setProducerId(
-          next.policy.producers.find((producer) => !producer.disabled)?.producerId ?? "",
+          next.policy.producers.find((producer) => !producer.disabled)
+            ?.producerId ?? "",
         );
       })
       .catch((reason) => {
@@ -3208,7 +4200,8 @@ function FederationAirlock({
     const decisionContextDigest =
       result?.approval?.decisionContextDigest ??
       selectedInboxItem?.review?.decisionContextDigest;
-    if (!result?.admission || !approvalReason.trim() || !decisionContextDigest) return;
+    if (!result?.admission || !approvalReason.trim() || !decisionContextDigest)
+      return;
     setDecisionBusy(choice);
     setLocalError(null);
     try {
@@ -3259,7 +4252,11 @@ function FederationAirlock({
   }, [currentRunId]);
 
   const exportReceiverCustody = async () => {
-    if (!currentRunId || (disposition !== "promoted" && disposition !== "quarantined")) return;
+    if (
+      !currentRunId ||
+      (disposition !== "promoted" && disposition !== "quarantined")
+    )
+      return;
     setCustodyBusy(true);
     setLocalError(null);
     try {
@@ -3268,10 +4265,13 @@ function FederationAirlock({
         throw new Error("The receiver rejected its own custody closure.");
       }
       const source = JSON.stringify(exported.packet);
-      const browserReport = await verifyReceiverCustodyPacketJsonInBrowser(source);
+      const browserReport =
+        await verifyReceiverCustodyPacketJsonInBrowser(source);
       setCustodyVerification(browserReport);
       if (!browserReport.valid) {
-        throw new Error("The browser independently rejected the custody closure.");
+        throw new Error(
+          "The browser independently rejected the custody closure.",
+        );
       }
       setCustodyPacket(exported.packet);
       downloadJsonArtifact(
@@ -3288,14 +4288,16 @@ function FederationAirlock({
     {
       label: "Verify",
       detail: admission
-        ? admission.decision.decision === "admit" || result?.approval?.choice === "approve"
+        ? admission.decision.decision === "admit" ||
+          result?.approval?.choice === "approve"
           ? "Bundle, receipt, authority, and signer scope verified"
           : result?.approval?.choice === "deny"
             ? "Local operator denied the immutable pending Admission"
             : admission.decision.detail
         : "Cryptographic bundle and organizational authority",
       state: admission
-        ? admission.decision.decision === "admit" || result?.approval?.choice === "approve"
+        ? admission.decision.decision === "admit" ||
+          result?.approval?.choice === "approve"
           ? "passed"
           : result?.approval?.choice === "deny"
             ? "rejected"
@@ -3316,7 +4318,8 @@ function FederationAirlock({
         : selectedTerminalValidation
           ? "Receiver checks completed; Run retains full evidence"
         : "Receiver Outcome Contract controls eligibility",
-      state: transaction || selectedTerminalValidation
+      state:
+        transaction || selectedTerminalValidation
         ? receiverValidationPassed
           ? "passed"
           : selectedInboxItem?.state === "promoted"
@@ -3349,8 +4352,9 @@ function FederationAirlock({
           <h3>Import verified work, not remote authority</h3>
         </div>
         <p>
-          Another organization can propose a signed state transition.
-          This receiver independently admits it into Candidate State, reruns its own Outcome Contract, and owns the final Promotion decision.
+          Another organization can propose a signed state transition. This
+          receiver independently admits it into Candidate State, reruns its own
+          Outcome Contract, and owns the final Promotion decision.
         </p>
       </div>
 
@@ -3358,29 +4362,43 @@ function FederationAirlock({
         <span>{policy ? "ACTIVE RECEIVER POLICY" : "RECEIVER POLICY"}</span>
         <strong>
           {policy
-            ? policy.policy.policyId + " · generation " + policy.policy.generation
+            ? policy.policy.policyId +
+              " · generation " +
+              policy.policy.generation
             : "Loading durable policy..."}
         </strong>
-        <code>{policy?.policyDigest ?? "Policy is required before import"}</code>
+        <code>
+          {policy?.policyDigest ?? "Policy is required before import"}
+        </code>
       </div>
 
-      <section className="federation-inbox" aria-label="Federated approval inbox">
+      <section
+        className="federation-inbox"
+        aria-label="Federated approval inbox"
+      >
         <div className="federation-inbox-heading">
           <div>
             <span className="eyebrow">Durable approval inbox</span>
-            <strong>{inbox.length} local Admission{inbox.length === 1 ? "" : "s"}</strong>
+            <strong>
+              {inbox.length} local Admission{inbox.length === 1 ? "" : "s"}
+            </strong>
           </div>
           <button
             type="button"
             className="button secondary"
             disabled={inboxBusy}
-            onClick={() => void loadInbox().catch((reason) => setLocalError(String(reason)))}
+            onClick={() =>
+              void loadInbox().catch((reason) => setLocalError(String(reason)))
+            }
           >
             {inboxBusy ? <Spinner /> : "Refresh inbox"}
           </button>
         </div>
         {inbox.length === 0 ? (
-          <p>No receiver Admissions yet. Imported work will remain discoverable here after reload.</p>
+          <p>
+            No receiver Admissions yet. Imported work will remain discoverable
+            here after reload.
+          </p>
         ) : (
           <div className="federation-inbox-list">
             {inbox.map((item) => (
@@ -3423,8 +4441,11 @@ function FederationAirlock({
             <div>
               <span className="eyebrow">Evidence-first review</span>
               <strong>
-                {selectedInboxItem.review.artifact.operationCount} proposed operation
-                {selectedInboxItem.review.artifact.operationCount === 1 ? "" : "s"}
+                {selectedInboxItem.review.artifact.operationCount} proposed
+                operation
+                {selectedInboxItem.review.artifact.operationCount === 1
+                  ? ""
+                  : "s"}
               </strong>
             </div>
             <span>PRODUCER CLAIM · NOT RECEIVER AUTHORITY</span>
@@ -3440,12 +4461,16 @@ function FederationAirlock({
             </div>
             <div>
               <span>Claimed result</span>
-              <strong>{selectedInboxItem.review.producerClaim.disposition}</strong>
+              <strong>
+                {selectedInboxItem.review.producerClaim.disposition}
+              </strong>
             </div>
             <div>
               <span>Payload</span>
               <strong>
-                {formatBytes(selectedInboxItem.review.artifact.totalPayloadBytes)}
+                {formatBytes(
+                  selectedInboxItem.review.artifact.totalPayloadBytes,
+                )}
               </strong>
             </div>
           </div>
@@ -3504,14 +4529,16 @@ function FederationAirlock({
             <div className="federation-preflight-deferred">
               <span>Deferred to authoritative Candidate Validation</span>
               <div>
-                {selectedInboxItem.review.preflight.deferredChecks.map((check) => (
+                {selectedInboxItem.review.preflight.deferredChecks.map(
+                  (check) => (
                   <small key={check}>{check.replaceAll("-", " ")}</small>
-                ))}
+                  ),
+                )}
               </div>
             </div>
             <p>
-              This preflight uses metadata only.
-              Approval never bypasses receiver Validation or grants Promotion.
+              This preflight uses metadata only. Approval never bypasses
+              receiver Validation or grants Promotion.
             </p>
           </div>
           <div className="federation-review-binding">
@@ -3520,27 +4547,37 @@ function FederationAirlock({
               {selectedInboxItem.review.decisionContextDigest.slice(0, 19)}...
             </code>
             <small>
-              If the Admission or receiver Outcome Contract changes, this screen must
-              refresh before a decision can be recorded.
+              If the Admission or receiver Outcome Contract changes, this screen
+              must refresh before a decision can be recorded.
             </small>
           </div>
           {selectedInboxItem.review.artifact.truncated && (
             <p>
-              Showing {selectedInboxItem.review.artifact.displayedOperationCount} of {" "}
+              Showing{" "}
+              {selectedInboxItem.review.artifact.displayedOperationCount} of{" "}
               {selectedInboxItem.review.artifact.operationCount} operations.
             </p>
           )}
           <p>
-            Receiver Outcome Contract checks run only after approval.
-            This summary contains metadata, never staged file content.
+            Receiver Outcome Contract checks run only after approval. This
+            summary contains metadata, never staged file content.
           </p>
         </section>
       )}
 
-      <div className="federation-pipeline" aria-label="Federated import pipeline">
+      <div
+        className="federation-pipeline"
+        aria-label="Federated import pipeline"
+      >
         {pipeline.map((stage, index) => (
           <div key={stage.label} data-state={stage.state}>
-            <span>{stage.state === "passed" ? "✓" : stage.state === "rejected" || stage.state === "reject" ? "!" : index + 1}</span>
+            <span>
+              {stage.state === "passed"
+                ? "✓"
+                : stage.state === "rejected" || stage.state === "reject"
+                  ? "!"
+                  : index + 1}
+            </span>
             <strong>{stage.label}</strong>
             <small>{stage.detail}</small>
           </div>
@@ -3602,13 +4639,17 @@ function FederationAirlock({
                   setLocalError(null);
                   setResult(null);
                 })
-                .catch((reason) => setLocalError(String(reason.message ?? reason)));
+                .catch((reason) =>
+                  setLocalError(String(reason.message ?? reason)),
+                );
             }}
           />
         </label>
         <label className="federation-file" data-loaded={trustPolicy !== null}>
           <span>Signed Trust Policy</span>
-          <strong>{trustPolicyFilename ?? "Choose authority policy JSON"}</strong>
+          <strong>
+            {trustPolicyFilename ?? "Choose authority policy JSON"}
+          </strong>
           <input
             type="file"
             accept="application/json,.json"
@@ -3627,13 +4668,19 @@ function FederationAirlock({
                   setLocalError(null);
                   setResult(null);
                 })
-                .catch((reason) => setLocalError(String(reason.message ?? reason)));
+                .catch((reason) =>
+                  setLocalError(String(reason.message ?? reason)),
+                );
             }}
           />
         </label>
       </div>
 
-      {localError && <div className="federation-error" role="alert">{localError}</div>}
+      {localError && (
+        <div className="federation-error" role="alert">
+          {localError}
+        </div>
+      )}
       {admission && (
         <div
           className="federation-verdict"
@@ -3651,18 +4698,37 @@ function FederationAirlock({
                     ? "DENIED BY OPERATOR"
                   : admission.decision.decision.toUpperCase()}
             </span>
-            <strong>{result?.approval?.reason ?? admission.decision.detail}</strong>
+            <strong>
+              {result?.approval?.reason ?? admission.decision.detail}
+            </strong>
           </div>
           <dl>
-            <div><dt>Admission</dt><dd>{admission.admissionId.slice(0, 19)}...</dd></div>
-            <div><dt>Policy</dt><dd>generation {admission.decision.policyGeneration}</dd></div>
-            <div><dt>Run</dt><dd>{result.run?.id.slice(0, 16) ?? selectedInboxItem?.run?.id.slice(0, 16) ?? "none"}</dd></div>
-            <div><dt>Canonical</dt><dd>{disposition === "promoted" ? "advanced" : "unchanged"}</dd></div>
+            <div>
+              <dt>Admission</dt>
+              <dd>{admission.admissionId.slice(0, 19)}...</dd>
+            </div>
+            <div>
+              <dt>Policy</dt>
+              <dd>generation {admission.decision.policyGeneration}</dd>
+            </div>
+            <div>
+              <dt>Run</dt>
+              <dd>
+                {result.run?.id.slice(0, 16) ??
+                  selectedInboxItem?.run?.id.slice(0, 16) ??
+                  "none"}
+              </dd>
+            </div>
+            <div>
+              <dt>Canonical</dt>
+              <dd>{disposition === "promoted" ? "advanced" : "unchanged"}</dd>
+            </div>
           </dl>
         </div>
       )}
 
-      {currentRunId && (disposition === "promoted" || disposition === "quarantined") && (
+      {currentRunId &&
+        (disposition === "promoted" || disposition === "quarantined") && (
         <section
           className="federation-custody"
           data-verified={custodyVerification?.valid === true}
@@ -3676,18 +4742,24 @@ function FederationAirlock({
                 : "Close the producer-to-receiver authority path"}
             </strong>
             <p>
-              One downloadable proof binds the producer signature, receiver Admission,
-              operator approval when required, terminal authority, and receiver receipt.
+                One downloadable proof binds the producer signature, receiver
+                Admission, operator approval when required, terminal authority,
+                and receiver receipt.
             </p>
           </div>
           <div className="federation-custody-domains">
-            <span><i>1</i> Producer trust domain</span>
+              <span>
+                <i>1</i> Producer trust domain
+              </span>
             <b aria-hidden="true">→</b>
-            <span><i>2</i> Receiver trust domain</span>
+              <span>
+                <i>2</i> Receiver trust domain
+              </span>
           </div>
           {custodyVerification?.valid && (
             <small>
-              {custodyVerification.checks.length} cryptographic and authority checks passed locally.
+                {custodyVerification.checks.length} cryptographic and authority
+                checks passed locally.
             </small>
           )}
           <button
@@ -3696,7 +4768,13 @@ function FederationAirlock({
             disabled={custodyBusy}
             onClick={() => void exportReceiverCustody()}
           >
-            {custodyBusy ? <Spinner /> : custodyVerification?.valid ? "Verify and download again" : "Verify and download custody proof"}
+              {custodyBusy ? (
+                <Spinner />
+              ) : custodyVerification?.valid ? (
+                "Verify and download again"
+              ) : (
+                "Verify and download custody proof"
+              )}
           </button>
           {custodyVerification?.valid && custodyPacket && (
             <button
@@ -3715,13 +4793,19 @@ function FederationAirlock({
           (result.approval.choice === "approve" &&
             !result.run &&
             selectedInboxItem?.state === "approved")) && (
-        <section className="federation-approval" aria-label="Local admission decision">
+          <section
+            className="federation-approval"
+            aria-label="Local admission decision"
+          >
           <div>
             <span className="eyebrow">Local operator gate</span>
-            <strong>Canonical State is unchanged while this decision is pending.</strong>
+              <strong>
+                Canonical State is unchanged while this decision is pending.
+              </strong>
             <p>
-              Review the verified producer, policy generation, and immutable Admission digest.
-              Your first decision is append-only and exact retries reuse it.
+                Review the verified producer, policy generation, and immutable
+                Admission digest. Your first decision is append-only and exact
+                retries reuse it.
             </p>
           </div>
           <label>
@@ -3731,7 +4815,10 @@ function FederationAirlock({
               onChange={(event) => setApprovalReason(event.target.value)}
               maxLength={512}
               placeholder="Record why this exact transfer is safe or unsafe"
-              disabled={decisionBusy !== null || result?.approval?.choice === "approve"}
+                disabled={
+                  decisionBusy !== null ||
+                  result?.approval?.choice === "approve"
+                }
               required
             />
           </label>
@@ -3742,13 +4829,19 @@ function FederationAirlock({
                 className="button"
                 disabled={
                   !approvalReason.trim() ||
-                  !(result?.approval?.decisionContextDigest ??
-                    selectedInboxItem?.review?.decisionContextDigest) ||
+                    !(
+                      result?.approval?.decisionContextDigest ??
+                      selectedInboxItem?.review?.decisionContextDigest
+                    ) ||
                   decisionBusy !== null
                 }
                 onClick={() => void decidePendingAdmission("deny")}
               >
-                {decisionBusy === "deny" ? <Spinner /> : "Deny and preserve Canonical"}
+                  {decisionBusy === "deny" ? (
+                    <Spinner />
+                  ) : (
+                    "Deny and preserve Canonical"
+                  )}
               </button>
             )}
             <button
@@ -3756,8 +4849,10 @@ function FederationAirlock({
               className="button button-primary"
               disabled={
                 !approvalReason.trim() ||
-                !(result?.approval?.decisionContextDigest ??
-                  selectedInboxItem?.review?.decisionContextDigest) ||
+                  !(
+                    result?.approval?.decisionContextDigest ??
+                    selectedInboxItem?.review?.decisionContextDigest
+                  ) ||
                 decisionBusy !== null
               }
               onClick={() => void decidePendingAdmission("approve")}
@@ -3775,8 +4870,13 @@ function FederationAirlock({
       )}
 
       {result?.approval && (
-        <div className="federation-decision-evidence" data-choice={result.approval.choice}>
-          <span>{result.approval.choice === "approve" ? "APPROVED" : "DENIED"}</span>
+        <div
+          className="federation-decision-evidence"
+          data-choice={result.approval.choice}
+        >
+          <span>
+            {result.approval.choice === "approve" ? "APPROVED" : "DENIED"}
+          </span>
           <strong>{result.approval.reason}</strong>
           <code>{result.approval.recordDigest}</code>
           {result.approval.decisionContextDigest ? (
@@ -3791,11 +4891,20 @@ function FederationAirlock({
       )}
 
       <div className="federation-actions">
-        <span>No model call runs during import. Exact retries reuse durable admission and decision evidence.</span>
+        <span>
+          No model call runs during import. Exact retries reuse durable
+          admission and decision evidence.
+        </span>
         <button
           className="button button-primary"
           disabled={
-            disabled || busy || !policy || !producerId || !transferId.trim() || !bundle || !trustPolicy
+            disabled ||
+            busy ||
+            !policy ||
+            !producerId ||
+            !transferId.trim() ||
+            !bundle ||
+            !trustPolicy
           }
         >
           {busy ? <Spinner /> : "Admit into Candidate State"}
@@ -3817,19 +4926,21 @@ export default function App() {
     setShowReceiptVerifier(false);
     setVerifierArtifact(null);
   }, []);
-  const [automaticProof, setAutomaticProof] = useState<{
-    runId: string;
-    status: "requested" | "verified" | "failed";
-    error?: string;
-  } | null>(null);
+  const [automaticProof, setAutomaticProof] =
+    useState<AutomaticProofState | null>(null);
+  const [recordingAttempt, setRecordingAttempt] =
+    useState<RecordingAttempt | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [activeCandidateSet, setActiveCandidateSet] = useState<CandidateSet | null>(null);
-  const [assuranceProposals, setAssuranceProposals] = useState<AssuranceProposal[]>([]);
+  const [activeCandidateSet, setActiveCandidateSet] =
+    useState<CandidateSet | null>(null);
+  const [assuranceProposals, setAssuranceProposals] = useState<
+    AssuranceProposal[]
+  >([]);
   const [contractVersions, setContractVersions] = useState<
     OutcomeContractVersionRecord[]
   >([]);
@@ -3839,10 +4950,28 @@ export default function App() {
   const [explorationObjective, setExplorationObjective] = useState(
     defaultExplorationObjective,
   );
-  const [loserPolicy, setLoserPolicy] = useState<"retain" | "discard">("retain");
+  const [loserPolicy, setLoserPolicy] = useState<"retain" | "discard">(
+    "retain",
+  );
   const [airlockActionBusy, setAirlockActionBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestAutomaticProof = useCallback(
+    (runId: string) => {
+      setError(null);
+      setActiveRun((current) =>
+        current?.id === runId
+          ? current
+          : (runs.find((run) => run.id === runId) ?? current),
+      );
+      setAutomaticProof((current) => ({
+        runId,
+        requestNonce: current?.runId === runId ? current.requestNonce + 1 : 1,
+        status: "requested",
+      }));
+    },
+    [runs],
+  );
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
   const messageEnd = useRef<HTMLDivElement>(null);
@@ -3850,11 +4979,27 @@ export default function App() {
   const mountedRef = useRef(true);
   const pollingRunIds = useRef(new Set<string>());
   const pollingCandidateSetIds = useRef(new Set<string>());
+  const recordingReplayRequestRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
 
   const selected = useMemo(
     () => agents.find((agent) => agent.id === selectedId) ?? null,
     [agents, selectedId],
+  );
+  const recordingRequested =
+    new URLSearchParams(window.location.search).get("recording") === "1";
+  const recordingReplaySelection = useMemo(
+    () => parseRecordingReplayRunIds(window.location.search),
+    [],
+  );
+  const recordingMode =
+    recordingRequested && system?.protocolFixtureMode === true;
+  const recordingOutcome = useMemo(
+    () =>
+      recordingMode
+        ? deriveRecordingOutcome(runs, automaticProof, recordingAttempt)
+        : null,
+    [automaticProof, recordingAttempt, recordingMode, runs],
   );
 
   const demoStepCompletion = useMemo(() => {
@@ -3883,7 +5028,9 @@ export default function App() {
     activeRun != null && ["queued", "running"].includes(activeRun.status);
   const candidateSetInProgress =
     activeCandidateSet != null &&
-    !["completed", "stale", "recovery-error"].includes(activeCandidateSet.phase);
+    !["completed", "stale", "recovery-error"].includes(
+      activeCandidateSet.phase,
+    );
   const demoActionBusy =
     busy ||
     airlockActionBusy ||
@@ -3929,13 +5076,18 @@ export default function App() {
         await bootstrap();
         if (mountedRef.current) setAuthRequired(false);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : String(reason)),
+      );
     return () => {
       mountedRef.current = false;
     };
   }, [bootstrap]);
 
   useEffect(() => {
+    recordingReplayRequestRef.current = null;
+    setAutomaticProof(null);
+    setRecordingAttempt(null);
     setActiveRun(null);
     setActiveCandidateSet(null);
     setShowExplore(false);
@@ -3956,35 +5108,81 @@ export default function App() {
       api.assuranceProposals(selectedId),
       api.outcomeContractVersions(selectedId),
     ])
-      .then(([, result, candidateSetsResult, assuranceResult, versionsResult]) => {
-        if (selectedIdRef.current !== selectedId) return;
-        const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
-        setRuns(result.runs);
-        setActiveRun(latest);
-        const latestCandidateSet = candidateSetsResult.candidateSets[0] ?? null;
-        setActiveCandidateSet(latestCandidateSet);
-        setAssuranceProposals(assuranceResult.proposals);
-        setContractVersions(versionsResult.versions);
-        if (latest && ["queued", "running"].includes(latest.status)) {
-          void pollRun(latest.id, selectedId).catch((reason) =>
-            setError(reason instanceof Error ? reason.message : String(reason)),
-          );
-        }
-        if (
-          latestCandidateSet &&
-          !["completed", "stale", "recovery-error"].includes(
-            latestCandidateSet.phase,
-          )
-        ) {
-          void pollCandidateSet(latestCandidateSet.id, selectedId).catch((reason) =>
-            setError(reason instanceof Error ? reason.message : String(reason)),
-          );
-        }
-      })
+      .then(
+        ([, result, candidateSetsResult, assuranceResult, versionsResult]) => {
+          if (selectedIdRef.current !== selectedId) return;
+          const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
+          setRuns(result.runs);
+          setActiveRun(latest);
+          const latestCandidateSet =
+            candidateSetsResult.candidateSets[0] ?? null;
+          setActiveCandidateSet(latestCandidateSet);
+          setAssuranceProposals(assuranceResult.proposals);
+          setContractVersions(versionsResult.versions);
+          if (latest && ["queued", "running"].includes(latest.status)) {
+            void pollRun(latest.id, selectedId).catch((reason) =>
+              setError(
+                reason instanceof Error ? reason.message : String(reason),
+              ),
+            );
+          }
+          if (
+            latestCandidateSet &&
+            !["completed", "stale", "recovery-error"].includes(
+              latestCandidateSet.phase,
+            )
+          ) {
+            void pollCandidateSet(latestCandidateSet.id, selectedId).catch(
+              (reason) =>
+                setError(
+                  reason instanceof Error ? reason.message : String(reason),
+                ),
+            );
+          }
+        },
+      )
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : String(reason)),
       );
   }, [refreshMessages, selectedId]);
+
+  useEffect(() => {
+    if (
+      !recordingMode ||
+      system?.protocolFixtureMode !== true ||
+      !selected
+    ) {
+      return;
+    }
+    const hydration = deriveRecordingReplayHydration(
+      runs,
+      recordingReplaySelection,
+    );
+    if (!hydration || hydration.agentId !== selected.id) return;
+
+    const replayIdentity = [
+      hydration.agentId,
+      hydration.runIds.safeRunId,
+      hydration.runIds.unsafeRunId,
+      hydration.runIds.repairedRunId,
+    ].join(":");
+    if (recordingReplayRequestRef.current === replayIdentity) return;
+    recordingReplayRequestRef.current = replayIdentity;
+    setRecordingAttempt({
+      agentId: hydration.agentId,
+      baselineRunIds: hydration.baselineRunIds,
+      canonicalStateId: hydration.canonicalStateId,
+      runIds: hydration.runIds,
+    });
+    requestAutomaticProof(hydration.repairedRun.id);
+  }, [
+    recordingMode,
+    recordingReplaySelection,
+    requestAutomaticProof,
+    runs,
+    selected,
+    system?.protocolFixtureMode,
+  ]);
 
   useEffect(() => {
     if (selected) {
@@ -4005,6 +5203,7 @@ export default function App() {
   useEffect(() => {
     const transaction = activeRun?.transaction;
     if (
+      recordingMode ||
       !system?.protocolFixtureMode ||
       activeRun?.status !== "completed" ||
       transaction?.disposition !== "promoted" ||
@@ -4015,13 +5214,14 @@ export default function App() {
     setAutomaticProof((current) =>
       current?.runId === activeRun.id
         ? current
-        : { runId: activeRun.id, status: "requested" },
+        : { runId: activeRun.id, requestNonce: 1, status: "requested" },
     );
   }, [
     activeRun?.id,
     activeRun?.status,
     activeRun?.transaction?.disposition,
     activeRun?.transaction?.lineage.depth,
+    recordingMode,
     system?.protocolFixtureMode,
   ]);
 
@@ -4078,7 +5278,11 @@ export default function App() {
 
   const deleteAgent = async () => {
     if (!selected) return;
-    if (!window.confirm("Delete " + selected.name + "? Its workspace will be archived.")) {
+    if (
+      !window.confirm(
+        "Delete " + selected.name + "? Its workspace will be archived.",
+      )
+    ) {
       return;
     }
     setBusy(true);
@@ -4093,7 +5297,10 @@ export default function App() {
     }
   };
 
-  const pollRun = async (runId: string, agentId: string): Promise<AgentRun | null> => {
+  const pollRun = async (
+    runId: string,
+    agentId: string,
+  ): Promise<AgentRun | null> => {
     if (pollingRunIds.current.has(runId)) return null;
     pollingRunIds.current.add(runId);
     try {
@@ -4129,7 +5336,11 @@ export default function App() {
         if (selectedIdRef.current === agentId) {
           setActiveCandidateSet(result.candidateSet);
         }
-        if (["completed", "stale", "recovery-error"].includes(result.candidateSet.phase)) {
+        if (
+          ["completed", "stale", "recovery-error"].includes(
+            result.candidateSet.phase,
+          )
+        ) {
           await refreshAgents();
           return;
         }
@@ -4232,15 +5443,22 @@ export default function App() {
 
   const acceptAssurance = async (proposal: AssuranceProposal) => {
     if (!selected) return;
-    const changes = proposal.operations.map(assuranceOperationLabel).join("\n- ");
+    const changes = proposal.operations
+      .map(assuranceOperationLabel)
+      .join("\n- ");
     if (
       !window.confirm(
-        "Accept this monotonic policy change for future Runs only?\n\n- " + changes,
+        "Accept this monotonic policy change for future Runs only?\n\n- " +
+          changes,
       )
     ) {
       return;
     }
-    const reason = window.prompt("Record an operator reason for acceptance:", "Reviewed bounded evidence") ?? "";
+    const reason =
+      window.prompt(
+        "Record an operator reason for acceptance:",
+        "Reviewed bounded evidence",
+      ) ?? "";
     setAirlockActionBusy(true);
     setError(null);
     try {
@@ -4256,7 +5474,10 @@ export default function App() {
 
   const rejectAssurance = async (proposal: AssuranceProposal) => {
     if (!selected) return;
-    const reason = window.prompt("Why reject this proposal?", "Needs more context");
+    const reason = window.prompt(
+      "Why reject this proposal?",
+      "Needs more context",
+    );
     if (reason === null) return;
     setAirlockActionBusy(true);
     setError(null);
@@ -4284,7 +5505,8 @@ export default function App() {
         (rule) =>
           !target.contract.secretPatterns.some(
             (candidate) =>
-              candidate.name === rule.name && candidate.pattern === rule.pattern,
+              candidate.name === rule.name &&
+              candidate.pattern === rule.pattern,
           ),
       )
       .map((rule) => rule.name);
@@ -4303,10 +5525,16 @@ export default function App() {
       .map((command) => command.name);
     const raisedLimits = [
       target.contract.maxChangedFiles > current.maxChangedFiles
-        ? "changed files " + current.maxChangedFiles + " to " + target.contract.maxChangedFiles
+        ? "changed files " +
+          current.maxChangedFiles +
+          " to " +
+          target.contract.maxChangedFiles
         : null,
       target.contract.maxAddedBytes > current.maxAddedBytes
-        ? "added bytes " + formatBytes(current.maxAddedBytes) + " to " + formatBytes(target.contract.maxAddedBytes)
+        ? "added bytes " +
+          formatBytes(current.maxAddedBytes) +
+          " to " +
+          formatBytes(target.contract.maxAddedBytes)
         : null,
     ].filter(Boolean);
     const warning = [
@@ -4323,10 +5551,19 @@ export default function App() {
         ? "Required validations removed or changed: " +
           removedRequiredCommands.join(", ")
         : "No required validations removed or changed.",
-      raisedLimits.length ? "Limits raised: " + raisedLimits.join(", ") : "No limits raised.",
+      raisedLimits.length
+        ? "Limits raised: " + raisedLimits.join(", ")
+        : "No limits raised.",
       "A new version will be created. Historical contracts and receipts remain unchanged.",
     ].join("\n");
-    if (!window.confirm("Roll back rule content from version " + target.contract.version + "?\n\n" + warning)) {
+    if (
+      !window.confirm(
+        "Roll back rule content from version " +
+          target.contract.version +
+          "?\n\n" +
+          warning,
+      )
+    ) {
       return;
     }
     setAirlockActionBusy(true);
@@ -4452,7 +5689,13 @@ export default function App() {
           <div className="brand-mark">A</div>
           <span className="eyebrow">Agent Airlock</span>
           <h1>Connecting to the control plane</h1>
-          {error ? <div className="error-banner" role="alert">{error}</div> : <Spinner />}
+          {error ? (
+            <div className="error-banner" role="alert">
+              {error}
+            </div>
+          ) : (
+            <Spinner />
+          )}
         </section>
       </main>
     );
@@ -4466,7 +5709,11 @@ export default function App() {
           <span className="eyebrow">Agent Airlock</span>
           <h1>Enter the access token</h1>
           <p>This shared demo token is configured by the platform operator.</p>
-          {error && <div className="error-banner" role="alert">{error}</div>}
+          {error && (
+            <div className="error-banner" role="alert">
+              {error}
+            </div>
+          )}
           <label>
             Access token
             <input
@@ -4478,7 +5725,10 @@ export default function App() {
               required
             />
           </label>
-          <button className="button button-primary" disabled={busy || !authInput.trim()}>
+          <button
+            className="button button-primary"
+            disabled={busy || !authInput.trim()}
+          >
             {busy ? <Spinner /> : "Open Airlock"}
           </button>
         </form>
@@ -4487,7 +5737,8 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={recordingMode ? "app-shell recording-mode" : "app-shell"}>
+      {!recordingMode && (
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">A</div>
@@ -4524,11 +5775,15 @@ export default function App() {
         <nav className="agent-list">
           {agents.map((agent) => (
             <button
-              className={"agent-card " + (agent.id === selectedId ? "selected" : "")}
+                className={
+                  "agent-card " + (agent.id === selectedId ? "selected" : "")
+                }
               key={agent.id}
               onClick={() => setSelectedId(agent.id)}
             >
-              <div className="agent-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
+                <div className="agent-avatar">
+                  {agent.name.slice(0, 1).toUpperCase()}
+                </div>
               <div className="agent-card-copy">
                 <strong>{agent.name}</strong>
                 <span>{agent.description || "Coding Agent"}</span>
@@ -4551,13 +5806,17 @@ export default function App() {
             {system?.demoMode
               ? "No paid inference"
               : system?.protocolFixtureMode
-                ? "Local Responses fixture · " + (system.containerEngine ?? "container")
+                  ? "Local Responses fixture · " +
+                    (system.containerEngine ?? "container")
                 : system?.modelArkDemoMode
-                  ? "Provider-backed ModelArk · " + (system.containerEngine ?? "container")
+                    ? "Provider-backed ModelArk · " +
+                      (system.containerEngine ?? "container")
                   : (system?.arkConfigured
                       ? "Configured ModelArk profile"
                       : "ModelArk profile not configured") +
-                    (system?.containerEngine ? " · " + system.containerEngine : "")}
+                      (system?.containerEngine
+                        ? " · " + system.containerEngine
+                        : "")}
           </span>
         </div>
         {system?.portableTrust.available && (
@@ -4574,6 +5833,7 @@ export default function App() {
           </button>
         )}
       </aside>
+      )}
 
       <main className="main">
         {system?.demoMode ? (
@@ -4591,7 +5851,10 @@ export default function App() {
             <span>REAL RUNTIME PROOF</span>
             <div>
               <strong>Real Codex CLI in a disposable container</strong>
-              <p>Local deterministic Responses fixture. No ModelArk request or paid inference.</p>
+              <p>
+                Local deterministic Responses fixture. No ModelArk request or
+                paid inference.
+              </p>
             </div>
           </div>
         ) : null}
@@ -4600,12 +5863,14 @@ export default function App() {
           <div className="live-mode-banner" role="status">
             <span>LIVE MODELARK PROOF</span>
             <div>
-              <strong>Provider-backed inference in a disposable container</strong>
+              <strong>
+                Provider-backed inference in a disposable container
+              </strong>
               <p>
                 Fresh preflight generated assistant output in{" "}
                 {system.modelArkPreflight?.requestCount ?? 0} bounded request
-                {system.modelArkPreflight?.requestCount === 1 ? "" : "s"}. Output and
-                credentials remain private.
+                {system.modelArkPreflight?.requestCount === 1 ? "" : "s"}.
+                Output and credentials remain private.
               </p>
             </div>
           </div>
@@ -4619,9 +5884,12 @@ export default function App() {
           <div className="live-mode-banner" role="status">
             <span>LIVE MODELARK</span>
             <div>
-              <strong>Provider-backed inference through an isolated Runtime</strong>
+              <strong>
+                Provider-backed inference through an isolated Runtime
+              </strong>
               <p>
-                Every turn still works in Candidate State until required Validations pass.
+                Every turn still works in Candidate State until required
+                Validations pass.
               </p>
             </div>
           </div>
@@ -4650,15 +5918,29 @@ export default function App() {
           </div>
         )}
 
-        {selected ? (
+        {recordingOutcome && system ? (
+          <RecordingOutcomeBrief
+            outcome={recordingOutcome}
+            system={system}
+            onOpenVerifier={() => {
+              if (!automaticProof?.artifact) return;
+              setVerifierArtifact(automaticProof.artifact);
+              setShowReceiptVerifier(true);
+            }}
+          />
+        ) : selected ? (
           <>
+            {!recordingMode && (
             <header className="agent-header">
               <div>
                 <div className="header-title-row">
                   <h1>{selected.name}</h1>
                   <StatusPill status={selected.status} />
                 </div>
-                <p>{selected.description || "A Codex coding Agent in an isolated workspace."}</p>
+                  <p>
+                    {selected.description ||
+                      "A Codex coding Agent in an isolated workspace."}
+                  </p>
               </div>
               <div className="header-actions">
                 <button
@@ -4684,22 +5966,27 @@ export default function App() {
                 </button>
               </div>
             </header>
+            )}
 
-            {showSettings && (
+            {!recordingMode && showSettings && (
               <form className="settings-panel" onSubmit={saveAgent}>
                 <div className="settings-title">
                   <div>
                     <span className="eyebrow">Agent configuration</span>
                     <h2>Instructions and identity</h2>
                   </div>
-                  <button type="button" onClick={() => setShowSettings(false)}>×</button>
+                  <button type="button" onClick={() => setShowSettings(false)}>
+                    ×
+                  </button>
                 </div>
                 <div className="form-grid">
                   <label>
                     Name
                     <input
                       value={form.name}
-                      onChange={(event) => setForm({ ...form, name: event.target.value })}
+                      onChange={(event) =>
+                        setForm({ ...form, name: event.target.value })
+                      }
                       required
                       maxLength={80}
                     />
@@ -4726,7 +6013,10 @@ export default function App() {
                     maxLength={10_000}
                   />
                 </label>
-                <section className="contract-overview" aria-label="Outcome Contract summary">
+                <section
+                  className="contract-overview"
+                  aria-label="Outcome Contract summary"
+                >
                   <div className="contract-overview-heading">
                     <div>
                       <span className="eyebrow">Promotion rules</span>
@@ -4756,22 +6046,23 @@ export default function App() {
                     <div>
                       <span>Change budget</span>
                       <strong>
-                        {selected.outcomeContract.maxChangedFiles} files · {formatBytes(
-                          selected.outcomeContract.maxAddedBytes,
-                        )}
+                        {selected.outcomeContract.maxChangedFiles} files ·{" "}
+                        {formatBytes(selected.outcomeContract.maxAddedBytes)}
                       </strong>
                     </div>
                     <div>
                       <span>Safety checks</span>
                       <strong>
-                        {selected.outcomeContract.secretPatterns.length} secret patterns · {" "}
-                        {selected.outcomeContract.validationCommands.length} commands
+                        {selected.outcomeContract.secretPatterns.length} secret
+                        patterns ·{" "}
+                        {selected.outcomeContract.validationCommands.length}{" "}
+                        commands
                       </strong>
                     </div>
                   </div>
                   <p>
-                    Every Run snapshots this version. Required failures enter Quarantine and
-                    leave Canonical State unchanged.
+                    Every Run snapshots this version. Required failures enter
+                    Quarantine and leave Canonical State unchanged.
                   </p>
                   {contractVersions.length > 1 && (
                     <details className="contract-history">
@@ -4781,9 +6072,11 @@ export default function App() {
                           <div key={record.contract.version}>
                             <span>
                               <strong>v{record.contract.version}</strong>
-                              {" · "}{record.provenance}
+                              {" · "}
+                              {record.provenance}
                             </span>
-                            {record.contract.version !== selected.outcomeContract.version && (
+                            {record.contract.version !==
+                              selected.outcomeContract.version && (
                               <button
                                 type="button"
                                 className="button button-ghost"
@@ -4842,21 +6135,40 @@ export default function App() {
                             ? "Prove a live ModelArk change is safe"
                         : "Build something with your Agent"}
                     </h2>
+                    {recordingMode && (
+                      <div
+                        className="recording-agent-context"
+                        aria-label="Recording Agent context"
+                      >
+                        <strong>{selected.name}</strong>
+                        <StatusPill status={selected.status} />
+                        <span>
+                          Outcome Contract v{selected.outcomeContract.version}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="playground-state">
+                    {!recordingMode && (
                     <button
                       type="button"
                       className="federation-toggle"
                       onClick={() => setShowFederation((current) => !current)}
-                      disabled={demoActionBusy || selected.status === "stopped"}
+                        disabled={
+                          demoActionBusy || selected.status === "stopped"
+                        }
                       aria-expanded={showFederation}
                       aria-controls="federation-airlock-panel"
                     >
                       <span aria-hidden="true">⇄</span>
                       Federation
                     </button>
+                    )}
                     {system?.protocolFixtureMode || system?.modelArkDemoMode ? (
-                      <div className="proof-route" aria-label="Judge proof path">
+                      <div
+                        className="proof-route"
+                        aria-label="Judge proof path"
+                      >
                         <span>Run</span>
                         <i aria-hidden="true">→</i>
                         <span>Validate</span>
@@ -4870,15 +6182,23 @@ export default function App() {
                         <button
                           type="button"
                           className="assurance-toggle"
-                          onClick={() => setShowAssurance((current) => !current)}
+                          onClick={() =>
+                            setShowAssurance((current) => !current)
+                          }
                           aria-expanded={showAssurance}
                           aria-controls="assurance-inbox"
                         >
                           <span aria-hidden="true">⌁</span>
                           Assurance
-                          {assuranceProposals.filter((proposal) => proposal.state === "ready").length > 0 && (
+                          {assuranceProposals.filter(
+                            (proposal) => proposal.state === "ready",
+                          ).length > 0 && (
                             <strong>
-                              {assuranceProposals.filter((proposal) => proposal.state === "ready").length}
+                              {
+                                assuranceProposals.filter(
+                                  (proposal) => proposal.state === "ready",
+                                ).length
+                              }
                             </strong>
                           )}
                         </button>
@@ -4906,13 +6226,19 @@ export default function App() {
                         )}
                       </>
                     )}
+                    {!recordingMode && (
+                      <>
                     <span className="contract-badge">
                       Outcome Contract v{selected.outcomeContract.version}
                     </span>
                     <div className="session-info">
                       <span className="pulse" />
-                      {selected.codexThreadId ? "Session connected" : "New session"}
+                          {selected.codexThreadId
+                            ? "Session connected"
+                            : "New session"}
                     </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -4927,7 +6253,9 @@ export default function App() {
                           setActiveRun(imported.run);
                           setRuns((current) => [
                             imported.run!,
-                            ...current.filter((run) => run.id !== imported.run!.id),
+                            ...current.filter(
+                              (run) => run.id !== imported.run!.id,
+                            ),
                           ]);
                         }
                         await refreshAgents();
@@ -4964,21 +6292,28 @@ export default function App() {
                         <h3>Let isolated approaches compete safely</h3>
                       </div>
                       <p>
-                        All three start from the same immutable source and policy.
-                        Required Validation controls eligibility, then a deterministic score selects exactly one future for Promotion.
+                        All three start from the same immutable source and
+                        policy. Required Validation controls eligibility, then a
+                        deterministic score selects exactly one future for
+                        Promotion.
                       </p>
                     </div>
                     <label className="explore-objective">
                       Objective
                       <textarea
                         value={explorationObjective}
-                        onChange={(event) => setExplorationObjective(event.target.value)}
+                        onChange={(event) =>
+                          setExplorationObjective(event.target.value)
+                        }
                         rows={2}
                         maxLength={4_000}
                         required
                       />
                     </label>
-                    <div className="explore-strategies" aria-label="Competing strategies">
+                    <div
+                      className="explore-strategies"
+                      aria-label="Competing strategies"
+                    >
                       <div>
                         <span>01</span>
                         <strong>Unsafe fast</strong>
@@ -5001,11 +6336,15 @@ export default function App() {
                         <select
                           value={loserPolicy}
                           onChange={(event) =>
-                            setLoserPolicy(event.target.value as "retain" | "discard")
+                            setLoserPolicy(
+                              event.target.value as "retain" | "discard",
+                            )
                           }
                         >
                           <option value="retain">Retain isolated state</option>
-                          <option value="discard">Keep proof, discard state</option>
+                          <option value="discard">
+                            Keep proof, discard state
+                          </option>
                         </select>
                       </label>
                       <div className="explore-safety">
@@ -5022,9 +6361,15 @@ export default function App() {
                         </button>
                         <button
                           className="button button-primary"
-                          disabled={!explorationObjective.trim() || demoActionBusy}
+                          disabled={
+                            !explorationObjective.trim() || demoActionBusy
+                          }
                         >
-                          {airlockActionBusy ? <Spinner /> : "Run three futures"}
+                          {airlockActionBusy ? (
+                            <Spinner />
+                          ) : (
+                            "Run three futures"
+                          )}
                         </button>
                       </div>
                     </div>
@@ -5032,16 +6377,23 @@ export default function App() {
                 )}
 
                 {system?.demoMode ? (
-                  <section className="demo-guide" aria-label="Four-step demo proof">
+                  <section
+                    className="demo-guide"
+                    aria-label="Four-step demo proof"
+                  >
                     <div className="demo-guide-heading">
                       <span className="eyebrow">Judge path</span>
-                      <p>Stage each prompt, then send it. Repair runs directly from Quarantine.</p>
+                      <p>
+                        Stage each prompt, then send it. Repair runs directly
+                        from Quarantine.
+                      </p>
                     </div>
                     <div className="demo-step-list">
                       {demoHeroSteps.map((step, index) => {
                         const completed = demoStepCompletion[step.id];
                         const prerequisiteMet =
-                          index === 0 || demoStepCompletion[demoHeroSteps[index - 1].id];
+                          index === 0 ||
+                          demoStepCompletion[demoHeroSteps[index - 1].id];
                         const disabled =
                           demoActionBusy ||
                           completed ||
@@ -5050,10 +6402,14 @@ export default function App() {
                         return (
                           <button
                             type="button"
-                            className={completed ? "demo-step completed" : "demo-step"}
+                            className={
+                              completed ? "demo-step completed" : "demo-step"
+                            }
                             key={step.id}
                             disabled={disabled}
-                            aria-label={"Demo step " + (index + 1) + ": " + step.label}
+                            aria-label={
+                              "Demo step " + (index + 1) + ": " + step.label
+                            }
                             onClick={() => {
                               if (step.id === "repair") {
                                 void repairActiveRun();
@@ -5081,10 +6437,27 @@ export default function App() {
                     busy={demoActionBusy}
                     onRun={runPrompt}
                     onRepair={repairActiveRun}
-                    onRequestProof={(runId) => {
-                      setAutomaticProof({ runId, status: "requested" });
-                    }}
+                    onRequestProof={requestAutomaticProof}
                     automaticProof={automaticProof}
+                    recordingMode={recordingMode}
+                    readOnlyReplayMode={
+                      recordingMode && recordingReplaySelection.kind !== "absent"
+                    }
+                    recordingRunIds={recordingAttempt?.runIds ?? null}
+                    onRecordingAttemptStart={() => {
+                      setAutomaticProof(null);
+                      setRecordingAttempt({
+                        baselineRunIds: runs.map((run) => run.id),
+                        agentId: selected.id,
+                        canonicalStateId: selected.canonicalStateId,
+                        runIds: null,
+                      });
+                    }}
+                    onRecordingAttemptComplete={(runIds) => {
+                      setRecordingAttempt((current) =>
+                        current ? { ...current, runIds } : null,
+                      );
+                    }}
                   />
                 ) : null}
                 {system?.modelArkDemoMode ? (
@@ -5099,6 +6472,7 @@ export default function App() {
               <div
                 className={
                   "messages" +
+                  (recordingMode ? " recording-proof-engine" : "") +
                   ((system?.protocolFixtureMode || system?.modelArkDemoMode) &&
                   messages.length === 0 &&
                   !activeRun &&
@@ -5148,16 +6522,22 @@ export default function App() {
                   </div>
                 ) : (
                   messages.map((message) => (
-                    <article className={"message message-" + message.role} key={message.id}>
+                    <article
+                      className={"message message-" + message.role}
+                      key={message.id}
+                    >
                       <div className="message-meta">
-                        <strong>{message.role === "user" ? "You" : selected.name}</strong>
+                        <strong>
+                          {message.role === "user" ? "You" : selected.name}
+                        </strong>
                         <span>{formatTime(message.createdAt)}</span>
                       </div>
                       <div className="message-body">{message.content}</div>
                     </article>
                   ))
                 )}
-                {activeRun && ["queued", "running"].includes(activeRun.status) && (
+                {activeRun &&
+                  ["queued", "running"].includes(activeRun.status) && (
                   <article className="message message-assistant thinking">
                     <div className="message-meta">
                       <strong>{selected.name}</strong>
@@ -5181,27 +6561,37 @@ export default function App() {
                     actionBusy={airlockActionBusy}
                     onRepair={() => void repairActiveRun()}
                     onDiscard={() => void discardActiveRun()}
-                    portableTrustAvailable={system?.portableTrust.available === true}
+                    portableTrustAvailable={
+                      system?.portableTrust.available === true
+                    }
                     judgeProofMode={
                       system?.protocolFixtureMode === true ||
                       system?.modelArkDemoMode === true
                     }
-                    autoGenerateProof={
+                    automaticProofRequestNonce={
                       activeRun.id === automaticProof?.runId &&
                       automaticProof.status === "requested"
+                        ? automaticProof.requestNonce
+                        : null
                     }
                     onPortableError={setError}
                     onVerifyArtifact={(artifact) => {
                       setVerifierArtifact(artifact);
                       setShowReceiptVerifier(true);
                     }}
-                    onAutomaticProofResult={(runId, valid, proofError) => {
+                    onAutomaticProofResult={(runId, verification) => {
                       setAutomaticProof((current) =>
                         current?.runId === runId
                           ? {
-                              runId,
-                              status: valid ? "verified" : "failed",
-                              error: proofError,
+                              ...current,
+                              status: verification.valid
+                                ? "verified"
+                                : "failed",
+                              error: verification.error,
+                              artifact: verification.artifact,
+                              decisionCount: verification.decisionCount,
+                              leafReceiptDigest:
+                                verification.leafReceiptDigest,
                             }
                           : current,
                       );
@@ -5213,13 +6603,16 @@ export default function App() {
                     candidateSet={activeCandidateSet}
                     actionBusy={airlockActionBusy}
                     onCancel={() => void cancelCompetingFutures()}
-                    portableTrustAvailable={system?.portableTrust.available === true}
+                    portableTrustAvailable={
+                      system?.portableTrust.available === true
+                    }
                     onPortableError={setError}
                   />
                 )}
                 <div ref={messageEnd} />
               </div>
 
+              {!recordingMode && (
               <form className="composer" onSubmit={sendMessage}>
                 <textarea
                   value={prompt}
@@ -5239,13 +6632,15 @@ export default function App() {
                     selected.status === "stopped" ||
                     selected.status === "busy" ||
                     candidateSetInProgress ||
-                    activeRun != null && ["queued", "running"].includes(activeRun.status)
+                      (activeRun != null &&
+                        ["queued", "running"].includes(activeRun.status))
                   }
                   rows={3}
                 />
                 <div className="composer-footer">
                   <span>
-                    Enter to send · Shift + Enter for newline · {system?.codexSandboxMode ?? "checking sandbox"}
+                      Enter to send · Shift + Enter for newline ·{" "}
+                      {system?.codexSandboxMode ?? "checking sandbox"}
                   </span>
                   <button
                     className="send-button"
@@ -5254,7 +6649,8 @@ export default function App() {
                       selected.status === "stopped" ||
                       selected.status === "busy" ||
                       candidateSetInProgress ||
-                      (activeRun != null && ["queued", "running"].includes(activeRun.status))
+                        (activeRun != null &&
+                          ["queued", "running"].includes(activeRun.status))
                     }
                     aria-label="Send message"
                   >
@@ -5262,6 +6658,7 @@ export default function App() {
                   </button>
                 </div>
               </form>
+              )}
             </section>
           </>
         ) : (
@@ -5269,7 +6666,10 @@ export default function App() {
             <div className="no-agent-art">A</div>
             <span className="eyebrow">Agent Airlock</span>
             <h1>Your runtime is ready for an Agent.</h1>
-            <p>Create a workspace, give Codex a job, and continue the conversation here.</p>
+            <p>
+              Create a workspace, give Codex a job, and continue the
+              conversation here.
+            </p>
             <button
               className="button button-primary"
               onClick={() => {
@@ -5284,7 +6684,10 @@ export default function App() {
       </main>
 
       {showCreate && (
-        <div className="modal-backdrop" onMouseDown={() => setShowCreate(false)}>
+        <div
+          className="modal-backdrop"
+          onMouseDown={() => setShowCreate(false)}
+        >
           <form
             className="modal"
             onSubmit={createAgent}
@@ -5294,9 +6697,14 @@ export default function App() {
               <div>
                 <span className="eyebrow">New workspace</span>
                 <h2>Create an Agent</h2>
-                <p>Each Agent gets a persistent folder and a resumable Codex session.</p>
+                <p>
+                  Each Agent gets a persistent folder and a resumable Codex
+                  session.
+                </p>
               </div>
-              <button type="button" onClick={() => setShowCreate(false)}>×</button>
+              <button type="button" onClick={() => setShowCreate(false)}>
+                ×
+              </button>
             </div>
             <label>
               Name
@@ -5304,7 +6712,9 @@ export default function App() {
                 autoFocus
                 placeholder="Frontend Builder"
                 value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, name: event.target.value })
+                }
                 required
                 maxLength={80}
               />
