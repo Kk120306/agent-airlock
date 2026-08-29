@@ -1,8 +1,13 @@
 # Agent Airlock submission brief
 
+**Selected track:** Track 1 - Agent Launchpad: Design and Build Lightweight Agent Middleware.
+
 ## The one-line product
 
 Agent Airlock is a transactional commit boundary for autonomous Agents: the Runtime may explore a complete future, but only a future that passes its Outcome Contract can become accepted reality.
+
+The submission is one reusable platform middleware capability applied to every Agent Run at the shared `AgentRunner` boundary.
+It is not a custom workflow for one seeded Agent.
 
 ## The problem
 
@@ -27,6 +32,7 @@ Candidate versions are temporary alternate futures, while the canonical manifest
 
 The track asks teams to preserve the starter kit and add a coherent, functional, testable middleware capability at a real execution boundary.
 Transactional execution and recovery is explicitly within the track's team-designed reliability, state-governance, versioning, rollback, and safety space.
+The proof is evaluated against the official Track 1 weighting: 40% end-to-end middleware behavior, 25% technical design and integration, 20% verification and robustness, and 15% demo and reproducibility.
 
 | Starter-kit capability | What remains intact | Airlock extension |
 | --- | --- | --- |
@@ -34,7 +40,7 @@ Transactional execution and recovery is explicitly within the track's team-desig
 | Fastify control plane and `AgentService` | Existing API and asynchronous Run lifecycle | Candidate preparation, Validation, Promotion journal, recovery, and deferred effects |
 | `AgentRunner` and Codex CLI | The same Agent execution seam and persistent session behavior | Candidate-only Runtime bindings and one transactional decision after execution |
 | Disposable local container Runtime | Docker, Colima, or Podman remains the primary judging path | Canonical State is never mounted mutably into the Runtime |
-| BytePlus ModelArk Responses integration | The credentialed provider path remains supported | A separate fail-closed live conformance proof binds a safe execution profile into signed evidence |
+| BytePlus ModelArk Responses integration | The credentialed provider path remains supported but is not required for the Track 1 proof | A separate optional fail-closed live conformance proof binds a safe execution profile into signed evidence when free capacity is available |
 
 Airlock is therefore built inside the intended CodeJam seams, not beside the starter kit and not as a static UI simulation.
 
@@ -55,13 +61,14 @@ npm run prove:runtime -- --reset --headed
 
 The bounded runner opens production Chrome and creates exactly three fresh persisted Runs through the actual CodeJam frontend, Fastify control plane, pinned Codex CLI, and disposable container Runtime.
 It uses a local deterministic Responses-protocol fixture so the core recording cannot fail because free provider capacity disappeared.
-This fixture replaces only inference, while the Codex process, container, file mutation, SQLite mutation, session state, outbox, Validation, Promotion, recovery, and browser evidence paths remain real.
+Only remote inference is replaced.
+The React UI, Fastify API, `AgentService`, `AgentRunner`, pinned Codex CLI, disposable container Runtime, file mutation, SQLite mutation, persistent session, outbox, Validation, Promotion, recovery, and browser evidence paths are real.
 
 The one-action story is:
 
-1. A valid Candidate promotes the workspace, Codex session, SQLite state, and outbox together, then releases exactly one supported effect.
-2. A destructive Candidate fails a required Validation, quarantines all four resources, releases no effect, and leaves the Canonical fingerprint unchanged.
-3. A Repair child reuses the retained useful work through bounded lineage, passes Validation, promotes all four resources, and releases one fresh effect after Promotion.
+1. A valid Candidate writes `candidate-only` to `protocol-proof.txt`, sets the `demo` inventory row in `.airlock/demo.sqlite` to `candidate-only`, records a deferred notification, promotes all four resources, and releases exactly one supported effect after Promotion.
+2. An invalid multi-resource Candidate writes `unsafe-candidate` to the same file and row, fails the required `command:protocol-content` Validation, quarantines all four resources, releases no effect, and leaves the Canonical fingerprint unchanged.
+3. A Repair child reuses the retained useful work and exact failure evidence through bounded lineage, restores the required file and SQLite values, uses a fresh outbox, passes Validation, promotes all four resources, and releases one fresh effect after Promotion.
 4. The same signed two-decision chain opens in a browser-local verifier that reports zero API calls and validates both signatures, the parent link, and the Canonical State handoff.
 
 The command returns success only after the fresh Run set, dispositions, effects, evidence, desktop frame, mobile replay, and offline proof all agree.
@@ -105,8 +112,10 @@ No credential, raw endpoint identifier, base URL, environment value, prompt, or 
 
 ## Submission deliverables
 
+- [Ready-to-paste Devpost submission](DEVPOST_SUBMISSION.md)
 - [Three-minute narration](three-minute-demo.md)
 - [One-page architecture and trust boundary](architecture-one-page.md)
+- [Standalone one-page Mermaid source](agent-airlock-one-page.mmd)
 - [Judge checklist and exact commands](JUDGE_CHECKLIST.md)
 - [Product requirements](../product/PRD.md)
 - [Outcome roadmap](../product/OUTCOME_ROADMAP.md)

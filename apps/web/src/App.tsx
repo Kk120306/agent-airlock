@@ -85,8 +85,10 @@ const starterPrompts = [
 ];
 
 const protocolFixturePrompts = {
-  promote: "Prepare the passing Whole-Agent protocol Candidate.",
-  challenge: "Attempt an unsafe protocol change for the rejection proof.",
+  promote:
+    "Create protocol-proof.txt with candidate-only, set SQLite row demo in .airlock/demo.sqlite to candidate-only, and queue typed effect protocol-release-ready for delivery only after Promotion.",
+  challenge:
+    "Attempt the unsafe protocol change for the rejection proof: set protocol-proof.txt and SQLite row demo to unsafe-candidate, then queue typed effect protocol-unsafe. Required Validation must decide whether anything is promoted.",
 } as const;
 
 function provesWholeAgentPromotion(
@@ -609,7 +611,8 @@ function ProtocolScenarioGuide({
                 : "Run passing Candidate"}
             </strong>
             <small>
-              Code, memory, SQLite, and one deferred effect promote together.
+              Codex updates protocol-proof.txt, the SQLite demo row, memory,
+              and one typed deferred effect.
             </small>
           </div>
         </button>
@@ -636,7 +639,8 @@ function ProtocolScenarioGuide({
                 : "Run failing Candidate"}
             </strong>
             <small>
-              One required Validation fails and accepted reality does not move.
+              command:protocol-content fails; all four Candidate resources stay
+              quarantined and zero effects ship.
             </small>
           </div>
         </button>
@@ -665,7 +669,8 @@ function ProtocolScenarioGuide({
                 : "Repair retained Candidate"}
             </strong>
             <small>
-              Bounded failure evidence guides a fresh isolated Repair Run.
+              A fresh child fixes protocol-proof.txt and SQLite from bounded
+              failure evidence, then queues a new typed effect.
             </small>
           </div>
         </button>
@@ -729,6 +734,14 @@ function requiredValidationResult(transaction: RunTransaction) {
       .length,
     total: required.length,
   };
+}
+
+function hasExactProtocolProofChange(transaction: RunTransaction): boolean {
+  return (
+    transaction.changes?.files.filter(
+      (change) => change.path === "protocol-proof.txt",
+    ).length === 1
+  );
 }
 
 function deriveRecordingOutcome(
@@ -848,6 +861,8 @@ function deriveRecordingOutcome(
     hasExactRecordingResources(safe.transaction, "promoted") &&
     hasExactRecordingResources(unsafe.transaction, "quarantined") &&
     hasExactRecordingResources(repaired.transaction, "promoted") &&
+    hasExactProtocolProofChange(safe.transaction) &&
+    hasExactProtocolProofChange(unsafe.transaction) &&
     safe.transaction.canonicalStateIdAfter ===
       unsafe.transaction.canonicalStateIdBefore &&
     safe.transaction.canonicalContentHashAfter ===
@@ -862,6 +877,7 @@ function deriveRecordingOutcome(
       repaired.transaction.canonicalContentHashBefore &&
     hasExactRecordingEffect(safe.transaction, {
       id: "protocol-release-ready",
+      type: "demo.notification.requested",
       status: "delivered",
       deliveredCount: 1,
     }) &&
@@ -870,6 +886,7 @@ function deriveRecordingOutcome(
     safeSqliteAfter?.value === "candidate-only" &&
     hasExactRecordingEffect(unsafe.transaction, {
       id: "protocol-unsafe",
+      type: "demo.notification.requested",
       status: "rejected",
       deliveredCount: 0,
     }) &&
@@ -877,6 +894,7 @@ function deriveRecordingOutcome(
     unsafeSqliteAfter?.value === "candidate-only" &&
     hasExactRecordingEffect(repaired.transaction, {
       id: "protocol-repair-ready",
+      type: "demo.notification.requested",
       status: "delivered",
       deliveredCount: 1,
     }) &&
@@ -903,28 +921,54 @@ function deriveRecordingOutcome(
 function RecordingOutcomeBrief({
   outcome,
   system,
+  agentStatus,
   onOpenVerifier,
+  onContinue,
 }: {
   outcome: RecordingOutcome;
   system: SystemInfo;
+  agentStatus: Agent["status"] | null;
   onOpenVerifier: () => void;
+  onContinue: () => void;
 }) {
   const safeTransaction = outcome.safe.transaction;
   const unsafeTransaction = outcome.unsafe.transaction;
   const repairedTransaction = outcome.repaired.transaction;
+  const safeFile = safeTransaction.changes!.files.find(
+    (change) => change.path === "protocol-proof.txt",
+  )!.path;
+  const unsafeFile = unsafeTransaction.changes!.files.find(
+    (change) => change.path === "protocol-proof.txt",
+  )!.path;
+  const safeSqliteRow = safeTransaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const unsafeSqliteRow = unsafeTransaction.sqlite?.candidate?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const repairedSqliteRow = repairedTransaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const failedRequiredValidation = unsafeTransaction.validations.find(
+    (validation) => validation.required && validation.status === "failed",
+  );
+  const safeEffect = safeTransaction.externalActions.intents[0];
+  const unsafeEffect = unsafeTransaction.externalActions.intents[0];
+  const repairedEffect = repairedTransaction.externalActions.intents[0];
 
   return (
     <section className="recording-outcome" aria-label="Verified Outcome Brief">
       <header className="recording-outcome-heading">
         <div>
           <span className="eyebrow">Verified Outcome Brief</span>
-          <h1>One release. Three futures. Only validated reality moves.</h1>
+          <h1>Three Runs. One rule: only validated state moves.</h1>
           <p>
-            Every result below is reconstructed from persisted Run transactions
-            and the independently verified signed decision chain.
+            Persisted Run transactions prove all three outcomes. The
+            independently verified signed chain proves the Quarantine-to-Repair
+            handoff.
           </p>
         </div>
-        <span className="recording-verdict">Release proven safe</span>
+        <span className="recording-verdict">Transactional safety proven</span>
       </header>
 
       <div className="recording-boundary" role="note">
@@ -943,34 +987,29 @@ function RecordingOutcomeBrief({
             <span>01 · SAFE ROOT · RUN {outcome.safe.id.slice(0, 8)}</span>
             <strong>Promotion</strong>
           </header>
-          <h2>A valid future became accepted reality.</h2>
+          <h2>A valid Whole-Agent Candidate promoted atomically.</h2>
           <ul>
-            <li>
+            <li data-evidence="exact">
               <strong>
-                {outcome.safeRequired.passed}/{outcome.safeRequired.total}
+                {safeTransaction.resources.length}/4 resources ·{" "}
+                {outcome.safeRequired.passed}/{outcome.safeRequired.total}{" "}
+                required
               </strong>
-              <span>required Validations passed</span>
+              <span>every required check passed before Promotion</span>
             </li>
-            <li>
+            <li data-evidence="exact">
               <strong>
-                {safeTransaction.resources.length}/4 +{" "}
-                {safeTransaction.externalActions.deliveredCount}
+                File {safeFile} · SQLite {safeSqliteRow?.id} ={" "}
+                {safeSqliteRow?.value}
               </strong>
-              <span>resources promoted + post-Promotion effect</span>
+              <span>
+                workspace file + {safeTransaction.sqlite?.databasePath} row
+                promoted
+              </span>
             </li>
-            <li>
-              <strong>
-                {shortHash(safeTransaction.canonicalContentHashBefore).slice(
-                  0,
-                  8,
-                )}{" "}
-                →{" "}
-                {shortHash(safeTransaction.canonicalContentHashAfter).slice(
-                  0,
-                  8,
-                )}
-              </strong>
-              <span>Canonical fingerprint advanced</span>
+            <li data-evidence="exact">
+              <strong>{safeEffect?.type}</strong>
+              <span>{safeEffect?.id} delivered only after Promotion</span>
             </li>
           </ul>
           <div
@@ -978,6 +1017,11 @@ function RecordingOutcomeBrief({
             data-recording-run-id={outcome.safe.id}
           >
             <span>Exact evidence</span>
+            <code>
+              Canonical {shortHash(safeTransaction.canonicalContentHashBefore).slice(0, 8)}
+              {" → "}
+              {shortHash(safeTransaction.canonicalContentHashAfter).slice(0, 8)}
+            </code>
             <code>Run {outcome.safe.id}</code>
           </div>
         </article>
@@ -989,16 +1033,16 @@ function RecordingOutcomeBrief({
             </span>
             <strong>Quarantine</strong>
           </header>
-          <h2>An invalid future was retained, never accepted.</h2>
+          <h2>One failed check kept Canonical State unchanged.</h2>
           <ul>
-            <li>
-              <strong>
-                {outcome.unsafeRequired.total - outcome.unsafeRequired.passed}{" "}
-                failed · {unsafeTransaction.resources.length}/4 quarantined
-              </strong>
-              <span>required Validation blocked every resource</span>
+            <li data-evidence="exact">
+              <strong>{failedRequiredValidation?.name}</strong>
+              <span>
+                decisive required Validation failed ·{" "}
+                {unsafeTransaction.resources.length}/4 quarantined
+              </span>
             </li>
-            <li>
+            <li data-evidence="exact">
               <strong>
                 {shortHash(unsafeTransaction.canonicalContentHashBefore).slice(
                   0,
@@ -1008,15 +1052,20 @@ function RecordingOutcomeBrief({
                 {shortHash(unsafeTransaction.canonicalContentHashAfter).slice(
                   0,
                   8,
-                )}
+                )}{" "}
+                · {unsafeTransaction.externalActions.deliveredCount} effects
               </strong>
-              <span>identical Canonical fingerprint</span>
+              <span>Canonical State stayed byte-for-byte unchanged</span>
             </li>
-            <li>
+            <li data-evidence="exact">
               <strong>
-                {unsafeTransaction.externalActions.deliveredCount}
+                File {unsafeFile} · SQLite {unsafeSqliteRow?.id} ={" "}
+                {unsafeSqliteRow?.value}
               </strong>
-              <span>effects delivered</span>
+              <span>
+                {unsafeTransaction.sqlite?.databasePath} + {unsafeEffect?.id}{" "}
+                {unsafeEffect?.status}
+              </span>
             </li>
           </ul>
           <div
@@ -1035,38 +1084,31 @@ function RecordingOutcomeBrief({
             </span>
             <strong>Promotion</strong>
           </header>
-          <h2>Bounded failure evidence guided a safe new future.</h2>
+          <h2>A fresh child repaired and promoted the retained Candidate.</h2>
           <ul>
-            <li>
-              <strong>
-                {outcome.repairedRequired.passed}/
-                {outcome.repairedRequired.total} passed · Depth{" "}
-                {repairedTransaction.lineage.depth}
-              </strong>
-              <span>
-                required Validations · parent{" "}
-                {repairedTransaction.lineage.parentRunId!.slice(0, 8)}
-              </span>
-            </li>
-            <li>
+            <li data-evidence="exact">
               <strong>
                 {repairedTransaction.resources.length}/4 +{" "}
-                {repairedTransaction.externalActions.deliveredCount}
+                {repairedTransaction.externalActions.deliveredCount} fresh
+                effect · {outcome.repairedRequired.passed}/
+                {outcome.repairedRequired.total} required
               </strong>
-              <span>resources promoted + fresh effect</span>
+              <span>fresh child passed every check before Promotion</span>
             </li>
-            <li>
+            <li data-evidence="exact">
               <strong>
-                {shortHash(
-                  repairedTransaction.canonicalContentHashBefore,
-                ).slice(0, 8)}{" "}
-                →{" "}
-                {shortHash(repairedTransaction.canonicalContentHashAfter).slice(
-                  0,
-                  8,
-                )}
+                Validation {"command:protocol-content"} · SQLite{" "}
+                {repairedSqliteRow?.id} = {repairedSqliteRow?.value}
               </strong>
-              <span>Canonical fingerprint advanced</span>
+              <span>
+                repaired from parent{" "}
+                {repairedTransaction.lineage.parentRunId!.slice(0, 8)} · depth{" "}
+                {repairedTransaction.lineage.depth}
+              </span>
+            </li>
+            <li data-evidence="exact">
+              <strong>{repairedEffect?.type}</strong>
+              <span>{repairedEffect?.id} delivered with a fresh key</span>
             </li>
           </ul>
           <div
@@ -1077,6 +1119,11 @@ function RecordingOutcomeBrief({
             }
           >
             <span>Exact evidence</span>
+            <code>
+              Canonical {shortHash(repairedTransaction.canonicalContentHashBefore).slice(0, 8)}
+              {" → "}
+              {shortHash(repairedTransaction.canonicalContentHashAfter).slice(0, 8)}
+            </code>
             <code>Run {outcome.repaired.id}</code>
             <code>Parent {repairedTransaction.lineage.parentRunId}</code>
           </div>
@@ -1091,7 +1138,7 @@ function RecordingOutcomeBrief({
           <ul>
             <li>
               <strong>2</strong>
-              <span>signed decisions linked</span>
+              <span>Quarantine-to-Repair signed decisions linked</span>
             </li>
             <li>
               <strong>Local</strong>
@@ -1117,7 +1164,18 @@ function RecordingOutcomeBrief({
           Candidate State (attempted future) → Outcome Contract → Canonical
           State (accepted reality) or Quarantine
         </span>
-        <strong>No trust claim depends on chat text.</strong>
+        <div className="recording-continuation">
+          {agentStatus !== null && (
+            <strong>Agent remains {agentStatus.toUpperCase()}</strong>
+          )}
+          <button
+            type="button"
+            className="button button-ghost"
+            onClick={onContinue}
+          >
+            Continue in Playground
+          </button>
+        </div>
       </footer>
     </section>
   );
@@ -1793,12 +1851,19 @@ function CustodyProofRoom({
 
 function ReceiptVerifier({
   initialArtifact,
+  agentStatus,
   onClose,
 }: {
   initialArtifact: PortableVerifierArtifact | null;
+  agentStatus: Agent["status"] | null;
   onClose: () => void;
 }) {
-  const openerRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+  const dialogRef = useRef<HTMLElement | null>(null);
   const [report, setReport] = useState<PortableVerificationReport | null>(null);
   const [packetReport, setPacketReport] =
     useState<PortableEvidencePacketVerificationReport | null>(null);
@@ -1898,16 +1963,41 @@ function ReceiptVerifier({
   );
 
   useEffect(() => {
-    openerRef.current =
-      document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      const active = document.activeElement;
+      if (
+        event.shiftKey &&
+        (active === first || !dialogRef.current.contains(active))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last || !dialogRef.current.contains(active))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
+    dialogRef.current
+      ?.querySelector<HTMLElement>("[data-verifier-close]")
+      ?.focus();
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
@@ -2084,6 +2174,7 @@ function ReceiptVerifier({
   return (
     <div className="modal-backdrop verifier-backdrop" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className="receipt-verifier"
         role="dialog"
         aria-modal="true"
@@ -2094,7 +2185,7 @@ function ReceiptVerifier({
           <div>
             <span className="eyebrow">Independent verifier</span>
             <h2 id="receipt-verifier-title">
-              Verify trust without trusting this server
+              Verify integrity locally without querying the server
             </h2>
             <p>
               Your file stays in this browser. Web Crypto checks the canonical
@@ -2105,6 +2196,7 @@ function ReceiptVerifier({
           </div>
           <button
             type="button"
+            data-verifier-close
             aria-label="Close receipt verifier"
             onClick={onClose}
           >
@@ -2121,6 +2213,9 @@ function ReceiptVerifier({
               : ""}
             {" · 16 MB custody / 4 MB other proofs"}
           </strong>
+          {agentStatus !== null && (
+            <small>Agent remains {agentStatus.toUpperCase()}</small>
+          )}
         </div>
 
         {chainReport?.valid && recordingChainRoot && recordingChainLeaf && (
@@ -5029,6 +5124,7 @@ export default function App() {
   );
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
+  const [recordingDismissed, setRecordingDismissed] = useState(false);
   const messageEnd = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -5048,7 +5144,9 @@ export default function App() {
     [],
   );
   const recordingMode =
-    recordingRequested && system?.protocolFixtureMode === true;
+    recordingRequested &&
+    !recordingDismissed &&
+    system?.protocolFixtureMode === true;
   const recordingOutcome = useMemo(
     () =>
       recordingMode
@@ -5903,12 +6001,15 @@ export default function App() {
 
         {system?.protocolFixtureMode ? (
           <div className="protocol-mode-banner" role="status">
-            <span>REAL RUNTIME PROOF</span>
+            <span>TRACK 1 · AGENT LAUNCHPAD</span>
             <div>
-              <strong>Real Codex CLI in a disposable container</strong>
+              <strong>
+                Reusable Agent Airlock middleware automatically protects every
+                Agent Run
+              </strong>
               <p>
-                Local deterministic Responses fixture. No ModelArk request or
-                paid inference.
+                Real Codex CLI in a disposable container · local deterministic
+                Responses fixture · no ModelArk request or paid inference.
               </p>
             </div>
           </div>
@@ -5978,10 +6079,19 @@ export default function App() {
           <RecordingOutcomeBrief
             outcome={recordingOutcome}
             system={system}
+            agentStatus={selected?.status ?? null}
             onOpenVerifier={() => {
               if (!automaticProof?.artifact) return;
               setVerifierArtifact(automaticProof.artifact);
               setShowReceiptVerifier(true);
+            }}
+            onContinue={() => {
+              setRecordingAttempt(null);
+              setAutomaticProof(null);
+              setRecordingDismissed(true);
+              const nextUrl = new URL(window.location.href);
+              nextUrl.searchParams.delete("recording");
+              window.history.replaceState({}, "", nextUrl);
             }}
           />
         ) : selected ? (
@@ -6186,7 +6296,7 @@ export default function App() {
                       {system?.demoMode
                         ? "Prove one Agent future is safe"
                         : system?.protocolFixtureMode
-                          ? "Prove a real Agent change is safe"
+                          ? "Prove transactional safety for a real Agent Run"
                           : system?.modelArkDemoMode
                             ? "Prove a live ModelArk change is safe"
                         : "Build something with your Agent"}
@@ -6817,6 +6927,7 @@ export default function App() {
       {showReceiptVerifier && (
         <ReceiptVerifier
           initialArtifact={verifierArtifact}
+          agentStatus={selected?.status ?? null}
           onClose={closeReceiptVerifier}
         />
       )}

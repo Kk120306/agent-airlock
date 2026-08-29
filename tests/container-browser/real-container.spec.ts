@@ -38,13 +38,18 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   releaseSystemRequest();
   await expect(page.locator(".brand").getByText("Agent Airlock", { exact: true }))
     .toBeVisible();
-  await expect(page.getByText("REAL RUNTIME PROOF", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Real Codex CLI in a disposable container", { exact: true }),
+    page.getByText("TRACK 1 · AGENT LAUNCHPAD", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText(
-      "Local deterministic Responses fixture. No ModelArk request or paid inference.",
+      "Reusable Agent Airlock middleware automatically protects every Agent Run",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Real Codex CLI in a disposable container · local deterministic Responses fixture · no ModelArk request or paid inference.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -57,7 +62,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     page.getByText("Real Runtime proof · local inference", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Prove a real Agent change is safe" }),
+    page.getByRole("heading", {
+      name: "Prove transactional safety for a real Agent Run",
+    }),
   ).toBeVisible();
   await expect(page.getByLabel("Judge proof path")).toContainText(
     "Run→Validate→Promote→Verify",
@@ -334,7 +341,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await repairedEvidence
     .getByRole("button", { name: "Inspect in zero-upload verifier" })
     .click();
-  const verifier = page.getByRole("dialog", { name: "Verify trust without trusting this server" });
+  const verifier = page.getByRole("dialog", {
+    name: "Verify integrity locally without querying the server",
+  });
   await expect(
     verifier.getByText(
       "0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
@@ -440,6 +449,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   const runs = (await runsResponse.json()) as {
     runs: Array<{
       id: string;
+      prompt: string;
       status: string;
       transaction: {
         disposition: string;
@@ -472,6 +482,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     (run) => run.transaction.disposition === "quarantined",
   );
   expect(promotedRun).toMatchObject({
+    prompt: expect.stringContaining(
+      "Create protocol-proof.txt with candidate-only",
+    ),
     status: "completed",
     transaction: {
       disposition: "promoted",
@@ -506,6 +519,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     ),
   );
   expect(quarantinedRun).toMatchObject({
+    prompt: expect.stringContaining(
+      "set protocol-proof.txt and SQLite row demo to unsafe-candidate",
+    ),
     status: "completed",
     transaction: {
       disposition: "quarantined",
@@ -755,11 +771,17 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   });
   await expect(
     outcomeBrief.getByRole("heading", {
-      name: "One release. Three futures. Only validated reality moves.",
+      name: "Three Runs. One rule: only validated state moves.",
     }),
   ).toBeVisible({ timeout: 45_000 });
   await expect(
-    outcomeBrief.getByText("Release proven safe", { exact: true }),
+    outcomeBrief.getByText("Transactional safety proven", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    outcomeBrief.getByText(
+      "Persisted Run transactions prove all three outcomes. The independently verified signed chain proves the Quarantine-to-Repair handoff.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(
     outcomeBrief.getByText("Disclosed execution boundary", { exact: true }),
@@ -776,44 +798,94 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(visibleRunLabels.filter((label) => /RUN [a-f0-9]{8}$/i.test(label)))
     .toHaveLength(3);
   const promotedOutcome = outcomeBrief.locator('article[data-outcome="promoted"]');
-  await expect(promotedOutcome.getByText("9/9", { exact: true })).toBeVisible();
-  await expect(promotedOutcome.getByText("4/4 + 1", { exact: true })).toBeVisible();
-  await expect(promotedOutcome.getByText("resources promoted + post-Promotion effect", { exact: true }))
-    .toBeVisible();
-  await expect(promotedOutcome.getByText("Canonical fingerprint advanced", {
-    exact: true,
-  })).toBeVisible();
+  await expect(
+    promotedOutcome.getByText("4/4 resources · 9/9 required", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    promotedOutcome.getByText(/^Canonical [a-f0-9]{8} → [a-f0-9]{8}$/),
+  ).toBeVisible();
+  await expect(
+    promotedOutcome.getByText(
+      "File protocol-proof.txt · SQLite demo = candidate-only",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    promotedOutcome.getByText("demo.notification.requested", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    promotedOutcome.getByText(
+      "protocol-release-ready delivered only after Promotion",
+      { exact: true },
+    ),
+  ).toBeVisible();
   const quarantinedOutcome = outcomeBrief.locator(
     'article[data-outcome="quarantined"]',
   );
   await expect(
-    quarantinedOutcome.getByText("1 failed · 4/4 quarantined", { exact: true }),
+    quarantinedOutcome.getByText("command:protocol-content", { exact: true }),
   ).toBeVisible();
   await expect(
     quarantinedOutcome.getByText(
-      "required Validation blocked every resource",
+      "decisive required Validation failed · 4/4 quarantined",
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(quarantinedOutcome.getByText("identical Canonical fingerprint", {
-    exact: true,
-  })).toBeVisible();
-  await expect(quarantinedOutcome.getByText("0", { exact: true })).toBeVisible();
-  await expect(quarantinedOutcome.getByText("effects delivered", { exact: true }))
-    .toBeVisible();
+  await expect(
+    quarantinedOutcome.getByText(/^[a-f0-9]{8} = [a-f0-9]{8} · 0 effects$/),
+  ).toBeVisible();
+  await expect(
+    quarantinedOutcome.getByText(
+      "File protocol-proof.txt · SQLite demo = unsafe-candidate",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    quarantinedOutcome.getByText(
+      ".airlock/demo.sqlite + protocol-unsafe rejected",
+      { exact: true },
+    ),
+  ).toBeVisible();
   const repairedOutcome = outcomeBrief.locator('article[data-outcome="repaired"]');
-  await expect(repairedOutcome.getByText("10/10 passed · Depth 1", { exact: true }))
-    .toBeVisible();
-  await expect(repairedOutcome.getByText("4/4 + 1", { exact: true })).toBeVisible();
-  await expect(repairedOutcome.getByText("Canonical fingerprint advanced", {
-    exact: true,
-  })).toBeVisible();
+  await expect(
+    repairedOutcome.getByText("4/4 + 1 fresh effect · 10/10 required", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    repairedOutcome.getByText(/^Canonical [a-f0-9]{8} → [a-f0-9]{8}$/),
+  ).toBeVisible();
+  await expect(
+    repairedOutcome.getByText(
+      "Validation command:protocol-content · SQLite demo = candidate-only",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    repairedOutcome.getByText("demo.notification.requested", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    repairedOutcome.getByText(
+      "protocol-repair-ready delivered with a fresh key",
+      { exact: true },
+    ),
+  ).toBeVisible();
   const verifiedOutcome = outcomeBrief.locator('article[data-outcome="verified"]');
-  await expect(verifiedOutcome.getByText("signed decisions linked", { exact: true }))
-    .toBeVisible();
+  await expect(
+    verifiedOutcome.getByText(
+      "Quarantine-to-Repair signed decisions linked",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await expect(verifiedOutcome.getByText("browser cryptographic check passed", {
     exact: true,
   })).toBeVisible();
+  await expect(
+    outcomeBrief.getByText("Agent remains READY", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    outcomeBrief.getByRole("button", { name: "Continue in Playground" }),
+  ).toBeEnabled();
   const outcomeBox = await outcomeBrief.boundingBox();
   expect(outcomeBox).not.toBeNull();
   expect(outcomeBox!.y + outcomeBox!.height).toBeLessThanOrEqual(720);
@@ -832,8 +904,24 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .getByRole("button", { name: "Inspect in zero-upload verifier" })
     .click();
   const automatedVerifier = page.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
+  const automatedVerifierClose = automatedVerifier.getByRole("button", {
+    name: "Close receipt verifier",
+  });
+  await expect(automatedVerifierClose).toBeFocused();
+  await expect(
+    automatedVerifier.getByText("Agent remains READY", { exact: true }),
+  ).toBeVisible();
+  await outcomeBrief
+    .getByRole("button", { name: "Inspect in zero-upload verifier" })
+    .focus();
+  await page.keyboard.press("Tab");
+  expect(
+    await automatedVerifier.evaluate((dialog) =>
+      dialog.contains(document.activeElement),
+    ),
+  ).toBe(true);
   await expect(
     automatedVerifier.getByText("Cryptographic proof valid", { exact: true }),
   ).toBeVisible();
@@ -846,9 +934,12 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       { exact: true },
     ),
   ).toBeVisible();
-  await automatedVerifier
-    .getByRole("button", { name: "Close receipt verifier" })
-    .click();
+  await automatedVerifierClose.click();
+  await expect(
+    outcomeBrief.getByRole("button", {
+      name: "Inspect in zero-upload verifier",
+    }),
+  ).toBeFocused();
 
   const threeRunResponse = await request.get(
     `/api/agents/${automatedAgent.agent.id}/runs`,
@@ -942,7 +1033,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(mobileVerifierButtonBox!.height).toBeGreaterThanOrEqual(44);
   await mobileVerifierButton.click();
   const mobileVerifier = mobilePage.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
   await expect(
     mobileVerifier.getByText("Cryptographic proof valid", { exact: true }),
@@ -967,6 +1058,19 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(1280);
+
+  const recordingUrl = page.url();
+  await outcomeBrief
+    .getByRole("button", { name: "Continue in Playground" })
+    .click();
+  await expect(page.locator(".recording-mode")).toHaveCount(0);
+  await expect(page.locator(".agent-header")).toBeVisible();
+  await expect(page.locator(".composer")).toBeVisible();
+  expect(new URL(page.url()).searchParams.has("recording")).toBe(false);
+  await page.goto(recordingUrl);
+  await expect(
+    page.getByRole("button", { name: "Prove this release is safe" }),
+  ).toBeEnabled();
 
   const malformedReplayUrl = new URL(replayUrl);
   malformedReplayUrl.searchParams.delete("recordingRepairRunId");
@@ -1094,7 +1198,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await offlineVerifierButton.click();
 
   const guardedOfflineVerifier = offlineVerifierPage.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
   await expect(
     guardedOfflineVerifier.getByText("Cryptographic proof valid", {

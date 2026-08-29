@@ -36,6 +36,7 @@ export const recordingReplayQueryParameters = {
 
 type RecordingEffectExpectation = {
   id: string;
+  type?: string;
   status: "delivered" | "rejected";
   deliveredCount: 0 | 1;
 };
@@ -220,6 +221,7 @@ export function hasExactRecordingEffect(
     transaction.externalActions.deliveredCount !== expectation.deliveredCount ||
     intents.length !== 1 ||
     intent?.id !== expectation.id ||
+    (expectation.type !== undefined && intent.type !== expectation.type) ||
     intent.status !== expectation.status ||
     !isSafeRecordingIdentifier(intent.idempotencyKey)
   ) {

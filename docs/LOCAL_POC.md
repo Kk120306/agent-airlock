@@ -55,10 +55,10 @@ The production control plane launches the pinned real Codex CLI in a disposable 
 Codex executes the requested write only inside Candidate State.
 Airlock requires `AGENTS.md` and `protocol-proof.txt`, protects `AGENTS.md`, caps the change, and runs `test "$(cat protocol-proof.txt)" = candidate-only` before Promotion.
 Then select `Run failing Candidate` to make real Codex write deliberately invalid content in a second isolated Candidate.
-The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, the `Run` to `Validate` to `Promote` to `Verify` path, a compact evidence-backed Quarantine verdict, and an unchanged canonical fingerprint.
+The browser must show `TRACK 1 · AGENT LAUNCHPAD`, the local inference disclosure, the `Run` to `Validate` to `Promote` to `Verify` path, a compact evidence-backed Quarantine verdict, and an unchanged Canonical fingerprint.
 The canonical workspace must still contain `candidate-only`, while the retained Quarantine contains `unsafe-candidate`.
 Select `Repair retained Candidate` to start a fresh real Codex Run from the retained Candidate and bounded failed-Validation evidence.
-The browser must show the repaired child linked to its quarantined parent, all nine required Validations passing, and Canonical State advancing only after the repair succeeds.
+The browser must show the repaired child linked to its quarantined parent, all ten required Validations passing, and Canonical State advancing only after the repair succeeds.
 Open the complete success evidence to show `Journal completed`, then open the rejection evidence to show the decisive `command:protocol-content` failure without crowding the primary judge story.
 Select `Generate and verify proof` on the repaired Run to create a private-by-default two-decision chain and confirm its signatures and Canonical handoff locally.
 State persists under the dedicated `.local/airlock-container-demo` root unless `--reset` is supplied.

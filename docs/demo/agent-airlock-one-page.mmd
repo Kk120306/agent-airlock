@@ -1,0 +1,62 @@
+%%{init: {"theme": "base", "flowchart": {"wrappingWidth": 420}, "themeVariables": {"fontSize": "24px", "lineColor": "#3c3a58"}}}%%
+flowchart TB
+    Title["AGENT AIRLOCK · TRACK 1<br/>Transactional execution middleware for every Agent Run"]
+
+    subgraph Execute["1 · EXECUTE ONE STARTER-KIT PATH"]
+        direction LR
+        UI["React Playground<br/>Agent CRUD + lifecycle"]
+        API["Fastify API<br/>AgentService"]
+        Airlock["Shared Airlock wrapper<br/>AgentRunner seam"]
+        Inference["Local Responses fixture<br/>or optional ModelArk"]
+        Runtime["Pinned Codex CLI<br/>disposable container"]
+        Candidate["Run-owned Candidate<br/>files + session + SQLite + outbox"]
+
+        UI --> API --> Airlock
+        Inference --> Runtime
+        Airlock -->|TRUST BOUNDARY<br/>Candidate-only bindings| Runtime
+        Runtime <--> Candidate
+    end
+
+    subgraph Decision["2 · TRUSTED OUTCOME CONTRACT DECISION"]
+        direction LR
+        Complete["Complete Candidate<br/>crosses back to control plane"]
+        Contract{"GUARANTEE<br/>Only if every required check passes<br/>may Candidate become Canonical"}
+        subgraph PassLane["PASS"]
+            direction LR
+            Promote["Durable Promotion journal<br/>atomic manifest advance"]
+            Canonical["Canonical State<br/>accepted reality"]
+            Effect["Typed external effect<br/>only after Promotion"]
+            Promote --> Canonical --> Effect
+        end
+        subgraph FailLane["FAIL"]
+            direction LR
+            Quarantine["Quarantine<br/>accepted state unchanged"]
+            Repair["Bounded Repair child<br/>same contract + fresh outbox"]
+            Reenter["RE-ENTER SAME PATH<br/>Airlock + Candidate + Contract"]
+            Quarantine --> Repair --> Reenter
+        end
+
+        Complete --> Contract
+        Contract -->|PASS| Promote
+        Contract -->|FAIL| Quarantine
+        Reenter -. "repeat until pass or depth limit" .-> Contract
+    end
+
+    subgraph Verify["3 · PRESERVE AND VERIFY EVIDENCE"]
+        direction LR
+        Decisions["Promotion + Quarantine + Repair<br/>persisted Run decisions"]
+        Evidence["Redacted receipt + signed lineage<br/>evidence only, never Promotion authority"]
+        Proof["JUDGE-VISIBLE PROOF<br/>harmless failure + recovery + verifier"]
+        Decisions --> Evidence --> Proof
+    end
+
+    Title ~~~ Execute
+    Execute -->|complete Candidate| Decision
+    Decision -->|persist every disposition| Verify
+
+    classDef trusted fill:#eeedff,stroke:#6558d9,color:#171333,stroke-width:2px;
+    classDef untrusted fill:#fff3df,stroke:#bd6518,color:#3d250d,stroke-width:2px;
+    classDef headline fill:#171333,stroke:#171333,color:#ffffff,stroke-width:2px;
+    class API,Airlock,Complete,Contract,Promote,Canonical,Effect,Quarantine,Repair,Reenter,Decisions,Evidence trusted;
+    class Inference,Runtime,Candidate untrusted;
+    class Title,Proof headline;

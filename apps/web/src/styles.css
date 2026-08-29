@@ -4462,6 +4462,16 @@ textarea:focus {
   font-size: 10px;
 }
 
+.verifier-boundary small {
+  margin-left: auto;
+  color: #356a57;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .verifier-recording-proof {
   margin: 0 0 10px;
   display: grid;
@@ -5768,6 +5778,21 @@ textarea:focus {
   line-height: 1.25;
 }
 
+.recording-outcome-grid li[data-evidence="exact"] {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 3px;
+}
+
+.recording-outcome-grid li[data-evidence="exact"] strong {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.recording-outcome-grid li[data-evidence="exact"] span {
+  font-size: 10px;
+}
+
 .recording-outcome-grid details {
   margin-top: auto;
   padding-top: 7px;
@@ -5836,6 +5861,22 @@ textarea:focus {
 
 .recording-outcome > footer strong {
   color: #4e4384;
+}
+
+.recording-continuation {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.recording-continuation .button {
+  min-height: 32px;
+  padding: 0 11px;
+  color: #4e4384;
+  border-color: #cfc8eb;
+  background: #f4f1ff;
+  font-size: 10px;
 }
 
 @keyframes spin {
@@ -6024,6 +6065,11 @@ textarea:focus {
     font-size: 26px;
   }
 
+  .recording-continuation {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .recording-verdict {
     min-height: 36px;
   }
@@ -6121,6 +6167,10 @@ textarea:focus {
   .verifier-boundary {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .verifier-boundary small {
+    margin-left: 0;
   }
 
   .receipt-dropzone {

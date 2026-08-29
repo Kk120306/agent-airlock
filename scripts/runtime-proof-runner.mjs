@@ -23,8 +23,7 @@ export const RUNTIME_PROOF_CHAIN_DIRECTORY = "chains";
 export const RUNTIME_PROOF_CAPSULE_DIRECTORY = "capsules";
 export const RUNTIME_PROOF_RESULT_NAME = "real-runtime-proof.latest.json";
 export const RUNTIME_PROOF_EVIDENCE_DIRECTORY = "evidence";
-export const RUNTIME_PROOF_ROOT_MARKER =
-  ".agent-airlock-runtime-proof-root";
+export const RUNTIME_PROOF_ROOT_MARKER = ".agent-airlock-runtime-proof-root";
 export const RUNTIME_PROOF_SESSION_MARKER =
   ".agent-airlock-runtime-proof-session.json";
 
@@ -80,8 +79,7 @@ const FORBIDDEN_RESULT_PATTERN =
 const FAILURE_MESSAGES = Object.freeze({
   "runtime-unavailable":
     "A running Docker, Colima, or Podman engine is required for the real Runtime proof.",
-  "image-build-failed":
-    "The exact pinned Runtime image could not be prepared.",
+  "image-build-failed": "The exact pinned Runtime image could not be prepared.",
   "startup-failed":
     "The fresh real Runtime proof launcher did not reach its admitted ready state.",
   "stale-state":
@@ -96,8 +94,7 @@ const FAILURE_MESSAGES = Object.freeze({
     "The complete browser proof did not finish inside the three-minute recording window.",
   "stage-timeout":
     "A real Runtime proof preparation stage exceeded its bounded execution window.",
-  "run-failed":
-    "One of the browser-created Runs failed or was cancelled.",
+  "run-failed": "One of the browser-created Runs failed or was cancelled.",
   "run-set-invalid":
     "The browser did not create exactly one promoted root, one quarantined root, and one promoted Repair child.",
   "promotion-invalid":
@@ -187,8 +184,9 @@ function samePhysicalIdentity(left, right) {
 }
 
 function ownedByCurrentUser(status) {
-  return typeof process.geteuid !== "function" ||
-    status?.uid === process.geteuid();
+  return (
+    typeof process.geteuid !== "function" || status?.uid === process.geteuid()
+  );
 }
 
 function runtimeProofProcessExists(pid) {
@@ -253,9 +251,7 @@ async function openOwnerOnlyDirectory(
     }
     handle = await fsImpl.open(
       directoryPath,
-      fsConstants.O_RDONLY |
-        fsConstants.O_NOFOLLOW |
-        fsConstants.O_DIRECTORY,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_DIRECTORY,
     );
     const opened = await handle.stat();
     if (
@@ -395,11 +391,7 @@ export async function runRuntimeProofArtifactWorker(
     child.once("close", (code, signalName) =>
       finish({
         code,
-        signalName: spawnFailed
-          ? "error"
-          : timedOut
-            ? "timeout"
-            : signalName,
+        signalName: spawnFailed ? "error" : timedOut ? "timeout" : signalName,
       }),
     );
   });
@@ -545,10 +537,7 @@ export function createRuntimeProofPresentationPacer({
         recordingDeadlineAt,
       )
         ? Math.floor(
-            recordingDeadlineAt -
-              now() -
-              tailReserveMs -
-              followingDwellReserve,
+            recordingDeadlineAt - now() - tailReserveMs - followingDwellReserve,
           )
         : requestedMilliseconds;
       if (remainingPresentationMilliseconds < requestedMilliseconds) {
@@ -561,7 +550,9 @@ export function createRuntimeProofPresentationPacer({
 
 function uniqueRuntimeProofAgent(agents) {
   if (!Array.isArray(agents)) throw new RuntimeProofError("startup-failed");
-  const matches = agents.filter((agent) => agent?.name === "Real Runtime Proof");
+  const matches = agents.filter(
+    (agent) => agent?.name === "Real Runtime Proof",
+  );
   if (
     matches.length !== 1 ||
     !safeIdentifier(matches[0]?.id) ||
@@ -573,7 +564,10 @@ function uniqueRuntimeProofAgent(agents) {
 }
 
 function hasExactResources(transaction, disposition) {
-  if (!Array.isArray(transaction?.resources) || transaction.resources.length !== 4) {
+  if (
+    !Array.isArray(transaction?.resources) ||
+    transaction.resources.length !== 4
+  ) {
     return false;
   }
   const resources = transaction.resources
@@ -581,16 +575,17 @@ function hasExactResources(transaction, disposition) {
       kind: resource?.kind,
       disposition: resource?.disposition,
     }))
-    .sort((left, right) => String(left.kind).localeCompare(String(right.kind), "en"));
-  return (
-    resources.every((resource, index) =>
+    .sort((left, right) =>
+      String(left.kind).localeCompare(String(right.kind), "en"),
+    );
+  return resources.every(
+    (resource, index) =>
       resource.kind === EXPECTED_RESOURCE_KINDS[index] &&
       resource.disposition === disposition,
-    )
   );
 }
 
-function exactEffect(transaction, { id, status, deliveredCount }) {
+function exactEffect(transaction, { id, type, status, deliveredCount }) {
   const effects = transaction?.externalActions;
   const intent = effects?.intents?.[0];
   const promoting = transaction?.events?.filter(
@@ -602,23 +597,33 @@ function exactEffect(transaction, { id, status, deliveredCount }) {
   const deliveredAt = Date.parse(intent?.deliveredAt ?? "");
   const promotingAt = Date.parse(promoting?.[0]?.at ?? "");
   const promotedAt = Date.parse(promoted?.[0]?.at ?? "");
-  const deliveryChronologyValid = status === "delivered"
-    ? promoting?.length === 1 &&
-      promoted?.length === 1 &&
-      [deliveredAt, promotingAt, promotedAt].every(Number.isFinite) &&
-      promotingAt <= deliveredAt &&
-      deliveredAt <= promotedAt
-    : intent?.deliveredAt === null &&
-      promoting?.length === 0 &&
-      promoted?.length === 0;
+  const deliveryChronologyValid =
+    status === "delivered"
+      ? promoting?.length === 1 &&
+        promoted?.length === 1 &&
+        [deliveredAt, promotingAt, promotedAt].every(Number.isFinite) &&
+        promotingAt <= deliveredAt &&
+        deliveredAt <= promotedAt
+      : intent?.deliveredAt === null &&
+        promoting?.length === 0 &&
+        promoted?.length === 0;
   return (
     effects?.deliveredCount === deliveredCount &&
     Array.isArray(effects?.intents) &&
     effects.intents.length === 1 &&
     intent?.id === id &&
+    intent?.type === type &&
     intent?.status === status &&
     safeIdentifier(intent?.idempotencyKey) &&
     deliveryChronologyValid
+  );
+}
+
+function hasExactProtocolProofChange(transaction) {
+  const files = transaction?.changes?.files;
+  return (
+    Array.isArray(files) &&
+    files.filter((change) => change?.path === "protocol-proof.txt").length === 1
   );
 }
 
@@ -756,14 +761,17 @@ export function verifyRuntimeProofRuns({ agent, runs }) {
     !rootLineage(promotion) ||
     promoted.canonicalStateIdBefore !== agent.canonicalStateId ||
     promoted.canonicalStateIdAfter === promoted.canonicalStateIdBefore ||
-    promoted.canonicalContentHashAfter === promoted.canonicalContentHashBefore ||
+    promoted.canonicalContentHashAfter ===
+      promoted.canonicalContentHashBefore ||
     !hasExactResources(promoted, "promoted") ||
+    !hasExactProtocolProofChange(promoted) ||
     !hasSqliteValue(promoted, "candidate-only", "candidate") ||
     !hasSqliteValue(promoted, "candidate-only") ||
     !requiredValidations(promoted, "passed") ||
     promoted.recovery?.journalPhase !== "completed" ||
     !exactEffect(promoted, {
       id: "protocol-release-ready",
+      type: "demo.notification.requested",
       status: "delivered",
       deliveredCount: 1,
     })
@@ -775,15 +783,19 @@ export function verifyRuntimeProofRuns({ agent, runs }) {
     !commonTerminalRun(quarantine, "quarantined") ||
     !rootLineage(quarantine) ||
     rejected.canonicalStateIdBefore !== promoted.canonicalStateIdAfter ||
-    rejected.canonicalContentHashBefore !== promoted.canonicalContentHashAfter ||
+    rejected.canonicalContentHashBefore !==
+      promoted.canonicalContentHashAfter ||
     rejected.canonicalStateIdAfter !== rejected.canonicalStateIdBefore ||
-    rejected.canonicalContentHashAfter !== rejected.canonicalContentHashBefore ||
+    rejected.canonicalContentHashAfter !==
+      rejected.canonicalContentHashBefore ||
     !hasExactResources(rejected, "quarantined") ||
+    !hasExactProtocolProofChange(rejected) ||
     !hasSqliteValue(rejected, "unsafe-candidate", "candidate") ||
     !hasSqliteValue(rejected, "candidate-only") ||
     !requiredValidations(rejected, "failed") ||
     !exactEffect(rejected, {
       id: "protocol-unsafe",
+      type: "demo.notification.requested",
       status: "rejected",
       deliveredCount: 0,
     })
@@ -799,9 +811,11 @@ export function verifyRuntimeProofRuns({ agent, runs }) {
     repaired.lineage?.parentRunId !== quarantine.id ||
     repaired.lineage?.depth !== 1 ||
     repaired.canonicalStateIdBefore !== rejected.canonicalStateIdAfter ||
-    repaired.canonicalContentHashBefore !== rejected.canonicalContentHashAfter ||
+    repaired.canonicalContentHashBefore !==
+      rejected.canonicalContentHashAfter ||
     repaired.canonicalStateIdAfter === repaired.canonicalStateIdBefore ||
-    repaired.canonicalContentHashAfter === repaired.canonicalContentHashBefore ||
+    repaired.canonicalContentHashAfter ===
+      repaired.canonicalContentHashBefore ||
     !hasExactResources(repaired, "promoted") ||
     !hasSqliteValue(repaired, "candidate-only", "candidate") ||
     !hasSqliteValue(repaired, "candidate-only") ||
@@ -809,6 +823,7 @@ export function verifyRuntimeProofRuns({ agent, runs }) {
     repaired.recovery?.journalPhase !== "completed" ||
     !exactEffect(repaired, {
       id: "protocol-repair-ready",
+      type: "demo.notification.requested",
       status: "delivered",
       deliveredCount: 1,
     }) ||
@@ -920,7 +935,9 @@ function assertVerifiedDecisionChain({ source, report, runs }) {
     !SHA256_PATTERN.test(report?.leafReceiptDigest ?? "") ||
     !Array.isArray(report?.checks) ||
     !["chain-links", "chain-state-continuity"].every((name) =>
-      report.checks.some((check) => check?.name === name && check?.valid === true),
+      report.checks.some(
+        (check) => check?.name === name && check?.valid === true,
+      ),
     )
   ) {
     throw new RuntimeProofError("chain-invalid");
@@ -945,15 +962,19 @@ function assertVerifiedDecisionChain({ source, report, runs }) {
     child?.decision?.runId !== runs.repair.id ||
     child?.decision?.disposition !== "promoted" ||
     parent?.state?.before?.stateId !== rejected.canonicalStateIdBefore ||
-    parent?.state?.before?.compositeHash !== rejected.canonicalContentHashBefore ||
+    parent?.state?.before?.compositeHash !==
+      rejected.canonicalContentHashBefore ||
     parent?.state?.after?.stateId !== rejected.canonicalStateIdAfter ||
-    parent?.state?.after?.compositeHash !== rejected.canonicalContentHashAfter ||
+    parent?.state?.after?.compositeHash !==
+      rejected.canonicalContentHashAfter ||
     child?.state?.before?.stateId !== repaired.canonicalStateIdBefore ||
-    child?.state?.before?.compositeHash !== repaired.canonicalContentHashBefore ||
+    child?.state?.before?.compositeHash !==
+      repaired.canonicalContentHashBefore ||
     child?.state?.after?.stateId !== repaired.canonicalStateIdAfter ||
     child?.state?.after?.compositeHash !== repaired.canonicalContentHashAfter ||
     child?.ancestry?.parentRunId !== runs.quarantine.id ||
-    child?.ancestry?.previousReceiptDigest !== packets[0]?.envelope?.receiptDigest ||
+    child?.ancestry?.previousReceiptDigest !==
+      packets[0]?.envelope?.receiptDigest ||
     report.leafReceiptDigest !== packets[1]?.envelope?.receiptDigest
   ) {
     throw new RuntimeProofError("chain-invalid");
@@ -1305,10 +1326,7 @@ async function removeOwnerOnlyLeaf(
   fsImpl,
   artifactIo = runRuntimeProofArtifactWorker,
 ) {
-  if (
-    !parentAnchor ||
-    path.dirname(filePath) !== parentAnchor.directoryPath
-  ) {
+  if (!parentAnchor || path.dirname(filePath) !== parentAnchor.directoryPath) {
     throw new RuntimeProofError("artifact-write-failed");
   }
   await assertDirectoryAnchor(parentAnchor, fsImpl);
@@ -1380,8 +1398,7 @@ function assertStoredArtifactPair(
   }
   const normalized = normalizeStoredRuntimeProofResult(result, allowLegacy);
   if (
-    sha256(Buffer.from(chainSource, "utf8")) !==
-    normalized.result.chainDigest
+    sha256(Buffer.from(chainSource, "utf8")) !== normalized.result.chainDigest
   ) {
     throw new RuntimeProofError("artifact-write-failed");
   }
@@ -1405,7 +1422,8 @@ async function safePublicationDirectory(evidenceAnchor, journal, fsImpl) {
     journal.ownerPid < 1 ||
     typeof journal.nonce !== "string" ||
     !/^[a-f0-9-]{36}$/.test(journal.nonce) ||
-    journal.transactionDirectory !== PUBLICATION_DIRECTORY_PREFIX + journal.nonce ||
+    journal.transactionDirectory !==
+      PUBLICATION_DIRECTORY_PREFIX + journal.nonce ||
     !["absent", "present"].includes(journal.previous)
   ) {
     throw new RuntimeProofError("artifact-write-failed");
@@ -1581,8 +1599,16 @@ async function currentStoredArtifact(evidenceAnchor, fsImpl, artifactIo) {
   }
 }
 
-async function ensureCurrentImmutableCapsule(evidenceAnchor, fsImpl, artifactIo) {
-  const stored = await currentStoredArtifact(evidenceAnchor, fsImpl, artifactIo);
+async function ensureCurrentImmutableCapsule(
+  evidenceAnchor,
+  fsImpl,
+  artifactIo,
+) {
+  const stored = await currentStoredArtifact(
+    evidenceAnchor,
+    fsImpl,
+    artifactIo,
+  );
   if (!stored) return null;
   const resultBytes = Buffer.from(stored.resultSource, "utf8");
   const capsuleAnchor = await ensureCapsuleDirectory(
@@ -1890,7 +1916,11 @@ async function migrateLegacyArtifactPair(evidenceAnchor, fsImpl, artifactIo) {
   const legacyPair = assertStoredArtifactPair(legacyChain, resultBytes, {
     allowLegacy: true,
   });
-  const chainAnchor = await ensureChainDirectory(evidenceAnchor, fsImpl, artifactIo);
+  const chainAnchor = await ensureChainDirectory(
+    evidenceAnchor,
+    fsImpl,
+    artifactIo,
+  );
   try {
     const chainPath = path.join(
       chainAnchor.directoryPath,
@@ -2010,10 +2040,12 @@ export async function recoverRuntimeProofArtifactPublication({
     resolvedRoot,
     RUNTIME_PROOF_EVIDENCE_DIRECTORY,
   );
-  const evidenceStatus = await fsImpl.lstat(evidenceDirectory).catch((error) => {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  });
+  const evidenceStatus = await fsImpl
+    .lstat(evidenceDirectory)
+    .catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
   if (!evidenceStatus) return false;
   const rootAnchor = await openOwnerOnlyDirectory(resolvedRoot, {}, fsImpl);
   let evidenceAnchor = null;
@@ -2094,7 +2126,11 @@ export async function writeRuntimeProofArtifacts({
       fsImpl,
       artifactIo,
     );
-    chainAnchor = await ensureChainDirectory(evidenceAnchor, fsImpl, artifactIo);
+    chainAnchor = await ensureChainDirectory(
+      evidenceAnchor,
+      fsImpl,
+      artifactIo,
+    );
     capsuleAnchor = await ensureCapsuleDirectory(
       evidenceAnchor,
       fsImpl,
@@ -2232,11 +2268,14 @@ export async function finalizeRuntimeProofPublication({
       signal,
     });
     if (Number.isFinite(recordingDeadlineAt)) {
-      commitDeadlineTimer = setTimeout(() => {
-        commitDeadlineController.abort(
-          new RuntimeProofError("recording-timeout"),
-        );
-      }, Math.max(0, recordingDeadlineAt - commitStartedAt));
+      commitDeadlineTimer = setTimeout(
+        () => {
+          commitDeadlineController.abort(
+            new RuntimeProofError("recording-timeout"),
+          );
+        },
+        Math.max(0, recordingDeadlineAt - commitStartedAt),
+      );
     }
     commitBoundaryReached = true;
   };
@@ -2384,8 +2423,23 @@ function runtimeProofRecordingExpectation(runs) {
   const quarantine = runs.quarantine;
   const repair = runs.repair;
   const promotionValidations = requiredValidationCounts(promotion);
-  const quarantineValidations = requiredValidationCounts(quarantine);
   const repairValidations = requiredValidationCounts(repair);
+  const promotionSqliteRow = promotion.transaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const quarantineSqliteRow =
+    quarantine.transaction.sqlite?.candidate?.rows.find(
+      (row) => row.id === "demo",
+    );
+  const repairSqliteRow = repair.transaction.sqlite?.after?.rows.find(
+    (row) => row.id === "demo",
+  );
+  const failedRequiredValidation = quarantine.transaction.validations.find(
+    (validation) => validation.required && validation.status === "failed",
+  );
+  const promotionEffect = promotion.transaction.externalActions.intents[0];
+  const quarantineEffect = quarantine.transaction.externalActions.intents[0];
+  const repairEffect = repair.transaction.externalActions.intents[0];
   return {
     runIds,
     headers: [
@@ -2396,22 +2450,28 @@ function runtimeProofRecordingExpectation(runs) {
     ],
     promotion: {
       runId: runIds.safeRunId,
-      validations: `${promotionValidations.passed}/${promotionValidations.total}`,
-      resourcesAndEffects: `${promotion.transaction.resources.length}/4 + ${promotion.transaction.externalActions.deliveredCount}`,
-      fingerprint: `${recordingHashPrefix(promotion.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(promotion.transaction.canonicalContentHashAfter)}`,
+      summary: `${promotion.transaction.resources.length}/4 resources · ${promotionValidations.passed}/${promotionValidations.total} required`,
+      fingerprintTransition: `Canonical ${recordingHashPrefix(promotion.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(promotion.transaction.canonicalContentHashAfter)}`,
+      fileAndSqlite: `File protocol-proof.txt · SQLite demo = ${promotionSqliteRow?.value}`,
+      effectType: promotionEffect?.type,
+      effectDelivery: `${promotionEffect?.id} delivered only after Promotion`,
     },
     quarantine: {
       runId: runIds.unsafeRunId,
-      failedAndResources: `${quarantineValidations.failed} failed · ${quarantine.transaction.resources.length}/4 quarantined`,
-      fingerprint: `${recordingHashPrefix(quarantine.transaction.canonicalContentHashBefore)} = ${recordingHashPrefix(quarantine.transaction.canonicalContentHashAfter)}`,
-      effects: String(quarantine.transaction.externalActions.deliveredCount),
+      failedValidation: failedRequiredValidation?.name,
+      summary: `decisive required Validation failed · ${quarantine.transaction.resources.length}/4 quarantined`,
+      fingerprintAndEffects: `${recordingHashPrefix(quarantine.transaction.canonicalContentHashBefore)} = ${recordingHashPrefix(quarantine.transaction.canonicalContentHashAfter)} · ${quarantine.transaction.externalActions.deliveredCount} effects`,
+      fileAndSqlite: `File protocol-proof.txt · SQLite demo = ${quarantineSqliteRow?.value}`,
+      rejection: `${quarantine.transaction.sqlite?.databasePath} + ${quarantineEffect?.id} ${quarantineEffect?.status}`,
     },
     repair: {
       runId: runIds.repairedRunId,
-      validationsAndDepth: `${repairValidations.passed}/${repairValidations.total} passed · Depth ${repair.transaction.lineage.depth}`,
-      parent: `required Validations · parent ${repair.transaction.lineage.parentRunId.slice(0, 8)}`,
-      resourcesAndEffects: `${repair.transaction.resources.length}/4 + ${repair.transaction.externalActions.deliveredCount}`,
-      fingerprint: `${recordingHashPrefix(repair.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(repair.transaction.canonicalContentHashAfter)}`,
+      summary: `${repair.transaction.resources.length}/4 + ${repair.transaction.externalActions.deliveredCount} fresh effect · ${repairValidations.passed}/${repairValidations.total} required`,
+      fingerprintTransition: `Canonical ${recordingHashPrefix(repair.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(repair.transaction.canonicalContentHashAfter)}`,
+      validationAndSqlite: `Validation command:protocol-content · SQLite demo = ${repairSqliteRow?.value}`,
+      parentAndDepth: `repaired from parent ${repair.transaction.lineage.parentRunId.slice(0, 8)} · depth ${repair.transaction.lineage.depth}`,
+      effectType: repairEffect?.type,
+      effectDelivery: `${repairEffect?.id} delivered with a fresh key`,
     },
   };
 }
@@ -2422,8 +2482,7 @@ async function createFailClosedVerifierGuard(context) {
   const recordViolation = () => {
     blockedRequestCount += 1;
   };
-  const action = () =>
-    offlineVerifierNetworkAction({ guardArmed });
+  const action = () => offlineVerifierNetworkAction({ guardArmed });
 
   await context.route("**/*", async (route) => {
     if (action() === "continue") {
@@ -2523,35 +2582,40 @@ async function assertInsideRecordingViewport(
   { scroll = false } = {},
 ) {
   if (scroll) await locator.scrollIntoViewIfNeeded();
-  const isInside = await locator.evaluate((element, expectedBounds) => {
-    const { viewport: expectedViewport, epsilon } = expectedBounds;
-    const rect = element.getBoundingClientRect();
-    const dialog = element.closest(".receipt-verifier")?.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
-    const details = element.closest("details");
-    const visible =
-      rect.width > 0 &&
-      rect.height > 0 &&
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      Number(style.opacity) > 0 &&
-      (!details || details.open);
-    return (
-      visible &&
-      rect.left >= -epsilon &&
-      rect.top >= -epsilon &&
-      rect.right <= expectedViewport.width + epsilon &&
-      rect.bottom <= expectedViewport.height + epsilon &&
-      (!dialog ||
-        (rect.left >= dialog.left - epsilon &&
-          rect.top >= dialog.top - epsilon &&
-          rect.right <= dialog.right + epsilon &&
-          rect.bottom <= dialog.bottom + epsilon))
-    );
-  }, {
-    viewport,
-    epsilon: RUNTIME_PROOF_VIEWPORT_EPSILON_PX,
-  });
+  const isInside = await locator.evaluate(
+    (element, expectedBounds) => {
+      const { viewport: expectedViewport, epsilon } = expectedBounds;
+      const rect = element.getBoundingClientRect();
+      const dialog = element
+        .closest(".receipt-verifier")
+        ?.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      const details = element.closest("details");
+      const visible =
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity) > 0 &&
+        (!details || details.open);
+      return (
+        visible &&
+        rect.left >= -epsilon &&
+        rect.top >= -epsilon &&
+        rect.right <= expectedViewport.width + epsilon &&
+        rect.bottom <= expectedViewport.height + epsilon &&
+        (!dialog ||
+          (rect.left >= dialog.left - epsilon &&
+            rect.top >= dialog.top - epsilon &&
+            rect.right <= dialog.right + epsilon &&
+            rect.bottom <= dialog.bottom + epsilon))
+      );
+    },
+    {
+      viewport,
+      epsilon: RUNTIME_PROOF_VIEWPORT_EPSILON_PX,
+    },
+  );
   if (!isInside) throw new RuntimeProofError("viewport-invalid");
 }
 
@@ -2560,13 +2624,17 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
   const board = page.getByRole("region", { name: "Verified Outcome Brief" });
   await board.waitFor({ state: "visible", timeout: 15_000 });
   const recordingFields = [];
-  recordingFields.push(await expectExactVisibleText(board, "Release proven safe"));
+  recordingFields.push(
+    await expectExactVisibleText(board, "Transactional safety proven"),
+  );
   const articles = board.locator("article[data-outcome]");
   if ((await articles.count()) !== 4) {
     throw new RuntimeProofError("viewport-invalid");
   }
   for (const outcome of ["promoted", "quarantined", "repaired", "verified"]) {
-    if ((await board.locator(`article[data-outcome="${outcome}"]`).count()) !== 1) {
+    if (
+      (await board.locator(`article[data-outcome="${outcome}"]`).count()) !== 1
+    ) {
       throw new RuntimeProofError("viewport-invalid");
     }
   }
@@ -2586,65 +2654,60 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
   const promoted = board.locator('article[data-outcome="promoted"]');
   recordingFields.push(
     await expectExactVisibleText(promoted, "Promotion"),
-    await expectExactVisibleText(promoted, expectation.promotion.validations),
+    await expectExactVisibleText(promoted, expectation.promotion.summary),
     await expectExactVisibleText(
       promoted,
-      expectation.promotion.resourcesAndEffects,
+      expectation.promotion.fingerprintTransition,
     ),
-    await expectExactVisibleText(promoted, expectation.promotion.fingerprint),
-    await expectExactVisibleText(promoted, "required Validations passed"),
+    await expectExactVisibleText(promoted, expectation.promotion.fileAndSqlite),
+    await expectExactVisibleText(promoted, expectation.promotion.effectType),
     await expectExactVisibleText(
       promoted,
-      "resources promoted + post-Promotion effect",
+      expectation.promotion.effectDelivery,
     ),
-    await expectExactVisibleText(promoted, "Canonical fingerprint advanced"),
   );
   const quarantined = board.locator('article[data-outcome="quarantined"]');
   recordingFields.push(
     await expectExactVisibleText(quarantined, "Quarantine"),
     await expectExactVisibleText(
       quarantined,
-      expectation.quarantine.failedAndResources,
+      expectation.quarantine.failedValidation,
+    ),
+    await expectExactVisibleText(quarantined, expectation.quarantine.summary),
+    await expectExactVisibleText(
+      quarantined,
+      expectation.quarantine.fingerprintAndEffects,
     ),
     await expectExactVisibleText(
       quarantined,
-      expectation.quarantine.fingerprint,
+      expectation.quarantine.fileAndSqlite,
     ),
-    await expectExactVisibleText(quarantined, expectation.quarantine.effects),
-    await expectExactVisibleText(
-      quarantined,
-      "required Validation blocked every resource",
-    ),
-    await expectExactVisibleText(
-      quarantined,
-      "identical Canonical fingerprint",
-    ),
-    await expectExactVisibleText(quarantined, "effects delivered"),
+    await expectExactVisibleText(quarantined, expectation.quarantine.rejection),
   );
   const repaired = board.locator('article[data-outcome="repaired"]');
   recordingFields.push(
     await expectExactVisibleText(repaired, "Promotion"),
+    await expectExactVisibleText(repaired, expectation.repair.summary),
     await expectExactVisibleText(
       repaired,
-      expectation.repair.validationsAndDepth,
+      expectation.repair.fingerprintTransition,
     ),
-    await expectExactVisibleText(repaired, expectation.repair.parent),
     await expectExactVisibleText(
       repaired,
-      expectation.repair.resourcesAndEffects,
+      expectation.repair.validationAndSqlite,
     ),
-    await expectExactVisibleText(repaired, expectation.repair.fingerprint),
-    await expectExactVisibleText(
-      repaired,
-      "resources promoted + fresh effect",
-    ),
-    await expectExactVisibleText(repaired, "Canonical fingerprint advanced"),
+    await expectExactVisibleText(repaired, expectation.repair.parentAndDepth),
+    await expectExactVisibleText(repaired, expectation.repair.effectType),
+    await expectExactVisibleText(repaired, expectation.repair.effectDelivery),
   );
   const verified = board.locator('article[data-outcome="verified"]');
   recordingFields.push(
     await expectExactVisibleText(verified, "Verified"),
     await expectExactVisibleText(verified, "2"),
-    await expectExactVisibleText(verified, "signed decisions linked"),
+    await expectExactVisibleText(
+      verified,
+      "Quarantine-to-Repair signed decisions linked",
+    ),
     await expectExactVisibleText(
       verified,
       "browser cryptographic check passed",
@@ -2692,10 +2755,27 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
     name: "Inspect in zero-upload verifier",
     exact: true,
   });
-  if ((await inspectButton.count()) !== 1 || !(await inspectButton.isEnabled())) {
+  if (
+    (await inspectButton.count()) !== 1 ||
+    !(await inspectButton.isEnabled())
+  ) {
     throw new RuntimeProofError("viewport-invalid");
   }
   recordingFields.push(inspectButton);
+  recordingFields.push(
+    await expectExactVisibleText(board, "Agent remains READY"),
+  );
+  const continueButton = board.getByRole("button", {
+    name: "Continue in Playground",
+    exact: true,
+  });
+  if (
+    (await continueButton.count()) !== 1 ||
+    !(await continueButton.isEnabled())
+  ) {
+    throw new RuntimeProofError("viewport-invalid");
+  }
+  recordingFields.push(continueButton);
   const isMobile = viewport.width === RUNTIME_PROOF_MOBILE_VIEWPORT.width;
   const headerFields = board.locator(
     ".recording-outcome-grid article > header > span",
@@ -2901,7 +2981,7 @@ export async function createPlaywrightRuntimeProofDriver({
       mobileGuard.arm();
       await inspectButton.click();
       const verifier = mobilePage.getByRole("dialog", {
-        name: "Verify trust without trusting this server",
+        name: "Verify integrity locally without querying the server",
       });
       await verifier
         .getByText("Cryptographic proof valid", { exact: true })
@@ -2949,7 +3029,8 @@ export async function createPlaywrightRuntimeProofDriver({
     return {
       recordingDeadlineAt,
       async invokeCompleteSafetyLoop() {
-        if (invocationCount !== 0) throw new RuntimeProofError("browser-failed");
+        if (invocationCount !== 0)
+          throw new RuntimeProofError("browser-failed");
         invocationCount += 1;
         try {
           const url = new URL(baseUrl);
@@ -2959,18 +3040,23 @@ export async function createPlaywrightRuntimeProofDriver({
             timeout: 30_000,
           });
           const runtimeStatus = page.getByRole("status").filter({
-            hasText: "REAL RUNTIME PROOF",
+            hasText: "TRACK 1 · AGENT LAUNCHPAD",
           });
           await runtimeStatus.waitFor({ state: "visible", timeout: 30_000 });
           await runtimeStatus
-            .getByText("Real Codex CLI in a disposable container", {
-              exact: true,
-            })
+            .getByText(
+              "Reusable Agent Airlock middleware automatically protects every Agent Run",
+              {
+                exact: true,
+              },
+            )
             .waitFor({ state: "visible", timeout: 5_000 });
           await runtimeStatus
             .getByText(
-              "Local deterministic Responses fixture. No ModelArk request or paid inference.",
-              { exact: true },
+              "Real Codex CLI in a disposable container · local deterministic Responses fixture · no ModelArk request or paid inference.",
+              {
+                exact: true,
+              },
             )
             .waitFor({ state: "visible", timeout: 5_000 });
           const guide = page.getByRole("region", { name: "Full safety loop" });
@@ -2979,7 +3065,8 @@ export async function createPlaywrightRuntimeProofDriver({
             exact: true,
           });
           await button.waitFor({ state: "visible", timeout: 10_000 });
-          if (!(await button.isEnabled())) throw new Error("control unavailable");
+          if (!(await button.isEnabled()))
+            throw new Error("control unavailable");
           await presentation.dwell("opening-cta");
           if (
             (await button.count()) === 1 &&
@@ -3039,7 +3126,9 @@ export async function createPlaywrightRuntimeProofDriver({
             throw new Error("desktop brief does not fit");
           }
           if (
-            (await board.getByText("Exact evidence", { exact: true }).count()) !== 3
+            (await board
+              .getByText("Exact evidence", { exact: true })
+              .count()) !== 3
           ) {
             throw new Error("the complete evidence board is unavailable");
           }
@@ -3053,10 +3142,7 @@ export async function createPlaywrightRuntimeProofDriver({
             throw safeError;
           });
           await Promise.all([
-            presentation.dwell(
-              "desktop-outcome-brief",
-              mobileFailure.signal,
-            ),
+            presentation.dwell("desktop-outcome-brief", mobileFailure.signal),
             mobileReplay,
           ]);
         } catch (error) {
@@ -3088,7 +3174,7 @@ export async function createPlaywrightRuntimeProofDriver({
             })
             .click();
           const verifier = page.getByRole("dialog", {
-            name: "Verify trust without trusting this server",
+            name: "Verify integrity locally without querying the server",
           });
           await verifier
             .getByText(/0 API calls/)
@@ -3097,9 +3183,12 @@ export async function createPlaywrightRuntimeProofDriver({
             .getByText("2 signed decisions linked", { exact: true })
             .waitFor({ state: "visible", timeout: 15_000 });
           await verifier
-            .getByText("Every receipt, parent link, and state handoff agrees.", {
-              exact: true,
-            })
+            .getByText(
+              "Every receipt, parent link, and state handoff agrees.",
+              {
+                exact: true,
+              },
+            )
             .waitFor({ state: "visible", timeout: 15_000 });
           await verifier
             .getByText(
@@ -3166,9 +3255,8 @@ export async function createPlaywrightRuntimeProofDriver({
 }
 
 async function defaultVerifyChain(source) {
-  const { verifyPortableDecisionChainJson } = await import(
-    "@agent-airlock/portable-promotion-receipt"
-  );
+  const { verifyPortableDecisionChainJson } =
+    await import("@agent-airlock/portable-promotion-receipt");
   return verifyPortableDecisionChainJson(source);
 }
 
@@ -3182,8 +3270,7 @@ export async function runRuntimeProofSession({
   writeArtifacts = writeRuntimeProofArtifacts,
   now = Date.now,
   observedAt = () => new Date().toISOString(),
-  recordingDeadlineAt =
-    browserDriver?.recordingDeadlineAt ??
+  recordingDeadlineAt = browserDriver?.recordingDeadlineAt ??
     now() + RUNTIME_PROOF_RECORDING_BUDGET_MS,
   runTimeoutMs = DEFAULT_RUN_TIMEOUT_MS,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
@@ -3215,7 +3302,8 @@ export async function runRuntimeProofSession({
       "startup-failed",
     );
     const initialOrdinary = ordinaryRuns(initialPayload?.runs);
-    if (initialOrdinary.length !== 0) throw new RuntimeProofError("stale-state");
+    if (initialOrdinary.length !== 0)
+      throw new RuntimeProofError("stale-state");
     const initialRunIds = new Set(initialOrdinary.map((run) => run.id));
 
     await browserDriver.invokeCompleteSafetyLoop();
@@ -3334,7 +3422,10 @@ async function assertDirectoryAncestorsArePhysical(parent, candidate) {
   }
 }
 
-export async function initializeRuntimeProofRoot({ projectRoot, artifactRoot }) {
+export async function initializeRuntimeProofRoot({
+  projectRoot,
+  artifactRoot,
+}) {
   const root = assertSafeRuntimeProofRoot(projectRoot, artifactRoot);
   const localRoot = path.join(path.resolve(projectRoot), ".local");
   const markerPath = path.join(root, RUNTIME_PROOF_ROOT_MARKER);
@@ -3342,7 +3433,10 @@ export async function initializeRuntimeProofRoot({ projectRoot, artifactRoot }) 
     if (error?.code === "ENOENT") return null;
     throw error;
   });
-  if (localStatus && (!localStatus.isDirectory() || localStatus.isSymbolicLink())) {
+  if (
+    localStatus &&
+    (!localStatus.isDirectory() || localStatus.isSymbolicLink())
+  ) {
     throw new RuntimeProofError("startup-failed");
   }
   if (localStatus) {
@@ -3358,10 +3452,7 @@ export async function initializeRuntimeProofRoot({ projectRoot, artifactRoot }) 
   }
   if (existing) {
     const markerStatus = await lstat(markerPath).catch(() => null);
-    if (
-      !markerStatus?.isFile() ||
-      markerStatus.isSymbolicLink()
-    ) {
+    if (!markerStatus?.isFile() || markerStatus.isSymbolicLink()) {
       throw new RuntimeProofError("startup-failed");
     }
     const marker = await readFile(markerPath, "utf8").catch(() => null);
@@ -3425,7 +3516,10 @@ export async function createRuntimeProofSessionRoot({ artifactRoot }) {
   }
   await chmod(sessionsRoot, 0o700);
   const nonce = randomUUID();
-  const sessionRoot = path.join(sessionsRoot, `session-${process.pid}-${nonce}`);
+  const sessionRoot = path.join(
+    sessionsRoot,
+    `session-${process.pid}-${nonce}`,
+  );
   await mkdir(sessionRoot, { mode: 0o700 });
   const marker = {
     schema: "agent-airlock/runtime-proof-session",
@@ -3521,10 +3615,7 @@ export async function cleanupAbandonedRuntimeProofSessions({
         if (markerBytes === null) {
           throw new RuntimeProofError("cleanup-failed");
         }
-        const marker = parseRuntimeProofSessionMarker(
-          markerBytes,
-          entry.name,
-        );
+        const marker = parseRuntimeProofSessionMarker(markerBytes, entry.name);
         let ownerIsLive;
         try {
           ownerIsLive = processExists(marker.ownerPid);
@@ -3602,11 +3693,15 @@ export async function cleanupRuntimeProofSessionRoot({
   let sessionsAnchor = null;
   let sessionAnchor = null;
   try {
-    rootAnchor = await openOwnerOnlyDirectory(root, {}, {
-      lstat,
-      open,
-      realpath,
-    });
+    rootAnchor = await openOwnerOnlyDirectory(
+      root,
+      {},
+      {
+        lstat,
+        open,
+        realpath,
+      },
+    );
     sessionsAnchor = await openOwnerOnlyDirectory(
       sessionsRoot,
       { realParentDirectory: rootAnchor.realDirectory },
@@ -3631,10 +3726,7 @@ export async function cleanupRuntimeProofSessionRoot({
       markerBytes,
       path.basename(resolved),
     );
-    if (
-      marker.nonce !== nonce ||
-      marker.ownerPid !== process.pid
-    ) {
+    if (marker.nonce !== nonce || marker.ownerPid !== process.pid) {
       throw new RuntimeProofError("cleanup-failed");
     }
     const purge = await runRuntimeProofArtifactWorker(sessionAnchor, {
@@ -3649,15 +3741,17 @@ export async function cleanupRuntimeProofSessionRoot({
     await assertDirectoryAnchor(sessionAnchor, { lstat, realpath });
     await closeDirectoryAnchor(sessionAnchor);
     sessionAnchor = null;
-    await removeEmptyPrivateDirectory(
-      resolved,
-      sessionsAnchor,
-      { lstat, realpath },
-    );
+    await removeEmptyPrivateDirectory(resolved, sessionsAnchor, {
+      lstat,
+      realpath,
+    });
     await assertDirectoryAnchor(sessionsAnchor, { lstat, realpath });
     await assertDirectoryAnchor(rootAnchor, { lstat, realpath });
   } catch (error) {
-    if (error instanceof RuntimeProofError && error.failureClass === "cleanup-failed") {
+    if (
+      error instanceof RuntimeProofError &&
+      error.failureClass === "cleanup-failed"
+    ) {
       throw error;
     }
     throw new RuntimeProofError("cleanup-failed");

@@ -273,7 +273,7 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   page.on("request", recordVerificationRequest);
   await page.getByRole("button", { name: "Verify a receipt" }).click();
   const verifier = page.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
   await verifier.locator('.receipt-dropzone input[type="file"]').setInputFiles(chainPath!);
   await expect(verifier.getByText("Every included proof matches")).toBeVisible();
