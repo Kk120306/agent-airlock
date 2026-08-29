@@ -717,6 +717,12 @@ describe("Transactional Resource SDK", () => {
     );
     expect(() => validateMetadata({ output: "Bearer abcdefghijk" }, "metadata"))
       .toThrow(/credential-like/);
+    expect(() =>
+      validateMetadata(
+        { output: "ark-11111111-2222-3333-4444-555555555555-test1" },
+        "metadata",
+      ),
+    ).toThrow(/credential-like/);
     expect(assertResourceFingerprint("a".repeat(64), "hash")).toHaveLength(64);
     expect(() => assertResourceFingerprint("A".repeat(64), "hash")).toThrow(
       /lowercase SHA-256/,

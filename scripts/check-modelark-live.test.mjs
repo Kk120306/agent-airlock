@@ -43,6 +43,14 @@ test("proves a completed Responses API request without returning the key", async
     async (request, response) => {
       assert.equal(request.url, "/api/v3/responses");
       assert.equal(request.headers.authorization, "Bearer secret-live-key");
+      let raw = "";
+      for await (const chunk of request) raw += chunk;
+      assert.deepEqual(JSON.parse(raw), {
+        model: "dola-seed-test",
+        input: "Reply with exactly OK.",
+        max_output_tokens: 64,
+        stream: false,
+      });
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(completedResponse("response-1")));
     },
@@ -119,13 +127,130 @@ test("the launch command emits one parseable redacted handoff", async () => {
         },
       );
       const result = JSON.parse(stdout);
-      assert.equal(result.selectedModel, "ep-private-model");
+      assert.equal(result.selectedModelIndex, 0);
       assert.equal(result.proof.generatedAssistantOutput, true);
       assert.equal(result.proof.requestCount, 1);
       assert.equal(stderr, "");
       assert.doesNotMatch(
-        JSON.stringify(result.proof),
+        JSON.stringify(result),
         /secret-live-key|ep-private-model|private-response-id|127\.0\.0\.1/,
+      );
+    },
+  );
+});
+
+test("the human command prints only commitment-safe success evidence", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(completedResponse("private-response-id")));
+    },
+    async (baseUrl) => {
+      const { stdout, stderr } = await execFile(
+        process.execPath,
+        ["scripts/check-modelark-live.mjs"],
+        {
+          cwd: new URL("..", import.meta.url),
+          env: {
+            ...process.env,
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "ep-private-model",
+            ARK_BASE_URL: baseUrl,
+          },
+        },
+      );
+      assert.match(stdout, /Ready: generated a non-empty Responses API assistant output/);
+      assert.match(stdout, /model sha256:[a-f0-9]{64}/);
+      assert.match(stdout, /endpoint sha256:[a-f0-9]{64}/);
+      assert.equal(stderr, "");
+      assert.doesNotMatch(
+        stdout,
+        /secret-live-key|ep-private-model|private-response-id|127\.0\.0\.1/,
+      );
+    },
+  );
+});
+
+test("the command withholds the configured provider origin on a reachability failure", async () => {
+  const privateHostname = "modelark-private.internal.invalid";
+  const privatePort = "43123";
+  let failure;
+  try {
+    await execFile(process.execPath, ["scripts/check-modelark-live.mjs"], {
+      cwd: new URL("..", import.meta.url),
+      env: {
+        ...process.env,
+        ARK_API_KEY: "secret-live-key",
+        ARK_MODEL: "ep-private-model",
+        ARK_BASE_URL: `https://${privateHostname}:${privatePort}/api/v3`,
+      },
+    });
+  } catch (error) {
+    failure = error;
+  }
+  assert.equal(failure?.code, 1);
+  const output = `${failure?.stdout ?? ""}${failure?.stderr ?? ""}`;
+  assert.match(output, /could not reach the configured provider/);
+  assert.doesNotMatch(
+    output,
+    new RegExp(
+      `${privateHostname.replaceAll(".", "\\.")}|${privatePort}|secret-live-key|ep-private-model`,
+    ),
+  );
+});
+
+test("can be imported without a CLI entry-point argument", async () => {
+  const { stdout, stderr } = await execFile(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      'await import("./scripts/check-modelark-live.mjs")',
+    ],
+    { cwd: new URL("..", import.meta.url) },
+  );
+  assert.equal(stdout, "");
+  assert.equal(stderr, "");
+});
+
+test("keeps the timeout active while the provider response body is streaming", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"status":"completed","output":[');
+    },
+    async (baseUrl) => {
+      await assert.rejects(
+        checkModelArkLive({
+          environment: {
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "dola-seed-test",
+            ARK_BASE_URL: baseUrl,
+          },
+          timeoutMs: 25,
+        }),
+        /timed out after 25 ms/,
+      );
+    },
+  );
+});
+
+test("rejects an oversized provider response before parsing it", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("x".repeat(32_769));
+    },
+    async (baseUrl) => {
+      await assert.rejects(
+        checkModelArkLive({
+          environment: {
+            ARK_API_KEY: "secret-live-key",
+            ARK_MODEL: "dola-seed-test",
+            ARK_BASE_URL: baseUrl,
+          },
+        }),
+        /response exceeded the safety limit/,
       );
     },
   );
@@ -381,7 +506,7 @@ test("does not expose provider account metadata in rate-limit errors", async () 
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      assert.match(message, /HTTP 429.*Free Credits Only Mode/);
+      assert.match(message, /HTTP 429.*provider or account limit/);
       assert.doesNotMatch(message, /3003612015|req-secret-123|secret-live-key/);
       assert.equal(requestCount, 1);
     },

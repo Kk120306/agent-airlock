@@ -56,7 +56,7 @@ The command cannot inherit the generic preflight-skip escape hatch.
 It must complete a credential-safe live Responses request before it can start the application or display `LIVE MODELARK PROOF`.
 The runner opens production Chrome and invokes the existing `Run live Candidate` control.
 The seeded Outcome Contract requires the exact `modelark-proof.txt` content and SQLite value, so the provider response cannot prove success by narration alone.
-Show the required `execution-profile` Validation, its private model commitment, the required state Validation, four promoted resources, one post-Promotion `modelark-live-ready` effect, the Canonical State fingerprint transition, and the locally verified signed decision.
+Show the required `execution-profile` Validation, its model identifier commitment, the required state Validation, four promoted resources, one post-Promotion `modelark-live-ready` effect, the Canonical State fingerprint transition, and the locally verified signed decision.
 Explain that the execution profile is a trusted Airlock control-plane attestation committed by the signed receipt, not an independent BytePlus signature.
 After the live Promotion, show that the launcher reports a captured signed conformance packet, then run `npm run verify:modelark-evidence` in a separate terminal.
 Explain that the offline command verifies historical signed evidence and does not claim that ModelArk is currently available.

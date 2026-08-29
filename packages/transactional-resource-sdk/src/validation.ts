@@ -24,6 +24,7 @@ const sensitiveKeyPattern =
   /(?:^|[_-])(?:api[_-]?key|auth(?:entication|orization)?|bearer|connection[_-]?string|cookie|credential|dsn|password|private[_-]?key|secret|session|token|access[_-]?token|refresh[_-]?token)(?:$|[_-])/i;
 const sensitiveValuePatterns = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
+  /\bark-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-[A-Za-z0-9]{4,}\b/i,
   /\bsk-[A-Za-z0-9_-]{20,}\b/,
   /\b(?:ghp|github_pat)_[A-Za-z0-9_]{16,}\b/i,
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/,
@@ -36,6 +37,7 @@ const sensitiveValuePatterns = [
 
 const redactionPatterns = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\bark-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-[A-Za-z0-9]{4,}\b/gi,
   /\bsk-[A-Za-z0-9_-]{20,}\b/g,
   /\b(?:ghp|github_pat)_[A-Za-z0-9_]{16,}\b/gi,
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,

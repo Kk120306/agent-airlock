@@ -126,6 +126,15 @@ describe("live ModelArk judge demo configuration", () => {
     });
   });
 
+  it("shares the BytePlus AP default with the provider preflight", () => {
+    const environment = Object.fromEntries(
+      Object.entries(liveModelArkDemoEnvironment).filter(
+        ([key]) => key !== "ARK_BASE_URL",
+      ),
+    );
+    expect(loadConfig(environment).arkBaseUrl).toBe(liveModelArkBaseUrl);
+  });
+
   it.each([
     ["remote app host", { HOST: "0.0.0.0" }],
     ["loopback inference URL", { ARK_BASE_URL: "https://localhost/api/v3" }],

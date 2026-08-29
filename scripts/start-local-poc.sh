@@ -65,7 +65,7 @@ detect_engine() {
 
 if [[ -z "${ARK_API_KEY:-}" || -z "${ARK_MODEL:-}" ]]; then
   log "ARK_API_KEY and ARK_MODEL are required."
-  log "Example: ARK_API_KEY=key ARK_MODEL=ep-id ./scripts/start-local-poc.sh"
+  log "Example: ARK_API_KEY=key ARK_MODEL=dola-seed-2-1-turbo-260628 ./scripts/start-local-poc.sh"
   exit 2
 fi
 
@@ -90,7 +90,25 @@ if [[ "${AIRLOCK_SKIP_MODELARK_PREFLIGHT:-false}" == "true" ]]; then
 else
   log "Checking the live ModelArk Responses API before building the Runtime."
   preflight_result="$(node scripts/check-modelark-live.mjs --launch-result-json)"
-  selected_model="$(node -e 'const result = JSON.parse(process.argv[1]); process.stdout.write(result.selectedModel);' "$preflight_result")"
+  selected_model="$(node -e '
+    const result = JSON.parse(process.argv[1]);
+    const configuredModels = [
+      process.env.ARK_MODEL,
+      ...(process.env.ARK_MODEL_FALLBACKS ?? "").split(","),
+    ]
+      .map((value) => value?.trim())
+      .filter(Boolean);
+    const models = [...new Set(configuredModels)];
+    if (
+      !Number.isInteger(result.selectedModelIndex) ||
+      result.selectedModelIndex < 0 ||
+      result.selectedModelIndex >= models.length
+    ) {
+      console.error("[local-poc] ModelArk preflight returned an invalid model selection.");
+      process.exit(2);
+    }
+    process.stdout.write(models[result.selectedModelIndex]);
+  ' "$preflight_result")"
   AIRLOCK_MODELARK_PREFLIGHT_PROOF="$(node -e 'const result = JSON.parse(process.argv[1]); process.stdout.write(JSON.stringify(result.proof));' "$preflight_result")"
   export AIRLOCK_MODELARK_PREFLIGHT_PROOF
   if [[ "$selected_model" != "$ARK_MODEL" ]]; then

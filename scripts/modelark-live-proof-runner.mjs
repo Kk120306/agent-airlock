@@ -1,25 +1,23 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import {
   isCompleteLiveModelArkPromotion,
-  liveModelArkEvidenceDirectoryName,
-  liveModelArkLatestEvidenceName,
+  liveModelArkEvidenceNameForRun,
+  replacePrivateModelArkEvidence,
 } from "./modelark-conformance-evidence.mjs";
 import { liveModelArkAgentName } from "./modelark-demo-profile.mjs";
-import { verifyRecordedLiveModelArkEvidence } from "./modelark-recorded-evidence.mjs";
+import {
+  LIVE_MODELARK_PROOF_RESULT_NAME,
+  LIVE_MODELARK_PROOF_RESULT_SCHEMA,
+  assertCanonicalLiveModelArkProofResult,
+  verifyRecordedLiveModelArkEvidence,
+} from "./modelark-recorded-evidence.mjs";
 
-export const LIVE_MODELARK_PROOF_RESULT_SCHEMA =
-  "agent-airlock/live-modelark-proof-result";
-export const LIVE_MODELARK_PROOF_RESULT_NAME =
-  "modelark-live-latest.result.json";
+export { LIVE_MODELARK_PROOF_RESULT_NAME, LIVE_MODELARK_PROOF_RESULT_SCHEMA };
 
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const DEFAULT_RUN_TIMEOUT_MS = 600_000;
 const DEFAULT_EVIDENCE_TIMEOUT_MS = 20_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const FORBIDDEN_RESULT_PATTERN =
-  /Bearer\s|ARK_API_KEY|api[_-]?key\s*[=:]|https?:\/\/|\bep-[A-Za-z0-9]|\bark-[A-Za-z0-9]|(?:^|["'\s])\/(?:Users|home|private|tmp|var)\//i;
 
 const FAILURE_MESSAGES = Object.freeze({
   "provider-unavailable":
@@ -38,7 +36,7 @@ const FAILURE_MESSAGES = Object.freeze({
     "Promotion completed, but the signed evidence packet was not captured inside the bounded proof window.",
   "evidence-invalid":
     "The captured live evidence packet failed independent offline verification.",
-  interrupted: "The live proof was interrupted and no success result was written.",
+  interrupted: "The live proof was interrupted, so this invocation did not return success.",
 });
 
 export class LiveModelArkProofError extends Error {
@@ -149,28 +147,37 @@ async function waitForVerifiedEvidence({
   waitImpl,
   verifyEvidence,
 }) {
+  const packetFile = liveModelArkEvidenceNameForRun(runId);
   const deadline = now() + evidenceTimeoutMs;
+  let sawPublicationInProgress = false;
   while (now() <= deadline) {
     try {
-      const result = await verifyEvidence({ stateRoot });
-      if (result.runId === runId) {
-        if (!result.valid) {
-          throw new LiveModelArkProofError("evidence-invalid");
-        }
-        return result;
+      const result = await verifyEvidence({ stateRoot, packetFile });
+      if (result.runId !== runId || !result.valid) {
+        throw new LiveModelArkProofError("evidence-invalid");
       }
+      return result;
     } catch (error) {
       if (error instanceof LiveModelArkProofError) throw error;
-      if (error?.code !== "ENOENT") {
+      if (error?.code === "EVIDENCE_PUBLICATION_IN_PROGRESS") {
+        sawPublicationInProgress = true;
+      } else if (error?.code !== "ENOENT") {
         throw new LiveModelArkProofError("evidence-invalid");
       }
     }
     await delay(pollIntervalMs, signal, waitImpl);
   }
-  throw new LiveModelArkProofError("evidence-timeout");
+  throw new LiveModelArkProofError(
+    sawPublicationInProgress ? "evidence-invalid" : "evidence-timeout",
+  );
 }
 
-export function buildLiveModelArkProofResult({ observedAt, runId, receiptDigest }) {
+export function buildLiveModelArkProofResult({
+  observedAt,
+  runId,
+  receiptDigest,
+  packetFile = liveModelArkEvidenceNameForRun(runId),
+}) {
   const result = {
     schema: LIVE_MODELARK_PROOF_RESULT_SCHEMA,
     schemaVersion: 1,
@@ -185,54 +192,33 @@ export function buildLiveModelArkProofResult({ observedAt, runId, receiptDigest 
       packetCaptured: true,
       offlineVerification: true,
     },
-    packetFile: liveModelArkLatestEvidenceName,
+    packetFile,
   };
   assertSafeLiveModelArkProofResult(result);
   return result;
 }
 
 export function assertSafeLiveModelArkProofResult(result) {
-  const expectedGates = [
-    "browserInvocation",
-    "completePromotion",
-    "offlineVerification",
-    "packetCaptured",
-  ];
-  const actualGates = Object.keys(result?.gates ?? {}).sort();
-  if (
-    result?.schema !== LIVE_MODELARK_PROOF_RESULT_SCHEMA ||
-    result?.schemaVersion !== 1 ||
-    result?.outcome !== "passed" ||
-    result?.clockClaim !== "observer-clock-not-external-timestamp" ||
-    typeof result?.observedAt !== "string" ||
-    !Number.isFinite(Date.parse(result.observedAt)) ||
-    !SAFE_IDENTIFIER_PATTERN.test(result?.runId ?? "") ||
-    !/^sha256:[a-f0-9]{64}$/.test(result?.receiptDigest ?? "") ||
-    result?.packetFile !== liveModelArkLatestEvidenceName ||
-    JSON.stringify(actualGates) !== JSON.stringify(expectedGates) ||
-    !Object.values(result.gates).every((value) => value === true)
-  ) {
+  try {
+    return assertCanonicalLiveModelArkProofResult(result);
+  } catch {
     throw new LiveModelArkProofError("evidence-invalid");
   }
-  const serialized = JSON.stringify(result);
-  if (FORBIDDEN_RESULT_PATTERN.test(serialized)) {
-    throw new LiveModelArkProofError("evidence-invalid");
-  }
-  return serialized;
 }
 
 export async function writeLiveModelArkProofResult({ stateRoot, result }) {
   const serialized = assertSafeLiveModelArkProofResult(result) + "\n";
-  const evidenceDirectory = path.join(
-    path.resolve(stateRoot),
-    liveModelArkEvidenceDirectoryName,
-  );
-  const resultPath = path.join(evidenceDirectory, LIVE_MODELARK_PROOF_RESULT_NAME);
-  const temporaryPath = `${resultPath}.tmp-${process.pid}`;
-  await mkdir(evidenceDirectory, { recursive: true, mode: 0o700 });
-  await writeFile(temporaryPath, serialized, { encoding: "utf8", mode: 0o600 });
-  await rename(temporaryPath, resultPath);
-  return resultPath;
+  try {
+    const publication = await replacePrivateModelArkEvidence({
+      stateRoot,
+      fileName: LIVE_MODELARK_PROOF_RESULT_NAME,
+      content: serialized,
+      maximumBytes: 8_192,
+    });
+    return publication.path;
+  } catch {
+    throw new LiveModelArkProofError("evidence-invalid");
+  }
 }
 
 export function safeLiveModelArkFailure(error) {
@@ -285,13 +271,23 @@ export async function createPlaywrightLiveModelArkDriver({
           throw new LiveModelArkProofError("browser-failed");
         }
       },
-      async assertBoundVerdict() {
+      async assertBoundVerdict(runId) {
         try {
+          if (!SAFE_IDENTIFIER_PATTERN.test(runId ?? "")) {
+            throw new Error("unsafe Run identifier");
+          }
           const guide = page.getByRole("region", { name: "Live ModelArk proof" });
-          await guide
-            .getByText("ModelArk preflight, Runtime, and Promotion bound", {
-              exact: true,
-            })
+          const verdict = guide.locator(
+            `[data-airlock-run-id="${runId}"]`,
+          );
+          await verdict.waitFor({ state: "visible", timeout: 30_000 });
+          await verdict
+            .getByText(
+              "Airlock attested preflight, Runtime profile, and Promotion",
+              {
+                exact: true,
+              },
+            )
             .waitFor({ state: "visible", timeout: 30_000 });
         } catch {
           throw new LiveModelArkProofError("browser-failed");
@@ -361,7 +357,8 @@ export async function runLiveModelArkProofSession({
       signal,
       waitImpl,
     });
-    await browserDriver.assertBoundVerdict();
+    await browserDriver.assertBoundVerdict(run.id);
+    abortError(signal);
     const evidence = await waitForVerifiedEvidence({
       runId: run.id,
       stateRoot,
@@ -372,12 +369,16 @@ export async function runLiveModelArkProofSession({
       waitImpl,
       verifyEvidence,
     });
+    abortError(signal);
     const result = buildLiveModelArkProofResult({
       observedAt: observedAt(),
       runId: run.id,
       receiptDigest: evidence.receiptDigest,
+      packetFile: evidence.packetFile ?? liveModelArkEvidenceNameForRun(run.id),
     });
+    abortError(signal);
     await writeResult({ stateRoot, result });
+    abortError(signal);
     return result;
   } finally {
     await browserDriver.close().catch(() => {});

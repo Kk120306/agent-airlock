@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import {
+  liveModelArkAgentDescription,
+  liveModelArkAgentInstructions,
+} from "./modelark-demo-profile.mjs";
 
 const reportSchema = "agent-airlock/judge-readiness-report";
 const supportedModes = new Set(["runtime", "modelark"]);
@@ -80,6 +84,8 @@ function expectedAgent(mode) {
       }
     : {
         name: "Live ModelArk Proof",
+        description: liveModelArkAgentDescription,
+        instructions: liveModelArkAgentInstructions,
         requiredPaths: ["AGENTS.md", "modelark-proof.txt"],
         validationName: "modelark-live-state",
       };
@@ -159,7 +165,11 @@ export async function inspectJudgeReadiness({
     system.portableTrust.verification === "offline-self-contained" &&
     system.portableTrust.networkRequired === false;
   const identityReady =
-    agent !== null && (expectedAgentId === null || agent.id === expectedAgentId);
+    agent !== null &&
+    (expectedAgentId === null || agent.id === expectedAgentId) &&
+    (evaluatedMode !== "modelark" ||
+      (agent.description === profile.description &&
+        agent.instructions === profile.instructions));
   const lifecycleReady = agent?.status === "ready";
 
   return completeReport(evaluatedMode, [

@@ -10,7 +10,7 @@ The runner must never introduce a second inference path, skip provider preflight
 
 The complete live path already exists as six independently useful boundaries.
 
-1. `scripts/check-modelark-live.mjs` performs a bounded Responses API preflight and returns only credential-safe commitments.
+1. `scripts/check-modelark-live.mjs` performs a bounded Responses API preflight and returns only credential-safe commitments, counts, and a configured-model selection index.
 2. `scripts/start-local-poc.sh` builds the disposable Runtime and starts the production server only after the preflight succeeds.
 3. `scripts/run-modelark-demo.mjs` owns the marker-protected state root, seeds the exact Agent and Outcome Contract, and admits the UI only after seven readiness checks pass.
 4. `LiveModelArkGuide` exposes the one production action named `Run live Candidate` and derives completion from persisted Run evidence.

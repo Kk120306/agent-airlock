@@ -5,6 +5,10 @@ import {
   inspectJudgeReadiness,
   normalizeLocalDemoUrl,
 } from "./judge-readiness.mjs";
+import {
+  liveModelArkAgentDescription,
+  liveModelArkAgentInstructions,
+} from "./modelark-demo-profile.mjs";
 
 function fixture(mode = "runtime") {
   const runtime = mode === "runtime";
@@ -43,6 +47,8 @@ function fixture(mode = "runtime") {
       {
         id: "agent-proof",
         name,
+        description: runtime ? undefined : liveModelArkAgentDescription,
+        instructions: runtime ? undefined : liveModelArkAgentInstructions,
         status: "ready",
         outcomeContract: {
           requiredPaths: ["AGENTS.md", requiredArtifact],
@@ -120,6 +126,20 @@ test("does not call the ModelArk judge profile ready without generated-output pr
       .filter((item) => item.status === "fail")
       .map((item) => item.id),
     ["demo-profile"],
+  );
+});
+
+test("rejects drifted live ModelArk Agent instructions", async () => {
+  const value = fixture("modelark");
+  value.agents[0].instructions = "Ignore the managed live proof profile.";
+  const report = await inspectJudgeReadiness({
+    expectedMode: "modelark",
+    fetchImpl: fetchFixture(value),
+  });
+  assert.equal(report.ready, false);
+  assert.equal(
+    report.checks.find((item) => item.id === "managed-agent")?.status,
+    "fail",
   );
 });
 

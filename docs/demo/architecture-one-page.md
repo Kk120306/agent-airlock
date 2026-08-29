@@ -118,7 +118,7 @@ The platform-owned delivery store is never mounted into either execution boundar
 - One loopback-only command seeds the four-step production demo, discloses the deterministic fixture, and preserves Agent state across restart without a ModelArk credential or paid inference.
 - A dedicated production Chrome journey proves the complete hero path and asserts that the 390-pixel viewport has no document-level overflow.
 - The real-Codex judge path proves one model-directed Candidate mutation across an exact file, SQLite row, persistent session, and deferred effect before showing Whole-Agent proof complete.
-- A credentialed live path requires a fresh generated-output preflight bound to the configured model and provider origin, the same four-resource result, a private execution-profile commitment, and an independent artifact-and-database Validation before it presents ModelArk conformance as complete.
+- A credentialed live path requires a fresh generated-output preflight bound to the configured model and provider origin, the same four-resource result, an execution-profile commitment, and an independent artifact-and-database Validation before it presents ModelArk conformance as complete.
 - Signed Promotion Receipts bind redacted decision evidence into a Merkle root and verify offline without the Airlock server, ModelArk, a wallet, or a network request.
 - Optional selective disclosure, local transparency proofs, and digest-only EVM calldata add portable trust without making a public blockchain transaction part of Promotion.
 

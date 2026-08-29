@@ -378,6 +378,9 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Align the visible product brand with Agent Airlock for recording consistency.
 - [x] Pass the complete local quality and real Runtime regression gates.
 - [x] Pass the exact hosted release workflow on the delivered Phase 21 revision.
+- [x] Admit only the exact canonical Agent, Outcome Contract, terminal Run, Validation evidence, resources, state transition, effect receipt, and recovery state.
+- [x] Protect reset and shutdown with nonce-bound state-root ownership, pre-reset port refusal, and owned process-group cleanup.
+- [x] Publish immutable per-Run packets, atomically advance latest pointers, and reconcile a verified packet after interruption without another provider export.
 - [ ] Complete the live provider-backed browser proof while Free Credits Only Mode has available capacity.
 
 ## Phase 22 canonical real Runtime recording proof

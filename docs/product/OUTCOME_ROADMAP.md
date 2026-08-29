@@ -842,6 +842,7 @@ Turn the fragile moment in a live AI demo into a portable conformance capsule th
 The outcome is tracked by [Wayfinder: Make live ModelArk proof one-command and self-verifying](https://github.com/Kk120306/agent-airlock/issues/32).
 The orchestration, authority, failure, privacy, and release boundaries are defined in [Bounded live ModelArk proof runner](../research/live-modelark-proof-runner.md).
 The runner, deterministic failure matrix, production-browser brand guard, complete local quality gate, real disposable-container transaction, two-Airlock signed transfer, and exact hosted release workflow are green on the delivered Phase 21 revision.
+The live runner now uses nonce-bound state-root ownership, pre-reset port refusal, owned process-group shutdown, exact canonical Run matching, immutable per-Run packets, atomically advanced latest pointers, owner-only no-follow evidence reads, and crash reconciliation.
 The current credentialed preflight reaches the provider but returns HTTP 429 at the free-only capacity boundary, so no live conformance success is claimed.
 
 ### Phase 22: Canonical real Runtime recording proof

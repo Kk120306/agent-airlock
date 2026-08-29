@@ -12,6 +12,8 @@ const TRANSIENT_RATE_LIMIT_CODES = new Set([
 const TRANSIENT_RETRY_DELAYS_MS = [1_000, 3_000, 7_000];
 const MAXIMUM_RETRY_AFTER_MS = 10_000;
 const MAXIMUM_TOTAL_RETRY_DELAY_MS = 15_000;
+const DEFAULT_MODELARK_BASE_URL =
+  "https://ark.ap-southeast.bytepluses.com/api/v3";
 const MODELARK_PREFLIGHT_PROOF_SCHEMA =
   "agent-airlock/modelark-preflight-proof";
 
@@ -62,7 +64,7 @@ async function boundedText(response) {
 
 function providerMessage(status, errorCode = null) {
   if (status === 401) {
-    return "ModelArk authentication failed with HTTP 401. Verify the Ark API key, region, and model configuration.";
+    return "ModelArk authentication failed with HTTP 401. Verify that ARK_API_KEY is a valid same-region ModelArk API key and that ARK_BASE_URL targets its region.";
   }
   if (status === 404) {
     return "ModelArk returned HTTP 404. Verify that the configured model is activated and available in the selected region.";
@@ -71,7 +73,10 @@ function providerMessage(status, errorCode = null) {
     if (errorCode && TRANSIENT_RATE_LIMIT_CODES.has(errorCode)) {
       return "ModelArk returned HTTP 429 after a bounded warm-up because provider capacity or burst protection is temporarily unavailable. Keep Free Credits Only Mode enabled and retry later.";
     }
-    return "ModelArk returned HTTP 429 because the configured inference limit or free quota is unavailable. Keep Free Credits Only Mode enabled and retry later, or configure another operator-approved model that visibly has remaining free quota.";
+    if (errorCode === "SetLimitExceeded") {
+      return "ModelArk returned HTTP 429 because the configured Free Credits Only quota or inference limit was reached. Keep Free Credits Only Mode enabled and retry when free capacity is available.";
+    }
+    return "ModelArk rejected the request with HTTP 429 because a provider or account limit was reached. No automatic retry was attempted because ModelArk did not classify it as transient. Keep Free Credits Only Mode enabled and review the console limit state.";
   }
   return `ModelArk preflight failed with HTTP ${status}. Provider response details were withheld to protect account metadata.`;
 }
@@ -106,6 +111,7 @@ async function requestModel({
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
+  let raw;
   try {
     response = await fetchImplementation(endpoint, {
       method: "POST",
@@ -121,16 +127,21 @@ async function requestModel({
       }),
       signal: controller.signal,
     });
+    raw = await boundedText(response);
   } catch (error) {
     if (error?.name === "AbortError") {
       throw new Error(`ModelArk preflight timed out after ${timeoutMs} ms`);
     }
-    throw new Error(`ModelArk preflight could not reach ${endpoint.origin}`);
+    if (error?.message === "ModelArk preflight response exceeded the safety limit") {
+      throw error;
+    }
+    throw new Error(
+      "ModelArk preflight could not reach the configured provider.",
+    );
   } finally {
     clearTimeout(timer);
   }
 
-  const raw = await boundedText(response);
   if (!response.ok) {
     return { response, payload: null, errorCode: safeProviderErrorCode(raw) };
   }
@@ -199,8 +210,7 @@ export async function checkModelArkLive({
   const apiKey = requiredValue(environment, "ARK_API_KEY");
   const models = configuredModels(environment);
   const endpoint = responsesUrl(
-    environment.ARK_BASE_URL?.trim() ||
-      "https://ark.cn-beijing.volces.com/api/v3",
+    environment.ARK_BASE_URL?.trim() || DEFAULT_MODELARK_BASE_URL,
   );
   let requestCount = 0;
   let totalRetryDelayMs = 0;
@@ -291,18 +301,18 @@ async function main() {
   if (process.argv.includes("--launch-result-json")) {
     process.stdout.write(
       JSON.stringify({
-        selectedModel: result.model,
+        selectedModelIndex: result.attemptCount - 1,
         proof: buildModelArkPreflightProof(result),
       }) + "\n",
     );
     return;
   }
-  if (process.argv.includes("--selected-model-only")) {
-    process.stdout.write(`${result.model}\n`);
-    return;
-  }
+  const proof = buildModelArkPreflightProof(result);
   console.log(
-    `[modelark-preflight] Ready: ${result.model} generated a non-empty Responses API assistant output through ${result.origin}.`,
+    "[modelark-preflight] Ready: generated a non-empty Responses API assistant output.",
+  );
+  console.log(
+    `[modelark-preflight] Bound proof: model ${proof.modelCommitment}; endpoint ${proof.endpointOriginCommitment}; ${proof.requestCount} bounded request(s).`,
   );
   if (result.attemptCount > 1) {
     console.log(
@@ -314,7 +324,7 @@ async function main() {
   );
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     console.error(`[modelark-preflight] ${error.message}`);
     process.exitCode = 1;

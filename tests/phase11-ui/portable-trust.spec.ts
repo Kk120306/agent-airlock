@@ -352,6 +352,8 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     runtime: "Codex CLI in docker Runtime",
   };
   const liveRun = structuredClone(run) as AgentRun;
+  const liveCheckedAt = new Date().toISOString();
+  liveRun.createdAt = liveCheckedAt;
   liveRun.transaction!.resources = [
     "workspace",
     "codex-session",
@@ -405,37 +407,59 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   if (!liveExecutionProfile) throw new Error("Missing execution profile fixture");
   liveExecutionProfile.summary =
     "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.";
-  liveExecutionProfile.output = JSON.stringify({
+  const validExecutionProfile = {
     schemaVersion: 2,
     attestation: "airlock-control-plane",
     inferenceMode: "modelark",
+    executor: "codex-cli",
+    runtimeProvider: "container",
+    providerProtocol: "responses",
     modelCommitment: "sha256:" + "a".repeat(64),
     preflight: {
+      checkedAt: liveCheckedAt,
       generatedAssistantOutput: true,
       endpointOriginCommitment: "sha256:" + "b".repeat(64),
+      attemptCount: 1,
       requestCount: 1,
+      retryDelayMs: 0,
     },
-  });
+  };
+  liveExecutionProfile.output = JSON.stringify(validExecutionProfile);
+  const liveRunState = { current: liveRun };
   await serveProductionBundle(
     page,
     liveRequests,
-    { current: liveRun },
+    liveRunState,
     undefined,
     liveSystem,
   );
   await page.goto("http://airlock.local/");
 
-  await expect(page.getByText("LIVE MODELARK PROOF", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("AIRLOCK-ATTESTED MODELARK RUN", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByText(/Fresh preflight generated assistant output in 1 bounded request/),
   ).toBeVisible();
   const guide = page.getByRole("region", { name: "Live ModelArk proof" });
   await expect(guide.getByText("Model decides. Contract verifies.")).toBeVisible();
+  await expect(
+    guide.getByText("Airlock-attested live execution", { exact: true }),
+  ).toBeVisible();
   await expect(guide.getByRole("button", { name: /Run another live Candidate/ }))
     .toBeVisible();
   await expect(guide.getByText("Preflight + Runtime bound")).toBeVisible();
   await expect(
-    guide.getByText("ModelArk preflight, Runtime, and Promotion bound"),
+    guide.getByText("Airlock attested preflight, Runtime profile, and Promotion"),
+  ).toBeVisible();
+  await expect(
+    guide.locator(`[data-airlock-run-id="${liveRun.id}"]`),
+  ).toBeVisible();
+  await expect(page.getByText(/not BytePlus-signed telemetry/)).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Promotion complete: one validated Whole-Agent future became reality",
+    }),
   ).toBeVisible();
   await expect(page.getByText("Independent proof")).toBeVisible();
   const liveProof = page.getByRole("region", { name: "Judge proof summary" });
@@ -451,6 +475,60 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   expect(liveRequests[0]).toEqual({
     content: "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.",
   });
+
+  const invalidProfiles = [
+    { ...validExecutionProfile, unexpected: true },
+    { ...validExecutionProfile, executor: "other" },
+    { ...validExecutionProfile, runtimeProvider: "local-process" },
+    { ...validExecutionProfile, providerProtocol: "chat-completions" },
+    {
+      ...validExecutionProfile,
+      preflight: {
+        ...validExecutionProfile.preflight,
+        checkedAt: "2020-01-01T00:00:00.000Z",
+      },
+    },
+    {
+      ...validExecutionProfile,
+      preflight: { ...validExecutionProfile.preflight, attemptCount: 0 },
+    },
+    {
+      ...validExecutionProfile,
+      preflight: { ...validExecutionProfile.preflight, requestCount: 0 },
+    },
+    {
+      ...validExecutionProfile,
+      preflight: { ...validExecutionProfile.preflight, retryDelayMs: 15_001 },
+    },
+    {
+      ...validExecutionProfile,
+      preflight: {
+        ...validExecutionProfile.preflight,
+        generatedAssistantOutput: false,
+      },
+    },
+  ];
+  for (const invalidProfile of invalidProfiles) {
+    liveExecutionProfile.output = JSON.stringify(invalidProfile);
+    await page.reload();
+    const unboundGuide = page.getByRole("region", {
+      name: "Live ModelArk proof",
+    });
+    await expect(
+      unboundGuide.getByText("Promotion complete; provider binding unavailable"),
+    ).toBeVisible();
+  }
+
+  liveExecutionProfile.required = false;
+  liveExecutionProfile.output = JSON.stringify(validExecutionProfile);
+  await page.reload();
+  const unboundGuide = page.getByRole("region", { name: "Live ModelArk proof" });
+  await expect(
+    unboundGuide.getByText(/cannot attest that Run to the live provider/),
+  ).toBeVisible();
+  await expect(
+    unboundGuide.getByText("Live-provider Promotion attested by Airlock"),
+  ).toHaveCount(0);
 });
 
 test("invalidates a generated receipt when the Run decision changes", async ({

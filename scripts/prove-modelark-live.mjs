@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertSafeManagedRoot } from "./modelark-demo-profile.mjs";
@@ -9,6 +10,11 @@ import {
   runLiveModelArkProofSession,
   safeLiveModelArkFailure,
 } from "./modelark-live-proof-runner.mjs";
+import {
+  createOwnedModelArkProcessTree,
+  terminateOwnedModelArkProcessTree,
+} from "./modelark-process-tree.mjs";
+import { releaseModelArkDemoLease } from "./modelark-demo-lease.mjs";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const argumentsList = process.argv.slice(2);
@@ -24,8 +30,12 @@ if (unknownArguments.length > 0) {
 
 if (argumentsList.includes("--help")) {
   console.log("Usage: npm run prove:modelark -- [--reset] [--headed] [--json]");
-  console.log("Runs one bounded production-browser ModelArk conformance proof.");
-  console.log("The command never disables Free Credits Only Mode or stores provider output.");
+  console.log(
+    "Runs one bounded production-browser ModelArk conformance proof.",
+  );
+  console.log(
+    "The command never disables Free Credits Only Mode or stores provider output.",
+  );
   process.exit(0);
 }
 
@@ -38,7 +48,9 @@ const port = Number.parseInt(
   10,
 );
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-  throw new Error("AIRLOCK_MODELARK_DEMO_PORT must be an integer from 1 through 65535");
+  throw new Error(
+    "AIRLOCK_MODELARK_DEMO_PORT must be an integer from 1 through 65535",
+  );
 }
 
 const stateRoot = assertSafeManagedRoot(
@@ -51,10 +63,47 @@ const startupTimeoutMs = 180_000;
 const maximumTranscriptBytes = 65_536;
 let transcript = "";
 let ready = false;
-let stopping = false;
 const controller = new AbortController();
+let child = null;
+let childExit = null;
+let ownedTree = null;
+let stopTask = null;
+let interruptionSignal = null;
+const ownedProcessGroupEnvironmentKey =
+  "AGENT_AIRLOCK_INTERNAL_MODELARK_PROCESS_GROUP_OWNER";
+const leaseNonceEnvironmentKey = "AGENT_AIRLOCK_INTERNAL_MODELARK_LEASE_NONCE";
+const leaseNonce = randomUUID();
 
-const child = spawn(
+async function stopChild(initialSignal = "SIGTERM") {
+  if (!ownedTree) return;
+  if (stopTask) return stopTask;
+  stopTask = (async () => {
+    await terminateOwnedModelArkProcessTree(ownedTree, {
+      initialSignal,
+      gracefulTimeoutMs: 15_000,
+      forcedTimeoutMs: 5_000,
+    });
+    if (childExit) await childExit;
+    if (process.platform !== "win32") {
+      releaseModelArkDemoLease({
+        stateRoot,
+        ownerPid: child.pid,
+        nonce: leaseNonce,
+      });
+    }
+  })();
+  return stopTask;
+}
+
+for (const signalName of ["SIGINT", "SIGTERM"]) {
+  process.once(signalName, () => {
+    interruptionSignal ??= signalName;
+    controller.abort();
+    void stopChild(signalName).catch(() => {});
+  });
+}
+
+child = spawn(
   process.execPath,
   [
     path.join(projectRoot, "scripts", "run-modelark-demo.mjs"),
@@ -62,10 +111,16 @@ const child = spawn(
   ],
   {
     cwd: projectRoot,
-    env: process.env,
+    env: {
+      ...process.env,
+      [ownedProcessGroupEnvironmentKey]: "1",
+      [leaseNonceEnvironmentKey]: leaseNonce,
+    },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
   },
 );
+ownedTree = createOwnedModelArkProcessTree(child);
 
 function capture(chunk, target) {
   const value = chunk.toString("utf8");
@@ -81,31 +136,11 @@ child.stdout.on("data", (chunk) =>
 );
 child.stderr.on("data", (chunk) => capture(chunk, process.stderr));
 
-const childExit = new Promise((resolve) => {
+childExit = new Promise((resolve) => {
   child.once("error", (error) => resolve({ code: 1, error }));
   child.once("exit", (code, signal) => resolve({ code, signal }));
 });
-
-async function stopChild() {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  stopping = true;
-  child.kill("SIGTERM");
-  const stopped = await Promise.race([
-    childExit.then(() => true),
-    new Promise((resolve) => setTimeout(() => resolve(false), 10_000)),
-  ]);
-  if (!stopped && child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-    await childExit;
-  }
-}
-
-for (const signalName of ["SIGINT", "SIGTERM"]) {
-  process.once(signalName, () => {
-    controller.abort();
-    void stopChild();
-  });
-}
+if (interruptionSignal) void stopChild(interruptionSignal).catch(() => {});
 
 async function waitForLauncher() {
   const deadline = Date.now() + startupTimeoutMs;
@@ -114,10 +149,10 @@ async function waitForLauncher() {
       childExit.then(() => true),
       new Promise((resolve) => setTimeout(() => resolve(false), 200)),
     ]);
-    if (exited) throw classifyLiveModelArkLauncherFailure(transcript);
     if (controller.signal.aborted) {
       throw new LiveModelArkProofError("interrupted");
     }
+    if (exited) throw classifyLiveModelArkLauncherFailure(transcript);
   }
   if (!ready) throw new LiveModelArkProofError("startup-failed");
 }
@@ -134,6 +169,9 @@ try {
     browserDriver,
     signal: controller.signal,
   });
+  if (controller.signal.aborted) {
+    throw new LiveModelArkProofError("interrupted");
+  }
   if (jsonOutput) {
     console.log(JSON.stringify(result));
   } else {
@@ -161,7 +199,7 @@ try {
   process.exitCode = 1;
 } finally {
   await stopChild();
-  if (!stopping && controller.signal.aborted) process.exitCode = 1;
+  if (controller.signal.aborted) process.exitCode = 1;
 }
 
 if (process.exitCode) process.exit(process.exitCode);

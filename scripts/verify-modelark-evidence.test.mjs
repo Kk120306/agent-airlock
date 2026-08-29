@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,11 +18,15 @@ import {
   buildPortableEvidencePacket,
   generatePortableSigningKey,
   signPortableReceipt,
+  verifyPortableEvidencePacketJson,
 } from "@agent-airlock/portable-promotion-receipt";
 import {
   liveModelArkEvidenceDirectoryName,
+  liveModelArkEvidenceNameForRun,
   liveModelArkLatestEvidenceName,
+  liveModelArkLatestResultName,
 } from "./modelark-conformance-evidence.mjs";
+import { assertCanonicalLiveModelArkProofResult } from "./modelark-recorded-evidence.mjs";
 
 const projectRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const verifierPath = path.join(projectRoot, "scripts", "verify-modelark-evidence.mjs");
@@ -120,6 +132,30 @@ function runVerifier(stateRoot) {
   });
 }
 
+function createResultCapsule({
+  runId = "run-modelark-live",
+  receiptDigest,
+  overrides = {},
+}) {
+  return {
+    schema: "agent-airlock/live-modelark-proof-result",
+    schemaVersion: 1,
+    outcome: "passed",
+    observedAt: "2026-08-28T09:30:00.000Z",
+    clockClaim: "observer-clock-not-external-timestamp",
+    runId,
+    receiptDigest,
+    gates: {
+      browserInvocation: true,
+      completePromotion: true,
+      packetCaptured: true,
+      offlineVerification: true,
+    },
+    packetFile: liveModelArkEvidenceNameForRun(runId),
+    ...overrides,
+  };
+}
+
 test("verifies a recorded signed ModelArk packet and labels it historical", async () => {
   const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-modelark-verify-"));
   const evidenceDirectory = path.join(
@@ -150,5 +186,211 @@ test("verifies a recorded signed ModelArk packet and labels it historical", asyn
     assert.match(invalid.stdout, /historical signed evidence/);
   } finally {
     await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("follows the result capsule to its immutable packet", async () => {
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-modelark-pair-"));
+  const evidenceDirectory = path.join(
+    stateRoot,
+    liveModelArkEvidenceDirectoryName,
+  );
+  const packetFile = liveModelArkEvidenceNameForRun("run-modelark-live");
+  try {
+    await mkdir(evidenceDirectory, { mode: 0o700 });
+    const packet = createPacket();
+    const source = JSON.stringify(packet);
+    const receiptDigest =
+      verifyPortableEvidencePacketJson(source).receipt.receiptDigest;
+    await writeFile(path.join(evidenceDirectory, packetFile), source, {
+      mode: 0o600,
+    });
+    await writeFile(
+      path.join(evidenceDirectory, liveModelArkLatestEvidenceName),
+      "not the paired packet",
+      { mode: 0o600 },
+    );
+    await writeFile(
+      path.join(evidenceDirectory, liveModelArkLatestResultName),
+      JSON.stringify(createResultCapsule({ receiptDigest })),
+      { mode: 0o600 },
+    );
+
+    const valid = runVerifier(stateRoot);
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.match(valid.stdout, /Recorded live ModelArk conformance: VALID/);
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects incomplete or non-passing result capsules", async (context) => {
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-modelark-result-"));
+  const evidenceDirectory = path.join(
+    stateRoot,
+    liveModelArkEvidenceDirectoryName,
+  );
+  const packetFile = liveModelArkEvidenceNameForRun("run-modelark-live");
+  try {
+    await mkdir(evidenceDirectory, { mode: 0o700 });
+    const packet = createPacket();
+    const source = JSON.stringify(packet);
+    const receiptDigest =
+      verifyPortableEvidencePacketJson(source).receipt.receiptDigest;
+    await writeFile(path.join(evidenceDirectory, packetFile), source, {
+      mode: 0o600,
+    });
+
+    const missingObservedAt = createResultCapsule({ receiptDigest });
+    delete missingObservedAt.observedAt;
+    const missingGate = createResultCapsule({ receiptDigest });
+    delete missingGate.gates.packetCaptured;
+    const cases = [
+      ["missing observedAt", missingObservedAt],
+      [
+        "wrong clock claim",
+        createResultCapsule({
+          receiptDigest,
+          overrides: { clockClaim: "provider-attested-clock" },
+        }),
+      ],
+      ["missing gate", missingGate],
+      [
+        "false gate",
+        createResultCapsule({
+          receiptDigest,
+          overrides: {
+            gates: {
+              browserInvocation: true,
+              completePromotion: false,
+              packetCaptured: true,
+              offlineVerification: true,
+            },
+          },
+        }),
+      ],
+      [
+        "unknown gate",
+        createResultCapsule({
+          receiptDigest,
+          overrides: {
+            gates: {
+              browserInvocation: true,
+              completePromotion: true,
+              packetCaptured: true,
+              offlineVerification: true,
+              providerAuthority: true,
+            },
+          },
+        }),
+      ],
+      [
+        "mismatched packet",
+        createResultCapsule({
+          receiptDigest,
+          overrides: {
+            packetFile: liveModelArkEvidenceNameForRun("run-other"),
+          },
+        }),
+      ],
+      [
+        "unknown result field",
+        createResultCapsule({
+          receiptDigest,
+          overrides: { providerClaim: true },
+        }),
+      ],
+    ];
+
+    for (const [name, capsule] of cases) {
+      await context.test(name, async () => {
+        await writeFile(
+          path.join(evidenceDirectory, liveModelArkLatestResultName),
+          JSON.stringify(capsule),
+          { mode: 0o600 },
+        );
+        const invalid = runVerifier(stateRoot);
+        assert.equal(invalid.status, 1);
+        assert.match(
+          invalid.stderr,
+          /Recorded live ModelArk conformance evidence could not be verified safely/,
+        );
+      });
+    }
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects private material in a structurally complete result capsule", () => {
+  assert.throws(
+    () =>
+      assertCanonicalLiveModelArkProofResult(
+        createResultCapsule({
+          runId: "ark-private-material",
+          receiptDigest: digest("receipt"),
+        }),
+      ),
+    /contains private material/,
+  );
+});
+
+test("rejects symlinked, shared, or broadly readable recorded evidence", async (context) => {
+  const source = JSON.stringify(createPacket());
+  const cases = [
+    {
+      name: "symbolic link",
+      async install({ evidencePath, outsidePath }) {
+        await writeFile(outsidePath, source, { mode: 0o600 });
+        await symlink(outsidePath, evidencePath);
+      },
+    },
+    {
+      name: "multiple hard links",
+      async install({ evidencePath, outsidePath }) {
+        await writeFile(outsidePath, source, { mode: 0o600 });
+        await link(outsidePath, evidencePath);
+      },
+    },
+    {
+      name: "group-readable mode",
+      async install({ evidencePath }) {
+        await writeFile(evidencePath, source, { mode: 0o600 });
+        await chmod(evidencePath, 0o640);
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    await context.test(testCase.name, async () => {
+      const stateRoot = await mkdtemp(
+        path.join(os.tmpdir(), "airlock-modelark-file-safety-"),
+      );
+      const outsideRoot = await mkdtemp(
+        path.join(os.tmpdir(), "airlock-modelark-outside-"),
+      );
+      const evidenceDirectory = path.join(
+        stateRoot,
+        liveModelArkEvidenceDirectoryName,
+      );
+      const evidencePath = path.join(
+        evidenceDirectory,
+        liveModelArkLatestEvidenceName,
+      );
+      const outsidePath = path.join(outsideRoot, "outside.packet.json");
+      try {
+        await mkdir(evidenceDirectory, { mode: 0o700 });
+        await testCase.install({ evidencePath, outsidePath });
+        const invalid = runVerifier(stateRoot);
+        assert.equal(invalid.status, 1);
+        assert.match(
+          invalid.stderr,
+          /Recorded live ModelArk conformance evidence could not be verified safely/,
+        );
+      } finally {
+        await rm(stateRoot, { recursive: true, force: true });
+        await rm(outsideRoot, { recursive: true, force: true });
+      }
+    });
   }
 });

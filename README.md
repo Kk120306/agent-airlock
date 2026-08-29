@@ -281,8 +281,8 @@ npm run demo:modelark -- --reset
 
 The launcher forces the live Responses API check before building or starting the application, binds the control plane to loopback, uses a disposable container Runtime, and seeds one `Live ModelArk Proof` Agent.
 It does not honor the generic `AIRLOCK_SKIP_MODELARK_PREFLIGHT` escape hatch.
-Successful preflight creates a bounded credential-free launch handoff containing only timestamps, request counts, and SHA-256 commitments to the selected model and provider origin.
-The server verifies that handoff is recent and matches its exact private configuration before it can expose `LIVE MODELARK PROOF` mode.
+Successful preflight creates a bounded credential-free launch handoff containing only timestamps, request counts, a configured-model selection index, and SHA-256 commitments to the selected model and provider origin.
+The server verifies that handoff is recent and matches its exact private configuration before it can expose `AIRLOCK-ATTESTED MODELARK RUN` mode.
 Missing, stale, malformed, wrong-model, or wrong-origin handoffs fail closed.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
 ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`, update the Candidate SQLite row to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
@@ -364,7 +364,7 @@ Confirm that each configured model is activated and visibly has remaining free q
 It reports those checks independently, so provider HTTP 429 capacity failures cannot be confused with an application or Runtime failure.
 `npm run demo:modelark` and `npm run poc` repeat that fail-fast preflight before installing dependencies or building the Runtime image.
 The model that passes preflight is exported as `ARK_MODEL` for the actual Runtime.
-The guided launcher watches only its managed Agent for a complete provider-backed Whole-Agent Promotion, requests the safe execution-profile disclosure, and atomically records the signed packet under its marker-protected state root.
+The guided launcher watches only its managed Agent for a complete provider-backed Whole-Agent Promotion, requests the safe execution-profile disclosure, and atomically records an immutable per-Run signed packet under its marker-protected state root.
 It will not capture partial Promotion, failed Validation, missing effect delivery, deterministic fixture evidence, or content containing credential-like or endpoint-like material.
 Set `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only when the provider was already verified and a temporary provider outage must not block local startup.
 The first successful run loads `.env`, installs Node.js dependencies, and builds the Runtime image.
@@ -386,7 +386,7 @@ In the guided Web UI:
 
 1. Select `Run live Candidate`.
 2. Watch the Candidate create the exact artifact, update SQLite, and submit one deferred action before the required state Validation completes.
-3. Confirm that `execution-profile` attests the live ModelArk Responses profile through a private model commitment rather than a raw endpoint identifier.
+3. Confirm that `execution-profile` attests the live ModelArk Responses profile through a model identifier commitment rather than embedding the raw identifier.
 4. Confirm that workspace, Codex session, SQLite, and outbox all show `promoted`, the database value is `modelark-live`, and exactly one `modelark-live-ready` effect is delivered after Promotion.
 5. Confirm that the canonical fingerprint advances only for this complete promoted result.
 6. Select `Generate and verify proof` to verify the signed decision locally and selectively disclose the safe execution-profile leaf when requested.
@@ -426,7 +426,7 @@ Force Podman when multiple engines are installed:
 ```bash
 CONTAINER_ENGINE=podman \
 ARK_API_KEY=your-ark-api-key \
-ARK_MODEL=ep-your-endpoint-id \
+ARK_MODEL=dola-seed-2-1-turbo-260628 \
 npm run poc
 ```
 
@@ -447,7 +447,7 @@ Required values in `.env`:
 
 ```dotenv
 ARK_API_KEY=your-ark-api-key
-ARK_MODEL=ep-your-endpoint-id
+ARK_MODEL=dola-seed-2-1-turbo-260628
 APP_AUTH_TOKEN=replace-with-at-least-24-random-characters
 ```
 
@@ -510,7 +510,7 @@ cp deploy/volcengine/terraform.tfvars.example \
 | --- | --- | --- |
 | `ARK_API_KEY` | Required | Ark model API key. |
 | `ARK_MODEL` | Required | Responses-capable endpoint or model ID. |
-| `ARK_BASE_URL` | Beijing v3 endpoint | Region-matching Ark API URL; BytePlus AP uses `https://ark.ap-southeast.bytepluses.com/api/v3`. |
+| `ARK_BASE_URL` | BytePlus AP v3 endpoint | Region-matching Ark API URL; BytePlus AP uses `https://ark.ap-southeast.bytepluses.com/api/v3`. |
 | `APP_AUTH_TOKEN` | Empty on loopback | Shared demo token; use 24+ random characters remotely. |
 | `RUNTIME_PROVIDER` | `local-process` | `container` for disposable local Runtime containers. |
 | `CODEX_SANDBOX_MODE` | `workspace-write` | Codex inner sandbox mode. |

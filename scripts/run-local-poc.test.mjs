@@ -73,7 +73,7 @@ test("the local POC launcher exports the fallback selected by preflight", async 
     await import("node:fs/promises").then(({ mkdir }) => mkdir(fakeBin));
     await writeFile(
       nodePath,
-      '#!/bin/sh\nif [ "$1" = "-p" ]; then printf "22"; exit 0; fi\nif [ "$1" = "scripts/check-modelark-live.mjs" ]; then printf \'%s\\n\' \'{"selectedModel":"ep-selected-fallback","proof":{"schema":"agent-airlock/modelark-preflight-proof","schemaVersion":1,"checkedAt":"2026-08-28T02:00:00.000Z","generatedAssistantOutput":true,"modelCommitment":"sha256:model","endpointOriginCommitment":"sha256:origin","attemptCount":2,"requestCount":2,"retryDelayMs":0}}\'; exit 0; fi\nexec "$AIRLOCK_REAL_NODE" "$@"\n',
+      '#!/bin/sh\nif [ "$1" = "-p" ]; then printf "22"; exit 0; fi\nif [ "$1" = "scripts/check-modelark-live.mjs" ]; then printf \'%s\\n\' \'{"selectedModelIndex":1,"proof":{"schema":"agent-airlock/modelark-preflight-proof","schemaVersion":1,"checkedAt":"2026-08-28T02:00:00.000Z","generatedAssistantOutput":true,"modelCommitment":"sha256:model","endpointOriginCommitment":"sha256:origin","attemptCount":2,"requestCount":2,"retryDelayMs":0}}\'; exit 0; fi\nexec "$AIRLOCK_REAL_NODE" "$@"\n',
       "utf8",
     );
     await writeFile(
@@ -116,7 +116,7 @@ test("the local POC launcher exports the fallback selected by preflight", async 
     assert.match(result.stderr, /Using the operator-approved ModelArk fallback/);
     assert.doesNotMatch(
       result.stderr,
-      /modelark-preflight-proof|sha256:model|sha256:origin/,
+      /modelark-preflight-proof|sha256:model|sha256:origin|ep-primary|ep-selected-fallback/,
     );
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });

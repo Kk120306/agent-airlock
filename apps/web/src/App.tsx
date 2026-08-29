@@ -113,23 +113,97 @@ function provesWholeAgentPromotion(
   );
 }
 
+const modelArkPreflightMaxAgeMs = 2 * 60 * 60 * 1_000;
+const modelArkPreflightFutureToleranceMs = 60_000;
+
+function hasExactObjectKeys(
+  value: unknown,
+  expected: readonly string[],
+): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return (
+    actual.length === wanted.length &&
+    actual.every((key, index) => key === wanted[index])
+  );
+}
+
 function hasBoundModelArkPreflight(
   validation: RunTransaction["validations"][number] | undefined,
+  runCreatedAt: string | undefined,
+  nowMs = Date.now(),
 ) {
-  if (validation?.status !== "passed" || !validation.output) return false;
+  if (
+    validation?.required !== true ||
+    validation.status !== "passed" ||
+    typeof validation.output !== "string" ||
+    validation.output.length > 4_096
+  ) {
+    return false;
+  }
   try {
     const profile = JSON.parse(validation.output);
+    if (
+      !hasExactObjectKeys(profile, [
+        "schemaVersion",
+        "attestation",
+        "inferenceMode",
+        "executor",
+        "runtimeProvider",
+        "providerProtocol",
+        "modelCommitment",
+        "preflight",
+      ]) ||
+      !hasExactObjectKeys(profile.preflight, [
+        "checkedAt",
+        "generatedAssistantOutput",
+        "endpointOriginCommitment",
+        "attemptCount",
+        "requestCount",
+        "retryDelayMs",
+      ])
+    ) {
+      return false;
+    }
+    const preflight = profile.preflight;
+    const checkedAtMs =
+      typeof preflight.checkedAt === "string"
+        ? Date.parse(preflight.checkedAt)
+        : Number.NaN;
+    const runCreatedAtMs = Date.parse(runCreatedAt ?? "");
+    const ageAtRenderMs = nowMs - checkedAtMs;
+    const ageAtAdmissionMs = runCreatedAtMs - checkedAtMs;
     return (
-      profile?.schemaVersion === 2 &&
-      profile?.attestation === "airlock-control-plane" &&
-      profile?.inferenceMode === "modelark" &&
-      /^sha256:[a-f0-9]{64}$/.test(profile?.modelCommitment ?? "") &&
-      profile?.preflight?.generatedAssistantOutput === true &&
+      profile.schemaVersion === 2 &&
+      profile.attestation === "airlock-control-plane" &&
+      profile.inferenceMode === "modelark" &&
+      profile.executor === "codex-cli" &&
+      profile.runtimeProvider === "container" &&
+      profile.providerProtocol === "responses" &&
+      /^sha256:[a-f0-9]{64}$/.test(String(profile.modelCommitment ?? "")) &&
+      preflight.generatedAssistantOutput === true &&
       /^sha256:[a-f0-9]{64}$/.test(
-        profile.preflight.endpointOriginCommitment ?? "",
+        String(preflight.endpointOriginCommitment ?? ""),
       ) &&
-      Number.isInteger(profile.preflight.requestCount) &&
-      profile.preflight.requestCount >= 1
+      Number.isFinite(checkedAtMs) &&
+      Number.isFinite(runCreatedAtMs) &&
+      ageAtRenderMs >= -modelArkPreflightFutureToleranceMs &&
+      ageAtRenderMs <= modelArkPreflightMaxAgeMs &&
+      ageAtAdmissionMs >= -modelArkPreflightFutureToleranceMs &&
+      ageAtAdmissionMs <= modelArkPreflightMaxAgeMs &&
+      typeof preflight.attemptCount === "number" &&
+      Number.isInteger(preflight.attemptCount) &&
+      preflight.attemptCount >= 1 &&
+      preflight.attemptCount <= 4 &&
+      typeof preflight.requestCount === "number" &&
+      Number.isInteger(preflight.requestCount) &&
+      preflight.requestCount >= preflight.attemptCount &&
+      preflight.requestCount <= 16 &&
+      typeof preflight.retryDelayMs === "number" &&
+      Number.isInteger(preflight.retryDelayMs) &&
+      preflight.retryDelayMs >= 0 &&
+      preflight.retryDelayMs <= 15_000
     );
   } catch {
     return false;
@@ -249,8 +323,10 @@ type RecordingAttempt = {
 
 function JudgeProofSummary({
   transaction,
+  modelArkProofMode = false,
 }: {
   transaction: NonNullable<AgentRun["transaction"]>;
+  modelArkProofMode?: boolean;
 }) {
   const disposition = transaction.disposition ?? transaction.status;
   const requiredValidations = transaction.validations.filter(
@@ -295,7 +371,9 @@ function JudgeProofSummary({
             {repaired
               ? "Recovery complete: retained work became a validated future"
               : promoted
-              ? "Proof complete: one validated Whole-Agent future became reality"
+              ? modelArkProofMode
+                ? "Promotion complete: one validated Whole-Agent future became reality"
+                : "Proof complete: one validated Whole-Agent future became reality"
               : quarantined
                 ? "Unsafe future blocked: accepted reality did not move"
               : terminal
@@ -304,7 +382,13 @@ function JudgeProofSummary({
           </h4>
         </div>
         <span className={promoted ? "proof-verdict passed" : "proof-verdict"}>
-          {promoted ? "Validated" : terminal ? "Protected" : "Running"}
+          {promoted
+            ? modelArkProofMode
+              ? "Promoted"
+              : "Validated"
+            : terminal
+              ? "Protected"
+              : "Running"}
         </span>
       </header>
       <ol>
@@ -1111,7 +1195,10 @@ function LiveModelArkGuide({
   const executionProfile = promoted?.transaction?.validations.find(
     (validation) => validation.name === "execution-profile",
   );
-  const preflightBound = hasBoundModelArkPreflight(executionProfile);
+  const preflightBound = hasBoundModelArkPreflight(
+    executionProfile,
+    promoted?.createdAt,
+  );
 
   return (
     <section
@@ -1120,7 +1207,7 @@ function LiveModelArkGuide({
     >
       <header>
         <div>
-          <span className="eyebrow">Provider proof</span>
+          <span className="eyebrow">Airlock-attested live execution</span>
           <strong>Model decides. Contract verifies.</strong>
         </div>
         <span>
@@ -1150,18 +1237,22 @@ function LiveModelArkGuide({
         </button>
       </div>
       {promoted?.transaction && (
-        <div className="protocol-paired-verdict" role="status">
+        <div
+          className="protocol-paired-verdict"
+          role="status"
+          data-airlock-run-id={promoted.id}
+        >
           <span aria-hidden="true">✓</span>
           <div>
             <strong>
               {preflightBound
-                ? "ModelArk preflight, Runtime, and Promotion bound"
-                : "Provider-backed Promotion proven"}
+                ? "Airlock attested preflight, Runtime profile, and Promotion"
+                : "Promotion complete; provider binding unavailable"}
             </strong>
             <small>
               {preflightBound
-                ? "The signed evidence binds fresh generated-output preflight facts and the private model commitment to four promoted resources and one post-Promotion effect."
-                : "Isolated Candidate passed the required state check and advanced Canonical State."}
+                ? "The Promotion Receipt binds fresh generated-output preflight facts and the model identifier commitment to four promoted resources and one post-Promotion effect. Independent packet verification completes in the proof command."
+                : "The isolated Candidate advanced Canonical State, but this view cannot attest that Run to the live provider without its required execution-profile evidence."}
             </small>
           </div>
           <code>
@@ -3498,6 +3589,7 @@ function AirlockEvidence({
   onDiscard,
   portableTrustAvailable,
   judgeProofMode,
+  modelArkProofMode,
   automaticProofRequestNonce,
   onPortableError,
   onVerifyArtifact,
@@ -3509,6 +3601,7 @@ function AirlockEvidence({
   onDiscard: () => void;
   portableTrustAvailable: boolean;
   judgeProofMode: boolean;
+  modelArkProofMode: boolean;
   automaticProofRequestNonce: number | null;
   onPortableError: (message: string) => void;
   onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
@@ -3591,7 +3684,12 @@ function AirlockEvidence({
         </span>
       </header>
 
-      {judgeProofMode && <JudgeProofSummary transaction={transaction} />}
+      {judgeProofMode && (
+        <JudgeProofSummary
+          transaction={transaction}
+          modelArkProofMode={modelArkProofMode}
+        />
+      )}
 
       <EvidenceDetails compact={compactJudgeEvidence}>
       <section className="repair-lineage" aria-label="Recovery evidence">
@@ -5861,16 +5959,17 @@ export default function App() {
 
         {system?.modelArkDemoMode ? (
           <div className="live-mode-banner" role="status">
-            <span>LIVE MODELARK PROOF</span>
+            <span>AIRLOCK-ATTESTED MODELARK RUN</span>
             <div>
               <strong>
-                Provider-backed inference in a disposable container
+                Live provider inference observed by Agent Airlock
               </strong>
               <p>
                 Fresh preflight generated assistant output in{" "}
                 {system.modelArkPreflight?.requestCount ?? 0} bounded request
                 {system.modelArkPreflight?.requestCount === 1 ? "" : "s"}.
-                Output and credentials remain private.
+                Output and credentials remain private. This is not
+                BytePlus-signed telemetry.
               </p>
             </div>
           </div>
@@ -6568,6 +6667,7 @@ export default function App() {
                       system?.protocolFixtureMode === true ||
                       system?.modelArkDemoMode === true
                     }
+                    modelArkProofMode={system?.modelArkDemoMode === true}
                     automaticProofRequestNonce={
                       activeRun.id === automaticProof?.runId &&
                       automaticProof.status === "requested"

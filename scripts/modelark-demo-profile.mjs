@@ -2,6 +2,10 @@ import os from "node:os";
 import path from "node:path";
 
 export const liveModelArkAgentName = "Live ModelArk Proof";
+export const liveModelArkAgentDescription =
+  "Provider-backed inference, isolated Candidate, validated Promotion";
+export const liveModelArkAgentInstructions =
+  "Work only in isolated Candidate State. Complete the requested workspace, SQLite, and deferred-action changes, run the required verification, and report the observed result.";
 export const liveModelArkPrompt =
   "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.";
 
@@ -15,7 +19,21 @@ export const liveModelArkContract = Object.freeze({
   protectedPaths: ["AGENTS.md"],
   maxChangedFiles: 4,
   maxAddedBytes: 65_536,
-  secretPatterns: [],
+  secretPatterns: [
+    {
+      name: "ark-api-key-assignment",
+      pattern: "ARK_API_KEY\\s*[:=]\\s*['\\\"]?[^\\s'\\\"]{8,}",
+    },
+    {
+      name: "ark-model-api-key",
+      pattern:
+        "\\bark-[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}-[A-Za-z0-9]{4,}\\b",
+    },
+    {
+      name: "bearer-token",
+      pattern: "Bearer\\s+[A-Za-z0-9._~+/-]{12,}=*",
+    },
+  ],
   validationCommands: [
     {
       name: "modelark-live-state",
@@ -95,9 +113,8 @@ export async function seedLiveModelArkDemo(baseUrl, fetchImpl = fetch) {
         method: "POST",
         body: JSON.stringify({
           name: liveModelArkAgentName,
-          description: "Provider-backed inference, isolated Candidate, validated Promotion",
-          instructions:
-            "Work only in isolated Candidate State. Complete the requested workspace, SQLite, and deferred-action changes, run the required verification, and report the observed result.",
+          description: liveModelArkAgentDescription,
+          instructions: liveModelArkAgentInstructions,
         }),
       },
       fetchImpl,
@@ -114,11 +131,13 @@ export async function seedLiveModelArkDemo(baseUrl, fetchImpl = fetch) {
     return agent;
   }
   if (
+    agent.description !== liveModelArkAgentDescription ||
+    agent.instructions !== liveModelArkAgentInstructions ||
     JSON.stringify(comparableContract(agent.outcomeContract)) !==
     JSON.stringify(liveModelArkContract)
   ) {
     throw new Error(
-      "The Live ModelArk Proof Outcome Contract changed. Restart with --reset for the guaranteed judge path.",
+      "The Live ModelArk Proof Agent profile or Outcome Contract changed. Restart with --reset for the guaranteed judge path.",
     );
   }
   return agent;
