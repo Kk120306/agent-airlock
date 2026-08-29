@@ -17,6 +17,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -57,10 +58,12 @@ import {
 } from "./runtime-proof-runner.mjs";
 import {
   attachBoundedRuntimeProofCapture,
+  createOwnedRuntimeProofProcessTree,
   createBoundedRuntimeProofTranscript,
   createRuntimeProofProgress,
   runtimeProofChildExitSucceeded,
   runtimeProofTerminalLimits,
+  stopOwnedRuntimeProofProcessTree,
   stopRuntimeProofChild,
   waitForRuntimeProofChildOutcome,
 } from "./runtime-proof-terminal.mjs";
@@ -2776,6 +2779,101 @@ test("forced child shutdown fails when termination cannot be confirmed", async (
     /did not exit/,
   );
 });
+
+async function reserveRuntimeProofRetryPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  await new Promise((resolve) => server.close(resolve));
+  return address.port;
+}
+
+async function assertRuntimeProofRetryPortReleased(port) {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port, exclusive: true }, resolve);
+  });
+  await new Promise((resolve) => server.close(resolve));
+}
+
+test(
+  "forced Runtime proof launcher shutdown removes stubborn descendants and releases retry ports",
+  { skip: process.platform === "win32", timeout: 10_000 },
+  async () => {
+    const port = await reserveRuntimeProofRetryPort();
+    const listenerSource = `
+      import net from "node:net";
+      process.on("SIGTERM", () => {});
+      const server = net.createServer();
+      server.listen({ host: "127.0.0.1", port: Number(process.env.TEST_PORT), exclusive: true }, () => {
+        console.log("RUNTIME_PROOF_RETRY_PORT_READY");
+      });
+      setInterval(() => {}, 1_000);
+    `;
+    const launcherSource = `
+      import { spawn } from "node:child_process";
+      process.on("SIGTERM", () => {});
+      spawn(process.execPath, ["--input-type=module", "--eval", ${JSON.stringify(listenerSource)}], {
+        detached: false,
+        env: process.env,
+        stdio: "inherit",
+      });
+      setInterval(() => {}, 1_000);
+    `;
+    const launcher = spawn(
+      process.execPath,
+      ["--input-type=module", "--eval", launcherSource],
+      {
+        detached: true,
+        env: { ...process.env, TEST_PORT: String(port) },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const ownedTree = createOwnedRuntimeProofProcessTree(launcher);
+    const launcherExit = new Promise((resolve) => launcher.once("exit", resolve));
+
+    try {
+      await new Promise((resolve, reject) => {
+        let readinessOutput = "";
+        const timeout = setTimeout(
+          () => reject(new Error("The stubborn Runtime proof child did not start")),
+          5_000,
+        );
+        launcher.stdout.on("data", (chunk) => {
+          readinessOutput = (readinessOutput + chunk.toString("utf8")).slice(-512);
+          if (!readinessOutput.includes("RUNTIME_PROOF_RETRY_PORT_READY")) {
+            return;
+          }
+          clearTimeout(timeout);
+          resolve();
+        });
+        launcher.once("error", reject);
+        launcher.once("exit", () =>
+          reject(new Error("The Runtime proof launcher exited before readiness")),
+        );
+      });
+
+      const result = await stopOwnedRuntimeProofProcessTree(ownedTree, {
+        gracefulTimeoutMs: 100,
+        forcedTimeoutMs: 5_000,
+        pollIntervalMs: 10,
+      });
+      await launcherExit;
+      assert.equal(result.forced, true);
+      assert.equal(ownedTree.isRunning(), false);
+      await assertRuntimeProofRetryPortReleased(port);
+    } finally {
+      try {
+        ownedTree.signal("SIGKILL");
+      } catch {}
+    }
+  },
+);
 
 test("launcher success requires a zero exit without a terminating signal", () => {
   assert.equal(

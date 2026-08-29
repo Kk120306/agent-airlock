@@ -8,10 +8,24 @@ Rejected futures remain inspectable, cannot alter Canonical State, and can seed 
 
 ## Start here
 
+Confirm Node.js 22 or newer, npm 10 or newer, installed Google Chrome, and a running Docker-compatible engine.
+The canonical proof uses loopback ports 3222 and 43996 and fails closed when another proof owns its session.
+Warm the application and Runtime image before recording:
+
 ```bash
 npm install
+npm run prove:runtime -- --reset --json
+```
+
+After the warm-up succeeds, start screen capture and run:
+
+```bash
 npm run prove:runtime -- --reset --headed
 ```
+
+The runner owns both browser actions and closes Chrome automatically.
+Do not click, scroll, switch tabs, or close Chrome during the canonical pass.
+Stop capture after Chrome closes and the terminal prints `Real Runtime proof: PASSED`.
 
 Phase 22 passed on this release candidate through `npm run prove:runtime -- --reset --headed`, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
 For a persistent stage-by-stage rehearsal, start the same product path manually:
@@ -26,12 +40,14 @@ Run completion is capped early enough to leave that full 115-second post-Run pre
 The deadline remains armed through browser shutdown and the actual atomic latest-pointer commit, so a late proof cannot publish.
 It opens production Chrome, keeps the desktop recording at 1280 by 720 through browser close, and presents one primary action, `Prove this release is safe`.
 Do not select it during the canonical headed recording.
-The runner invokes it exactly once at 0:15 and requires exactly three fresh Runs after proof start: one valid Promotion, one destructive Quarantine, and one promoted Repair from the retained Quarantine.
+The runner invokes it exactly once after the 15-second opening and requires exactly three fresh Runs after proof start: one valid Promotion, one destructive Quarantine, and one promoted Repair from the retained Quarantine.
 Use `npm run demo:runtime -- --reset` when rehearsing the human-click path.
 Do not accept evidence from a prior run, browser-local fixture state, prompt text, or Runtime narration.
 The Outcome Brief must derive its claims from persisted Run evidence and show the three Run identifiers, four-resource dispositions, Canonical fingerprint transitions, failed and passed Validations, post-Promotion effects, and Repair lineage.
 The final success verdict must remain unavailable until the quarantined parent and promoted Repair form a locally verified signed two-decision chain.
-Select `Inspect in zero-upload verifier` and show `0 API calls`, `2 signed decisions linked`, both signatures, the exact parent link, and the intact Canonical State handoff.
+After the complete 85-second Outcome Brief dwell, the runner automatically selects `Inspect in zero-upload verifier` and keeps it visible for 25 seconds.
+Do not select that control yourself during the canonical headed recording.
+Show `0 API calls`, `2 signed decisions linked`, both signatures, the exact parent link, and the intact Canonical State handoff.
 While the desktop browser remains at 1280 by 720, the runner must start a separate headless 390 by 844 read-only replay from the exact three persisted Run identifiers.
 That replay must create no Run and independently regenerate the same signed chain and zero-upload verifier evidence.
 The runner must produce only a content-addressed immutable result capsule plus its exact content-addressed signed chain, with mutable latest state retained only as a convenience pointer.
@@ -44,6 +60,8 @@ npm run demo -- --reset
 ```
 
 Open <http://127.0.0.1:3199> and follow the four numbered controls.
+Select Promotion, Quarantine, Repair, and continuity in order, waiting for each step to complete before continuing.
+Press `Ctrl+C` in the launcher terminal when the fallback recording is complete.
 This remains a production-build regression and fallback fixture rather than the canonical recording.
 
 When ModelArk free capacity is available, run the credentialed conformance proof:

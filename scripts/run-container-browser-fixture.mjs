@@ -378,21 +378,23 @@ const app = spawn(process.execPath, [path.join(repoRoot, "apps/server/dist/index
 });
 
 let stopping = false;
+async function stopFixtureChild(child) {
+  await stopRuntimeProofChild(child, {
+    gracefulTimeoutMs: 5_000,
+    forcedTimeoutMs: 5_000,
+  });
+}
+
 async function shutdown(exitCode = 0) {
   if (stopping) return;
   stopping = true;
-  let childCleanupFailed = false;
-  for (const child of [app, fixture]) {
-    try {
-      await stopRuntimeProofChild(child, {
-        gracefulTimeoutMs: 5_000,
-        forcedTimeoutMs: 5_000,
-      });
-    } catch {
-      childCleanupFailed = true;
-      exitCode = 1;
-    }
-  }
+  const childCleanup = await Promise.allSettled(
+    [app, fixture].map(stopFixtureChild),
+  );
+  const childCleanupFailed = childCleanup.some(
+    (result) => result.status === "rejected",
+  );
+  if (childCleanupFailed) exitCode = 1;
   if (
     (!demoRequested || ephemeralRequested) &&
     !childCleanupFailed &&

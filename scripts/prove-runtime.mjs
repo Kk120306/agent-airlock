@@ -27,9 +27,11 @@ import {
 } from "./runtime-proof-runner.mjs";
 import {
   attachBoundedRuntimeProofCapture,
+  createOwnedRuntimeProofProcessTree,
   createRuntimeProofProgress,
   runtimeProofChildExitSucceeded,
   runtimeProofChildHasExited,
+  stopOwnedRuntimeProofProcessTree,
   stopRuntimeProofChild,
   waitForRuntimeProofChildOutcome,
 } from "./runtime-proof-terminal.mjs";
@@ -71,6 +73,7 @@ const ownedChildren = new Set();
 const controller = new AbortController();
 let launcher = null;
 let launcherExit = null;
+let launcherTree = null;
 let launcherOutput = null;
 let detachLauncherReadiness = null;
 let engine = null;
@@ -324,8 +327,15 @@ async function cleanupRuntimeContainers() {
 for (const signalName of ["SIGINT", "SIGTERM"]) {
   process.once(signalName, () => {
     controller.abort();
-    for (const child of ownedChildren) child.kill("SIGTERM");
-    launcher?.kill("SIGTERM");
+    for (const child of ownedChildren) {
+      if (child === launcher && launcherTree) continue;
+      child.kill("SIGTERM");
+    }
+    try {
+      launcherTree?.signal(signalName);
+    } catch {
+      // The bounded cleanup path below confirms whether the owned tree exited.
+    }
   });
 }
 
@@ -387,9 +397,11 @@ try {
         CONTAINER_RUNTIME_IMAGE: runtimeImage,
       },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     },
   );
   ownedChildren.add(launcher);
+  launcherTree = createOwnedRuntimeProofProcessTree(launcher);
   runtimeInstanceId = `browser-${launcher.pid}`;
   launcherOutput = attachBoundedRuntimeProofCapture(launcher);
   let readinessProbe = "";
@@ -474,7 +486,11 @@ function recordCleanupFailure(error) {
 progress.emit("cleanup");
 if (launcher) {
   try {
-    await stopRuntimeProofChild(launcher);
+    if (launcherTree) {
+      await stopOwnedRuntimeProofProcessTree(launcherTree);
+    } else {
+      await stopRuntimeProofChild(launcher);
+    }
     const launcherOutcome = await launcherExit;
     if (!runtimeProofChildExitSucceeded(launcherOutcome)) {
       throw new RuntimeProofError("cleanup-failed");

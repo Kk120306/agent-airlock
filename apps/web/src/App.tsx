@@ -528,6 +528,29 @@ function ProtocolScenarioGuide({
     repaired && automaticProof?.runId === repaired.id
       ? automaticProof.status
       : null;
+  const recordingStageOrder = {
+    promote: 0,
+    quarantine: 1,
+    repair: 2,
+    verify: 3,
+  } as const;
+  const scenarioStageState = (
+    stage: "promote" | "quarantine" | "repair",
+    evidenceComplete: boolean,
+  ): "pending" | "active" | "complete" => {
+    if (evidenceComplete) return "complete";
+    if (!recordingMode || automationStage === null) return "pending";
+    const currentIndex = recordingStageOrder[automationStage];
+    const stageIndex = recordingStageOrder[stage];
+    if (currentIndex === stageIndex) return "active";
+    return currentIndex > stageIndex ? "complete" : "pending";
+  };
+  const promotedStageState = scenarioStageState("promote", Boolean(promoted));
+  const quarantinedStageState = scenarioStageState(
+    "quarantine",
+    Boolean(quarantined),
+  );
+  const repairedStageState = scenarioStageState("repair", Boolean(repaired));
 
   useEffect(() => {
     if (repairedProofStatus === "verified") {
@@ -641,6 +664,7 @@ function ProtocolScenarioGuide({
             className="button button-primary protocol-run-all"
             onClick={() => void runCompleteLoop()}
             disabled={readOnlyReplayMode || busy || automationStage !== null}
+            aria-busy={automationStage !== null}
           >
             {automationStage ? (
               <Spinner />
@@ -651,20 +675,34 @@ function ProtocolScenarioGuide({
           </button>
         )}
       </header>
+      <span
+        className="protocol-progress-announcement"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {automationStage === null
+          ? ""
+          : `Safety proof progress: ${automationLabel}.`}
+      </span>
       <div className="protocol-scenario-actions">
         <button
           type="button"
-          data-complete={Boolean(promoted)}
+          data-state={promotedStageState}
+          data-complete={promotedStageState === "complete"}
+          aria-current={promotedStageState === "active" ? "step" : undefined}
           onClick={() => {
             setAutomationError(null);
             void onRun(protocolFixturePrompts.promote);
           }}
           disabled={recordingMode || busy || automationStage !== null}
         >
-          <span>{promoted ? "✓" : "1"}</span>
+          <span>{promotedStageState === "complete" ? "✓" : "1"}</span>
           <div>
             <strong>
-              {promoted ? "Safe future promoted" : "Run passing Candidate"}
+              {promotedStageState === "complete"
+                ? "Safe future promoted"
+                : "Run passing Candidate"}
             </strong>
             <small>
               Code, memory, SQLite, and one deferred effect promote together.
@@ -673,7 +711,11 @@ function ProtocolScenarioGuide({
         </button>
         <button
           type="button"
-          data-complete={Boolean(quarantined)}
+          data-state={quarantinedStageState}
+          data-complete={quarantinedStageState === "complete"}
+          aria-current={
+            quarantinedStageState === "active" ? "step" : undefined
+          }
           onClick={() => {
             setAutomationError(null);
             void onRun(protocolFixturePrompts.challenge);
@@ -682,10 +724,10 @@ function ProtocolScenarioGuide({
             recordingMode || busy || automationStage !== null || !promoted
           }
         >
-          <span>{quarantined ? "✓" : "2"}</span>
+          <span>{quarantinedStageState === "complete" ? "✓" : "2"}</span>
           <div>
             <strong>
-              {quarantined
+              {quarantinedStageState === "complete"
                 ? "Unsafe future quarantined"
                 : "Run failing Candidate"}
             </strong>
@@ -696,7 +738,9 @@ function ProtocolScenarioGuide({
         </button>
         <button
           type="button"
-          data-complete={Boolean(repaired)}
+          data-state={repairedStageState}
+          data-complete={repairedStageState === "complete"}
+          aria-current={repairedStageState === "active" ? "step" : undefined}
           onClick={() => {
             setAutomationError(null);
             if (quarantined) void onRepair(quarantined.id);
@@ -709,10 +753,10 @@ function ProtocolScenarioGuide({
             Boolean(repaired)
           }
         >
-          <span>{repaired ? "✓" : "3"}</span>
+          <span>{repairedStageState === "complete" ? "✓" : "3"}</span>
           <div>
             <strong>
-              {repaired
+              {repairedStageState === "complete"
                 ? "Rejected future safely repaired"
                 : "Repair retained Candidate"}
             </strong>

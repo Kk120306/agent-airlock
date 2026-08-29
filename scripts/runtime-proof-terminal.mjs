@@ -122,6 +122,121 @@ export function runtimeProofChildExitSucceeded(outcome) {
   );
 }
 
+function validRuntimeProofProcessId(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function unixRuntimeProofProcessGroupExists(processGroupId, killProcess) {
+  try {
+    killProcess(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    if (error?.code === "EPERM") return true;
+    throw error;
+  }
+}
+
+export function createOwnedRuntimeProofProcessTree(
+  child,
+  {
+    platform = process.platform,
+    killProcess = process.kill.bind(process),
+  } = {},
+) {
+  if (!child || !validRuntimeProofProcessId(child.pid)) {
+    throw new Error("The owned Runtime proof process tree has no valid leader");
+  }
+  const processGroupId = platform === "win32" ? null : child.pid;
+  return Object.freeze({
+    child,
+    processGroupId,
+    isRunning() {
+      if (platform !== "win32") {
+        return unixRuntimeProofProcessGroupExists(processGroupId, killProcess);
+      }
+      return !runtimeProofChildHasExited(child);
+    },
+    signal(signalName) {
+      try {
+        if (platform !== "win32") {
+          killProcess(-processGroupId, signalName);
+        } else {
+          if (runtimeProofChildHasExited(child)) return false;
+          child.kill(signalName);
+        }
+        return true;
+      } catch (error) {
+        if (error?.code === "ESRCH") return false;
+        throw error;
+      }
+    },
+  });
+}
+
+async function waitForRuntimeProofProcessTreeToStop(
+  ownedTree,
+  timeoutMs,
+  pollIntervalMs,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (ownedTree.isRunning()) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return false;
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)),
+    );
+  }
+  return true;
+}
+
+export async function stopOwnedRuntimeProofProcessTree(
+  ownedTree,
+  {
+    initialSignal = "SIGTERM",
+    gracefulTimeoutMs = 12_000,
+    forcedTimeoutMs = 5_000,
+    pollIntervalMs = 25,
+  } = {},
+) {
+  if (
+    !ownedTree ||
+    typeof ownedTree.isRunning !== "function" ||
+    typeof ownedTree.signal !== "function"
+  ) {
+    throw new TypeError("An owned Runtime proof process tree is required");
+  }
+  for (const value of [gracefulTimeoutMs, forcedTimeoutMs, pollIntervalMs]) {
+    if (!Number.isInteger(value) || value < 1 || value > 30_000) {
+      throw new TypeError(
+        "Runtime proof process-tree timeouts must be bounded positive integers",
+      );
+    }
+  }
+  if (!ownedTree.isRunning()) return { forced: false };
+  ownedTree.signal(initialSignal);
+  if (
+    await waitForRuntimeProofProcessTreeToStop(
+      ownedTree,
+      gracefulTimeoutMs,
+      pollIntervalMs,
+    )
+  ) {
+    return { forced: false };
+  }
+  ownedTree.signal("SIGKILL");
+  if (
+    !(await waitForRuntimeProofProcessTreeToStop(
+      ownedTree,
+      forcedTimeoutMs,
+      pollIntervalMs,
+    ))
+  ) {
+    throw new Error("The owned Runtime proof process group survived SIGKILL");
+  }
+  return { forced: true };
+}
+
 export function waitForRuntimeProofChildOutcome(
   child,
   {

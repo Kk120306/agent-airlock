@@ -6,12 +6,32 @@ Agent Airlock lets an Agent attempt one Whole-Agent future across files, memory,
 The canonical recording path uses the starter kit's production React Playground, Fastify control plane, pinned Codex CLI, disposable Runtime container, isolated Candidate State, constrained Validation, Promotion journal, and persisted Run authority.
 Only the Responses provider is deterministic and local, so the recording needs no ModelArk credential, provider capacity, wallet, blockchain, or paid inference.
 
-## Rehearse from a clean state
+## Recording prerequisites
+
+- Node.js 22 or newer and npm 10 or newer.
+- Installed Google Chrome.
+- A running Docker-compatible engine through Docker Desktop, Docker Engine, Colima, or Podman compatibility.
+- Free loopback ports 3222 and 43996 for the canonical proof.
+- No other active Agent Airlock proof session.
+
+The canonical proof builds the application and Runtime image before Chrome opens.
+Warm those caches and verify the exact flow before starting screen capture:
 
 ```bash
 npm install
+npm run prove:runtime -- --reset --json
+```
+
+Start the recording pass only after that command succeeds:
+
+```bash
 npm run prove:runtime -- --reset --headed
 ```
+
+Start screen capture before entering the headed command and trim everything before the first Chrome frame, or start capture as soon as Chrome opens.
+Do not click, scroll, switch tabs, or close Chrome during the canonical pass.
+The runner owns both proof actions, the viewport, presentation timing, verifier transition, and browser shutdown.
+Stop capture only after Chrome closes and the terminal prints `Real Runtime proof: PASSED`.
 
 Phase 22 passed on this release candidate through `npm run prove:runtime -- --reset --headed`, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
 It uses deadline-aware presentation pacing under a hard 180-second recording budget.
@@ -30,7 +50,11 @@ The final Outcome Brief must be derived from those three persisted Runs and inde
 While the desktop browser remains at 1280 by 720, a separate headless 390 by 844 read-only replay hydrates from those exact persisted Run identifiers.
 The replay creates no Run and independently regenerates the same signed chain and zero-upload verifier evidence before the proof may publish success.
 
-## Timeline
+## Visual-cue recording timeline
+
+The proof preserves fixed presentation dwells, but real container Run completion time varies.
+Only the opening begins at a fixed wall-clock time.
+After 0:15, follow the visible screen state rather than a stopwatch.
 
 ### 0:00 to 0:15 - Establish the guarantee
 
@@ -38,48 +62,53 @@ Point to `REAL RUNTIME PROOF`, the selected recording Agent, and its visible ver
 State the falsifiable guarantee: the Runtime may mutate only Candidate State, and only Airlock may advance the atomic Canonical State manifest after every required Validation passes.
 Point out that real Codex is running inside a disposable container while a local deterministic Responses fixture removes provider capacity from the recording risk.
 
-### 0:15 to 0:50 - Start one proof
+### Next visible state - Watch one proof execute
 
 Do not select `Prove this release is safe` during the canonical headed recording.
-The runner invokes it exactly once at 0:15 after the opening guarantee is visible for the full 15 seconds.
+The runner invokes it exactly once after the opening guarantee is visible for the full 15 seconds.
 Use `npm run demo:runtime -- --reset` for a human-click rehearsal.
 The guided proof must start exactly three fresh Runs in order: a valid Candidate, a destructive Candidate, and a Repair Run from the retained Quarantine.
 Keep the recording on the three-step progress guide while the Runs complete.
 After signed verification succeeds, the final evidence-derived Outcome Brief replaces the working view and becomes the single frame for the evidence walk-through.
+Run completion may take up to 35 seconds, and the Outcome Brief appears immediately when the proof finishes.
 
-### 0:50 to 1:15 - Promote one coherent future
+### Outcome Brief, first 20 seconds - Promote one coherent future
 
 On the completed Outcome Brief, show the first fresh Run as `Promotion` only after every required Validation passes.
 Point to the visible passed-Validation count, four promoted resources, advanced Canonical fingerprint, and exactly one post-Promotion effect.
 Explain that the persisted transaction evidence also records the accepted SQLite value and ordered Promotion journal without crowding the compact recording brief.
 
-### 1:15 to 1:40 - Quarantine the destructive future
+### Outcome Brief, next 20 seconds - Quarantine the destructive future
 
 On the completed Outcome Brief, show the second fresh Run as `Quarantine` after its required Validation rejects the deliberately invalid result.
 Point to the visible failed-Validation count, four quarantined resources, and the identical before and after Canonical fingerprints.
 Explain that the unchanged fingerprint and zero effects prove the rejected attempt did not reach accepted reality.
 
-### 1:40 to 2:05 - Repair retained work
+### Outcome Brief, next 20 seconds - Repair retained work
 
 On the completed Outcome Brief, show the third fresh Run as a promoted Repair child of the retained Quarantine with bounded parent and root lineage.
 The Repair Run must receive the rejected workspace and memory, a verified disposable reference to exact Canonical State, the original Outcome Contract, and a fresh empty outbox.
 Show every required Validation pass, all four resources promote together, and one fresh repair effect dispatch only after Canonical State advances.
 
-### 2:05 to 2:15 - Read the Outcome Brief
+### Outcome Brief, final 25 seconds - Read the trust proof
 
 The Outcome Brief must name the three fresh Run identifiers and summarize only persisted facts.
 Show the valid Promotion, harmless rejection, promoted Repair, Canonical fingerprint transitions, four-resource dispositions, post-Promotion effects, and locally verified signed lineage.
 Require the final verdict to remain unavailable until Airlock verifies the two-decision chain from quarantined parent to promoted repair child.
 
-### 2:15 to 2:40 - Verify beyond the running app
+The runner keeps the completed Outcome Brief visible for 85 seconds in total.
+Use the remaining Outcome Brief time to show `Release proven safe`, all three fresh Run identifiers, the two signed decisions, and the final summary without scrolling.
 
-Select `Inspect in zero-upload verifier` from the completed Outcome Brief.
+### Final visible state, 25 seconds - Verify beyond the running app
+
+Do not select `Inspect in zero-upload verifier` during the canonical headed recording.
+After the full Outcome Brief dwell, the runner opens the exact decision chain automatically and keeps the verifier visible for 25 seconds.
 Show `0 API calls`, `2 signed decisions linked`, valid signatures, the exact parent link, and the intact Canonical State handoff.
 Close with the product line:
 
 > Agents may explore many futures, but only validated futures become reality.
 
-The runner reserves 2:40 to 2:45 for browser close and 2:45 to 3:00 as release headroom without asking the presenter to rush a visible frame.
+The runner then closes Chrome automatically and retains at least 15 seconds of release headroom without asking the presenter to rush a visible frame.
 
 ## Required visible proof
 
@@ -156,6 +185,9 @@ Ordinary containers are not hardened multi-tenant sandboxes.
 Use `npm run demo -- --reset` when no container engine is available.
 That four-step fixture remains the fastest deterministic regression and fallback demonstration, but it is not the canonical Phase 22 recording.
 Its UI and terminal must continue to disclose that paid model inference was replaced.
+Open <http://127.0.0.1:3199> and select the four numbered controls in order: Promotion, Quarantine, Repair, and continuity.
+This fallback is human-driven, so wait for each numbered step to complete before selecting the next one.
+Press `Ctrl+C` in the launcher terminal to stop it after the recording.
 
 ## Live ModelArk conformance
 

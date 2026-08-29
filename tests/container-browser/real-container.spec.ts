@@ -673,10 +673,24 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   const proveReleaseButton = automatedGuide.getByRole("button", {
     name: "Prove this release is safe",
   });
+  const runAllButton = automatedGuide.locator(".protocol-run-all");
+  const recordingStages = automatedGuide.locator(
+    ".protocol-scenario-actions > button",
+  );
+  const safeStage = recordingStages.nth(0);
+  const quarantineStage = recordingStages.nth(1);
+  const repairStage = recordingStages.nth(2);
   await expect(
     page.getByRole("region", { name: "Verified Outcome Brief" }),
   ).toHaveCount(0);
   expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
+  await expect(proveReleaseButton).toHaveCSS("min-height", "44px");
+  await expect(recordingStages).toHaveCount(3);
+  await expect(safeStage).toHaveAttribute("data-state", "pending");
+  await expect(quarantineStage).toHaveAttribute("data-state", "pending");
+  await expect(repairStage).toHaveAttribute("data-state", "pending");
+  await expect(safeStage).not.toHaveAttribute("aria-current", "step");
+  await expect(safeStage).toHaveCSS("opacity", "1");
 
   const mobileContext = await browser.newContext({
     serviceWorkers: "block",
@@ -705,6 +719,36 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       response.ok(),
   );
   await proveReleaseButton.click();
+  const progressAnnouncement = automatedGuide.locator(
+    ".protocol-progress-announcement",
+  );
+  await expect(runAllButton).toHaveAttribute("aria-busy", "true");
+  await expect(safeStage).toHaveAttribute("data-state", "active");
+  await expect(safeStage).toHaveAttribute("aria-current", "step");
+  await expect(progressAnnouncement).toHaveText(
+    "Safety proof progress: Running safe Candidate.",
+  );
+  await expect(runAllButton).toContainText("Proving rejection", {
+    timeout: 30_000,
+  });
+  await expect(safeStage).toHaveAttribute("data-state", "complete");
+  await expect(safeStage).not.toHaveAttribute("aria-current", "step");
+  await expect(quarantineStage).toHaveAttribute("data-state", "active");
+  await expect(quarantineStage).toHaveAttribute("aria-current", "step");
+  await expect(progressAnnouncement).toHaveText(
+    "Safety proof progress: Proving rejection.",
+  );
+  await expect(runAllButton).toContainText(
+    "Repairing retained Candidate",
+    { timeout: 30_000 },
+  );
+  await expect(quarantineStage).toHaveAttribute("data-state", "complete");
+  await expect(quarantineStage).not.toHaveAttribute("aria-current", "step");
+  await expect(repairStage).toHaveAttribute("data-state", "active");
+  await expect(repairStage).toHaveAttribute("aria-current", "step");
+  await expect(progressAnnouncement).toHaveText(
+    "Safety proof progress: Repairing retained Candidate.",
+  );
 
   const outcomeBrief = page.getByRole("region", {
     name: "Verified Outcome Brief",

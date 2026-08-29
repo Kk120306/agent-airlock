@@ -16,11 +16,20 @@ Only the Responses provider is deterministic and local, so the proof requires no
 
 ```bash
 npm install
+npm run prove:runtime -- --reset --json
+```
+
+Start screen capture, then run:
+
+```bash
 npm run prove:runtime -- --reset --headed
 ```
 
 Phase 22 passed on this release candidate through the full headed command above, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
 Use `npm run demo:runtime -- --reset` at <http://127.0.0.1:3200> when a persistent stage-by-stage rehearsal is more useful than the bounded canonical proof.
+The first proof command warms and verifies the exact application and Runtime image before screen capture.
+During the headed pass, do not click, scroll, switch tabs, or close Chrome.
+The runner owns both proof actions and closes Chrome automatically, and the recording is complete when the terminal prints `Real Runtime proof: PASSED`.
 
 The headed proof uses deadline-aware presentation pacing under a hard 180-second recording budget.
 Success preserves the full 15-second opening, 85-second desktop Outcome Brief, and 25-second desktop verifier dwells plus a 5-second browser-close reserve.
@@ -31,7 +40,7 @@ The deadline remains armed through browser shutdown and the actual atomic latest
 The desktop recording remains at 1280 by 720 and presents one primary action, `Prove this release is safe`.
 That action must create exactly three fresh Runs: a valid Promotion, a destructive Quarantine, and a promoted Repair from the retained failure.
 Its Outcome Brief must derive every claim from those persisted Runs, require all four resources to receive one disposition, show effect timing and Canonical fingerprint transitions, and withhold success until a signed two-decision chain verifies locally.
-The completed brief opens that exact chain in the zero-upload verifier, where the judge can see two valid signatures, the parent link, the Canonical State handoff, `0 API calls`, and `2 signed decisions linked`.
+After the complete Outcome Brief dwell, the runner automatically opens that exact chain in the zero-upload verifier, where the judge can see two valid signatures, the parent link, the Canonical State handoff, `0 API calls`, and `2 signed decisions linked`.
 The recording runner arms a deny-all HTTP and WebSocket boundary before that verifier first opens and keeps it active through browser close.
 While the desktop recording remains at 1280 by 720, a separate headless 390 by 844 read-only replay starts from the same three persisted Run identifiers, creates no Run, and independently regenerates the same signed chain and zero-upload verifier evidence.
 The runner publishes an owner-only content-addressed immutable result capsule plus its exact content-addressed signed chain, and it retains proof ownership through publication.
