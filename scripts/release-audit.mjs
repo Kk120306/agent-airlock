@@ -1,12 +1,19 @@
-import { execFile as execFileCallback } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { approvedModelArkBoundaryDocuments } from "./modelark-claim-policy.mjs";
+import { releaseLockfileDependencyFindings } from "./release-lockfile-policy.mjs";
+import {
+  approvedReleaseQualityPipeline,
+  requiredReleaseWorkspaceScripts,
+} from "./release-quality-policy.mjs";
+import {
+  highConfidenceReachableGitObjectFindings,
+  highConfidenceSecretFindings,
+} from "./release-secret-policy.mjs";
+import { runTrustedGit } from "./trusted-git-exec.mjs";
 
-const execFile = promisify(execFileCallback);
 const projectRoot = path.resolve(".");
-const { stdout } = await execFile(
-  "git",
+const { stdout } = await runTrustedGit(
   ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
   {
     cwd: projectRoot,
@@ -22,50 +29,29 @@ const failures = [];
 
 const modelArkStatusFiles = [
   "README.md",
+  "docs/demo/DEVPOST_SUBMISSION.md",
   "docs/demo/JUDGE_CHECKLIST.md",
+  "docs/demo/SUBMISSION_BRIEF.md",
+  "docs/demo/architecture-one-page.md",
   "docs/demo/three-minute-demo.md",
   "docs/product/OUTCOME_ROADMAP.md",
   "docs/product/PRD.md",
 ];
-const staleModelArkSuccessClaims = [
-  /credentialed ModelArk acceptance journey passed/i,
-  /live ModelArk (?:acceptance|conformance|promotion)[^.\n]*(?:passed|complete|verified|successful)/i,
-];
-
 for (const file of trackedFiles) {
   if (/^\.env(?:\.|$)/.test(path.basename(file)) && file !== ".env.example") {
     failures.push("Tracked environment file: " + file);
   }
+  if (path.basename(file) === ".npmrc") {
+    failures.push("Tracked project npm configuration: " + file);
+  }
 }
 
-const highConfidenceSecrets = [
-  { name: "OpenAI-style secret", pattern: /\bsk-[A-Za-z0-9_-]{32,}\b/g },
-  { name: "Volcengine access key", pattern: /\bAKLT[A-Za-z0-9]{16,}\b/g },
-  {
-    name: "private key block",
-    pattern:
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n(?:[A-Za-z0-9+/=]{16,}\r?\n)+-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
-    historyPattern:
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n(?:[ +\-][A-Za-z0-9+/=]{16,}\r?\n)+[ +\-]-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
-  },
-];
-
-const { stdout: history } = await execFile(
-  "git",
-  ["log", "-p", "--all", "--no-ext-diff", "--format=commit %H"],
-  {
-    cwd: projectRoot,
-    encoding: "buffer",
-    maxBuffer: 100 * 1024 * 1024,
-  },
-);
-const historyText = history.toString("utf8");
-for (const scanner of highConfidenceSecrets) {
-  const historyPattern = scanner.historyPattern ?? scanner.pattern;
-  historyPattern.lastIndex = 0;
-  if (historyPattern.test(historyText)) {
-    failures.push(scanner.name + " in Git history");
+try {
+  for (const secretName of highConfidenceReachableGitObjectFindings(projectRoot)) {
+    failures.push(secretName + " in Git history");
   }
+} catch {
+  failures.push("Git history scan was incomplete or unsafe");
 }
 
 for (const file of trackedFiles) {
@@ -78,11 +64,8 @@ for (const file of trackedFiles) {
   if (/^(?:<{7}|={7}|>{7})(?: |$)/m.test(content)) {
     failures.push("Merge conflict marker: " + file);
   }
-  for (const scanner of highConfidenceSecrets) {
-    scanner.pattern.lastIndex = 0;
-    if (scanner.pattern.test(content)) {
-      failures.push(scanner.name + ": " + file);
-    }
+  for (const secretName of highConfidenceSecretFindings(content)) {
+    failures.push(secretName + ": " + file);
   }
 }
 
@@ -112,18 +95,19 @@ for (const markdownFile of trackedFiles.filter((file) => file.endsWith(".md"))) 
   }
 }
 
+const modelArkStatusDocuments = [];
 for (const statusFile of modelArkStatusFiles) {
   if (!trackedFiles.includes(statusFile)) {
     failures.push("Missing ModelArk status document: " + statusFile);
     continue;
   }
   const content = await readFile(path.join(projectRoot, statusFile), "utf8");
-  for (const pattern of staleModelArkSuccessClaims) {
-    if (pattern.test(content)) {
-      failures.push("Stale live ModelArk success claim: " + statusFile);
-      break;
-    }
-  }
+  modelArkStatusDocuments.push([statusFile, content]);
+}
+if (!approvedModelArkBoundaryDocuments(modelArkStatusDocuments)) {
+  failures.push(
+    "ModelArk status disclosures differ from the approved submission boundary",
+  );
 }
 
 const readme = await readFile(path.join(projectRoot, "README.md"), "utf8");
@@ -193,6 +177,26 @@ for (const [documentPath, content] of Object.entries(
 const packageManifest = JSON.parse(
   await readFile(path.join(projectRoot, "package.json"), "utf8"),
 );
+const releaseManifests = { "package.json": packageManifest };
+const releaseWorkspaceScripts = {};
+for (const workspaceManifestPath of Object.keys(
+  requiredReleaseWorkspaceScripts,
+)) {
+  const workspaceManifest = JSON.parse(
+    await readFile(path.join(projectRoot, workspaceManifestPath), "utf8"),
+  );
+  releaseManifests[workspaceManifestPath] = workspaceManifest;
+  releaseWorkspaceScripts[workspaceManifestPath] = workspaceManifest.scripts;
+}
+const packageLock = JSON.parse(
+  await readFile(path.join(projectRoot, "package-lock.json"), "utf8"),
+);
+for (const finding of releaseLockfileDependencyFindings(
+  packageLock,
+  releaseManifests,
+)) {
+  failures.push("Release dependency lock mismatch: " + finding);
+}
 const requiredRuntimeProofScripts = {
   "prove:runtime": "node scripts/prove-runtime.mjs",
   "test:recording-outcome":
@@ -201,12 +205,54 @@ const requiredRuntimeProofScripts = {
     "node --test scripts/runtime-proof-artifact-worker.test.mjs",
   "test:runtime-proof": "node --test scripts/runtime-proof-runner.test.mjs",
 };
+if (
+  packageManifest.scripts?.["audit:submission"] !==
+  "node --env-file-if-exists=.env scripts/submission-audit.mjs"
+) {
+  failures.push(
+    "audit:submission must remain the credential-safe zero-network submission handoff",
+  );
+}
 for (const [scriptName, command] of Object.entries(requiredRuntimeProofScripts)) {
   if (packageManifest.scripts?.[scriptName] !== command) {
     failures.push(`${scriptName} must remain exactly: ${command}`);
   }
 }
 const scriptChecks = packageManifest.scripts?.["check:scripts"];
+const scriptCheckCommands =
+  typeof scriptChecks === "string" ? scriptChecks.split(" && ") : [];
+const hasExactSyntaxCheck = (file) =>
+  scriptCheckCommands.includes(`node --check ${file}`);
+for (const requiredSubmissionAuditFile of [
+  "scripts/modelark-claim-policy.mjs",
+  "scripts/modelark-claim-policy.test.mjs",
+  "scripts/release-lockfile-policy.mjs",
+  "scripts/release-lockfile-policy.test.mjs",
+  "scripts/release-quality-policy.mjs",
+  "scripts/release-quality-policy.test.mjs",
+  "scripts/release-secret-policy.mjs",
+  "scripts/release-secret-policy.test.mjs",
+  "scripts/submission-artifact-binding.mjs",
+  "scripts/submission-artifact-binding.test.mjs",
+  "scripts/submission-audit.mjs",
+  "scripts/submission-audit.test.mjs",
+  "scripts/trusted-git-exec.mjs",
+]) {
+  if (!trackedFiles.includes(requiredSubmissionAuditFile)) {
+    failures.push(
+      "Missing tracked submission handoff gate: " +
+        requiredSubmissionAuditFile,
+    );
+  }
+  if (
+    !hasExactSyntaxCheck(requiredSubmissionAuditFile)
+  ) {
+    failures.push(
+      "check:scripts is missing submission handoff coverage: " +
+        requiredSubmissionAuditFile,
+    );
+  }
+}
 for (const requiredRuntimeProofCheck of [
   "scripts/runtime-proof-artifact-worker.mjs",
   "scripts/runtime-proof-artifact-worker.test.mjs",
@@ -217,8 +263,7 @@ for (const requiredRuntimeProofCheck of [
   "scripts/resolve-runtime-proof-artifacts.mjs",
 ]) {
   if (
-    typeof scriptChecks !== "string" ||
-    !scriptChecks.includes(requiredRuntimeProofCheck)
+    !hasExactSyntaxCheck(requiredRuntimeProofCheck)
   ) {
     failures.push(
       "check:scripts is missing Runtime proof coverage: " +
@@ -226,8 +271,6 @@ for (const requiredRuntimeProofCheck of [
     );
   }
 }
-const scriptSyntaxCommand =
-  typeof scriptChecks === "string" ? scriptChecks.split(" && ")[0] : "";
 const scriptTestCommandOffset =
   typeof scriptChecks === "string" ? scriptChecks.lastIndexOf("&& node --test ") : -1;
 const scriptTestCommand =
@@ -235,25 +278,21 @@ const scriptTestCommand =
     ? ""
     : scriptChecks.slice(scriptTestCommandOffset);
 if (
-  !scriptSyntaxCommand.includes(
-    "scripts/runtime-proof-artifact-worker.test.mjs",
-  ) ||
+  !hasExactSyntaxCheck("scripts/runtime-proof-artifact-worker.test.mjs") ||
   !scriptTestCommand.includes("scripts/runtime-proof-artifact-worker.test.mjs")
 ) {
   failures.push(
     "check:scripts must syntax-check and execute the Runtime proof artifact worker test",
   );
 }
-const projectCheck = packageManifest.scripts?.check;
-const recordingOutcomeCheck = "npm run test:recording-outcome";
-const buildCheck = "npm run build";
 if (
-  typeof projectCheck !== "string" ||
-  !projectCheck.includes(recordingOutcomeCheck) ||
-  projectCheck.indexOf(recordingOutcomeCheck) > projectCheck.indexOf(buildCheck)
+  !approvedReleaseQualityPipeline(
+    packageManifest.scripts,
+    releaseWorkspaceScripts,
+  )
 ) {
   failures.push(
-    "check must execute the focused recording Outcome Brief policy test before build",
+    "check and audit:release must retain the exact script, typecheck, ModelArk evidence, recording policy, server test, build, and direct release-audit pipeline",
   );
 }
 const phaseThirteenCommand = packageManifest.scripts?.["check:phase13"];

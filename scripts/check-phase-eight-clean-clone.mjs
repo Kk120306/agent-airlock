@@ -4,6 +4,9 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertGitSourceMatchesHead } from "./runtime-source-provenance.mjs";
+import { runTrustedGit } from "./trusted-git-exec.mjs";
+
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const phase = process.env.AIRLOCK_CLEAN_CLONE_PHASE ?? "phase8";
 if (
@@ -23,29 +26,31 @@ const phaseLabel =
       : phase === "phase10"
         ? "Phase 10"
         : "Phase 11";
-const status = await capture("git", ["status", "--porcelain", "--untracked-files=all"], {
-  cwd: projectRoot,
-});
-if (status.trim()) {
+const sourceSnapshot = await inspectCleanSource(projectRoot).catch((error) => {
   process.stderr.write(
-    phaseLabel + " clean-clone verification requires a clean committed worktree.\n",
+    phaseLabel + " clean-clone verification requires exact clean committed source: " +
+      error.message +
+      "\n",
   );
   process.exit(1);
-}
-
-const sourceRevision = (
-  await capture("git", ["rev-parse", "HEAD"], { cwd: projectRoot })
-).trim();
+});
+const sourceRevision = sourceSnapshot.revision;
 const temporaryParent = path.join(projectRoot, ".local", "clean-clones");
 await mkdir(temporaryParent, { recursive: true });
 const temporaryRoot = await mkdtemp(path.join(temporaryParent, "airlock-phase-eight-clone-"));
 const cloneRoot = path.join(temporaryRoot, "repository");
 
 try {
-  await run("git", ["clone", "--local", "--no-hardlinks", projectRoot, cloneRoot]);
+  await runTrustedGit(
+    ["clone", "--local", "--no-hardlinks", projectRoot, cloneRoot],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
   const cloneRevision = (
-    await capture("git", ["rev-parse", "HEAD"], { cwd: cloneRoot })
-  ).trim();
+    await runTrustedGit(["rev-parse", "HEAD"], {
+      cwd: cloneRoot,
+      encoding: "utf8",
+    })
+  ).stdout.trim();
   if (cloneRevision !== sourceRevision) {
     throw new Error("Clean clone did not resolve the source revision");
   }
@@ -64,11 +69,53 @@ try {
       );
     }
   }
+  const closingSnapshot = await inspectCleanSource(projectRoot);
+  if (
+    closingSnapshot.revision !== sourceSnapshot.revision ||
+    closingSnapshot.treeDigest !== sourceSnapshot.treeDigest ||
+    closingSnapshot.objectFormat !== sourceSnapshot.objectFormat
+  ) {
+    throw new Error("Clean-clone source changed while the release gate ran");
+  }
   process.stdout.write(
     phaseLabel + " clean clone passed twice at " + sourceRevision.slice(0, 12) + ".\n",
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+async function inspectCleanSource(root) {
+  const textOptions = {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  };
+  const [revisionResult, treeResult, formatResult, statusResult] =
+    await Promise.all([
+      runTrustedGit(["rev-parse", "HEAD"], textOptions),
+      runTrustedGit(["rev-parse", "HEAD^{tree}"], textOptions),
+      runTrustedGit(["rev-parse", "--show-object-format"], textOptions),
+      runTrustedGit(
+        [
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          "--ignore-submodules=none",
+        ],
+        { ...textOptions, encoding: "buffer" },
+      ),
+    ]);
+  if (statusResult.stdout.length !== 0) {
+    throw new Error("the worktree is not clean");
+  }
+  const objectFormat = formatResult.stdout.trim();
+  await assertGitSourceMatchesHead({ root, objectFormat });
+  return {
+    revision: revisionResult.stdout.trim(),
+    treeDigest: treeResult.stdout.trim(),
+    objectFormat,
+  };
 }
 
 function phasePorts(selectedPhase) {

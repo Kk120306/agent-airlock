@@ -35,6 +35,11 @@ import {
   stopRuntimeProofChild,
   waitForRuntimeProofChildOutcome,
 } from "./runtime-proof-terminal.mjs";
+import {
+  assertMatchingRuntimeSourceProvenance,
+  inspectRuntimeSourceProvenance,
+  inspectRuntimeSourceProvenanceSync,
+} from "./runtime-source-provenance.mjs";
 
 const execFile = promisify(execFileCallback);
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -87,6 +92,7 @@ let recordingDeadlineAt = null;
 let recordingController = null;
 let recordingTimer = null;
 let browserProofSignal = controller.signal;
+let sourceProvenance = null;
 
 async function acquireLease() {
   if (!leasePath) throw new RuntimeProofError("startup-failed");
@@ -363,6 +369,13 @@ try {
   session = await createRuntimeProofSessionRoot({ artifactRoot });
   progress.emit("container-readiness");
   engine = await detectEngine();
+  try {
+    sourceProvenance = await inspectRuntimeSourceProvenance({
+      root: projectRoot,
+    });
+  } catch {
+    throw new RuntimeProofError("source-unverified");
+  }
   progress.emit("application-build");
   await runCommand(
     "npm",
@@ -462,6 +475,7 @@ try {
     baseUrl: `http://${host}:${port}`,
     artifactRoot,
     readinessDigest,
+    sourceProvenance,
     browserDriver,
     recordingDeadlineAt,
     signal: browserProofSignal,
@@ -541,6 +555,16 @@ if (!failure && pendingArtifacts && result) {
     progress.emit("publication");
     const publication = await finalizeRuntimeProofPublication({
       releaseOwnership: releaseLease,
+      beforePublicationCommit: () => {
+        try {
+          assertMatchingRuntimeSourceProvenance(
+            sourceProvenance,
+            inspectRuntimeSourceProvenanceSync({ root: projectRoot }),
+          );
+        } catch {
+          throw new RuntimeProofError("source-unverified");
+        }
+      },
       publishArtifacts: ({ beforeCommit, afterCommit }) =>
         writeRuntimeProofArtifacts({
           ...pendingArtifacts,

@@ -57,6 +57,10 @@ import {
   writeRuntimeProofArtifacts,
 } from "./runtime-proof-runner.mjs";
 import {
+  realRuntimeProofAgentName,
+  realRuntimeProofContract,
+} from "./runtime-demo-profile.mjs";
+import {
   attachBoundedRuntimeProofCapture,
   createOwnedRuntimeProofProcessTree,
   createBoundedRuntimeProofTranscript,
@@ -95,9 +99,10 @@ function validation(status) {
 
 function outcomeContract() {
   return {
-    schema: "agent-airlock/outcome-contract",
     schemaVersion: 1,
-    name: "recording-proof-contract",
+    version: 1,
+    ...structuredClone(realRuntimeProofContract),
+    createdAt: "2026-08-28T09:55:00.000Z",
   };
 }
 
@@ -280,6 +285,12 @@ function decisionChainSource(runSet = makeRunSet()) {
               runId: runSet.quarantine.id,
               disposition: "quarantined",
             },
+            ancestry: {
+              rootRunId: runSet.quarantine.id,
+              parentRunId: null,
+              depth: 0,
+              previousReceiptDigest: null,
+            },
             state: {
               before: {
                 stateId:
@@ -305,7 +316,9 @@ function decisionChainSource(runSet = makeRunSet()) {
               disposition: "promoted",
             },
             ancestry: {
+              rootRunId: runSet.quarantine.id,
               parentRunId: runSet.quarantine.id,
+              depth: 1,
               previousReceiptDigest: parentReceiptDigest,
             },
             state: {
@@ -367,7 +380,11 @@ function browserFixture(events, chainSource = decisionChainSource()) {
 
 function fetchFixture(
   runsAfterInvocation,
-  { initialRuns = [], finalRuns = runsAfterInvocation } = {},
+  {
+    agentContract = outcomeContract(),
+    initialRuns = [],
+    finalRuns = runsAfterInvocation,
+  } = {},
 ) {
   let runRequests = 0;
   return async (url) => {
@@ -376,8 +393,9 @@ function fetchFixture(
         agents: [
           {
             id: "agent-runtime-proof",
-            name: "Real Runtime Proof",
+            name: realRuntimeProofAgentName,
             canonicalStateId: "state-initial",
+            outcomeContract: agentContract,
           },
         ],
       });
@@ -710,6 +728,25 @@ test("rejects stale ordinary Runs before invoking Chrome", async () => {
   assert.deepEqual(events, ["closed"]);
 });
 
+test("rejects managed Outcome Contract drift after readiness before invoking Chrome", async () => {
+  const events = [];
+  const agentContract = outcomeContract();
+  agentContract.maxChangedFiles += 1;
+  await expectFailure(
+    runRuntimeProofSession({
+      baseUrl: "http://127.0.0.1:3222",
+      artifactRoot: "/bounded-test-root",
+      readinessDigest,
+      browserDriver: browserFixture(events),
+      fetchImpl: fetchFixture(apiRuns(makeRunSet()), { agentContract }),
+      verifyChain: async () => verifiedChainReport(),
+      writeArtifacts: async () => assert.fail("drifted policy cannot publish"),
+    }),
+    "startup-failed",
+  );
+  assert.deepEqual(events, ["closed"]);
+});
+
 test("returns a distinct bounded Run timeout and closes the browser without publishing", async () => {
   const events = [];
   let clock = 0;
@@ -817,6 +854,42 @@ test("rejects every required Run-set contradiction", async (context) => {
         runs.find(
           (run) => run.id === "run-repair",
         ).transaction.outcomeContract.name = "different-contract";
+      },
+    ],
+    [
+      "all Run policies drift together after readiness",
+      "run-set-invalid",
+      (runs) => {
+        for (const run of runs) {
+          run.transaction.outcomeContract.maxChangedFiles += 1;
+        }
+      },
+    ],
+    [
+      "all Run contracts use an unsupported schema version",
+      "run-set-invalid",
+      (runs) => {
+        for (const run of runs) {
+          run.transaction.outcomeContract.schemaVersion = 2;
+        }
+      },
+    ],
+    [
+      "all Run contracts contain an unknown policy field",
+      "run-set-invalid",
+      (runs) => {
+        for (const run of runs) {
+          run.transaction.outcomeContract.allowNetwork = true;
+        }
+      },
+    ],
+    [
+      "all Run contracts contain an invalid creation timestamp",
+      "run-set-invalid",
+      (runs) => {
+        for (const run of runs) {
+          run.transaction.outcomeContract.createdAt = "not-a-timestamp";
+        }
       },
     ],
     [
@@ -1426,6 +1499,33 @@ test("publication rechecks the recording deadline at the commit boundary", async
     "recording-timeout",
   );
   assert.deepEqual(events, ["chain-installed", "lease-released"]);
+});
+
+test("publication rejects source drift before the capsule pointer can commit", async () => {
+  const events = [];
+  await expectFailure(
+    finalizeRuntimeProofPublication({
+      releaseOwnership: async () => {
+        events.push("lease-released");
+      },
+      beforePublicationCommit: () => {
+        events.push("source-rechecked");
+        throw new RuntimeProofError("source-unverified");
+      },
+      publishArtifacts: async ({ beforeCommit, afterCommit }) => {
+        events.push("chain-installed");
+        beforeCommit();
+        events.push("capsule-committed");
+        afterCommit();
+      },
+    }),
+    "source-unverified",
+  );
+  assert.deepEqual(events, [
+    "chain-installed",
+    "source-rechecked",
+    "lease-released",
+  ]);
 });
 
 test("a lease-release failure cannot revoke a valid publication commit", async () => {

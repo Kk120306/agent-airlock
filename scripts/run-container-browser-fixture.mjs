@@ -7,6 +7,13 @@ import {
   assertJudgeReadiness,
   inspectJudgeReadiness,
 } from "./judge-readiness.mjs";
+import { comparableDemoContract } from "./demo-outcome-contract.mjs";
+import {
+  realRuntimeProofAgentDescription,
+  realRuntimeProofAgentInstructions,
+  realRuntimeProofAgentName,
+  realRuntimeProofContract,
+} from "./runtime-demo-profile.mjs";
 import { stopRuntimeProofChild } from "./runtime-proof-terminal.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -256,54 +263,32 @@ async function requestJson(baseUrl, pathname, options = {}) {
 
 async function seedProtocolDemo(baseUrl) {
   const { agents } = await requestJson(baseUrl, "/api/agents");
-  const matches = agents.filter((agent) => agent.name === "Real Runtime Proof");
+  const matches = agents.filter((agent) => agent.name === realRuntimeProofAgentName);
   if (matches.length > 1) {
     throw new Error("The managed demo contains duplicate Real Runtime Proof Agents");
   }
-  const contract = {
-    requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
-    protectedPaths: ["AGENTS.md"],
-    maxChangedFiles: 4,
-    maxAddedBytes: 65_536,
-    secretPatterns: [],
-    validationCommands: [
-      {
-        name: "protocol-content",
-        command: [
-          'test "$(cat protocol-proof.txt)" = candidate-only',
-          "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"candidate-only\") process.exit(1);'",
-        ].join(" && "),
-        required: true,
-        timeoutMs: 10_000,
-      },
-    ],
-  };
   let agent = matches[0];
   if (!agent) {
     ({ agent } = await requestJson(baseUrl, "/api/agents", {
       method: "POST",
       body: JSON.stringify({
-        name: "Real Runtime Proof",
-        description: "Real Codex, isolated Candidate, validated Promotion",
-        instructions:
-          "Keep every workspace, SQLite, and deferred-action change inside isolated Candidate State and complete the requested Whole-Agent protocol proof.",
+        name: realRuntimeProofAgentName,
+        description: realRuntimeProofAgentDescription,
+        instructions: realRuntimeProofAgentInstructions,
       }),
     }));
     await requestJson(baseUrl, `/api/agents/${agent.id}/outcome-contract`, {
       method: "PUT",
-      body: JSON.stringify(contract),
+      body: JSON.stringify(realRuntimeProofContract),
     });
     return agent;
   }
-  const persistedContract = {
-    requiredPaths: agent.outcomeContract.requiredPaths,
-    protectedPaths: agent.outcomeContract.protectedPaths,
-    maxChangedFiles: agent.outcomeContract.maxChangedFiles,
-    maxAddedBytes: agent.outcomeContract.maxAddedBytes,
-    secretPatterns: agent.outcomeContract.secretPatterns,
-    validationCommands: agent.outcomeContract.validationCommands,
-  };
-  if (JSON.stringify(persistedContract) !== JSON.stringify(contract)) {
+  if (
+    agent.description !== realRuntimeProofAgentDescription ||
+    agent.instructions !== realRuntimeProofAgentInstructions ||
+    JSON.stringify(comparableDemoContract(agent.outcomeContract)) !==
+      JSON.stringify(realRuntimeProofContract)
+  ) {
     throw new Error(
       "The persisted Real Runtime Proof Outcome Contract changed. Restart with --reset for the guaranteed judge path.",
     );

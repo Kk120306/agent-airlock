@@ -14,3 +14,19 @@ test("clean-clone workspaces stay below the Docker-shared project root", () => {
   );
   assert.doesNotMatch(source, /os\.tmpdir\(\)/);
 });
+
+test("clean-clone source checks use the shared exact Git byte boundary twice", () => {
+  assert.match(source, /assertGitSourceMatchesHead/);
+  assert.match(
+    source,
+    /"ls-files", "--cached", "--full-name", "-v", "-z"|assertGitSourceMatchesHead/,
+  );
+  assert.match(source, /"--porcelain=v1"/);
+  assert.match(source, /"-z"/);
+  assert.match(source, /"--untracked-files=all"/);
+  assert.match(source, /"--ignore-submodules=none"/);
+  assert.equal(
+    source.match(/inspectCleanSource\(projectRoot\)/g)?.length,
+    2,
+  );
+});

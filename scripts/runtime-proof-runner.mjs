@@ -16,6 +16,13 @@ import {
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
+import { comparableExactDemoContract } from "./demo-outcome-contract.mjs";
+import {
+  realRuntimeProofAgentName,
+  realRuntimeProofContract,
+} from "./runtime-demo-profile.mjs";
+import { assertRuntimeProofCapsuleChainBinding } from "./runtime-proof-capsule-binding.mjs";
+import { assertRuntimeSourceProvenance } from "./runtime-source-provenance.mjs";
 
 export const RUNTIME_PROOF_RESULT_SCHEMA =
   "agent-airlock/real-runtime-proof-result";
@@ -75,6 +82,14 @@ const UUID_PATTERN =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const FORBIDDEN_RESULT_PATTERN =
   /Bearer\s|ARK_API_KEY|api[_-]?key\s*[=:]|https?:\/\/|\bep-[A-Za-z0-9]|\bark-[A-Za-z0-9]|(?:^|["'\s])\/(?:Users|home|private|tmp|var)\//i;
+const UNBOUND_RUNTIME_SOURCE_PROVENANCE = Object.freeze({
+  claim: "runner-observed-clean-git-state-not-signed",
+  repository: "github:Kk120306/agent-airlock",
+  objectFormat: "sha1",
+  commitOid: "0".repeat(40),
+  treeOid: "0".repeat(40),
+  worktreeState: "clean",
+});
 
 const FAILURE_MESSAGES = Object.freeze({
   "runtime-unavailable":
@@ -82,6 +97,8 @@ const FAILURE_MESSAGES = Object.freeze({
   "image-build-failed": "The exact pinned Runtime image could not be prepared.",
   "startup-failed":
     "The fresh real Runtime proof launcher did not reach its admitted ready state.",
+  "source-unverified":
+    "The Runtime proof source was not the same clean submission revision at capture and publication.",
   "stale-state":
     "The supposedly fresh proof state already contains ordinary Runs.",
   "browser-failed":
@@ -551,12 +568,15 @@ export function createRuntimeProofPresentationPacer({
 function uniqueRuntimeProofAgent(agents) {
   if (!Array.isArray(agents)) throw new RuntimeProofError("startup-failed");
   const matches = agents.filter(
-    (agent) => agent?.name === "Real Runtime Proof",
+    (agent) => agent?.name === realRuntimeProofAgentName,
   );
   if (
     matches.length !== 1 ||
     !safeIdentifier(matches[0]?.id) ||
-    !safeIdentifier(matches[0]?.canonicalStateId)
+    !safeIdentifier(matches[0]?.canonicalStateId) ||
+    JSON.stringify(
+      comparableExactDemoContract(matches[0]?.outcomeContract),
+    ) !== JSON.stringify(realRuntimeProofContract)
   ) {
     throw new RuntimeProofError("startup-failed");
   }
@@ -658,14 +678,25 @@ function sameOutcomeContract(...transactions) {
     version < 1 ||
     !contract ||
     typeof contract !== "object" ||
-    Array.isArray(contract)
+    Array.isArray(contract) ||
+    contract.version !== version
   ) {
     return false;
   }
   const serialized = JSON.stringify(contract);
+  if (
+    JSON.stringify(comparableExactDemoContract(contract)) !==
+    JSON.stringify(realRuntimeProofContract)
+  ) {
+    return false;
+  }
   return transactions.every(
     (transaction) =>
       transaction?.outcomeContractVersion === version &&
+      transaction?.outcomeContract?.version === version &&
+      JSON.stringify(
+        comparableExactDemoContract(transaction?.outcomeContract),
+      ) === JSON.stringify(realRuntimeProofContract) &&
       JSON.stringify(transaction?.outcomeContract) === serialized,
   );
 }
@@ -1002,10 +1033,12 @@ export function buildRuntimeProofResult({
   runs,
   chainDigest,
   leafReceiptDigest,
+  sourceProvenance = UNBOUND_RUNTIME_SOURCE_PROVENANCE,
 }) {
+  assertRuntimeSourceProvenance(sourceProvenance);
   const result = {
     schema: RUNTIME_PROOF_RESULT_SCHEMA,
-    schemaVersion: 1,
+    schemaVersion: 2,
     outcome: "passed",
     authority: "signed-decision-chain-not-this-capsule",
     observedAt,
@@ -1019,6 +1052,7 @@ export function buildRuntimeProofResult({
     leafReceiptDigest,
     chainDigest,
     chainFile: runtimeProofChainFile(chainDigest),
+    source: { ...sourceProvenance },
     gates: {
       freshState: true,
       browserInvocation: true,
@@ -1068,8 +1102,7 @@ export function assertSafeRuntimeProofResult(result) {
     "repair",
     "zeroUploadVerifier",
   ];
-  if (
-    !exactKeys(result, [
+  const legacyKeys = [
       "authority",
       "chainDigest",
       "chainFile",
@@ -1082,9 +1115,22 @@ export function assertSafeRuntimeProofResult(result) {
       "runs",
       "schema",
       "schemaVersion",
-    ]) ||
+    ];
+  let sourceValid = false;
+  try {
+    assertRuntimeSourceProvenance(result?.source);
+    sourceValid = true;
+  } catch {
+    sourceValid = false;
+  }
+  const supportedShape =
+    (result?.schemaVersion === 1 && exactKeys(result, legacyKeys)) ||
+    (result?.schemaVersion === 2 &&
+      exactKeys(result, [...legacyKeys, "source"]) &&
+      sourceValid);
+  if (
+    !supportedShape ||
     result.schema !== RUNTIME_PROOF_RESULT_SCHEMA ||
-    result.schemaVersion !== 1 ||
     result.outcome !== "passed" ||
     result.authority !== "signed-decision-chain-not-this-capsule" ||
     result.clockClaim !== "observer-clock-not-external-timestamp" ||
@@ -2247,6 +2293,7 @@ export function safeRuntimeProofFailure(error) {
 export async function finalizeRuntimeProofPublication({
   releaseOwnership,
   publishArtifacts,
+  beforePublicationCommit = () => {},
   signal,
   recordingDeadlineAt = Number.POSITIVE_INFINITY,
   now = Date.now,
@@ -2277,6 +2324,7 @@ export async function finalizeRuntimeProofPublication({
         Math.max(0, recordingDeadlineAt - commitStartedAt),
       );
     }
+    beforePublicationCommit();
     commitBoundaryReached = true;
   };
   Object.defineProperty(beforeCommit, "signal", {
@@ -3264,6 +3312,7 @@ export async function runRuntimeProofSession({
   baseUrl,
   artifactRoot,
   readinessDigest,
+  sourceProvenance = UNBOUND_RUNTIME_SOURCE_PROVENANCE,
   browserDriver,
   fetchImpl = fetch,
   verifyChain = defaultVerifyChain,
@@ -3351,9 +3400,18 @@ export async function runRuntimeProofSession({
     const result = buildRuntimeProofResult({
       observedAt: observedAt(),
       readinessDigest,
+      sourceProvenance,
       runs: finalRuns,
       ...chainEvidence,
     });
+    try {
+      assertRuntimeProofCapsuleChainBinding({
+        result,
+        chainDocument: JSON.parse(chainSource),
+      });
+    } catch {
+      throw new RuntimeProofError("chain-invalid");
+    }
     try {
       await browserDriver.close();
       browserClosed = true;
