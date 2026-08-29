@@ -1,4 +1,5 @@
 import { expect, test, type Download, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,8 @@ const repositoryRoot = path.resolve(
 );
 const webDist = path.join(repositoryRoot, "apps", "web", "dist");
 const timestamp = "2026-08-26T02:00:00.000Z";
+const sha256 = (value: string) =>
+  "sha256:" + createHash("sha256").update(value).digest("hex");
 const goldenDocument = JSON.parse(
   await readFile(
     path.join(
@@ -353,22 +356,60 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   };
   const liveRun = structuredClone(run) as AgentRun;
   const liveCheckedAt = new Date().toISOString();
+  const liveCompletedAt = new Date(Date.parse(liveCheckedAt) + 1_000).toISOString();
   liveRun.createdAt = liveCheckedAt;
-  liveRun.transaction!.resources = [
-    "workspace",
-    "codex-session",
-    "sqlite",
-    "external-actions",
-  ].map((kind) => ({
-    kind: kind as NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
-    label: kind,
-    disposition: "promoted" as const,
-    fingerprintBefore: "a".repeat(64),
-    fingerprintAfter: "b".repeat(64),
-    summary: kind + " promoted",
-  }));
+  liveRun.completedAt = liveCompletedAt;
+  liveRun.prompt =
+    "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.";
+  const transaction = liveRun.transaction!;
+  transaction.id = liveRun.id;
+  transaction.assuranceEvidenceVersion = 1;
+  transaction.candidateStateId = "candidate-modelark-live";
+  transaction.quarantinePath = null;
+  transaction.discardedAt = null;
+  transaction.canonicalStateIdBefore = "state-modelark-before";
+  transaction.canonicalStateIdAfter = "state-modelark-after";
+  transaction.canonicalContentHashBefore = "sha256:" + "1".repeat(64);
+  transaction.canonicalContentHashAfter = "sha256:" + "2".repeat(64);
+  const liveStateValidationCommand = [
+    'test "$(cat modelark-proof.txt)" = modelark-live',
+    "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value, updated_at FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"modelark-live\" || row?.updated_at !== \"2026-08-28T00:00:00.000Z\") process.exit(1);'",
+  ].join(" && ");
+  transaction.outcomeContractVersion = 1;
+  transaction.outcomeContract = {
+    schemaVersion: 1,
+    version: 1,
+    requiredPaths: ["AGENTS.md", "modelark-proof.txt"],
+    protectedPaths: ["AGENTS.md"],
+    maxChangedFiles: 4,
+    maxAddedBytes: 65_536,
+    secretPatterns: [
+      {
+        name: "ark-api-key-assignment",
+        pattern: "ARK_API_KEY\\s*[:=]\\s*['\\\"]?[^\\s'\\\"]{8,}",
+      },
+      {
+        name: "ark-model-api-key",
+        pattern:
+          "\\bark-[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}-[A-Za-z0-9]{4,}\\b",
+      },
+      {
+        name: "bearer-token",
+        pattern: "Bearer\\s+[A-Za-z0-9._~+/-]{12,}=*",
+      },
+    ],
+    validationCommands: [
+      {
+        name: "modelark-live-state",
+        command: liveStateValidationCommand,
+        required: true,
+        timeoutMs: 10_000,
+      },
+    ],
+    createdAt: liveCheckedAt,
+  };
   const liveSnapshot = {
-    contentHash: "c".repeat(64),
+    contentHash: "",
     rowCount: 1,
     rows: [
       {
@@ -378,35 +419,62 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       },
     ],
   };
-  liveRun.transaction!.sqlite = {
+  liveSnapshot.contentHash = sha256(JSON.stringify(liveSnapshot.rows));
+  transaction.resources = [
+    ["workspace", "Workspace", "sha256:" + "3".repeat(64)],
+    ["codex-session", "Agent memory", "sha256:" + "4".repeat(64)],
+    ["sqlite", "SQLite data", liveSnapshot.contentHash],
+    ["external-actions", "External actions", ""],
+  ].map(([kind, label, fingerprintAfter]) => ({
+    kind: kind as NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
+    label,
+    disposition: "promoted" as const,
+    fingerprintBefore: "sha256:" + "0".repeat(64),
+    fingerprintAfter,
+    summary: kind + " promoted",
+  }));
+  transaction.providerResources = [];
+  transaction.providerResourceEvents = [];
+  transaction.sqlite = {
     databasePath: ".airlock/demo.sqlite",
     integrity: "passed",
-    before: { ...liveSnapshot, contentHash: "d".repeat(64) },
+    before: { ...liveSnapshot, contentHash: "sha256:" + "5".repeat(64) },
     candidate: liveSnapshot,
     after: liveSnapshot,
   };
-  liveRun.transaction!.externalActions = {
-    outboxPath: "outbox/intents.jsonl",
+  const normalizedPayload = JSON.stringify({
+    destination: "demo-console",
+    subject: "ModelArk release ready",
+    body: "The live Whole-Agent Candidate passed.",
+  });
+  const liveIdempotencyKey = sha256(
+    [
+      liveRun.id,
+      "modelark-live-ready",
+      "demo.notification.requested",
+      normalizedPayload,
+    ].join("\0"),
+  );
+  const deliveredAt = liveCompletedAt;
+  transaction.resources[3]!.fingerprintAfter = sha256(
+    JSON.stringify([{ idempotencyKey: liveIdempotencyKey, deliveredAt }]),
+  );
+  transaction.externalActions = {
+    outboxPath: "Candidate State/outbox/intents.jsonl",
     intents: [
       {
         id: "modelark-live-ready",
         type: "demo.notification.requested",
         destination: "demo-console",
         subject: "ModelArk release ready",
-        idempotencyKey: "e".repeat(64),
+        idempotencyKey: liveIdempotencyKey,
         status: "delivered",
-        deliveredAt: timestamp,
+        deliveredAt,
       },
     ],
     deliveredCount: 1,
     bypassDisclosure: "No effect bypass is available.",
   };
-  const liveExecutionProfile = liveRun.transaction!.validations.find(
-    (validation) => validation.name === "execution-profile",
-  );
-  if (!liveExecutionProfile) throw new Error("Missing execution profile fixture");
-  liveExecutionProfile.summary =
-    "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.";
   const validExecutionProfile = {
     schemaVersion: 2,
     attestation: "airlock-control-plane",
@@ -424,7 +492,57 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       retryDelayMs: 0,
     },
   };
-  liveExecutionProfile.output = JSON.stringify(validExecutionProfile);
+  transaction.validations = [
+    {
+      name: "execution-profile",
+      status: "passed",
+      required: true,
+      summary:
+        "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.",
+      durationMs: 0,
+      output: JSON.stringify(validExecutionProfile),
+    },
+    "path-safety",
+    "protected-paths",
+    "required-paths",
+    "change-limits",
+    "secret-patterns",
+    "command:modelark-live-state",
+    "sqlite-resource",
+    "external-action-intents",
+  ].flatMap((validation) =>
+    typeof validation === "string"
+      ? [
+          {
+            name: validation,
+            status: "passed" as const,
+            required: true,
+            summary: validation + " passed",
+            durationMs: 1,
+            output: null,
+          },
+        ]
+      : [validation],
+  );
+  transaction.recovery = {
+    journalPhase: "completed",
+    recoveredAfterRestart: false,
+    recoveryError: null,
+  };
+  transaction.promotionReceipt = {
+    runTransactionId: liveRun.id,
+    disposition: "promoted",
+    outcomeContractVersion: transaction.outcomeContractVersion,
+    canonicalStateIdBefore: transaction.canonicalStateIdBefore,
+    canonicalStateIdAfter: transaction.canonicalStateIdAfter!,
+    canonicalContentHashBefore: transaction.canonicalContentHashBefore,
+    canonicalContentHashAfter: transaction.canonicalContentHashAfter!,
+    validationEvidenceHash: "sha256:" + "6".repeat(64),
+    lineage: transaction.lineage,
+    createdAt: liveCompletedAt,
+  };
+  const liveExecutionProfile = transaction.validations[0]!;
+  const validLiveRun = structuredClone(liveRun);
   const liveRunState = { current: liveRun };
   await serveProductionBundle(
     page,
@@ -432,8 +550,9 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     liveRunState,
     undefined,
     liveSystem,
+    { origin: "http://localhost" },
   );
-  await page.goto("http://airlock.local/");
+  await page.goto("http://localhost/");
 
   await expect(
     page.getByText("AIRLOCK-ATTESTED MODELARK RUN", { exact: true }),
@@ -490,6 +609,13 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     },
     {
       ...validExecutionProfile,
+      preflight: {
+        ...validExecutionProfile.preflight,
+        checkedAt: "2026-08-29T08:00:00.000+08:00",
+      },
+    },
+    {
+      ...validExecutionProfile,
       preflight: { ...validExecutionProfile.preflight, attemptCount: 0 },
     },
     {
@@ -529,6 +655,53 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   await expect(
     unboundGuide.getByText("Live-provider Promotion attested by Airlock"),
   ).toHaveCount(0);
+
+  const semanticDrifts: Array<(candidate: AgentRun) => void> = [
+    (candidate) => {
+      candidate.prompt = "Perform a different ModelArk task.";
+    },
+    (candidate) => {
+      candidate.transaction!.outcomeContract.maxChangedFiles = 5;
+    },
+    (candidate) => {
+      const validations = candidate.transaction!.validations;
+      [validations[1], validations[2]] = [validations[2]!, validations[1]!];
+    },
+    (candidate) => {
+      candidate.transaction!.resources[0]!.label = "Generic workspace";
+    },
+    (candidate) => {
+      candidate.transaction!.sqlite!.after!.rows[0]!.value = "other";
+    },
+    (candidate) => {
+      candidate.transaction!.externalActions.intents[0]!.idempotencyKey =
+        "sha256:" + "f".repeat(64);
+    },
+    (candidate) => {
+      candidate.transaction!.recovery.journalPhase = "canonical-advanced";
+    },
+    (candidate) => {
+      candidate.transaction!.promotionReceipt!.canonicalStateIdAfter =
+        "state-other";
+    },
+    (candidate) => {
+      candidate.transaction!.canonicalStateIdAfter =
+        candidate.transaction!.canonicalStateIdBefore;
+    },
+  ];
+  for (const mutate of semanticDrifts) {
+    const driftedRun = structuredClone(validLiveRun);
+    mutate(driftedRun);
+    liveRunState.current = driftedRun;
+    await page.reload();
+    const driftedGuide = page.getByRole("region", {
+      name: "Live ModelArk proof",
+    });
+    await expect(
+      driftedGuide.getByText("Promotion complete; provider binding unavailable"),
+    ).toBeVisible();
+    await expect(driftedGuide.getByText("Preflight + Runtime bound")).toHaveCount(0);
+  }
 });
 
 test("invalidates a generated receipt when the Run decision changes", async ({

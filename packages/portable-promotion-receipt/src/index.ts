@@ -9,6 +9,7 @@ export * from "./local-transparency-log.js";
 export * from "./receiver-custody.js";
 export * from "./receiver-custody-story.js";
 export * from "./merkle.js";
+export * from "./modelark-execution-profile.js";
 export * from "./signing-key.js";
 export * from "./transparency.js";
 export * from "./trust-policy.js";

@@ -125,6 +125,7 @@ export interface OutcomeContractVersionRecord {
 
 export interface RunTransaction {
   id: string;
+  assuranceEvidenceVersion?: 1;
   status: RunTransactionStatus;
   disposition: "promoted" | "quarantined" | "discarded" | "cancelled" | null;
   candidateStateId: string | null;
@@ -329,6 +330,7 @@ export interface AgentRun {
     outputTokens?: number;
   } | null;
   transaction: RunTransaction | null;
+  completedAt: string | null;
   createdAt: string;
 }
 

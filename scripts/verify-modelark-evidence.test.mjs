@@ -14,9 +14,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  buildModelArkExecutionProfileDisclosureSummary,
   buildEvidenceCommitment,
   buildPortableEvidencePacket,
+  canonicalize,
   generatePortableSigningKey,
+  MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
   signPortableReceipt,
   verifyPortableEvidencePacketJson,
 } from "@agent-airlock/portable-promotion-receipt";
@@ -35,20 +38,36 @@ function digest(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-function createPacket() {
-  const evidence = buildEvidenceCommitment([
-    {
-      schemaVersion: 1,
-      identity: "validation:execution-profile",
-      category: "validation",
-      status: "passed",
-      required: true,
-      durationMs: 12,
-      summary:
-        "Airlock attested the configured ModelArk Responses profile using a redacted profile digest.",
-      valueHash: digest("modelark-profile"),
+function createPacket({ mutateLeaf = () => {} } = {}) {
+  const summary = buildModelArkExecutionProfileDisclosureSummary({
+    schemaVersion: 2,
+    attestation: "airlock-control-plane",
+    inferenceMode: "modelark",
+    executor: "codex-cli",
+    runtimeProvider: "container",
+    providerProtocol: "responses",
+    modelCommitment: digest("private-model"),
+    preflight: {
+      checkedAt: "2026-08-27T23:30:00.000Z",
+      generatedAssistantOutput: true,
+      endpointOriginCommitment: digest("private-endpoint-origin"),
+      attemptCount: 1,
+      requestCount: 2,
+      retryDelayMs: 250,
     },
-  ]);
+  });
+  const leaf = {
+    schemaVersion: 1,
+    identity: MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
+    category: "validation",
+    status: "passed",
+    required: true,
+    durationMs: 0,
+    summary,
+    valueHash: digest("modelark-profile"),
+  };
+  mutateLeaf(leaf);
+  const evidence = buildEvidenceCommitment([leaf]);
   const receipt = {
     protocol: {
       schema: "agent-airlock/portable-promotion-receipt",
@@ -172,7 +191,7 @@ test("verifies a recorded signed ModelArk packet and labels it historical", asyn
     assert.equal(valid.status, 0, valid.stderr);
     assert.match(valid.stdout, /Recorded live ModelArk conformance: VALID/);
     assert.match(valid.stdout, /historical signed evidence/);
-    assert.match(valid.stdout, /Execution profile disclosed: yes/);
+    assert.match(valid.stdout, /Exact safe execution profile: VERIFIED/);
     assert.doesNotMatch(valid.stdout + valid.stderr, /ark-synthetic|Bearer|ep-/i);
 
     const tampered = structuredClone(packet);
@@ -219,6 +238,51 @@ test("follows the result capsule to its immutable packet", async () => {
     const valid = runVerifier(stateRoot);
     assert.equal(valid.status, 0, valid.stderr);
     assert.match(valid.stdout, /Recorded live ModelArk conformance: VALID/);
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("fails closed for legacy phrases and re-signed semantic profile drift", async () => {
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-modelark-semantics-"));
+  const evidenceDirectory = path.join(
+    stateRoot,
+    liveModelArkEvidenceDirectoryName,
+  );
+  const evidencePath = path.join(evidenceDirectory, liveModelArkLatestEvidenceName);
+  try {
+    await mkdir(evidenceDirectory, { mode: 0o700 });
+    const legacyPacket = createPacket({
+      mutateLeaf(leaf) {
+        leaf.identity = "validation:legacy-execution-profile";
+        leaf.summary =
+          "Airlock attested the configured ModelArk Responses profile using a redacted digest.";
+      },
+    });
+    assert.equal(
+      verifyPortableEvidencePacketJson(JSON.stringify(legacyPacket)).valid,
+      true,
+    );
+    await writeFile(evidencePath, JSON.stringify(legacyPacket), { mode: 0o600 });
+    const legacy = runVerifier(stateRoot);
+    assert.equal(legacy.status, 1);
+    assert.match(legacy.stdout, /Exact safe execution profile: LEGACY-UNPROVEN/);
+
+    const driftedPacket = createPacket({
+      mutateLeaf(leaf) {
+        const claim = JSON.parse(leaf.summary);
+        claim.profile = "airlock-control-plane:modelark:local-process";
+        leaf.summary = canonicalize(claim);
+      },
+    });
+    assert.equal(
+      verifyPortableEvidencePacketJson(JSON.stringify(driftedPacket)).valid,
+      true,
+    );
+    await writeFile(evidencePath, JSON.stringify(driftedPacket), { mode: 0o600 });
+    const drifted = runVerifier(stateRoot);
+    assert.equal(drifted.status, 1);
+    assert.match(drifted.stdout, /Exact safe execution profile: INVALID/);
   } finally {
     await rm(stateRoot, { recursive: true, force: true });
   }

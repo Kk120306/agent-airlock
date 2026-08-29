@@ -24,7 +24,7 @@ Today a reviewer must keep the launcher open, click the browser action, notice t
 
 The production Chrome interaction proves that the user-facing CodeJam path initiated the Run.
 The terminal Run Transaction proves the disposition, Validations, resource handoff, SQLite state, and deferred effect.
-The portable evidence packet proves the signed historical decision and disclosed execution-profile commitment.
+The portable evidence packet proves the signed historical decision and an exact disclosed safe execution profile whose private model and endpoint-origin values remain SHA-256 commitments.
 The runner result is only a bounded convenience projection over those authorities.
 It is not signed, does not add a timestamp claim, and cannot replace the packet.
 
@@ -37,7 +37,7 @@ Success requires every following gate.
 5. `isCompleteLiveModelArkPromotion` accepts the persisted transaction.
 6. The UI renders the bound ModelArk preflight, Runtime, and Promotion verdict for that Run.
 7. The existing capture boundary writes the private latest packet atomically.
-8. A structured offline verifier accepts the packet, its promoted disposition, and its required ModelArk execution-profile disclosure.
+8. A structured offline verifier accepts the packet, its promoted disposition, and exactly one required ModelArk execution-profile disclosure with the fixed control-plane, Codex CLI, container Runtime, Responses protocol, generated-output semantics, bounded preflight counts, and decision-relative freshness.
 
 No earlier gate may imply a later one.
 An HTTP 200 from ModelArk, a completed Codex process, a green UI label, or a packet-shaped file is insufficient independently.
@@ -115,6 +115,11 @@ The test matrix includes:
 - Atomic owner-only capsule persistence.
 - Rejection of forbidden private material in a proposed capsule.
 - Preservation of the previous successful capsule after a later failure.
+- Re-signed semantic mutations that remain generically valid but alter the execution-profile identity, leaf fields, canonical keys, fixed Runtime facts, commitments, bounds, or signed decision-time relationship.
+
+Capture requests the deterministic execution-profile identity directly and performs generic cryptographic verification plus exact profile verification locally before publishing the immutable packet.
+It does not trust the unsigned disclosure preview or the server's self-verification boolean as capture authority.
+Phrase-only historical packets are reported as `legacy-unproven` rather than being upgraded to the exact profile claim.
 
 Existing real-Codex container and production browser suites remain the credential-free proof of the Runtime, Candidate, Validation, Promotion, and UI seams.
 Only a successful invocation against the live provider may close the final provider-backed acceptance gate.

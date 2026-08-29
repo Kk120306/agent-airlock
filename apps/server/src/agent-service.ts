@@ -304,6 +304,7 @@ export class AgentService {
       this.resourceCoordinator,
       promotionFaultInjector,
       buildExecutionProfileEvidence(config),
+      (error, fallback) => boundedPersistedError(error, fallback, config),
     );
   }
 
@@ -511,7 +512,10 @@ export class AgentService {
           terminalAuthorityRecoveries.set(run.id, authority);
         }
       } catch (error) {
-        terminalAuthorityFailures.set(run.id, boundedCandidateSetError(error));
+        terminalAuthorityFailures.set(
+          run.id,
+          boundedCandidateSetError(error, this.config),
+        );
       }
     }
     for (const runId of authoritativeDiscardQuarantineRoots) {
@@ -526,7 +530,7 @@ export class AgentService {
         terminalAuthorityFailures.set(
           runId,
           "Authoritative Discard cleanup failed: " +
-            boundedCandidateSetError(error),
+            boundedCandidateSetError(error, this.config),
         );
       }
     }
@@ -542,7 +546,7 @@ export class AgentService {
         terminalAuthorityFailures.set(
           runId,
           "Authoritative Discard cleanup failed: " +
-            boundedCandidateSetError(error),
+            boundedCandidateSetError(error, this.config),
         );
       }
     }
@@ -558,7 +562,7 @@ export class AgentService {
         terminalAuthorityFailures.set(
           runId,
           "Authoritative Discard cleanup failed: " +
-            boundedCandidateSetError(error),
+            boundedCandidateSetError(error, this.config),
         );
       }
     }
@@ -686,7 +690,7 @@ export class AgentService {
         terminalAuthorityFailures.set(
           runId,
           "Authoritative Discard cleanup failed: " +
-            boundedCandidateSetError(error),
+            boundedCandidateSetError(error, this.config),
         );
       }
     }
@@ -711,7 +715,8 @@ export class AgentService {
       } catch (error) {
         terminalAuthorityFailures.set(
           run.id,
-          "Quarantine inspection failed: " + boundedCandidateSetError(error),
+          "Quarantine inspection failed: " +
+            boundedCandidateSetError(error, this.config),
         );
       }
     }
@@ -790,23 +795,34 @@ export class AgentService {
       for (const [runId, failure] of recoveryFailures) {
         const run = database.runs.find((item) => item.id === runId);
         if (!run) continue;
+        const safeFailureMessage = boundedPersistedError(
+          failure.message,
+          "Promotion recovery failed closed",
+          this.config,
+        );
+        const safeFailureTransaction = failure.transaction
+          ? sanitizeTransactionRecoveryError(failure.transaction, this.config)
+          : null;
         run.status = "failed";
-        run.error = failure.message;
+        run.error = safeFailureMessage;
         run.completedAt = now();
         const existingAuthority = terminalAuthorities.get(runId);
         if (
           existingAuthority?.disposition === "promoted" &&
-          failure.transaction?.disposition === "promoted"
+          safeFailureTransaction?.disposition === "promoted"
         ) {
-          run.transaction = structuredClone(existingAuthority.transaction);
-        } else if (failure.transaction) {
-          run.transaction = failure.transaction;
+          run.transaction = sanitizeTransactionRecoveryError(
+            existingAuthority.transaction,
+            this.config,
+          );
+        } else if (safeFailureTransaction) {
+          run.transaction = safeFailureTransaction;
         } else if (run.transaction) {
           run.transaction.status = "recovery-error";
           run.transaction.recovery = {
             ...run.transaction.recovery,
             recoveredAfterRestart: true,
-            recoveryError: failure.message.slice(0, 500),
+            recoveryError: safeFailureMessage,
           };
         }
       }
@@ -818,10 +834,16 @@ export class AgentService {
         const terminalAuthority = terminalAuthorityRecoveries.get(run.id);
         const terminalAuthorityFailure = terminalAuthorityFailures.get(run.id);
         if (terminalAuthorityFailure) {
+          const safeTerminalAuthorityFailure = boundedPersistedError(
+            terminalAuthorityFailure,
+            "Immutable terminal decision recovery failed closed",
+            this.config,
+          );
           run.status = "failed";
-          run.error =
+          run.error = (
             "Immutable terminal decision recovery failed: " +
-            terminalAuthorityFailure;
+            safeTerminalAuthorityFailure
+          ).slice(0, 500);
           run.completedAt = now();
           if (run.transaction) {
             run.transaction.status = "recovery-error";
@@ -831,7 +853,7 @@ export class AgentService {
             run.transaction.recovery = {
               ...run.transaction.recovery,
               recoveredAfterRestart: true,
-              recoveryError: terminalAuthorityFailure.slice(0, 500),
+              recoveryError: safeTerminalAuthorityFailure,
             };
           }
           continue;
@@ -893,14 +915,20 @@ export class AgentService {
           );
           startupAuthorityRunIds.add(run.id);
         } else if (retained?.error && run.transaction) {
+          const safeRetainedError = boundedPersistedError(
+            retained.error,
+            "Interrupted Candidate recovery failed closed",
+            this.config,
+          );
           run.status = "failed";
-          run.error =
-            "Interrupted Candidate recovery failed: " + retained.error;
+          run.error = (
+            "Interrupted Candidate recovery failed: " + safeRetainedError
+          ).slice(0, 500);
           run.transaction.status = "recovery-error";
           run.transaction.recovery = {
             ...run.transaction.recovery,
             recoveredAfterRestart: true,
-            recoveryError: retained.error.slice(0, 500),
+            recoveryError: safeRetainedError,
           };
         } else {
           run.status = "cancelled";
@@ -952,8 +980,11 @@ export class AgentService {
           .find((failure) => failure !== undefined);
         if (recoveryFailure || corruptJournalFailure) {
           agent.status = "error";
-          agent.lastError =
-            recoveryFailure?.message ?? corruptJournalFailure ?? null;
+          agent.lastError = boundedPersistedError(
+            recoveryFailure?.message ?? corruptJournalFailure,
+            "Agent recovery failed closed",
+            this.config,
+          );
           agent.updatedAt = now();
         } else if (agent.status === "busy") {
           agent.status = "ready";
@@ -1021,10 +1052,17 @@ export class AgentService {
           );
           canonicalStates.set(agent.id, transitioned);
         } catch (error) {
+          const safeError = boundedPersistedError(
+            error,
+            "Canonical State reconciliation failed closed",
+            this.config,
+          );
           canonicalErrors.set(
             agent.id,
-            "Canonical State reconciliation failed: " +
-              (error instanceof Error ? error.message : String(error)),
+            ("Canonical State reconciliation failed: " + safeError).slice(
+              0,
+              500,
+            ),
           );
         }
       }
@@ -1086,7 +1124,18 @@ export class AgentService {
     await this.store.mutate((database) => {
       for (const run of database.runs) {
         if (run.error) {
-          run.error = boundedPersistedError(run.error, "Run failed closed");
+          run.error = boundedPersistedError(
+            run.error,
+            "Run failed closed",
+            this.config,
+          );
+        }
+        if (run.transaction?.recovery.recoveryError) {
+          run.transaction.recovery.recoveryError = boundedPersistedError(
+            run.transaction.recovery.recoveryError,
+            "Run recovery failed closed",
+            this.config,
+          );
         }
       }
       for (const agent of database.agents) {
@@ -1094,6 +1143,7 @@ export class AgentService {
           agent.lastError = boundedPersistedError(
             agent.lastError,
             "Agent operation failed closed",
+            this.config,
           );
         }
       }
@@ -3368,6 +3418,7 @@ export class AgentService {
       const message = boundedPersistedError(
         error,
         "Federated receiver execution failed closed",
+        this.config,
       );
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((candidate) => candidate.id === run.id);
@@ -3972,7 +4023,7 @@ export class AgentService {
       } catch (error) {
         invalidCandidateSets.set(
           candidateSet.id,
-          boundedCandidateSetError(error),
+          boundedCandidateSetError(error, this.config),
         );
       }
     }
@@ -4279,7 +4330,7 @@ export class AgentService {
             run.status === "cancelled" ? "cancelled" : "ineligible";
           competitor.exclusions = ["restart-interrupted-evaluation"];
           competitor.error = run.error
-            ? boundedCandidateSetError(run.error)
+            ? boundedCandidateSetError(run.error, this.config)
             : null;
           competitor.completedAt = run.completedAt ?? timestamp;
         }
@@ -4513,7 +4564,7 @@ export class AgentService {
         return;
       }
       if (error instanceof AirlockRunError) {
-        const safeError = boundedCandidateSetError(error);
+        const safeError = boundedCandidateSetError(error, this.config);
         const authorityCandidateSet = this.getCandidateSet(admitted.id);
         const winnerRunId = authorityCandidateSet.winnerRunId;
         if (winnerRunId) {
@@ -4553,7 +4604,7 @@ export class AgentService {
         });
         return;
       }
-      const failureMessage = boundedCandidateSetError(error);
+      const failureMessage = boundedCandidateSetError(error, this.config);
       let cleanupFailure: unknown = null;
       try {
         await this.cleanupCandidateSetLosers(admitted.id, null, false);
@@ -4719,7 +4770,7 @@ export class AgentService {
           (error instanceof AirlockRunError && error.cancelled));
       const message = durationBudgetExpired
         ? "Candidate evaluation exceeded its duration budget"
-        : boundedCandidateSetError(error);
+        : boundedCandidateSetError(error, this.config);
       if (error instanceof AirlockRunError) {
         await this.recordPortableDecisionAuthority(
           competitorAtAdmission.runId,
@@ -5153,7 +5204,7 @@ export class AgentService {
       const agent = database.agents.find(
         (item) => item.id === candidateSet?.agentId,
       );
-      const safeError = boundedCandidateSetError(error);
+      const safeError = boundedCandidateSetError(error, this.config);
       if (candidateSet) {
         candidateSet.phase = phase;
         candidateSet.recoveryError = safeError;
@@ -5251,7 +5302,11 @@ export class AgentService {
       const cancelled =
         error instanceof RunCancelledError ||
         (error instanceof AirlockRunError && error.cancelled);
-      const message = boundedPersistedError(error, "Run failed closed");
+      const message = boundedPersistedError(
+        error,
+        "Run failed closed",
+        this.config,
+      );
       const currentRun = this.store
         .snapshot()
         .runs.find((candidate) => candidate.id === run.id);
@@ -5398,11 +5453,19 @@ function normalizeAssuranceDecisionReason(reason: string): string {
   return normalized;
 }
 
-function boundedCandidateSetError(error: unknown): string {
-  return boundedPersistedError(error, "Candidate Set operation failed closed");
+function boundedCandidateSetError(error: unknown, config: AppConfig): string {
+  return boundedPersistedError(
+    error,
+    "Candidate Set operation failed closed",
+    config,
+  );
 }
 
-function boundedPersistedError(error: unknown, fallback: string): string {
+function boundedPersistedError(
+  error: unknown,
+  fallback: string,
+  config: AppConfig,
+): string {
   const message = error instanceof Error ? error.message : String(error);
   if (
     /429 Too Many Requests|HTTP 429|inference limit|safe experience mode/i.test(
@@ -5421,7 +5484,18 @@ function boundedPersistedError(error: unknown, fallback: string): string {
   ) {
     return "The configured ModelArk model is unavailable. Verify model activation, model ID, and region.";
   }
-  const safe = redactSensitiveText(message)
+  const configuredValues = [
+    config.arkApiKey,
+    config.arkBaseUrl,
+    config.arkModel,
+  ]
+    .filter((value) => value.length > 0)
+    .sort((left, right) => right.length - left.length);
+  const withoutConfiguredValues = configuredValues.reduce(
+    (value, configured) => value.split(configured).join("[REDACTED]"),
+    message,
+  );
+  const safe = redactSensitiveText(withoutConfiguredValues)
     .replace(
       /\brequest(?:[_ -]?id)?\s*[:=]\s*[A-Za-z0-9._:-]+/gi,
       "request id: [REDACTED]",
@@ -5429,6 +5503,21 @@ function boundedPersistedError(error: unknown, fallback: string): string {
     .replace(/\baccount\s+\d{4,}\b/gi, "account [REDACTED]")
     .trim();
   return (safe || fallback).slice(0, 500);
+}
+
+function sanitizeTransactionRecoveryError(
+  transaction: RunTransaction,
+  config: AppConfig,
+): RunTransaction {
+  const sanitized = structuredClone(transaction);
+  if (sanitized.recovery.recoveryError) {
+    sanitized.recovery.recoveryError = boundedPersistedError(
+      sanitized.recovery.recoveryError,
+      "Run recovery failed closed",
+      config,
+    );
+  }
+  return sanitized;
 }
 
 function assertPersistedSealIdentity(

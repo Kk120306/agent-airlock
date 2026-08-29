@@ -42,6 +42,10 @@ import {
   parseRecordingReplayRunIds,
   type RecordingReplayRunIds,
 } from "./recording-outcome-policy";
+import {
+  findCompleteLiveModelArkPromotion,
+  liveModelArkPrompt,
+} from "./live-modelark-outcome-policy";
 import type {
   Agent,
   AgentRun,
@@ -85,9 +89,6 @@ const protocolFixturePrompts = {
   challenge: "Attempt an unsafe protocol change for the rejection proof.",
 } as const;
 
-const liveModelArkPrompt =
-  "Create modelark-proof.txt containing exactly modelark-live followed by a newline. Then use Node.js built-in node:sqlite to update the inventory row with id demo in .airlock/demo.sqlite so value is modelark-live and updated_at is 2026-08-28T00:00:00.000Z. Append exactly one demo.notification.requested JSON object to AIRLOCK_OUTBOX_PATH with id modelark-live-ready, destination demo-console, subject ModelArk release ready, and body The live Whole-Agent Candidate passed. Use no dependencies. Verify the file and database values before finishing.";
-
 function provesWholeAgentPromotion(
   run: AgentRun,
   expectedDatabaseValue: string,
@@ -111,103 +112,6 @@ function provesWholeAgentPromotion(
       resourceKinds.has(kind as RunTransaction["resources"][number]["kind"]),
     )
   );
-}
-
-const modelArkPreflightMaxAgeMs = 2 * 60 * 60 * 1_000;
-const modelArkPreflightFutureToleranceMs = 60_000;
-
-function hasExactObjectKeys(
-  value: unknown,
-  expected: readonly string[],
-): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return (
-    actual.length === wanted.length &&
-    actual.every((key, index) => key === wanted[index])
-  );
-}
-
-function hasBoundModelArkPreflight(
-  validation: RunTransaction["validations"][number] | undefined,
-  runCreatedAt: string | undefined,
-  nowMs = Date.now(),
-) {
-  if (
-    validation?.required !== true ||
-    validation.status !== "passed" ||
-    typeof validation.output !== "string" ||
-    validation.output.length > 4_096
-  ) {
-    return false;
-  }
-  try {
-    const profile = JSON.parse(validation.output);
-    if (
-      !hasExactObjectKeys(profile, [
-        "schemaVersion",
-        "attestation",
-        "inferenceMode",
-        "executor",
-        "runtimeProvider",
-        "providerProtocol",
-        "modelCommitment",
-        "preflight",
-      ]) ||
-      !hasExactObjectKeys(profile.preflight, [
-        "checkedAt",
-        "generatedAssistantOutput",
-        "endpointOriginCommitment",
-        "attemptCount",
-        "requestCount",
-        "retryDelayMs",
-      ])
-    ) {
-      return false;
-    }
-    const preflight = profile.preflight;
-    const checkedAtMs =
-      typeof preflight.checkedAt === "string"
-        ? Date.parse(preflight.checkedAt)
-        : Number.NaN;
-    const runCreatedAtMs = Date.parse(runCreatedAt ?? "");
-    const ageAtRenderMs = nowMs - checkedAtMs;
-    const ageAtAdmissionMs = runCreatedAtMs - checkedAtMs;
-    return (
-      profile.schemaVersion === 2 &&
-      profile.attestation === "airlock-control-plane" &&
-      profile.inferenceMode === "modelark" &&
-      profile.executor === "codex-cli" &&
-      profile.runtimeProvider === "container" &&
-      profile.providerProtocol === "responses" &&
-      /^sha256:[a-f0-9]{64}$/.test(String(profile.modelCommitment ?? "")) &&
-      preflight.generatedAssistantOutput === true &&
-      /^sha256:[a-f0-9]{64}$/.test(
-        String(preflight.endpointOriginCommitment ?? ""),
-      ) &&
-      Number.isFinite(checkedAtMs) &&
-      Number.isFinite(runCreatedAtMs) &&
-      ageAtRenderMs >= -modelArkPreflightFutureToleranceMs &&
-      ageAtRenderMs <= modelArkPreflightMaxAgeMs &&
-      ageAtAdmissionMs >= -modelArkPreflightFutureToleranceMs &&
-      ageAtAdmissionMs <= modelArkPreflightMaxAgeMs &&
-      typeof preflight.attemptCount === "number" &&
-      Number.isInteger(preflight.attemptCount) &&
-      preflight.attemptCount >= 1 &&
-      preflight.attemptCount <= 4 &&
-      typeof preflight.requestCount === "number" &&
-      Number.isInteger(preflight.requestCount) &&
-      preflight.requestCount >= preflight.attemptCount &&
-      preflight.requestCount <= 16 &&
-      typeof preflight.retryDelayMs === "number" &&
-      Number.isInteger(preflight.retryDelayMs) &&
-      preflight.retryDelayMs >= 0 &&
-      preflight.retryDelayMs <= 15_000
-    );
-  } catch {
-    return false;
-  }
 }
 
 const demoHeroPrompts = {
@@ -1228,21 +1132,30 @@ function LiveModelArkGuide({
   busy: boolean;
   onRun: (prompt: string) => void;
 }) {
-  const promoted = runs.find(
-    (run) =>
-      !run.candidateSetId && provesWholeAgentPromotion(run, "modelark-live"),
-  );
+  const [qualification, setQualification] = useState<{
+    source: AgentRun[] | null;
+    run: AgentRun | null;
+  }>({ source: null, run: null });
+  useEffect(() => {
+    let cancelled = false;
+    void findCompleteLiveModelArkPromotion(runs)
+      .then((run) => {
+        if (!cancelled) setQualification({ source: runs, run });
+      })
+      .catch(() => {
+        if (!cancelled) setQualification({ source: runs, run: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runs]);
+  const promoted = qualification.source === runs ? qualification.run : null;
   const partialPromotion = runs.find(
     (run) => !run.candidateSetId && run.transaction?.disposition === "promoted",
   );
-  const completed = Boolean(promoted?.transaction);
-  const executionProfile = promoted?.transaction?.validations.find(
-    (validation) => validation.name === "execution-profile",
-  );
-  const preflightBound = hasBoundModelArkPreflight(
-    executionProfile,
-    promoted?.createdAt,
-  );
+  const displayedRun = promoted ?? partialPromotion;
+  const completed = promoted !== null;
+  const preflightBound = promoted !== null;
 
   return (
     <section
@@ -1280,11 +1193,11 @@ function LiveModelArkGuide({
           </div>
         </button>
       </div>
-      {promoted?.transaction && (
+      {displayedRun?.transaction && (
         <div
           className="protocol-paired-verdict"
           role="status"
-          data-airlock-run-id={promoted.id}
+          data-airlock-run-id={displayedRun.id}
         >
           <span aria-hidden="true">✓</span>
           <div>
@@ -1300,7 +1213,7 @@ function LiveModelArkGuide({
             </small>
           </div>
           <code>
-            {shortHash(promoted.transaction.canonicalContentHashAfter)}
+            {shortHash(displayedRun.transaction.canonicalContentHashAfter)}
           </code>
         </div>
       )}

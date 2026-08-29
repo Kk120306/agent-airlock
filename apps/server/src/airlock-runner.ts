@@ -116,6 +116,11 @@ export type PromotionFaultInjector = (
   runId: string,
 ) => void | Promise<void>;
 
+export type RecoveryErrorSanitizer = (
+  error: unknown,
+  fallback: string,
+) => string;
+
 export interface ReconciledPromotion {
   runId: string;
   agentId: string;
@@ -251,6 +256,13 @@ export class AirlockRunner {
     private readonly resources: ResourceCoordinator,
     private readonly injectPromotionFault?: PromotionFaultInjector,
     private readonly executionProfileEvidence?: ValidationEvidence,
+    private readonly sanitizeRecoveryError: RecoveryErrorSanitizer = (
+      error,
+      fallback,
+    ) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return (message.trim() || fallback).slice(0, 500);
+    },
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -1701,7 +1713,10 @@ export class AirlockRunner {
     const failures: PromotionRecoveryFailure[] = scan.errors.map((error) => ({
       runId: error.runId,
       agentId: null,
-      message: error.message,
+      message: this.sanitizeRecoveryError(
+        error.message,
+        "Promotion recovery journal scan failed closed",
+      ),
       transaction: null,
     }));
     const protectedRunIds = new Set<string>();
@@ -1724,9 +1739,11 @@ export class AirlockRunner {
         );
         protectedRunIds.delete(record.runId);
       } catch (error) {
-        const message =
+        const message = this.sanitizeRecoveryError(
           "Promotion recovery failed: " +
-          (error instanceof Error ? error.message : String(error));
+            (error instanceof Error ? error.message : String(error)),
+          "Promotion recovery failed closed",
+        );
         const latestRecord = await this.promotionJournal
           .read(record.runId)
           .catch(() => record);

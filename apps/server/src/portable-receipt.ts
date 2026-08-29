@@ -2,8 +2,10 @@ import { Buffer } from "node:buffer";
 import {
   assertPortablePromotionReceipt,
   buildEvidenceCommitment,
+  buildModelArkExecutionProfileDisclosureSummary,
   canonicalize,
   digestPortableReceipt,
+  MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
   sha256Digest,
   type PortableEvidenceDisclosure,
   type PortableEvidenceLeaf,
@@ -587,19 +589,56 @@ function validationLeaf(
   scope: string,
   validation: ValidationEvidence | RunTransaction["providerResources"][number]["validations"][number],
 ): PortableEvidenceLeaf {
-  const executionProfile = validation.name === "execution-profile";
+  const coreExecutionProfile =
+    scope === "core" && validation.name === "execution-profile";
   return {
     schemaVersion: 1,
-    identity: `validation:${sha256Digest(Buffer.from(`${scope}\u0000${validation.name}`, "utf8")).slice("sha256:".length)}`,
+    identity: coreExecutionProfile
+      ? MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY
+      : `validation:${sha256Digest(Buffer.from(`${scope}\u0000${validation.name}`, "utf8")).slice("sha256:".length)}`,
     category: "validation",
     status: validation.status,
     required: validation.required,
     durationMs: validation.durationMs,
-    summary: executionProfile
-      ? validation.summary
+    summary: coreExecutionProfile
+      ? portableExecutionProfileSummary(validation)
       : `Trusted Validation reported ${validation.status}.`,
     valueHash: digestValue(validation),
   };
+}
+
+function portableExecutionProfileSummary(
+  validation: ValidationEvidence,
+): string {
+  let attestation: unknown;
+  try {
+    attestation = JSON.parse(validation.output ?? "");
+  } catch {
+    if (
+      validation.summary.startsWith(
+        "A fresh provider preflight generated assistant output",
+      )
+    ) {
+      throw new Error(
+        "Portable ModelArk execution-profile evidence is malformed",
+      );
+    }
+    return validation.summary;
+  }
+  const candidate =
+    typeof attestation === "object" && attestation !== null
+      ? (attestation as {
+          inferenceMode?: unknown;
+          preflight?: unknown;
+        })
+      : {};
+  const claimsLivePreflight =
+    validation.summary.startsWith(
+      "A fresh provider preflight generated assistant output",
+    ) ||
+    (candidate.inferenceMode === "modelark" && candidate.preflight !== null);
+  if (!claimsLivePreflight) return validation.summary;
+  return buildModelArkExecutionProfileDisclosureSummary(attestation);
 }
 
 function externalActionCommitment(transaction: RunTransaction): ReceiptDigest {

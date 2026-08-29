@@ -7,6 +7,7 @@ import {
   LiveModelArkProofError,
   classifyLiveModelArkLauncherFailure,
   createPlaywrightLiveModelArkDriver,
+  resolveLiveModelArkProofExitCode,
   runLiveModelArkProofSession,
   safeLiveModelArkFailure,
 } from "./modelark-live-proof-runner.mjs";
@@ -69,6 +70,7 @@ let childExit = null;
 let ownedTree = null;
 let stopTask = null;
 let interruptionSignal = null;
+let proofCommitted = false;
 const ownedProcessGroupEnvironmentKey =
   "AGENT_AIRLOCK_INTERNAL_MODELARK_PROCESS_GROUP_OWNER";
 const leaseNonceEnvironmentKey = "AGENT_AIRLOCK_INTERNAL_MODELARK_LEASE_NONCE";
@@ -169,9 +171,7 @@ try {
     browserDriver,
     signal: controller.signal,
   });
-  if (controller.signal.aborted) {
-    throw new LiveModelArkProofError("interrupted");
-  }
+  proofCommitted = true;
   if (jsonOutput) {
     console.log(JSON.stringify(result));
   } else {
@@ -198,8 +198,16 @@ try {
   }
   process.exitCode = 1;
 } finally {
-  await stopChild();
-  if (controller.signal.aborted) process.exitCode = 1;
+  try {
+    await stopChild();
+  } catch {
+    if (!proofCommitted) process.exitCode = 1;
+  }
+  process.exitCode = resolveLiveModelArkProofExitCode({
+    currentExitCode: process.exitCode,
+    interrupted: controller.signal.aborted,
+    proofCommitted,
+  });
 }
 
 if (process.exitCode) process.exit(process.exitCode);

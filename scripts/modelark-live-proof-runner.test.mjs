@@ -5,6 +5,8 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -18,6 +20,7 @@ import {
   assertSafeLiveModelArkProofResult,
   buildLiveModelArkProofResult,
   classifyLiveModelArkLauncherFailure,
+  resolveLiveModelArkProofExitCode,
   runLiveModelArkProofSession,
   safeLiveModelArkFailure,
   writeLiveModelArkProofResult,
@@ -505,16 +508,73 @@ test("does not publish success when interruption arrives after evidence verifica
   assert.deepEqual(events, ["invoked", "verdict", "closed"]);
 });
 
-test("does not return success when interruption races with result persistence", async () => {
+test("an interruption before the real result rename preserves the prior capsule", async () => {
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-live-proof-"));
   const controller = new AbortController();
   const events = [];
-  let wroteResult = false;
-  await assert.rejects(
-    runLiveModelArkProofSession({
+  const prior = buildLiveModelArkProofResult({
+    observedAt: "2026-08-28T09:29:00.000Z",
+    runId: "run-prior-live-proof",
+    receiptDigest: "sha256:" + "b".repeat(64),
+  });
+  try {
+    const resultPath = await writeLiveModelArkProofResult({
+      stateRoot,
+      result: prior,
+    });
+    await assert.rejects(
+      runLiveModelArkProofSession({
+        baseUrl: "http://127.0.0.1:3201",
+        stateRoot,
+        browserDriver: browserFixture(events),
+        fetchImpl: fetchFixture([completeRun()]),
+        observedAt: () => "2026-08-28T09:30:00.000Z",
+        signal: controller.signal,
+        verifyEvidence: async ({ packetFile }) => ({
+          valid: true,
+          runId: "run-live-modelark-proof",
+          receiptDigest,
+          packetFile,
+        }),
+        resultPublicationOperations: {
+          beforeCommit: async () => controller.abort(),
+        },
+      }),
+      (error) =>
+        error instanceof LiveModelArkProofError &&
+        error.failureClass === "interrupted",
+    );
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), prior);
+    assert.deepEqual(
+      await readdir(path.dirname(resultPath)),
+      [LIVE_MODELARK_PROOF_RESULT_NAME],
+    );
+    assert.deepEqual(events, ["invoked", "verdict", "closed"]);
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("an interruption after the real result rename keeps the proof passed", async () => {
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-live-proof-"));
+  const controller = new AbortController();
+  const events = [];
+  const prior = buildLiveModelArkProofResult({
+    observedAt: "2026-08-28T09:29:00.000Z",
+    runId: "run-prior-live-proof",
+    receiptDigest: "sha256:" + "b".repeat(64),
+  });
+  try {
+    const resultPath = await writeLiveModelArkProofResult({
+      stateRoot,
+      result: prior,
+    });
+    const result = await runLiveModelArkProofSession({
       baseUrl: "http://127.0.0.1:3201",
-      stateRoot: "/bounded-test-root",
+      stateRoot,
       browserDriver: browserFixture(events),
       fetchImpl: fetchFixture([completeRun()]),
+      observedAt: () => "2026-08-28T09:30:00.000Z",
       signal: controller.signal,
       verifyEvidence: async ({ packetFile }) => ({
         valid: true,
@@ -522,17 +582,47 @@ test("does not return success when interruption races with result persistence", 
         receiptDigest,
         packetFile,
       }),
-      writeResult: async () => {
-        wroteResult = true;
-        controller.abort();
+      resultPublicationOperations: {
+        rename: async (temporaryPath, destinationPath) => {
+          await rename(temporaryPath, destinationPath);
+          controller.abort();
+        },
       },
+    });
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(result.outcome, "passed");
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), result);
+    assert.deepEqual(events, ["invoked", "verdict", "closed"]);
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("a cleanup signal cannot flip the CLI exit after the capsule commits", () => {
+  assert.equal(
+    resolveLiveModelArkProofExitCode({
+      currentExitCode: undefined,
+      interrupted: true,
+      proofCommitted: true,
     }),
-    (error) =>
-      error instanceof LiveModelArkProofError &&
-      error.failureClass === "interrupted",
+    0,
   );
-  assert.equal(wroteResult, true);
-  assert.deepEqual(events, ["invoked", "verdict", "closed"]);
+  assert.equal(
+    resolveLiveModelArkProofExitCode({
+      currentExitCode: undefined,
+      interrupted: true,
+      proofCommitted: false,
+    }),
+    1,
+  );
+  assert.equal(
+    resolveLiveModelArkProofExitCode({
+      currentExitCode: 2,
+      interrupted: true,
+      proofCommitted: true,
+    }),
+    2,
+  );
 });
 
 test("classifies provider capacity without copying child output", () => {

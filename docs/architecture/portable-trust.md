@@ -182,6 +182,19 @@ It reports:
 One failed cryptographic or structural check makes the envelope invalid.
 An absent optional anchor or absent disclosure does not make a valid signature invalid.
 
+### ModelArk execution-profile disclosure
+
+The live ModelArk proof uses an application-specific convention over the existing version 1 Validation evidence leaf instead of changing the receipt or envelope schema.
+The deterministic core `execution-profile` identity discloses one RFC 8785 canonical JSON summary with the exact control-plane, ModelArk, Codex CLI, container Runtime, Responses protocol, and generated-output profile.
+The same signed summary carries the full SHA-256 commitments for the configured model and endpoint origin, the canonical preflight time, and the bounded attempt, request, and retry counts.
+Raw model values, endpoint origins, credentials, and provider output remain undisclosed, while the existing evidence `valueHash` continues to commit the complete private Validation record.
+
+The ModelArk verifier first runs the generic version 1 signature and Merkle-proof verifier and then applies the stricter application profile.
+It requires the exact evidence identity and leaf semantics, exact canonical claim keys and constants, valid commitment syntax, bounded counts, and a preflight time within two hours before or sixty seconds after the signed signer-clock decision.
+Historical phrase-only disclosures remain mathematically valid portable receipts, but they are `legacy-unproven` for the exact ModelArk conformance claim.
+The claim is an Airlock control-plane attestation of historical evidence and does not prove current provider availability, independent Runtime observation, signer-clock accuracy, or provider-signed telemetry.
+Commitments hide their preimages from the packet but do not prevent correlation or dictionary guessing of low-entropy model or origin values.
+
 ## Portable Evidence Packet
 
 The version 1 Portable Evidence Packet is a deterministic one-file transport for one Portable Promotion Envelope, one optional signed transparency checkpoint and inclusion proof, and one optional offline EVM payload.

@@ -158,7 +158,11 @@ export async function verifyRecordedLiveModelArkEvidence({
   stateRoot,
   packetFile = null,
 }) {
-  const { verifyPortableEvidencePacketJson } = await import(
+  const {
+    MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
+    verifyModelArkExecutionProfileDisclosure,
+    verifyPortableEvidencePacketJson,
+  } = await import(
     "@agent-airlock/portable-promotion-receipt"
   );
   const resultPointer =
@@ -171,14 +175,38 @@ export async function verifyRecordedLiveModelArkEvidence({
   const report = verifyPortableEvidencePacketJson(source);
   const packet = JSON.parse(source);
   const receipt = packet?.envelope?.receipt;
-  const providerDisclosure = packet?.envelope?.disclosures?.find(
-    (disclosure) =>
-      disclosure.leaf?.required === true &&
-      disclosure.leaf?.status === "passed" &&
-      disclosure.leaf?.summary?.includes(
-        "configured ModelArk Responses profile",
-      ),
-  );
+  const disclosures = packet?.envelope?.disclosures;
+  const exactProfileDisclosures = Array.isArray(disclosures)
+    ? disclosures.filter(
+        (disclosure) =>
+          disclosure?.leaf?.identity ===
+          MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
+      )
+    : [];
+  let profileClaim = null;
+  let profileStatus = "invalid";
+  if (report.valid && exactProfileDisclosures.length === 1) {
+    try {
+      profileClaim = verifyModelArkExecutionProfileDisclosure(
+        exactProfileDisclosures[0],
+        receipt?.decision?.decidedAt,
+      );
+      profileStatus = "verified";
+    } catch {
+      profileStatus = "invalid";
+    }
+  } else if (
+    report.valid &&
+    Array.isArray(disclosures) &&
+    disclosures.some(
+      (disclosure) =>
+        disclosure?.leaf?.category === "validation" &&
+        typeof disclosure?.leaf?.summary === "string" &&
+        disclosure.leaf.summary.includes("configured ModelArk Responses profile"),
+    )
+  ) {
+    profileStatus = "legacy-unproven";
+  }
   const runId = receipt?.decision?.runId;
   const receiptDigest = report.receipt.receiptDigest;
   const valid =
@@ -188,7 +216,7 @@ export async function verifyRecordedLiveModelArkEvidence({
     typeof runId === "string" &&
     runId.length > 0 &&
     /^sha256:[a-f0-9]{64}$/.test(receiptDigest ?? "") &&
-    Boolean(providerDisclosure) &&
+    profileStatus === "verified" &&
     (resultPointer === null ||
       (resultPointer.runId === runId &&
         resultPointer.receiptDigest === receiptDigest));
@@ -197,7 +225,19 @@ export async function verifyRecordedLiveModelArkEvidence({
     valid,
     runId: typeof runId === "string" ? runId : null,
     receiptDigest: receiptDigest ?? null,
-    executionProfileDisclosed: Boolean(providerDisclosure),
+    executionProfileDisclosed: profileStatus === "verified",
+    executionProfileVerdict: {
+      status: profileStatus,
+      schemaVersion: profileClaim?.schemaVersion ?? null,
+      profile: profileClaim?.profile ?? null,
+      modelCommitment: profileClaim?.modelCommitment ?? null,
+      endpointOriginCommitment:
+        profileClaim?.endpointOriginCommitment ?? null,
+      checkedAt: profileClaim?.checkedAt ?? null,
+      attemptCount: profileClaim?.attemptCount ?? null,
+      requestCount: profileClaim?.requestCount ?? null,
+      retryDelayMs: profileClaim?.retryDelayMs ?? null,
+    },
     packetFile: selectedPacketFile,
   };
 }

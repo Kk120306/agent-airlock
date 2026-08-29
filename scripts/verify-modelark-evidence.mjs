@@ -16,7 +16,7 @@ try {
   console.log(`Signed decisions: 1`);
   console.log(`Receipt digest: ${result.receiptDigest ?? "unavailable"}`);
   console.log(
-    `Execution profile disclosed: ${result.executionProfileDisclosed ? "yes" : "no"}`,
+    `Exact safe execution profile: ${result.executionProfileVerdict.status.toUpperCase()}`,
   );
   if (!result.valid) process.exitCode = 1;
 } catch (error) {

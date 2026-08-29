@@ -11,6 +11,7 @@ import {
   parseResourcePromotionPlan,
   parseResourceProviderManifest,
   parseResourceReconciliationResult,
+  redactSensitiveText,
   runTransactionalResourceConformance,
   validateMetadata,
   validateTransactionalResourceProvider,
@@ -427,6 +428,18 @@ async function createCredentialRuntimePathFixture(): Promise<ResourceConformance
 }
 
 describe("Transactional Resource SDK", () => {
+  it("redacts ModelArk endpoint identifiers without changing ordinary words", () => {
+    const input =
+      "Runtime failed for ep-private-endpoint-123 during step-by-step recovery of an ephemeral worker";
+
+    expect(redactSensitiveText(input)).toBe(
+      "Runtime failed for [REDACTED] during step-by-step recovery of an ephemeral worker",
+    );
+    expect(redactSensitiveText("EP-release episode kept ep- incomplete")).toBe(
+      "EP-release episode kept ep- incomplete",
+    );
+  });
+
   it("derives stable bounded Promotion idempotency keys", () => {
     const first = createResourcePromotionIdempotencyKey({
       runId: "run-001",
@@ -549,6 +562,12 @@ describe("Transactional Resource SDK", () => {
       parseResourceProviderManifest({
         ...manifest,
         metadata: { endpoint: "postgres://user:password@database.invalid/app" },
+      }),
+    ).toThrow(/credential-like value/);
+    expect(() =>
+      parseResourceProviderManifest({
+        ...manifest,
+        metadata: { model: "ep-private-endpoint-123" },
       }),
     ).toThrow(/credential-like value/);
     const contradictoryProvider = new FixtureProvider({

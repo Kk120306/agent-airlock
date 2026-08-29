@@ -17,6 +17,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  buildEvidenceCommitment,
+  buildModelArkExecutionProfileDisclosureSummary,
+  buildPortableEvidencePacket,
+  generatePortableSigningKey,
+  MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
+  signPortableReceipt,
+} from "@agent-airlock/portable-promotion-receipt";
+import {
   captureLiveModelArkConformance,
   isCompleteLiveModelArkPromotion,
   liveModelArkEvidenceDirectoryName,
@@ -194,30 +202,93 @@ function completeRun() {
   };
 }
 
-function exportResult(runId, disclosures) {
+function exportResult(run) {
+  const attestation = JSON.parse(run.transaction.validations[0].output);
+  const evidence = buildEvidenceCommitment([
+    {
+      schemaVersion: 1,
+      identity: MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
+      category: "validation",
+      status: "passed",
+      required: true,
+      durationMs: 0,
+      summary: buildModelArkExecutionProfileDisclosureSummary(attestation),
+      valueHash: commitment("modelark-execution-profile"),
+    },
+  ]);
+  const receipt = {
+    protocol: {
+      schema: "agent-airlock/portable-promotion-receipt",
+      schemaVersion: 1,
+      canonicalization: "RFC8785",
+      digestAlgorithm: "SHA-256",
+    },
+    decision: {
+      runId: run.id,
+      agentId: run.agentId,
+      disposition: "promoted",
+      decidedAt: run.completedAt,
+      clockClaim: "signer-clock-not-external-timestamp",
+    },
+    state: {
+      before: {
+        stateId: "state-before",
+        compositeHash: commitment("before"),
+        builtinResources: [],
+        providerResources: [],
+      },
+      after: {
+        stateId: "state-after",
+        compositeHash: commitment("after"),
+        builtinResources: [],
+        providerResources: [],
+      },
+    },
+    outcomeContract: {
+      schemaVersion: 1,
+      version: 1,
+      digest: commitment("contract"),
+    },
+    validationEvidence: {
+      root: evidence.root,
+      leafCount: evidence.leaves.length,
+      ordering: "canonical-identity-ascending",
+    },
+    externalActions: {
+      commitment: commitment("actions"),
+      deliveredCount: 1,
+    },
+    selection: null,
+    assurance: null,
+    ancestry: {
+      rootRunId: run.id,
+      parentRunId: null,
+      depth: 0,
+      maxDepth: 2,
+      previousReceiptDigest: null,
+    },
+  };
+  const key = generatePortableSigningKey();
+  const envelope = signPortableReceipt({
+    receipt,
+    privateKey: key.privateKeyPem,
+    disclosures: evidence.disclosures,
+  });
   return {
-    verification: { valid: true },
+    verification: { valid: false },
     availableDisclosures: [
       {
-        identity: "validation:profile-digest",
+        identity: MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
         required: true,
         status: "passed",
-        summary:
-          "A fresh provider preflight generated assistant output in 1 bounded request. Airlock control plane attested successful execution through real Codex CLI against the configured ModelArk Responses profile.",
+        summary: evidence.leaves[0].summary,
       },
     ],
-    packet: {
-      schema: "agent-airlock/portable-evidence-packet",
-      schemaVersion: 1,
-      envelope: {
-        receipt: {
-          decision: { runId, disposition: "promoted" },
-        },
-        disclosures,
-      },
+    packet: buildPortableEvidencePacket({
+      envelope,
       anchor: null,
       evmPayload: null,
-    },
+    }),
   };
 }
 
@@ -294,6 +365,9 @@ test("rejects drifted Runtime facts and stale or unbounded preflight evidence", 
     (profile) => {
       profile.preflight.retryDelayMs = 15_001;
     },
+    (profile) => {
+      profile.preflight.checkedAt = "2026-08-28T08:00:00.000+08:00";
+    },
   ];
   for (const mutate of mutations) {
     assert.equal(isCompleteLiveModelArkPromotion(mutateProfile(mutate)), false);
@@ -357,22 +431,7 @@ test("captures one private signed packet with the ModelArk profile disclosed", a
     if (url.endsWith("/api/agents/agent-live/runs")) {
       return Response.json({ runs: [run] });
     }
-    const body = JSON.parse(options.body);
-    if (body.disclosureIdentities.length === 0) {
-      return Response.json(exportResult(run.id, []));
-    }
-    return Response.json(
-      exportResult(run.id, [
-        {
-          leaf: {
-            identity: "validation:profile-digest",
-            required: true,
-            status: "passed",
-            summary: "configured ModelArk Responses profile",
-          },
-        },
-      ]),
-    );
+    return Response.json(exportResult(run));
   };
   try {
     const captured = await captureLiveModelArkConformance({
@@ -383,9 +442,9 @@ test("captures one private signed packet with the ModelArk profile disclosed", a
       verifyStoredPacket: async (source) => source,
     });
     assert.equal(captured.runId, run.id);
-    assert.equal(requests.length, 3);
-    assert.deepEqual(JSON.parse(requests[2].options.body).disclosureIdentities, [
-      "validation:profile-digest",
+    assert.equal(requests.length, 2);
+    assert.deepEqual(JSON.parse(requests[1].options.body).disclosureIdentities, [
+      MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
     ]);
     const latestPath = path.join(
       stateRoot,
@@ -406,7 +465,7 @@ test("captures one private signed packet with the ModelArk profile disclosed", a
       }),
       null,
     );
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 3);
   } finally {
     await rm(stateRoot, { recursive: true, force: true });
   }
@@ -417,20 +476,9 @@ test("refuses to persist a packet containing provider-private material", async (
   const run = completeRun();
   const fetchStub = async (url, options = {}) => {
     if (url.endsWith("/runs")) return Response.json({ runs: [run] });
-    const body = JSON.parse(options.body);
-    if (body.disclosureIdentities.length === 0) {
-      return Response.json(exportResult(run.id, []));
-    }
-    const exported = exportResult(run.id, [
-      {
-        leaf: {
-          identity: "validation:profile-digest",
-          required: true,
-          status: "passed",
-          summary: "configured ModelArk Responses profile Bearer private-value",
-        },
-      },
-    ]);
+    const exported = exportResult(run);
+    exported.packet.envelope.disclosures[0].leaf.summary =
+      "configured ModelArk Responses profile Bearer private-value";
     return Response.json(exported);
   };
   try {
@@ -463,23 +511,10 @@ test("refuses to persist an Ark model API key", async () => {
   const run = completeRun();
   const fetchStub = async (url, options = {}) => {
     if (url.endsWith("/runs")) return Response.json({ runs: [run] });
-    const body = JSON.parse(options.body);
-    if (body.disclosureIdentities.length === 0) {
-      return Response.json(exportResult(run.id, []));
-    }
-    return Response.json(
-      exportResult(run.id, [
-        {
-          leaf: {
-            identity: "validation:profile-digest",
-            required: true,
-            status: "passed",
-            summary:
-              "configured ModelArk Responses profile ark-11111111-2222-3333-4444-555555555555-test1",
-          },
-        },
-      ]),
-    );
+    const exported = exportResult(run);
+    exported.packet.envelope.disclosures[0].leaf.summary =
+      "configured ModelArk Responses profile ark-11111111-2222-3333-4444-555555555555-test1";
+    return Response.json(exported);
   };
   try {
     await assert.rejects(
@@ -824,16 +859,7 @@ test("reconciles an immutable packet after a crash without re-exporting provider
   const artifactFileName = liveModelArkEvidenceNameForRun(run.id);
   const serialized =
     JSON.stringify(
-      exportResult(run.id, [
-        {
-          leaf: {
-            identity: "validation:profile-digest",
-            required: true,
-            status: "passed",
-            summary: "configured ModelArk Responses profile",
-          },
-        },
-      ]).packet,
+      exportResult(run).packet,
       null,
       2,
     ) + "\n";

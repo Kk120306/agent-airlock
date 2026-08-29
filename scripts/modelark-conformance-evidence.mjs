@@ -12,6 +12,11 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
+  MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY,
+  verifyModelArkExecutionProfileDisclosure,
+  verifyPortableEvidencePacketJson,
+} from "@agent-airlock/portable-promotion-receipt";
+import {
   comparableContract,
   liveModelArkContract,
   liveModelArkPrompt,
@@ -524,6 +529,7 @@ export async function replacePrivateModelArkEvidence({
     publicationId,
   });
   const renamePublication = publicationOperations.rename ?? rename;
+  const beforeCommit = publicationOperations.beforeCommit ?? (() => {});
   const syncDirectory =
     publicationOperations.syncDirectory ?? syncPrivateEvidenceDirectory;
   const verifyInstalled =
@@ -531,6 +537,7 @@ export async function replacePrivateModelArkEvidence({
   let committed = false;
   try {
     try {
+      await beforeCommit({ temporaryPath, destinationPath });
       await renamePublication(temporaryPath, destinationPath);
       committed = true;
     } catch (error) {
@@ -601,7 +608,12 @@ function hasExactKeys(value, expected) {
 }
 
 function isFiniteTimestamp(value) {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
+  return (
+    typeof value === "string" &&
+    value.length === 24 &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString() === value
+  );
 }
 
 function hasBoundModelArkPreflight(validation, nowMs, runCreatedAtMs) {
@@ -651,6 +663,7 @@ function hasBoundModelArkPreflight(validation, nowMs, runCreatedAtMs) {
       sha256Pattern.test(profile.modelCommitment ?? "") &&
       preflight.generatedAssistantOutput === true &&
       sha256Pattern.test(preflight.endpointOriginCommitment ?? "") &&
+      isFiniteTimestamp(preflight.checkedAt) &&
       Number.isFinite(checkedAtMs) &&
       ageAtCaptureMs >= -modelArkPreflightFutureToleranceMs &&
       ageAtCaptureMs <= modelArkPreflightMaxAgeMs &&
@@ -804,6 +817,8 @@ export function isCompleteLiveModelArkPromotion(run, nowMs = Date.now()) {
     run?.candidateSetId !== null ||
     run?.competitorId !== null ||
     run?.prompt !== liveModelArkPrompt ||
+    !isFiniteTimestamp(run?.createdAt) ||
+    !isFiniteTimestamp(run?.completedAt) ||
     !Number.isFinite(createdAtMs) ||
     !Number.isFinite(completedAtMs) ||
     completedAtMs < createdAtMs ||
@@ -879,20 +894,9 @@ async function requestJson(baseUrl, pathname, options, fetchImpl, signal) {
   return response.json();
 }
 
-function assertSafeCapturedPacket(exported, runId, disclosureIdentity) {
+function assertSafeCapturedPacket(exported, runId) {
   const packet = exported?.packet;
   const envelope = packet?.envelope;
-  if (
-    exported?.verification?.valid !== true ||
-    packet?.schema !== "agent-airlock/portable-evidence-packet" ||
-    envelope?.receipt?.decision?.runId !== runId ||
-    envelope.receipt.decision.disposition !== "promoted" ||
-    !envelope.disclosures?.some(
-      (disclosure) => disclosure.leaf?.identity === disclosureIdentity,
-    )
-  ) {
-    throw new Error("The live ModelArk evidence packet did not pass capture admission");
-  }
   const serialized = JSON.stringify(packet, null, 2) + "\n";
   if (
     /Bearer\s|ARK_API_KEY|api[_-]?key\s*[=:]|https?:\/\/|\bep-[A-Za-z0-9]|\bark-[A-Za-z0-9]/i.test(
@@ -900,6 +904,30 @@ function assertSafeCapturedPacket(exported, runId, disclosureIdentity) {
     )
   ) {
     throw new Error("The live ModelArk evidence packet contains forbidden private material");
+  }
+  const verification = verifyPortableEvidencePacketJson(serialized);
+  const disclosures = envelope?.disclosures;
+  if (
+    !verification.valid ||
+    packet?.schema !== "agent-airlock/portable-evidence-packet" ||
+    envelope?.receipt?.decision?.runId !== runId ||
+    envelope.receipt.decision.disposition !== "promoted" ||
+    !Array.isArray(disclosures) ||
+    disclosures.length !== 1 ||
+    disclosures[0]?.leaf?.identity !==
+      MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY
+  ) {
+    throw new Error("The live ModelArk evidence packet did not pass capture admission");
+  }
+  try {
+    verifyModelArkExecutionProfileDisclosure(
+      disclosures[0],
+      envelope.receipt.decision.decidedAt,
+    );
+  } catch {
+    throw new Error(
+      "The live ModelArk evidence packet did not prove the exact safe execution profile",
+    );
   }
   return serialized;
 }
@@ -911,28 +939,7 @@ async function assertSafeStoredPacket(serialized, runId) {
   } catch {
     throw new Error("The stored live ModelArk evidence packet is malformed");
   }
-  const executionProfile = packet?.envelope?.disclosures?.find(
-    (disclosure) =>
-      disclosure.leaf?.required === true &&
-      disclosure.leaf?.status === "passed" &&
-      disclosure.leaf?.summary?.includes(
-        "configured ModelArk Responses profile",
-      ),
-  );
-  if (!executionProfile?.leaf?.identity) {
-    throw new Error(
-      "The stored live ModelArk execution-profile disclosure is unavailable",
-    );
-  }
-  const { verifyPortableEvidencePacketJson } = await import(
-    "@agent-airlock/portable-promotion-receipt"
-  );
-  const verification = verifyPortableEvidencePacketJson(serialized);
-  return assertSafeCapturedPacket(
-    { packet, verification },
-    runId,
-    executionProfile.leaf.identity,
-  );
+  return assertSafeCapturedPacket({ packet }, runId);
 }
 
 export async function captureLiveModelArkConformance({
@@ -986,40 +993,13 @@ export async function captureLiveModelArkConformance({
     };
   }
 
-  const preview = await requestJson(
-    baseUrl,
-    `/api/runs/${run.id}/portable-receipt`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        disclosureIdentities: [],
-        includeAncestry: false,
-        localAnchor: false,
-        evmPayload: false,
-      }),
-    },
-    fetchImpl,
-    signal,
-  );
-  const executionProfile = preview.availableDisclosures?.find(
-    (disclosure) =>
-      disclosure.required === true &&
-      disclosure.status === "passed" &&
-      disclosure.summary?.includes(
-        "fresh provider preflight generated assistant output",
-      ) &&
-      disclosure.summary?.includes("configured ModelArk Responses profile"),
-  );
-  if (!executionProfile) {
-    throw new Error("The live ModelArk execution-profile disclosure is unavailable");
-  }
   const exported = await requestJson(
     baseUrl,
     `/api/runs/${run.id}/portable-receipt`,
     {
       method: "POST",
       body: JSON.stringify({
-        disclosureIdentities: [executionProfile.identity],
+        disclosureIdentities: [MODELARK_EXECUTION_PROFILE_EVIDENCE_IDENTITY],
         includeAncestry: false,
         localAnchor: false,
         evmPayload: false,
@@ -1028,11 +1008,7 @@ export async function captureLiveModelArkConformance({
     fetchImpl,
     signal,
   );
-  const serialized = assertSafeCapturedPacket(
-    exported,
-    run.id,
-    executionProfile.identity,
-  );
+  const serialized = assertSafeCapturedPacket(exported, run.id);
   const artifact = await publishPrivateModelArkEvidence({
     stateRoot,
     fileName: artifactFileName,

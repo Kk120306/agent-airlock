@@ -206,19 +206,47 @@ export function assertSafeLiveModelArkProofResult(result) {
   }
 }
 
-export async function writeLiveModelArkProofResult({ stateRoot, result }) {
+export async function writeLiveModelArkProofResult({
+  stateRoot,
+  result,
+  signal,
+  publicationOperations = {},
+}) {
   const serialized = assertSafeLiveModelArkProofResult(result) + "\n";
+  abortError(signal);
+  const callerBeforeCommit = publicationOperations.beforeCommit;
   try {
     const publication = await replacePrivateModelArkEvidence({
       stateRoot,
       fileName: LIVE_MODELARK_PROOF_RESULT_NAME,
       content: serialized,
       maximumBytes: 8_192,
+      publicationOperations: {
+        ...publicationOperations,
+        beforeCommit: async (context) => {
+          await callerBeforeCommit?.(context);
+          abortError(signal);
+        },
+      },
     });
     return publication.path;
-  } catch {
+  } catch (error) {
+    if (error instanceof LiveModelArkProofError) throw error;
+    abortError(signal);
     throw new LiveModelArkProofError("evidence-invalid");
   }
+}
+
+export function resolveLiveModelArkProofExitCode({
+  currentExitCode,
+  interrupted,
+  proofCommitted,
+}) {
+  const normalizedExitCode = Number(currentExitCode ?? 0);
+  if (Number.isInteger(normalizedExitCode) && normalizedExitCode !== 0) {
+    return normalizedExitCode;
+  }
+  return interrupted && !proofCommitted ? 1 : 0;
 }
 
 export function safeLiveModelArkFailure(error) {
@@ -329,6 +357,7 @@ export async function runLiveModelArkProofSession({
     }),
   verifyEvidence = verifyRecordedLiveModelArkEvidence,
   writeResult = writeLiveModelArkProofResult,
+  resultPublicationOperations,
 }) {
   try {
     const { agents } = await requestJson(
@@ -377,8 +406,12 @@ export async function runLiveModelArkProofSession({
       packetFile: evidence.packetFile ?? liveModelArkEvidenceNameForRun(run.id),
     });
     abortError(signal);
-    await writeResult({ stateRoot, result });
-    abortError(signal);
+    await writeResult({
+      stateRoot,
+      result,
+      signal,
+      publicationOperations: resultPublicationOperations,
+    });
     return result;
   } finally {
     await browserDriver.close().catch(() => {});
