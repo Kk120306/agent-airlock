@@ -1,6 +1,6 @@
 # Three-day hackathon guide
 
-Teams receive a working Agent platform and build exactly one middleware track.
+Teams receive a working Agent platform and build a coherent middleware capability inside the Agent Launchpad track.
 Rebuilding the UI, control plane, local Runtime, or ECS setup is out of scope.
 
 ## Provided baseline
@@ -13,7 +13,15 @@ Rebuilding the UI, control plane, local Runtime, or ECS setup is out of scope.
 
 Local execution is the default judging path. Cloud deployment is optional.
 
-## Choose one track
+## Choose a coherent middleware story
+
+Identity, authorization, trace, audit, layered architecture, safety, and multi-Agent coordination are examples rather than separate required tracks.
+Teams may adapt, combine, replace, or invent capabilities when the result has a clear Agent-specific problem, an enforced boundary, functional evidence, a failure or recovery case, and automated verification.
+
+Agent Airlock selects transactional execution and recovery.
+It combines state governance, versioning, fail-closed Validation, recovery, and portable audit evidence at the `AgentRunner` and persistence seams.
+
+The examples below remain useful starting points, but a team does not have to select one of them.
 
 ### Glass Box: trace and audit
 
@@ -67,7 +75,7 @@ Only three deliverables are required:
 
 1. **Three-minute live demo:** show a real Agent Run and the middleware result.
 2. **One-page architecture diagram:** show the middleware and trust boundary.
-3. **Code repository:** include setup, tests, selected track, and limitations.
+3. **Code repository:** include setup, tests, the selected middleware story, and limitations.
 
 ## Evaluation
 
@@ -80,7 +88,7 @@ Only three deliverables are required:
 
 ## Acceptance checklist
 
-- [ ] The README names one selected track.
+- [ ] The README names one coherent middleware story and explains why it belongs in the Agent Launchpad track.
 - [ ] A reviewer can run the project from the documented command.
 - [ ] Middleware executes in the backend or Runtime path, not only in the UI.
 - [ ] The demo includes a positive and a failure, denial, or malicious case.

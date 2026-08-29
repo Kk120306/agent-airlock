@@ -6,7 +6,9 @@ Rejected work remains inspectable and can be repaired without contaminating acce
 
 > Agents may explore many futures, but only validated futures become reality.
 
-Read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
+Selected middleware direction: transactional Agent state safety and failure recovery.
+
+Start with the [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), then read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
 ## Canonical three-minute recording
@@ -322,7 +324,7 @@ HTTP 429 free-capacity failure returns `provider-unavailable` and never disables
 - Docker, Colima, or Podman
 - A ModelArk API key and endpoint or model that supports the Responses API
 
-The automated proof does not require ModelArk credentials or paid inference.
+The deterministic `npm run test:demo:e2e` proof does not require ModelArk credentials or paid inference.
 Run `npm run test:demo:e2e` to exercise the exact four-step production browser story locally.
 ModelArk credentials are needed only for the final live conformance journey.
 
@@ -343,8 +345,8 @@ Codex CLI is already included in the Runtime image.
 ### 2. Clone the repository
 
 ```bash
-git clone <repository-url> volc-agent-launchpad
-cd volc-agent-launchpad
+git clone https://github.com/Kk120306/agent-airlock.git
+cd agent-airlock
 ```
 
 Skip this step when already working from the repository root.
@@ -375,7 +377,7 @@ It reports those checks independently, so provider HTTP 429 capacity failures ca
 The model that passes preflight is exported as `ARK_MODEL` for the actual Runtime.
 The guided launcher watches only its managed Agent for a complete provider-backed Whole-Agent Promotion, requests the safe execution-profile disclosure, and atomically records an immutable per-Run signed packet under its marker-protected state root.
 It will not capture partial Promotion, failed Validation, missing effect delivery, deterministic fixture evidence, or content containing credential-like or endpoint-like material.
-Set `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only when the provider was already verified and a temporary provider outage must not block local startup.
+The generic `npm run poc` path can honor `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` for local troubleshooting, but neither `npm run demo:modelark` nor `npm run prove:modelark` ever honors that escape hatch.
 The first successful run loads `.env`, installs Node.js dependencies, and builds the Runtime image.
 Explicit process environment variables take precedence over `.env`.
 The script automatically selects Docker, Colima, or Podman.
@@ -614,6 +616,7 @@ The browser SOP above is the repeatable live conformance path and does not store
 
 ## Documentation
 
+- [Submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Agent Airlock architecture](docs/architecture/agent-airlock.md)
 - [One-page judging architecture](docs/demo/architecture-one-page.md)

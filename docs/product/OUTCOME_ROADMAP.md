@@ -914,7 +914,8 @@ They add safe repair, adversarial confidence, and a flawless three-minute story.
 
 ### Future vision
 
-Phases 8 through 11 are implemented on an isolated post-hackathon branch and remain outside the frozen Phase 7 judging path.
+Phases 8 through 11 are implemented as optional extensions outside the core three-Run submission story.
+Phase 22 deliberately reuses the Phase 11 signed-chain and zero-upload verifier primitives as evidence without giving them Promotion authority.
 
 ## Three-day execution allocation
 

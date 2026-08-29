@@ -66,11 +66,19 @@ flowchart LR
         Dispatcher --> Mock
     end
 
+    subgraph Evidence["Portable evidence, never Promotion authority"]
+        Chain["Signed two-decision chain"]
+        Verifier["Browser-local zero-upload verifier"]
+        Chain --> Verifier
+    end
+
     Manifest -->|Advance exactly once| Versions
     Manifest -->|Only after advance| Dispatcher
     Dispatcher -->|Receipt acknowledgement| Journal
     Canonical -->|Copy at Run start| Candidate
     Receipt --> UI
+    Receipt -->|Export redacted evidence| Chain
+    UI -->|Open exact chain| Verifier
     Decision -->|No accepted mutation| Quarantine
     Canonical -->|Exact freshness match| Reference
 ```
@@ -99,7 +107,7 @@ The atomic canonical manifest is the only source of accepted state, while the jo
 Canonical workspace, Codex-session, and SQLite versions are never mounted writable into the Runtime or validation container.
 The platform-owned delivery store is never mounted into either execution boundary.
 
-## Implemented and tested in Phases 0-11
+## Implemented and tested through the Phase 22 recording release
 
 - Starter-kit Agent CRUD, lifecycle controls, Playground chat, persistence, Codex runner seam, and container path remain intact.
 - Promotion, destructive Quarantine, Runtime failure, and cancellation preserve the documented canonical-state invariant.
@@ -121,6 +129,7 @@ The platform-owned delivery store is never mounted into either execution boundar
 - A credentialed live path requires a fresh generated-output preflight bound to the configured model and provider origin, the same four-resource result, an execution-profile commitment, and an independent artifact-and-database Validation before it presents ModelArk conformance as complete.
 - Signed Promotion Receipts bind redacted decision evidence into a Merkle root and verify offline without the Airlock server, ModelArk, a wallet, or a network request.
 - Optional selective disclosure, local transparency proofs, and digest-only EVM calldata add portable trust without making a public blockchain transaction part of Promotion.
+- The canonical recording creates exactly three fresh real-Runtime Runs, derives one Outcome Brief from persisted evidence, and verifies the rejected-parent to promoted-Repair chain with zero uploads or API calls.
 
 ## Deliberate non-claims
 

@@ -117,16 +117,17 @@ If live interaction must remain manual, use `npm run demo:modelark -- --reset` a
 - [x] `Run complete safety loop` executes the three real-Runtime stages in order, stops immediately if an expected disposition is not produced, and automatically verifies the signed Repair lineage.
 - [x] The guide reports `Full signed recovery proof verified` only after both signatures, the parent link, and every Canonical State handoff pass local verification.
 - [x] The repaired real-Runtime proof opens its generated decision chain directly in the zero-upload verifier and reports two linked signed decisions with an intact Canonical State handoff.
-- [ ] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
-- [ ] The live UI shows `LIVE MODELARK PROOF`, fresh generated-output preflight evidence, one seeded Agent, and one `Run live Candidate` action.
-- [ ] A complete live Promotion automatically records one private signed evidence packet with the safe ModelArk execution-profile disclosure, and `npm run verify:modelark-evidence` validates it offline.
-- [ ] `npm run prove:modelark -- --reset --headed` drives the production browser, verifies the signed packet offline, cleans up owned processes, and returns success only after all eight proof gates pass.
-- [ ] Provider HTTP 429 returns the safe `provider-unavailable` class without a live-proof UI, paid fallback, credential disclosure, or overwritten successful capsule.
-- [ ] Recorded evidence is labelled historical and is never presented as a substitute for a current live preflight.
-- [ ] The live Candidate creates the exact artifact, updates SQLite, submits one typed intent, passes the required state Validation, promotes all four resources, delivers exactly one effect after Promotion, and exports a locally verified signed decision.
+- [x] `npm run demo:modelark -- --reset` refuses to start unless a live ModelArk preflight succeeds and never honors `AIRLOCK_SKIP_MODELARK_PREFLIGHT`.
+- [x] Provider HTTP 429 returns the safe `provider-unavailable` class without a live-proof UI, paid fallback, credential disclosure, or overwritten successful capsule.
+- [x] Deterministic orchestration, capture, redaction, exact-Run binding, interruption, and offline-verifier tests cover the live proof machinery without claiming a provider-backed success.
+- [x] Recorded evidence is labelled historical and is never presented as a substitute for a current live preflight.
+- [ ] While Free Credits Only Mode has capacity, `npm run prove:modelark -- --reset --headed` completes one fresh provider-backed Run and publishes a signed credential-free packet that verifies offline.
+
+That final live Run must show `LIVE MODELARK PROOF`, fresh generated-output preflight evidence, one seeded Agent, and one exact `Run live Candidate` action.
+It must create the exact artifact, update SQLite, submit one typed intent, pass the required state and execution-profile Validations, promote all four resources, deliver exactly one effect after Promotion, and export a locally verified signed decision.
 
 The Phase 22 checklist passed from fresh canonical headed, headless, and JSON evidence on this release candidate.
-The other unchecked items are optional live ModelArk conformance steps that require provider capacity at judging time.
+The single unchecked item is the optional provider-backed ModelArk conformance rerun, which requires external free capacity at judging time.
 
 ## Falsifiable claims
 
@@ -153,6 +154,7 @@ Each claim is asserted through server or production-browser tests and is visible
 
 ## Submission artifacts
 
+- [Submission brief and rubric map](SUBMISSION_BRIEF.md)
 - [README and one-command setup](../../README.md)
 - [Product requirements](../product/PRD.md)
 - [Outcome roadmap](../product/OUTCOME_ROADMAP.md)

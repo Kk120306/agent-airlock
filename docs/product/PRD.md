@@ -369,15 +369,16 @@ They make Codex continuity transactional with the workspace and prove the same a
 
 Phases 5 through 7 add recoverable Repair Runs, adversarial resilience, and a deterministic three-minute release experience.
 All three phases are delivered and regression-locked.
-Later-phase work cannot enter the judging path before submission.
+Phase 22 turns that core journey into the canonical recording and reuses Phase 11 signed-chain and zero-upload verification primitives only as evidence, never as Promotion authority.
+The other later-phase capabilities remain outside the three-minute submission story.
 
-### Post-hackathon expansion
+### Optional expansion
 
-Phase 8 delivers the Transactional Resource SDK on the isolated post-hackathon branch.
-Phase 9 delivers competing Agent futures with deterministic one-winner Selection on the same branch.
-Phase 10 delivers deterministic, operator-controlled Adaptive Assurance on the same branch.
-Phase 11 delivers independently verifiable Portable Promotion Receipts on the same branch.
-Phase 12 delivers receiver-controlled federated Candidate admission on the post-hackathon branch.
+Phase 8 delivers the Transactional Resource SDK as an optional extension.
+Phase 9 delivers competing Agent futures with deterministic one-winner Selection as an optional extension.
+Phase 10 delivers deterministic, operator-controlled Adaptive Assurance as an optional extension.
+Phase 11 delivers independently verifiable Portable Promotion Receipts, whose evidence-only signed chain and verifier are reused by the Phase 22 recording.
+Phase 12 delivers receiver-controlled federated Candidate admission as an optional extension.
 One Airlock can export a promoted workspace as a self-verifying signed bundle, while another independently configured Airlock applies its own durable trust policy, materializes only Candidate State, reruns its own Outcome Contract, and owns Promotion or Quarantine.
 The credential-free two-instance browser proof is automated by `npm run test:phase12:real`.
 Phase 13 adds resumable approval-required Admissions without mutating the original machine decision.
