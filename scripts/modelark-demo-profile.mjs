@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { comparableDemoContract } from "./demo-outcome-contract.mjs";
 
 export const liveModelArkAgentName = "Live ModelArk Proof";
 export const liveModelArkAgentDescription =
@@ -58,16 +59,7 @@ export function assertSafeManagedRoot(projectRoot, stateRoot) {
   return resolvedStateRoot;
 }
 
-export function comparableContract(contract) {
-  return {
-    requiredPaths: contract.requiredPaths,
-    protectedPaths: contract.protectedPaths,
-    maxChangedFiles: contract.maxChangedFiles,
-    maxAddedBytes: contract.maxAddedBytes,
-    secretPatterns: contract.secretPatterns,
-    validationCommands: contract.validationCommands,
-  };
-}
+export const comparableContract = comparableDemoContract;
 
 export function buildLiveModelArkDemoEnvironment(
   baseEnvironment,

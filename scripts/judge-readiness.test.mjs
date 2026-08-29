@@ -6,15 +6,30 @@ import {
   normalizeLocalDemoUrl,
 } from "./judge-readiness.mjs";
 import {
+  liveModelArkContract,
   liveModelArkAgentDescription,
   liveModelArkAgentInstructions,
+  liveModelArkAgentName,
 } from "./modelark-demo-profile.mjs";
+import {
+  realRuntimeProofAgentDescription,
+  realRuntimeProofAgentInstructions,
+  realRuntimeProofAgentName,
+  realRuntimeProofContract,
+} from "./runtime-demo-profile.mjs";
+
+function persistedContract(policy) {
+  return {
+    schemaVersion: 1,
+    version: 2,
+    ...structuredClone(policy),
+    createdAt: "2026-08-28T01:00:00.000Z",
+  };
+}
 
 function fixture(mode = "runtime") {
   const runtime = mode === "runtime";
-  const name = runtime ? "Real Runtime Proof" : "Live ModelArk Proof";
-  const requiredArtifact = runtime ? "protocol-proof.txt" : "modelark-proof.txt";
-  const validationName = runtime ? "protocol-content" : "modelark-live-state";
+  const name = runtime ? realRuntimeProofAgentName : liveModelArkAgentName;
   return {
     health: { ok: true, service: "volc-agent-launchpad" },
     system: {
@@ -47,14 +62,16 @@ function fixture(mode = "runtime") {
       {
         id: "agent-proof",
         name,
-        description: runtime ? undefined : liveModelArkAgentDescription,
-        instructions: runtime ? undefined : liveModelArkAgentInstructions,
+        description: runtime
+          ? realRuntimeProofAgentDescription
+          : liveModelArkAgentDescription,
+        instructions: runtime
+          ? realRuntimeProofAgentInstructions
+          : liveModelArkAgentInstructions,
         status: "ready",
-        outcomeContract: {
-          requiredPaths: ["AGENTS.md", requiredArtifact],
-          protectedPaths: ["AGENTS.md"],
-          validationCommands: [{ name: validationName, required: true }],
-        },
+        outcomeContract: persistedContract(
+          runtime ? realRuntimeProofContract : liveModelArkContract,
+        ),
       },
     ],
   };
@@ -142,6 +159,50 @@ test("rejects drifted live ModelArk Agent instructions", async () => {
     "fail",
   );
 });
+
+for (const [label, drift] of [
+  ["schema version", (contract) => (contract.schemaVersion = 2)],
+  ["created timestamp", (contract) => (contract.createdAt = "not-a-timestamp")],
+  ["unknown policy field", (contract) => (contract.allowNetwork = true)],
+  ["required paths", (contract) => contract.requiredPaths.pop()],
+  ["protected paths", (contract) => contract.protectedPaths.pop()],
+  ["changed-file limit", (contract) => (contract.maxChangedFiles += 1)],
+  ["added-byte limit", (contract) => (contract.maxAddedBytes += 1)],
+  [
+    "secret policy",
+    (contract) => contract.secretPatterns.push({ name: "drift", pattern: "drift" }),
+  ],
+  [
+    "validation name",
+    (contract) => (contract.validationCommands[0].name = "drifted-name"),
+  ],
+  [
+    "validation command",
+    (contract) => (contract.validationCommands[0].command = "true"),
+  ],
+  [
+    "validation requirement",
+    (contract) => (contract.validationCommands[0].required = false),
+  ],
+  [
+    "validation timeout",
+    (contract) => (contract.validationCommands[0].timeoutMs += 1),
+  ],
+]) {
+  test(`rejects drifted Runtime ${label}`, async () => {
+    const value = fixture("runtime");
+    drift(value.agents[0].outcomeContract);
+    const report = await inspectJudgeReadiness({
+      expectedMode: "runtime",
+      fetchImpl: fetchFixture(value),
+    });
+    assert.equal(report.ready, false);
+    assert.equal(
+      report.checks.find((item) => item.id === "outcome-contract")?.status,
+      "fail",
+    );
+  });
+}
 
 test("accepts only plain loopback HTTP origins", () => {
   assert.equal(normalizeLocalDemoUrl("http://127.0.0.1:3200"), "http://127.0.0.1:3200");

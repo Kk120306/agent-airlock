@@ -18,6 +18,18 @@ The [architecture notes and Mermaid source](docs/demo/architecture-one-page.md) 
 Then read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [complete architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
+Before submitting, run the zero-network handoff audit:
+
+```bash
+npm run audit:submission
+```
+
+It independently checks the Track 1 copy, architecture source and PNG integrity, current immutable Runtime proof pair, source-control handoff, public video placeholder, and the honest boundary between the canonical fixture proof and optional ModelArk conformance.
+It also reruns `npm run check` and `npm run audit:release` inside the final handoff, so `CORE READY` cannot outlive a failing test, build, link, secret, or release-policy gate.
+It reads only whether ModelArk fields are configured, never prints their values, and makes zero provider requests.
+After the exact pushed revision and final video open signed out, copy the report's `sourceRevision` and rerun `npm run audit:submission -- --confirm-public-revision=EXACT_GIT_SHA --confirm-video-public`, replacing `EXACT_GIT_SHA` with that complete object ID.
+The revision confirmation passes only when the clean local HEAD also matches the local `origin/main` reference.
+
 ## Canonical three-minute recording
 
 The canonical judge recording uses production React and Fastify, the actual pinned Codex CLI, a disposable container Runtime, isolated Candidate State, constrained Validation, the Promotion journal, and durable Portable Trust evidence.

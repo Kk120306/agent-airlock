@@ -1,6 +1,8 @@
 # Agent Airlock - Devpost submission copy
 
-Replace the two bracketed URLs before submitting.
+Replace the YouTube placeholder after recording, push the final clean HEAD, and run `npm run audit:submission -- --confirm-public-revision=EXACT_GIT_SHA --confirm-video-public` before submitting.
+Replace `EXACT_GIT_SHA` with the complete `sourceRevision` printed by the audit after verifying that exact revision signed out.
+The submission audit reruns the complete project check and zero-network release audit before it can report `CORE READY`.
 
 ## Project title
 

@@ -1,9 +1,18 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { comparableExactDemoContract } from "./demo-outcome-contract.mjs";
 import {
+  liveModelArkContract,
   liveModelArkAgentDescription,
   liveModelArkAgentInstructions,
+  liveModelArkAgentName,
 } from "./modelark-demo-profile.mjs";
+import {
+  realRuntimeProofAgentDescription,
+  realRuntimeProofAgentInstructions,
+  realRuntimeProofAgentName,
+  realRuntimeProofContract,
+} from "./runtime-demo-profile.mjs";
 
 const reportSchema = "agent-airlock/judge-readiness-report";
 const supportedModes = new Set(["runtime", "modelark"]);
@@ -78,16 +87,16 @@ function detectedMode(system) {
 function expectedAgent(mode) {
   return mode === "runtime"
     ? {
-        name: "Real Runtime Proof",
-        requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
-        validationName: "protocol-content",
+        name: realRuntimeProofAgentName,
+        description: realRuntimeProofAgentDescription,
+        instructions: realRuntimeProofAgentInstructions,
+        contract: realRuntimeProofContract,
       }
     : {
-        name: "Live ModelArk Proof",
+        name: liveModelArkAgentName,
         description: liveModelArkAgentDescription,
         instructions: liveModelArkAgentInstructions,
-        requiredPaths: ["AGENTS.md", "modelark-proof.txt"],
-        validationName: "modelark-live-state",
+        contract: liveModelArkContract,
       };
 }
 
@@ -130,19 +139,11 @@ export async function inspectJudgeReadiness({
     : [];
   const agent = matches.length === 1 ? matches[0] : null;
   const contract = agent?.outcomeContract;
-  const requiredPathsMatch =
-    Array.isArray(contract?.requiredPaths) &&
-    JSON.stringify(contract.requiredPaths) === JSON.stringify(profile.requiredPaths);
-  const protectedPathsMatch =
-    Array.isArray(contract?.protectedPaths) &&
-    JSON.stringify(contract.protectedPaths) === JSON.stringify(["AGENTS.md"]);
-  const validations = Array.isArray(contract?.validationCommands)
-    ? contract.validationCommands
-    : [];
-  const validationMatches =
-    validations.length === 1 &&
-    validations[0]?.name === profile.validationName &&
-    validations[0]?.required === true;
+  const contractMatches =
+    contract !== null &&
+    typeof contract === "object" &&
+    JSON.stringify(comparableExactDemoContract(contract)) ===
+      JSON.stringify(profile.contract);
   const profileReady =
     mode === evaluatedMode &&
     (evaluatedMode !== "modelark" ||
@@ -167,9 +168,8 @@ export async function inspectJudgeReadiness({
   const identityReady =
     agent !== null &&
     (expectedAgentId === null || agent.id === expectedAgentId) &&
-    (evaluatedMode !== "modelark" ||
-      (agent.description === profile.description &&
-        agent.instructions === profile.instructions));
+    agent.description === profile.description &&
+    agent.instructions === profile.instructions;
   const lifecycleReady = agent?.status === "ready";
 
   return completeReport(evaluatedMode, [
@@ -218,9 +218,9 @@ export async function inspectJudgeReadiness({
     readinessCheck(
       "outcome-contract",
       "Outcome Contract",
-      requiredPathsMatch && protectedPathsMatch && validationMatches ? "pass" : "fail",
-      requiredPathsMatch && protectedPathsMatch && validationMatches
-        ? "The exact protected path, required artifact, and required state Validation are installed."
+      contractMatches ? "pass" : "fail",
+      contractMatches
+        ? "The exact paths, resource limits, secret policy, and required state Validation are installed."
         : "The managed Outcome Contract no longer matches the guaranteed judge path.",
     ),
     readinessCheck(
