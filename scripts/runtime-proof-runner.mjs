@@ -2308,6 +2308,8 @@ const RUNTIME_PROOF_MOBILE_VIEWPORT = Object.freeze({
   width: 390,
   height: 844,
 });
+// Linux Chromium can leave a fractional CSS-pixel edge after integer scrolling.
+const RUNTIME_PROOF_VIEWPORT_EPSILON_PX = 1;
 
 function runtimeProofRunIds(runs) {
   const runIds = {
@@ -2521,7 +2523,8 @@ async function assertInsideRecordingViewport(
   { scroll = false } = {},
 ) {
   if (scroll) await locator.scrollIntoViewIfNeeded();
-  const isInside = await locator.evaluate((element, expectedViewport) => {
+  const isInside = await locator.evaluate((element, expectedBounds) => {
+    const { viewport: expectedViewport, epsilon } = expectedBounds;
     const rect = element.getBoundingClientRect();
     const dialog = element.closest(".receipt-verifier")?.getBoundingClientRect();
     const style = window.getComputedStyle(element);
@@ -2535,17 +2538,20 @@ async function assertInsideRecordingViewport(
       (!details || details.open);
     return (
       visible &&
-      rect.left >= 0 &&
-      rect.top >= 0 &&
-      rect.right <= expectedViewport.width &&
-      rect.bottom <= expectedViewport.height &&
+      rect.left >= -epsilon &&
+      rect.top >= -epsilon &&
+      rect.right <= expectedViewport.width + epsilon &&
+      rect.bottom <= expectedViewport.height + epsilon &&
       (!dialog ||
-        (rect.left >= dialog.left &&
-          rect.top >= dialog.top &&
-          rect.right <= dialog.right &&
-          rect.bottom <= dialog.bottom))
+        (rect.left >= dialog.left - epsilon &&
+          rect.top >= dialog.top - epsilon &&
+          rect.right <= dialog.right + epsilon &&
+          rect.bottom <= dialog.bottom + epsilon))
     );
-  }, viewport);
+  }, {
+    viewport,
+    epsilon: RUNTIME_PROOF_VIEWPORT_EPSILON_PX,
+  });
   if (!isInside) throw new RuntimeProofError("viewport-invalid");
 }
 
@@ -2865,8 +2871,10 @@ export async function createPlaywrightRuntimeProofDriver({
         );
       if (
         !buttonBox ||
-        buttonBox.x < 0 ||
-        buttonBox.x + buttonBox.width > RUNTIME_PROOF_MOBILE_VIEWPORT.width ||
+        buttonBox.x < -RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
+        buttonBox.x + buttonBox.width >
+          RUNTIME_PROOF_MOBILE_VIEWPORT.width +
+            RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
         buttonBox.height < 44 ||
         cardBoxes.length !== 4 ||
         cardBoxes.some((left) => Math.abs(left - cardBoxes[0]) > 0.5)
@@ -2925,8 +2933,10 @@ export async function createPlaywrightRuntimeProofDriver({
       );
       if (
         !dialogBox ||
-        dialogBox.x < 0 ||
-        dialogBox.x + dialogBox.width > RUNTIME_PROOF_MOBILE_VIEWPORT.width ||
+        dialogBox.x < -RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
+        dialogBox.x + dialogBox.width >
+          RUNTIME_PROOF_MOBILE_VIEWPORT.width +
+            RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
         documentWidth > RUNTIME_PROOF_MOBILE_VIEWPORT.width ||
         dialogScrollWidth > dialogClientWidth
       ) {
@@ -3016,12 +3026,14 @@ export async function createPlaywrightRuntimeProofDriver({
           );
           if (
             !desktopBox ||
-            desktopBox.x < 0 ||
-            desktopBox.y < 0 ||
+            desktopBox.x < -RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
+            desktopBox.y < -RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
             desktopBox.x + desktopBox.width >
-              RUNTIME_PROOF_DESKTOP_VIEWPORT.width ||
+              RUNTIME_PROOF_DESKTOP_VIEWPORT.width +
+                RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
             desktopBox.y + desktopBox.height >
-              RUNTIME_PROOF_DESKTOP_VIEWPORT.height ||
+              RUNTIME_PROOF_DESKTOP_VIEWPORT.height +
+                RUNTIME_PROOF_VIEWPORT_EPSILON_PX ||
             desktopHeight > RUNTIME_PROOF_DESKTOP_VIEWPORT.height
           ) {
             throw new Error("desktop brief does not fit");
