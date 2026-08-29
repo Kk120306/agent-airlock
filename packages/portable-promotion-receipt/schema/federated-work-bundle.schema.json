@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/federated-work-bundle-v1.json",
+  "title": "Agent Airlock Federated Work Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "receipt",
+    "artifact",
+    "binding",
+    "bindingDigest",
+    "signatureAlgorithm",
+    "signature",
+    "keyId"
+  ],
+  "properties": {
+    "schema": { "const": "agent-airlock/federated-work-bundle" },
+    "schemaVersion": { "const": 1 },
+    "receipt": { "$ref": "portable-promotion-receipt.schema.json" },
+    "artifact": { "$ref": "workspace-change-set.schema.json" },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schemaVersion",
+        "receiptDigest",
+        "artifactDigest",
+        "artifactProtocol",
+        "baseStateDigest",
+        "resultStateDigest"
+      ],
+      "properties": {
+        "schema": { "const": "agent-airlock/federated-work-binding" },
+        "schemaVersion": { "const": 1 },
+        "receiptDigest": { "$ref": "#/$defs/digest" },
+        "artifactDigest": { "$ref": "#/$defs/digest" },
+        "artifactProtocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "schemaVersion", "pathSemantics"],
+          "properties": {
+            "schema": { "const": "agent-airlock/workspace-change-set" },
+            "schemaVersion": { "const": 1 },
+            "pathSemantics": { "const": "normalized-relative-posix-nfc" }
+          }
+        },
+        "baseStateDigest": { "$ref": "#/$defs/digest" },
+        "resultStateDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "bindingDigest": { "$ref": "#/$defs/digest" },
+    "signatureAlgorithm": { "const": "Ed25519" },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+    "keyId": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

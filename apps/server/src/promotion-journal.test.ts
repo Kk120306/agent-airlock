@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -28,6 +28,7 @@ const source: CanonicalStateReference = {
   sessionContentHash: "sha256:session-source",
   sqliteContentHash: "sha256:sqlite-source",
   outboxContentHash: "sha256:outbox-source",
+  providerVersions: [],
   contentHash: "sha256:source",
 };
 
@@ -55,6 +56,9 @@ const plan: PromotionPlan = {
   sourceSessionHash: source.sessionContentHash,
   sourceSqliteHash: source.sqliteContentHash,
   sourceOutboxHash: source.outboxContentHash,
+  sourceProviderVersions: [],
+  targetProviderVersions: [],
+  resourcePlans: [],
   sourceThreadId: source.codexThreadId,
 };
 
@@ -81,6 +85,8 @@ describe("PromotionJournal", () => {
     });
 
     expect(validated).toMatchObject({
+      schemaVersion: 2,
+      authority: { schemaVersion: 1, kind: "ordinary-run" },
       phase: "validated",
       recoveryResult: {
         threadId: "thread-one",
@@ -110,6 +116,32 @@ describe("PromotionJournal", () => {
     ).resolves.toEqual(installed);
   });
 
+  it("rejects unknown Promotion authority fields before recovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-journal-authority-"));
+    temporaryDirectories.push(root);
+    const journal = new PromotionJournal(root);
+    await journal.initialize();
+    await journal.begin({
+      plan,
+      transaction: createRunTransaction(
+        plan.runId,
+        source,
+        createDefaultOutcomeContract(),
+      ),
+      result: { output: "done", threadId: null, usage: null },
+    });
+    const filePath = path.join(root, plan.runId + ".json");
+    const record = JSON.parse(await readFile(filePath, "utf8")) as {
+      authority: Record<string, unknown>;
+    };
+    record.authority.hiddenWinnerOverride = "other-run";
+    await writeFile(filePath, JSON.stringify(record, null, 2) + "\n", "utf8");
+
+    await expect(journal.read(plan.runId)).rejects.toThrow(
+      /unknown or missing fields/,
+    );
+  });
+
   it("reports a corrupt record without trusting its contents", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "airlock-journal-corrupt-"));
     temporaryDirectories.push(root);
@@ -126,5 +158,50 @@ describe("PromotionJournal", () => {
         message: expect.stringContaining("corrupt"),
       }),
     ]);
+  });
+
+  it("rejects contradictory provider vectors before recovery can act", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-journal-provider-"));
+    temporaryDirectories.push(root);
+    const journal = new PromotionJournal(root);
+    await journal.initialize();
+    const transaction = createRunTransaction(
+      plan.runId,
+      source,
+      createDefaultOutcomeContract(),
+    );
+    await journal.begin({
+      plan,
+      transaction,
+      result: { output: "done", threadId: null, usage: null },
+    });
+    const filePath = path.join(root, plan.runId + ".json");
+    const record = JSON.parse(await readFile(filePath, "utf8")) as {
+      plan: { targetProviderVersions: unknown[] };
+    };
+    record.plan.targetProviderVersions = [
+      {
+        schemaVersion: 1,
+        providerId: "contradictory-provider",
+        resourceKind: "contradictory-resource",
+        versionId: "version-one",
+        fingerprint: "a".repeat(64),
+        metadata: {},
+      },
+    ];
+    await writeFile(filePath, JSON.stringify(record, null, 2) + "\n", "utf8");
+
+    await expect(journal.read(plan.runId)).rejects.toThrow(
+      /provider version vectors provider set is inconsistent/,
+    );
+    await expect(journal.scan()).resolves.toMatchObject({
+      records: [],
+      errors: [
+        {
+          runId: plan.runId,
+          message: expect.stringContaining("corrupt"),
+        },
+      ],
+    });
   });
 });

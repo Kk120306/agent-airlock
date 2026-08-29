@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { RunCancelledError } from "./errors.js";
+import { resourceEnvironmentName } from "./resource-registry.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -18,6 +19,8 @@ export function buildCodexEnvironment(
   codexHomePath: string,
   outboxPath?: string,
   repairReferencePath?: string | null,
+  resourceBindings: RunnerRequest["resourceBindings"] = [],
+  tokenBudget: RunnerRequest["tokenBudget"] = undefined,
 ): NodeJS.ProcessEnv {
   const inheritedNames = [
     "PATH",
@@ -41,7 +44,17 @@ export function buildCodexEnvironment(
     ...(repairReferencePath
       ? { AIRLOCK_REPAIR_REFERENCE_PATH: repairReferencePath }
       : {}),
+    ...(config.demoMode && tokenBudget
+      ? {
+          AIRLOCK_MAXIMUM_TOTAL_TOKENS: String(
+            tokenBudget.maximumTotalTokens,
+          ),
+        }
+      : {}),
   };
+  for (const binding of resourceBindings) {
+    environment[resourceEnvironmentName(binding.providerId)] = binding.hostPath;
+  }
   for (const name of inheritedNames) {
     if (process.env[name] !== undefined) environment[name] = process.env[name];
   }
@@ -61,6 +74,7 @@ export function buildCodexArgs(
   workspacePath = request.workspacePath,
   outboxDirectory = path.dirname(request.outboxPath),
   repairReferencePath = request.repairReferencePath,
+  resourcePaths = request.resourceBindings?.map((binding) => binding.hostPath) ?? [],
 ): string[] {
   const args = [
     "exec",
@@ -73,6 +87,7 @@ export function buildCodexArgs(
     "--add-dir",
     outboxDirectory,
     ...(repairReferencePath ? ["--add-dir", repairReferencePath] : []),
+    ...resourcePaths.flatMap((resourcePath) => ["--add-dir", resourcePath]),
   ];
   if (request.threadId) {
     args.push("resume", request.threadId, request.prompt);
@@ -128,9 +143,11 @@ export function parseCodexEventLine(line: string, parsed: ParsedEvents): void {
 }
 
 export class CodexRunner implements AgentRunner {
+  readonly tokenBudgetEnforcement: "provider-boundary" | undefined;
   private readonly active = new Map<
     string,
     {
+      agentId: string;
       child: ChildProcess;
       cancelled: boolean;
       timedOut: boolean;
@@ -140,7 +157,11 @@ export class CodexRunner implements AgentRunner {
     }
   >();
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(private readonly config: AppConfig) {
+    this.tokenBudgetEnforcement = config.demoMode
+      ? "provider-boundary"
+      : undefined;
+  }
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -154,20 +175,35 @@ export class CodexRunner implements AgentRunner {
     }
   }
 
-  async cancel(agentId: string): Promise<boolean> {
-    const active = this.active.get(agentId);
-    if (!active) {
-      return false;
+  async cancel(agentId: string, executionId?: string): Promise<boolean> {
+    const scoped = executionId ? this.active.get(executionId) : null;
+    const active = scoped
+      ? scoped.agentId === agentId
+        ? [scoped]
+        : []
+      : executionId
+        ? []
+        : [...this.active.values()].filter(
+            (execution) => execution.agentId === agentId,
+          );
+    if (active.length === 0) return false;
+    for (const execution of active) {
+      execution.cancelled = true;
+      this.terminate(execution);
     }
-    active.cancelled = true;
-    this.terminate(active);
-    await active.settled;
+    await Promise.all(active.map((execution) => execution.settled));
     return true;
   }
 
   async run(request: RunnerRequest): Promise<RunnerResult> {
-    if (this.active.has(request.agentId)) {
-      throw new Error("Agent already has an active Codex process");
+    const executionId = request.executionId ?? request.agentId;
+    if (this.active.has(executionId)) {
+      throw new Error("Execution already has an active Codex process");
+    }
+    if (request.resourceBindings?.some((binding) => binding.access === "read-only")) {
+      throw new Error(
+        "Local-process Runtime cannot enforce read-only Transactional Resource bindings",
+      );
     }
 
     const args = buildCodexArgs(request, this.config.codexSandboxMode);
@@ -178,6 +214,8 @@ export class CodexRunner implements AgentRunner {
         request.codexHomePath,
         request.outboxPath,
         request.repairReferencePath,
+        request.resourceBindings,
+        request.tokenBudget,
       ),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -186,6 +224,7 @@ export class CodexRunner implements AgentRunner {
       child.once("error", () => resolve());
     });
     const active = {
+      agentId: request.agentId,
       child,
       cancelled: false,
       timedOut: false,
@@ -193,7 +232,7 @@ export class CodexRunner implements AgentRunner {
       settled,
       forceKillTimer: null as NodeJS.Timeout | null,
     };
-    this.active.set(request.agentId, active);
+    this.active.set(executionId, active);
 
     const parsed: ParsedEvents = {
       messages: [],
@@ -261,6 +300,7 @@ export class CodexRunner implements AgentRunner {
       if (!output) {
         throw new Error("Codex completed without an agent message");
       }
+      assertTrustedTokenBudget(request, parsed.usage);
       return {
         output,
         threadId: parsed.threadId,
@@ -269,7 +309,7 @@ export class CodexRunner implements AgentRunner {
     } finally {
       clearTimeout(timeout);
       if (active.forceKillTimer) clearTimeout(active.forceKillTimer);
-      this.active.delete(request.agentId);
+      this.active.delete(executionId);
     }
   }
 
@@ -285,4 +325,30 @@ export class CodexRunner implements AgentRunner {
     }
   }
 
+}
+
+export function assertTrustedTokenBudget(
+  request: RunnerRequest,
+  usage: RunUsage | null,
+): void {
+  if (!request.tokenBudget) return;
+  const inputTokens = usage?.inputTokens;
+  const outputTokens = usage?.outputTokens;
+  if (
+    request.tokenBudget.schemaVersion !== 1 ||
+    !Number.isSafeInteger(request.tokenBudget.maximumTotalTokens) ||
+    request.tokenBudget.maximumTotalTokens < 1 ||
+    !Number.isSafeInteger(inputTokens) ||
+    !Number.isSafeInteger(outputTokens) ||
+    (inputTokens ?? -1) < 0 ||
+    (outputTokens ?? -1) < 0
+  ) {
+    throw new Error("Codex omitted trusted total-token budget evidence");
+  }
+  if (
+    (inputTokens as number) + (outputTokens as number) >
+    request.tokenBudget.maximumTotalTokens
+  ) {
+    throw new Error("Codex exceeded its reserved total-token allowance");
+  }
 }

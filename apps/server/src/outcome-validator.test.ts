@@ -84,9 +84,18 @@ describe("OutcomeValidator", () => {
       "required-paths",
       "change-limits",
       "secret-patterns",
+      "assurance-catalog-rule:private-key-block:v1",
     ]);
-    expect(result.validations.every((validation) => validation.status === "passed"))
-      .toBe(true);
+    expect(
+      result.validations
+        .filter((validation) => validation.required)
+        .every((validation) => validation.status === "passed"),
+    ).toBe(true);
+    expect(result.validations.at(-1)).toMatchObject({
+      status: "error",
+      required: false,
+      summary: "Trusted catalog detector lacks complete bounded file evidence",
+    });
   });
 
   it("counts the complete candidate payload for same-size file replacements", async () => {
@@ -140,6 +149,76 @@ describe("OutcomeValidator", () => {
       summary: "Secret-pattern findings: leak.txt matched ark-api-key-assignment",
     });
     expect(JSON.stringify(result)).not.toContain("super-secret-value-12345");
+  });
+
+  it("records a bounded optional trusted-catalog secret observation", async () => {
+    const { canonical, candidate } = await makeWorkspaces();
+    await writeFile(
+      path.join(candidate, "fixture.pem"),
+      "-----BEGIN " + "PRIVATE KEY-----\nnot-retained\n-----END PRIVATE KEY-----\n",
+    );
+    const validator = new OutcomeValidator(
+      new FixtureExecutor(() => passingResult()),
+    );
+
+    const result = await validator.validate(
+      canonical,
+      candidate,
+      createDefaultOutcomeContract(),
+      "run-observation",
+    );
+    const observation = result.validations.find(
+      (validation) =>
+        validation.name === "assurance-catalog-rule:private-key-block:v1",
+    );
+
+    expect(observation).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        required: false,
+        summary: "Trusted catalog detector matched in 1 changed file(s)",
+        output: null,
+      }),
+    );
+    expect(JSON.stringify(observation)).not.toContain("not-retained");
+  });
+
+  it("reports unknown catalog evidence after the aggregate scan budget", async () => {
+    const { canonical, candidate } = await makeWorkspaces();
+    await Promise.all(
+      Array.from({ length: 100 }, (_, index) =>
+        writeFile(
+          path.join(candidate, "a-" + String(index).padStart(3, "0") + ".txt"),
+          "bounded\n",
+        ),
+      ),
+    );
+    await writeFile(
+      path.join(candidate, "z-over-budget.pem"),
+      "-----BEGIN " + "PRIVATE KEY-----\nnot-retained\n",
+    );
+    const validator = new OutcomeValidator(
+      new FixtureExecutor(() => passingResult()),
+    );
+
+    const result = await validator.validate(
+      canonical,
+      candidate,
+      createDefaultOutcomeContract(),
+      "run-observation-budget",
+    );
+    expect(
+      result.validations.find(
+        (validation) =>
+          validation.name === "assurance-catalog-rule:private-key-block:v1",
+      ),
+    ).toMatchObject({
+      status: "error",
+      required: false,
+      summary: "Trusted catalog detector lacks complete bounded file evidence",
+      output: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("not-retained");
   });
 
   it("bounds and redacts command evidence while preserving required severity", async () => {

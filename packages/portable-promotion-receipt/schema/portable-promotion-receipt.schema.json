@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/portable-promotion-envelope-v1.json",
+  "title": "Agent Airlock Portable Promotion Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "receipt",
+    "receiptDigest",
+    "signatureAlgorithm",
+    "signature",
+    "keyId",
+    "publicJwk",
+    "disclosures"
+  ],
+  "properties": {
+    "schema": { "const": "agent-airlock/portable-promotion-envelope" },
+    "schemaVersion": { "const": 1 },
+    "receipt": { "$ref": "#/$defs/receipt" },
+    "receiptDigest": { "$ref": "#/$defs/digest" },
+    "signatureAlgorithm": { "const": "Ed25519" },
+    "signature": { "$ref": "#/$defs/base64url" },
+    "keyId": { "$ref": "#/$defs/digest" },
+    "publicJwk": { "$ref": "#/$defs/publicJwk" },
+    "disclosures": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/disclosure" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "base64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "publicJwk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["crv", "kty", "x"],
+      "properties": {
+        "crv": { "const": "Ed25519" },
+        "kty": { "const": "OKP" },
+        "x": { "$ref": "#/$defs/base64url" }
+      }
+    },
+    "builtinResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "fingerprint"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/identifier" },
+        "fingerprint": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "providerResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "resourceKind", "versionId", "fingerprint"],
+      "properties": {
+        "providerId": { "$ref": "#/$defs/identifier" },
+        "resourceKind": { "$ref": "#/$defs/identifier" },
+        "versionId": { "$ref": "#/$defs/identifier" },
+        "fingerprint": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateId", "compositeHash", "builtinResources", "providerResources"],
+      "properties": {
+        "stateId": { "$ref": "#/$defs/identifier" },
+        "compositeHash": { "$ref": "#/$defs/digest" },
+        "builtinResources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/builtinResource" }
+        },
+        "providerResources": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/providerResource" }
+        }
+      }
+    },
+    "evidenceLeaf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "identity",
+        "category",
+        "status",
+        "required",
+        "durationMs",
+        "summary",
+        "valueHash"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "identity": { "$ref": "#/$defs/identifier" },
+        "category": {
+          "enum": ["validation", "resource", "external-action", "selection"]
+        },
+        "status": {
+          "enum": ["passed", "failed", "skipped", "error", "recorded"]
+        },
+        "required": { "type": "boolean" },
+        "durationMs": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "summary": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "valueHash": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "disclosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leaf", "leafIndex", "totalLeaves", "siblings"],
+      "properties": {
+        "leaf": { "$ref": "#/$defs/evidenceLeaf" },
+        "leafIndex": { "type": "integer", "minimum": 0, "maximum": 9999 },
+        "totalLeaves": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "siblings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["direction", "hash"],
+            "properties": {
+              "direction": { "enum": ["left", "right"] },
+              "hash": { "$ref": "#/$defs/digest" }
+            }
+          }
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "decision",
+        "state",
+        "outcomeContract",
+        "validationEvidence",
+        "externalActions",
+        "selection",
+        "assurance",
+        "ancestry"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "schemaVersion", "canonicalization", "digestAlgorithm"],
+          "properties": {
+            "schema": { "const": "agent-airlock/portable-promotion-receipt" },
+            "schemaVersion": { "const": 1 },
+            "canonicalization": { "const": "RFC8785" },
+            "digestAlgorithm": { "const": "SHA-256" }
+          }
+        },
+        "decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runId", "agentId", "disposition", "decidedAt", "clockClaim"],
+          "properties": {
+            "runId": { "$ref": "#/$defs/identifier" },
+            "agentId": { "$ref": "#/$defs/identifier" },
+            "disposition": { "enum": ["promoted", "quarantined", "discarded", "cancelled"] },
+            "decidedAt": { "type": "string", "format": "date-time" },
+            "clockClaim": { "const": "signer-clock-not-external-timestamp" }
+          }
+        },
+        "state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["before", "after"],
+          "properties": {
+            "before": { "$ref": "#/$defs/state" },
+            "after": { "$ref": "#/$defs/state" }
+          }
+        },
+        "outcomeContract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "version", "digest"],
+          "properties": {
+            "schemaVersion": { "type": "integer", "minimum": 1 },
+            "version": { "type": "integer", "minimum": 1 },
+            "digest": { "$ref": "#/$defs/digest" }
+          }
+        },
+        "validationEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root", "leafCount", "ordering"],
+          "properties": {
+            "root": { "$ref": "#/$defs/digest" },
+            "leafCount": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "ordering": { "const": "canonical-identity-ascending" }
+          }
+        },
+        "externalActions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commitment", "deliveredCount"],
+          "properties": {
+            "commitment": { "$ref": "#/$defs/digest" },
+            "deliveredCount": { "type": "integer", "minimum": 0, "maximum": 10000 }
+          }
+        },
+        "selection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["candidateSetId", "decisionDigest"],
+              "properties": {
+                "candidateSetId": { "$ref": "#/$defs/identifier" },
+                "decisionDigest": { "$ref": "#/$defs/digest" }
+              }
+            }
+          ]
+        },
+        "assurance": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["proposalId", "contractVersion"],
+              "properties": {
+                "proposalId": { "$ref": "#/$defs/identifier" },
+                "contractVersion": { "type": "integer", "minimum": 1 }
+              }
+            }
+          ]
+        },
+        "ancestry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rootRunId", "parentRunId", "depth", "maxDepth", "previousReceiptDigest"],
+          "properties": {
+            "rootRunId": { "$ref": "#/$defs/identifier" },
+            "parentRunId": {
+              "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/identifier" }]
+            },
+            "depth": { "type": "integer", "minimum": 0, "maximum": 64 },
+            "maxDepth": { "type": "integer", "minimum": 0, "maximum": 64 },
+            "previousReceiptDigest": {
+              "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+            }
+          }
+        }
+      }
+    }
+  }
+}

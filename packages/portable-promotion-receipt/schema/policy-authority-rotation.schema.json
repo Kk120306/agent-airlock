@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/policy-authority-rotation-v1.json",
+  "title": "Agent Airlock Policy-Authority Rotation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "rotationId",
+    "issuedAt",
+    "effectiveAt",
+    "expiresAt",
+    "previousAuthorityKeyId",
+    "nextAuthorityKeyId",
+    "nextAuthorityPublicJwk"
+  ],
+  "properties": {
+    "schema": { "const": "agent-airlock/policy-authority-rotation" },
+    "schemaVersion": { "const": 1 },
+    "rotationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "effectiveAt": { "type": "string", "format": "date-time" },
+    "expiresAt": {
+      "oneOf": [
+        { "type": "string", "format": "date-time" },
+        { "type": "null" }
+      ]
+    },
+    "previousAuthorityKeyId": { "$ref": "#/$defs/digest" },
+    "nextAuthorityKeyId": { "$ref": "#/$defs/digest" },
+    "nextAuthorityPublicJwk": { "$ref": "#/$defs/publicJwk" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "base64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "publicJwk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["crv", "kty", "x"],
+      "properties": {
+        "crv": { "const": "Ed25519" },
+        "kty": { "const": "OKP" },
+        "x": { "$ref": "#/$defs/base64url" }
+      }
+    }
+  }
+}

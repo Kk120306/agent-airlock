@@ -6,6 +6,13 @@ dist/
 .data/
 .e2e-baseline/
 .e2e-demo/
+.e2e-container-browser/
+.e2e-container-demo/
+.e2e-phase8/
+.e2e-phase10/
+.e2e-phase11-real/
+.e2e-phase12-producer/
+.e2e-phase12-receiver/
 .local/
 data/
 workspaces/

@@ -1,0 +1,46 @@
+{
+  "name": "@agent-airlock/portable-promotion-receipt",
+  "version": "0.1.0",
+  "description": "Offline-verifiable signed Promotion Receipts for Agent Airlock.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-airlock-receipt": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser-verifier.d.ts",
+      "import": "./dist/browser-verifier.js"
+    },
+    "./schema": "./schema/portable-promotion-receipt.schema.json",
+    "./trust-policy-schema": "./schema/signing-key-trust-policy.schema.json",
+    "./signed-trust-policy-schema": "./schema/signed-signing-key-trust-policy.schema.json",
+    "./authority-rotation-schema": "./schema/policy-authority-rotation.schema.json",
+    "./signed-authority-rotation-schema": "./schema/signed-policy-authority-rotation.schema.json",
+    "./evidence-packet-schema": "./schema/portable-evidence-packet.schema.json",
+    "./decision-chain-schema": "./schema/portable-decision-chain.schema.json",
+    "./federated-work-bundle-schema": "./schema/federated-work-bundle.schema.json",
+    "./workspace-change-set-schema": "./schema/workspace-change-set.schema.json"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "vectors",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

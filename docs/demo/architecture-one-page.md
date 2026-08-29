@@ -33,18 +33,17 @@ flowchart LR
 
     subgraph Untrusted["Untrusted execution"]
         Runtime["Starter-kit Codex Runtime"]
-        Fixture["Deterministic local Codex protocol fixture"]
+        Fixture["Deterministic local Responses inference fixture"]
         Candidate["Run-owned workspace, Codex home, SQLite, and action outbox"]
         Check["Disposable validation copy in constrained container"]
         Ark["ModelArk Responses API"]
         Runtime <--> Candidate
-        Runtime <--> Ark
-        Fixture <--> Candidate
+        Runtime <-->|Credentialed live inference| Ark
+        Runtime <-->|Free deterministic inference| Fixture
         Candidate --> Check
     end
 
-    Airlock -->|Credentialed POC| Runtime
-    Airlock -->|Free judge demo| Fixture
+    Airlock -->|Every real-Runtime judge Run| Runtime
     Candidate --> Validate
     Check --> Validate
 
@@ -67,11 +66,19 @@ flowchart LR
         Dispatcher --> Mock
     end
 
+    subgraph Evidence["Portable evidence, never Promotion authority"]
+        Chain["Signed two-decision chain"]
+        Verifier["Browser-local zero-upload verifier"]
+        Chain --> Verifier
+    end
+
     Manifest -->|Advance exactly once| Versions
     Manifest -->|Only after advance| Dispatcher
     Dispatcher -->|Receipt acknowledgement| Journal
     Canonical -->|Copy at Run start| Candidate
     Receipt --> UI
+    Receipt -->|Export redacted evidence| Chain
+    UI -->|Open exact chain| Verifier
     Decision -->|No accepted mutation| Quarantine
     Canonical -->|Exact freshness match| Reference
 ```
@@ -80,16 +87,17 @@ flowchart LR
 
 1. Airlock resolves and verifies the current immutable Canonical State.
 2. Airlock copies its workspace, Codex home, and SQLite database into Run-owned Candidate State and creates a fresh dedicated outbox.
-3. The credentialed POC uses Codex and ModelArk, while the free judge demo substitutes a deterministic local protocol fixture at the same `AgentRunner` seam.
-4. Either provider may change files, data, reasoning, and supported action intents only inside Candidate State.
-5. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
-6. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
-7. A pass first records an approved decision, then moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
-8. Only after that advance may the idempotent mock consumer claim a validated notification intent, and every boundary advances the monotonic journal.
-9. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
-10. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
-11. The operator may discard mutable Quarantine state or fork one bounded Repair Run that resumes rejected memory, preserves useful work, uses a fresh outbox, and must pass the original contract before Promotion.
-12. After interruption, startup verifies the journal, installed version, canonical manifest, and mock receipts before reconstructing operator-facing metadata.
+3. Both real-Runtime judge paths execute the pinned Codex CLI in a disposable container against the same Candidate State and `AgentRunner` seam.
+4. The credentialed path supplies Codex with ModelArk inference, while the free path supplies deterministic Responses-protocol inference and labels that substitution in the terminal, API, and browser.
+5. Codex may change files, data, reasoning, and supported action intents only inside Candidate State.
+6. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
+7. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
+8. A pass first records an approved decision, then moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
+9. Only after that advance may the idempotent mock consumer claim a validated notification intent, and every boundary advances the monotonic journal.
+10. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
+11. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
+12. The operator may discard mutable Quarantine state or fork one bounded Repair Run that resumes rejected memory, preserves useful work, uses a fresh outbox, and must pass the original contract before Promotion.
+13. After interruption, startup verifies the journal, installed version, canonical manifest, and mock receipts before reconstructing operator-facing metadata.
 
 ## Trust and recovery boundary
 
@@ -99,7 +107,7 @@ The atomic canonical manifest is the only source of accepted state, while the jo
 Canonical workspace, Codex-session, and SQLite versions are never mounted writable into the Runtime or validation container.
 The platform-owned delivery store is never mounted into either execution boundary.
 
-## Implemented and tested in Phases 0-7
+## Implemented and tested through the Phase 22 recording release
 
 - Starter-kit Agent CRUD, lifecycle controls, Playground chat, persistence, Codex runner seam, and container path remain intact.
 - Promotion, destructive Quarantine, Runtime failure, and cancellation preserve the documented canonical-state invariant.
@@ -117,6 +125,11 @@ The platform-owned delivery store is never mounted into either execution boundar
 - A physical fingerprint contradiction fails closed with visible recovery evidence, while root-confined retention preserves bounded evidence and unrelated host data.
 - One loopback-only command seeds the four-step production demo, discloses the deterministic fixture, and preserves Agent state across restart without a ModelArk credential or paid inference.
 - A dedicated production Chrome journey proves the complete hero path and asserts that the 390-pixel viewport has no document-level overflow.
+- The real-Codex judge path proves one model-directed Candidate mutation across an exact file, SQLite row, persistent session, and deferred effect before showing Whole-Agent proof complete.
+- A credentialed live path requires a fresh generated-output preflight bound to the configured model and provider origin, the same four-resource result, an execution-profile commitment, and an independent artifact-and-database Validation before it presents ModelArk conformance as complete.
+- Signed Promotion Receipts bind redacted decision evidence into a Merkle root and verify offline without the Airlock server, ModelArk, a wallet, or a network request.
+- Optional selective disclosure, local transparency proofs, and digest-only EVM calldata add portable trust without making a public blockchain transaction part of Promotion.
+- The canonical recording creates exactly three fresh real-Runtime Runs, derives one Outcome Brief from persisted evidence, and verifies the rejected-parent to promoted-Repair chain with zero uploads or API calls.
 
 ## Deliberate non-claims
 

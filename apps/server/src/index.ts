@@ -1,18 +1,63 @@
 import path from "node:path";
+import {
+  HttpObjectResourceProvider,
+  versionReference as httpObjectVersionReference,
+} from "@agent-airlock/http-object-resource";
 import { AgentService } from "./agent-service.js";
 import { createApp } from "./app.js";
 import { loadConfig, writeCodexConfig } from "./config.js";
 import { createRunner } from "./runner-factory.js";
 import { JsonStore } from "./store.js";
+import { ResourceCoordinator } from "./resource-coordinator.js";
+import { ResourceRegistry } from "./resource-registry.js";
 import { WorkspaceManager } from "./workspace.js";
 
 const config = loadConfig();
 await writeCodexConfig(config);
 
 const store = new JsonStore(path.join(config.dataDirectory, "launchpad.json"));
-const workspaces = new WorkspaceManager(config.workspaceRoot, config.codexHome);
+const resourceCoordinator = new ResourceCoordinator(
+  new ResourceRegistry(
+    config.httpObjectResource
+      ? [
+          {
+            provider: new HttpObjectResourceProvider({
+              baseUrl: config.httpObjectResource.baseUrl,
+              ...(config.httpObjectResource.socketPath
+                ? { socketPath: config.httpObjectResource.socketPath }
+                : {}),
+            }),
+            initialVersion: httpObjectVersionReference(
+              config.httpObjectResource.initialVersionId,
+              config.httpObjectResource.initialFingerprint,
+            ),
+          },
+        ]
+      : [],
+    {
+      supportedRuntimeAccess:
+        config.runtimeProvider === "container"
+          ? ["none", "read-only", "read-write"]
+          : ["none", "read-write"],
+    },
+  ),
+);
+const workspaces = new WorkspaceManager(
+  config.workspaceRoot,
+  config.codexHome,
+  undefined,
+  resourceCoordinator.initialVersions(),
+);
 const runner = createRunner(config);
-const service = new AgentService(config, store, workspaces, runner);
+const service = new AgentService(
+  config,
+  store,
+  workspaces,
+  runner,
+  undefined,
+  undefined,
+  resourceCoordinator,
+);
 await service.initialize();
 if (config.demoMode && service.listAgents().length === 0) {
   await service.createAgent({

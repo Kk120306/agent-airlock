@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { ResourceLifecycleError } from "@agent-airlock/transactional-resource-sdk";
+import type {
+  ResourcePromotionPlan,
+  ResourceQuarantineHandle,
+  ResourceVersionReference,
+} from "@agent-airlock/transactional-resource-sdk";
 import {
   EXTERNAL_ACTION_BYPASS_DISCLOSURE,
   ExternalActionOutbox,
@@ -11,7 +17,17 @@ import {
 import { RunCancelledError } from "./errors.js";
 import { OutcomeValidator } from "./outcome-validator.js";
 import {
+  appendBoundedResourceEvent,
+  ResourceCoordinator,
+  ResourcePreparationError,
+  ResourceQuarantineError,
+  ResourceRuntimeBoundaryError,
+  type CoordinatedPreparedResource,
+  type CoordinatedResourceEvidence,
+} from "./resource-coordinator.js";
+import {
   PromotionJournal,
+  type PromotionAuthority,
   type PromotionJournalRecord,
 } from "./promotion-journal.js";
 import { SQLITE_RELATIVE_PATH, SqliteResource } from "./sqlite-resource.js";
@@ -25,7 +41,10 @@ import type {
   RunTransactionStatus,
   RunnerRequest,
   RunnerResult,
+  SealedCandidateReference,
+  ValidationEvidence,
 } from "./types.js";
+import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js";
 import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
@@ -34,14 +53,53 @@ export interface AirlockRunRequest extends Omit<RunnerRequest, "outboxPath"> {
   runId: string;
   canonicalStateId: string;
   repairSourceRunId?: string | null;
+  repairProviderQuarantines?: ResourceQuarantineHandle[];
 }
 
 export interface AirlockRunResult extends RunnerResult {
   transaction: RunTransaction;
   canonicalState: CanonicalStateReference | null;
+  sealedCandidate?: SealedCandidateReference;
 }
 
-export type TransactionProgress = (transaction: RunTransaction) => Promise<void>;
+export interface DeferredSelectionIdentity {
+  candidateSetId: string;
+  competitorId: string;
+}
+
+export interface AirlockRunOptions {
+  deferPromotionFor?: DeferredSelectionIdentity;
+}
+
+export interface FederatedRunIdentity {
+  admissionId: string;
+  importIdentifier: string;
+  recordDigest: string;
+  producerId: string;
+  policyDigest: string;
+  pendingRecordDigest?: string;
+  approvalDecisionDigest?: string;
+}
+
+export interface PromotionRecoveryAuthorityContext {
+  candidateSetRunIds: ReadonlySet<string>;
+  expectedCandidateSetAuthorities: ReadonlyMap<string, PromotionAuthority>;
+  expectedFederatedAuthorities: ReadonlyMap<string, PromotionAuthority>;
+  terminalPromotionTransactions: ReadonlyMap<string, RunTransaction>;
+}
+
+export class StaleCandidateSourceError extends Error {
+  constructor(
+    message = "Canonical State changed before selected Candidate Promotion",
+  ) {
+    super(message);
+    this.name = "StaleCandidateSourceError";
+  }
+}
+
+export type TransactionProgress = (
+  transaction: RunTransaction,
+) => Promise<void>;
 
 export type PromotionFaultPoint =
   | "after-validated"
@@ -57,6 +115,11 @@ export type PromotionFaultInjector = (
   point: PromotionFaultPoint,
   runId: string,
 ) => void | Promise<void>;
+
+export type RecoveryErrorSanitizer = (
+  error: unknown,
+  fallback: string,
+) => string;
 
 export interface ReconciledPromotion {
   runId: string;
@@ -94,6 +157,7 @@ export function createRunTransaction(
 ): RunTransaction {
   return {
     id: runId,
+    assuranceEvidenceVersion: 1,
     status: "preparing",
     disposition: null,
     candidateStateId: null,
@@ -139,6 +203,8 @@ export function createRunTransaction(
         summary: "Typed intents remain deferred until Promotion",
       },
     ],
+    providerResources: [],
+    providerResourceEvents: [],
     sqlite: null,
     externalActions: {
       outboxPath: "Candidate State/outbox/intents.jsonl",
@@ -174,8 +240,10 @@ export function createRunTransaction(
 }
 
 export class AirlockRunner {
-  private readonly activeAgentIds = new Set<string>();
+  private readonly activeAgentCounts = new Map<string, number>();
+  private readonly activeExecutionIds = new Set<string>();
   private readonly cancellationRequests = new Set<string>();
+  private readonly executionCancellationRequests = new Set<string>();
 
   constructor(
     private readonly inner: AgentRunner,
@@ -185,29 +253,162 @@ export class AirlockRunner {
     private readonly actionOutbox: ExternalActionOutbox,
     private readonly actionDispatcher: MockExternalActionDispatcher,
     private readonly promotionJournal: PromotionJournal,
+    private readonly resources: ResourceCoordinator,
     private readonly injectPromotionFault?: PromotionFaultInjector,
+    private readonly executionProfileEvidence?: ValidationEvidence,
+    private readonly sanitizeRecoveryError: RecoveryErrorSanitizer = (
+      error,
+      fallback,
+    ) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return (message.trim() || fallback).slice(0, 500);
+    },
   ) {}
 
   async isAvailable(): Promise<boolean> {
     return this.inner.isAvailable();
   }
 
-  async cancel(agentId: string): Promise<boolean> {
-    if (!this.activeAgentIds.has(agentId)) return this.inner.cancel(agentId);
+  async cancel(agentId: string, executionId?: string): Promise<boolean> {
+    if (executionId) {
+      if (!this.activeExecutionIds.has(executionId)) {
+        return this.inner.cancel(agentId, executionId);
+      }
+      this.executionCancellationRequests.add(executionId);
+      try {
+        return await this.inner.cancel(agentId, executionId);
+      } finally {
+        if (!this.activeExecutionIds.has(executionId)) {
+          this.executionCancellationRequests.delete(executionId);
+        }
+      }
+    }
+    if (!this.activeAgentCounts.has(agentId)) return this.inner.cancel(agentId);
     this.cancellationRequests.add(agentId);
     await this.inner.cancel(agentId);
     return true;
+  }
+
+  canRepairProviderQuarantine(transaction: RunTransaction): boolean {
+    const manifests = this.resources.manifests();
+    if (manifests.length === 0) return true;
+    const quarantines = new Map(
+      transaction.providerResources.flatMap((resource) =>
+        resource.quarantine
+          ? [[resource.providerId, resource.quarantine] as const]
+          : [],
+      ),
+    );
+    return manifests.every((manifest) => quarantines.has(manifest.providerId));
+  }
+
+  async discardProviderQuarantines(
+    agentId: string,
+    transaction: RunTransaction,
+    onProgress?: TransactionProgress,
+  ): Promise<RunTransaction> {
+    if (
+      transaction.providerResources.length === 0 &&
+      !hasFailedProviderPrepare(transaction)
+    ) {
+      return structuredClone(transaction);
+    }
+    if (!transaction.quarantinePath || !transaction.candidateStateId) {
+      throw new Error("Provider Quarantine has no retained Candidate State");
+    }
+    return this.discardRetainedProviderState(
+      agentId,
+      transaction,
+      transaction.quarantinePath,
+      onProgress,
+    );
+  }
+
+  async discardRetainedProviderState(
+    agentId: string,
+    transaction: RunTransaction,
+    retainedStateRoot: string,
+    onProgress?: TransactionProgress,
+  ): Promise<RunTransaction> {
+    const prepareFailed = hasFailedProviderPrepare(transaction);
+    if (transaction.providerResources.length === 0 && !prepareFailed) {
+      return structuredClone(transaction);
+    }
+    if (!transaction.candidateStateId) {
+      throw new Error(
+        "Provider Candidate has no retained Candidate State identifier",
+      );
+    }
+    const candidateResourcesRoot = path.join(retainedStateRoot, "resources");
+    const providerIds = await this.workspaces.retainedProviderIds(
+      transaction.id,
+      retainedStateRoot,
+    );
+    const prepared = await this.resources.restorePrepared(
+      candidateResourcesRoot,
+      transaction.providerResources,
+      {
+        allowPartial: prepareFailed,
+        providerIds,
+      },
+    );
+    const next = structuredClone(transaction);
+    await this.resources.discardAll({
+      agentId,
+      runId: transaction.id,
+      candidateStateId: transaction.candidateStateId,
+      candidateResourcesRoot,
+      prepared,
+      quarantines: transaction.providerResources.flatMap((resource) =>
+        resource.quarantine ? [resource.quarantine] : [],
+      ),
+      allowPartialPrepared: prepareFailed,
+      providerIds,
+      onEvent: async (event) => {
+        appendBoundedResourceEvent(next.providerResourceEvents, event);
+        await onProgress?.(next);
+      },
+      onDiscard: async (results) => {
+        next.providerResources = markProvidersDiscarded(
+          next.providerResources,
+          results.map((result) => result.providerId),
+        );
+        await onProgress?.(next);
+      },
+    });
+    next.providerResources = markProviderDisposition(
+      next.providerResources,
+      "discarded",
+    );
+    return next;
   }
 
   async run(
     request: AirlockRunRequest,
     initialTransaction: RunTransaction,
     onProgress: TransactionProgress,
+    options: AirlockRunOptions = {},
   ): Promise<AirlockRunResult> {
     let transaction = structuredClone(initialTransaction);
     let candidatePrepared = false;
     let parsedIntents: ParsedExternalActionIntent[] = [];
-    this.activeAgentIds.add(request.agentId);
+    let preparedResources: CoordinatedPreparedResource[] = [];
+    let providerEvidence: CoordinatedResourceEvidence[] = [];
+    let providerPlans: ResourcePromotionPlan[] = [];
+    let providerQuarantines: ResourceQuarantineHandle[] = [];
+    let candidateResourcesRoot = "";
+    let candidateStateId = "";
+    const recordResourceEvent = async (
+      event: RunTransaction["providerResourceEvents"][number],
+    ) => {
+      appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      await onProgress(transaction);
+    };
+    this.activeAgentCounts.set(
+      request.agentId,
+      (this.activeAgentCounts.get(request.agentId) ?? 0) + 1,
+    );
+    if (request.executionId) this.activeExecutionIds.add(request.executionId);
     try {
       const candidate = request.repairSourceRunId
         ? await this.workspaces.prepareRepairCandidate(
@@ -215,18 +416,33 @@ export class AirlockRunner {
             request.repairSourceRunId,
             request.runId,
           )
-        : await this.workspaces.prepareCandidate(request.agentId, request.runId);
+        : await this.workspaces.prepareCandidate(
+            request.agentId,
+            request.runId,
+          );
       candidatePrepared = true;
+      candidateStateId = candidate.candidateStateId;
+      transaction.candidateStateId = candidate.candidateStateId;
       const candidateWorkspacePath =
         await this.workspaces.candidateWorkspacePath(request.runId);
       const candidateCodexHomePath =
         await this.workspaces.candidateCodexHomePath(request.runId);
-      const candidateOutboxPath =
-        await this.workspaces.candidateOutboxPath(request.runId);
-      const canonicalBefore = await this.workspaces.readCanonical(request.agentId);
-      const sqliteBefore = await this.sqlite.inspect(canonicalBefore.workspacePath);
+      const candidateOutboxPath = await this.workspaces.candidateOutboxPath(
+        request.runId,
+      );
+      candidateResourcesRoot = await this.workspaces.candidateResourcesPath(
+        request.runId,
+      );
+      const canonicalBefore = await this.workspaces.readCanonical(
+        request.agentId,
+      );
+      const sqliteBefore = await this.sqlite.inspect(
+        canonicalBefore.workspacePath,
+      );
       if (sqliteBefore.contentHash !== canonicalBefore.sqliteContentHash) {
-        throw new Error("Canonical SQLite snapshot does not match its manifest");
+        throw new Error(
+          "Canonical SQLite snapshot does not match its manifest",
+        );
       }
       transaction.sqlite = {
         databasePath: SQLITE_RELATIVE_PATH,
@@ -235,7 +451,26 @@ export class AirlockRunner {
         candidate: null,
         after: null,
       };
-      this.assertNotCancelled(request.agentId);
+      preparedResources = await this.resources.prepareAll({
+        agentId: request.agentId,
+        runId: request.runId,
+        candidateStateId: candidate.candidateStateId,
+        candidateResourcesRoot,
+        sourceVersions: canonicalBefore.providerVersions,
+        repairQuarantines: request.repairProviderQuarantines ?? [],
+        repairSourceRunId: request.repairSourceRunId ?? null,
+        onEvent: recordResourceEvent,
+        onPrepared: async (resources) => {
+          preparedResources = structuredClone([...resources]);
+          transaction.providerResources =
+            providerRecordsFromPrepared(resources);
+          await onProgress(transaction);
+        },
+      });
+      transaction.providerResources =
+        providerRecordsFromPrepared(preparedResources);
+      await onProgress(transaction);
+      this.assertNotCancelled(request.agentId, request.executionId);
       if (
         candidate.canonicalStateIdBefore !== request.canonicalStateId ||
         candidate.canonicalThreadIdBefore !== request.threadId
@@ -244,7 +479,6 @@ export class AirlockRunner {
           "Agent metadata does not match the current Canonical State pair",
         );
       }
-      transaction.candidateStateId = candidate.candidateStateId;
       transaction = await this.transition(
         transaction,
         "executing",
@@ -254,15 +488,35 @@ export class AirlockRunner {
 
       const result = await this.inner.run({
         agentId: request.agentId,
+        ...(request.executionId ? { executionId: request.executionId } : {}),
         workspacePath: candidateWorkspacePath,
         codexHomePath: candidateCodexHomePath,
         outboxPath: candidateOutboxPath,
         repairReferencePath: candidate.repairReferencePath,
+        resourceBindings: preparedResources.flatMap((resource) =>
+          resource.runtimeBinding
+            ? [
+                {
+                  providerId: resource.providerId,
+                  hostPath: resource.runtimeBinding.hostPath,
+                  runtimePath: resource.runtimeBinding.runtimePath,
+                  access: resource.runtimeBinding.access,
+                },
+              ]
+            : [],
+        ),
+        ...(request.tokenBudget
+          ? { tokenBudget: structuredClone(request.tokenBudget) }
+          : {}),
         prompt: request.prompt,
         threadId: candidate.runtimeThreadId,
       });
-      await this.workspaces.recordCandidateThread(request.runId, result.threadId);
-      this.assertNotCancelled(request.agentId);
+      await this.workspaces.recordCandidateThread(
+        request.runId,
+        result.threadId,
+      );
+      this.assertNotCancelled(request.agentId, request.executionId);
+      await this.resources.assertRuntimeBindingsSafe(preparedResources);
 
       transaction = await this.transition(
         transaction,
@@ -277,21 +531,48 @@ export class AirlockRunner {
         transaction.outcomeContract,
         request.runId,
       );
-      const [sqliteValidation, actionValidation] = await Promise.all([
-        this.sqlite.validate(
-          candidateWorkspacePath,
-          transaction.outcomeContract.secretPatterns,
-        ),
-        this.actionOutbox.validate(candidateOutboxPath, request.runId),
-      ]);
+      const [sqliteValidation, actionValidation, resourceValidation] =
+        await Promise.all([
+          this.sqlite.validate(
+            candidateWorkspacePath,
+            transaction.outcomeContract.secretPatterns,
+          ),
+          this.actionOutbox.validate(candidateOutboxPath, request.runId),
+          this.resources.describeAndValidate({
+            agentId: request.agentId,
+            runId: request.runId,
+            candidateStateId: candidate.candidateStateId,
+            candidateResourcesRoot,
+            prepared: preparedResources,
+            onEvent: recordResourceEvent,
+          }),
+        ]);
       const repairReferenceValidation =
         await this.workspaces.repairReferenceEvidence(request.runId);
       parsedIntents = actionValidation.intents;
+      providerEvidence = resourceValidation;
+      transaction.providerResources = mergeProviderEvidence(
+        transaction.providerResources,
+        providerEvidence,
+      );
       transaction.changes = validationResult.changes;
       transaction.validations = [
+        ...(this.executionProfileEvidence
+          ? [structuredClone(this.executionProfileEvidence)]
+          : []),
         ...validationResult.validations,
         sqliteValidation.evidence,
         actionValidation.evidence,
+        ...providerEvidence.flatMap((resource) =>
+          resource.validations.map((validation) => ({
+            name: resource.providerId + ":" + validation.name,
+            status: validation.status,
+            required: resource.required && validation.required,
+            summary: validation.summary,
+            durationMs: validation.durationMs,
+            output: validation.output,
+          })),
+        ),
         ...(repairReferenceValidation
           ? [
               {
@@ -322,6 +603,28 @@ export class AirlockRunner {
       );
 
       if (failedRequiredValidation) {
+        providerQuarantines = await this.resources.quarantineAll({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          evidence: providerEvidence,
+          failureStage: "validate",
+          onEvent: recordResourceEvent,
+          onQuarantine: async (quarantines) => {
+            providerQuarantines = structuredClone([...quarantines]);
+            transaction.providerResources = markProviderQuarantined(
+              transaction.providerResources,
+              quarantines,
+            );
+            await onProgress(transaction);
+          },
+        });
+        transaction.providerResources = markProviderQuarantined(
+          transaction.providerResources,
+          providerQuarantines,
+        );
         transaction.quarantinePath = await this.workspaces.quarantineCandidate(
           request.runId,
         );
@@ -350,16 +653,53 @@ export class AirlockRunner {
         return { ...result, transaction, canonicalState: null };
       }
 
-      this.assertNotCancelled(request.agentId);
+      if (options.deferPromotionFor) {
+        this.assertNotCancelled(request.agentId, request.executionId);
+        transaction = await this.transition(
+          transaction,
+          "sealed",
+          "Candidate passed required Validation and is sealed for deterministic Selection",
+          onProgress,
+        );
+        const sealedCandidate = createSealedCandidateReference({
+          identity: options.deferPromotionFor,
+          transaction,
+          result,
+        });
+        return {
+          ...result,
+          transaction,
+          canonicalState: null,
+          sealedCandidate,
+        };
+      }
+
+      this.assertNotCancelled(request.agentId, request.executionId);
       transaction = await this.transition(
         transaction,
         "promoting",
         "All required Validations passed",
         onProgress,
       );
+      providerPlans = await this.resources.planAll({
+        agentId: request.agentId,
+        runId: request.runId,
+        candidateStateId: candidate.candidateStateId,
+        candidateResourcesRoot,
+        prepared: preparedResources,
+        evidence: providerEvidence,
+        onEvent: recordResourceEvent,
+      });
+      transaction.providerResources = mergeProviderPlans(
+        transaction.providerResources,
+        providerPlans,
+      );
+      const targetProviderVersions = providerPlans.map(versionFromResourcePlan);
       const plan = await this.workspaces.planPromotion(
         request.agentId,
         request.runId,
+        targetProviderVersions,
+        providerPlans,
       );
       let journal = await this.promotionJournal.begin({
         plan,
@@ -369,6 +709,21 @@ export class AirlockRunner {
       transaction = journal.transaction;
       await onProgress(transaction);
       await this.injectPromotionFault?.("after-validated", request.runId);
+
+      const installedBeforeCanonical =
+        await this.resources.promoteBeforeCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          onEvent: recordResourceEvent,
+        });
+      transaction.providerResources = mergeInstalledProviderVersions(
+        transaction.providerResources,
+        installedBeforeCanonical,
+      );
 
       const installed = await this.workspaces.installPromotion(plan);
       candidatePrepared = false;
@@ -380,11 +735,20 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-version-installed", request.runId);
+      await this.injectPromotionFault?.(
+        "after-version-installed",
+        request.runId,
+      );
 
-      const canonicalState = await this.workspaces.advancePromotion(plan, installed);
+      const canonicalState = await this.workspaces.advancePromotion(
+        plan,
+        installed,
+      );
       transaction = this.recordCanonicalAdvance(transaction, canonicalState);
-      await this.injectPromotionFault?.("after-canonical-advance", request.runId);
+      await this.injectPromotionFault?.(
+        "after-canonical-advance",
+        request.runId,
+      );
       journal = await this.promotionJournal.advance(
         request.runId,
         "canonical-advanced",
@@ -392,7 +756,30 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-canonical-advanced", request.runId);
+      await this.injectPromotionFault?.(
+        "after-canonical-advanced",
+        request.runId,
+      );
+
+      const installedResourcesRoot =
+        await this.workspaces.installedResourcesPath(
+          request.agentId,
+          plan.targetStateId,
+        );
+      const installedAfterCanonical =
+        await this.resources.promoteAfterCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot: installedResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          onEvent: recordResourceEvent,
+        });
+      transaction.providerResources = mergeInstalledProviderVersions(
+        transaction.providerResources,
+        installedAfterCanonical,
+      );
 
       const receipts = await this.actionDispatcher.dispatch(
         request.runId,
@@ -412,17 +799,24 @@ export class AirlockRunner {
       );
       transaction = journal.transaction;
       await onProgress(transaction);
-      await this.injectPromotionFault?.("after-effects-delivered", request.runId);
+      await this.injectPromotionFault?.(
+        "after-effects-delivered",
+        request.runId,
+      );
 
       transaction = this.recordTransition(
         transaction,
         "promoted",
         "Candidate State is now Canonical State",
       );
-      journal = await this.promotionJournal.advance(request.runId, "completed", {
-        transaction,
-        targetCanonical: canonicalState,
-      });
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "completed",
+        {
+          transaction,
+          targetCanonical: canonicalState,
+        },
+      );
       transaction = journal.transaction;
       await onProgress(transaction);
       await this.injectPromotionFault?.("after-completed", request.runId);
@@ -432,8 +826,709 @@ export class AirlockRunner {
         .read(request.runId)
         .catch(() => null);
       if (journal) {
+        const evidencedTransaction = structuredClone(journal.transaction);
+        evidencedTransaction.providerResources = structuredClone(
+          transaction.providerResources,
+        );
+        evidencedTransaction.providerResourceEvents = structuredClone(
+          transaction.providerResourceEvents,
+        );
+        const evidencedJournal = await this.promotionJournal
+          .updateTransaction(request.runId, evidencedTransaction)
+          .catch(() => journal);
         throw new AirlockRunError(
           "Promotion was interrupted at " +
+            evidencedJournal.phase +
+            " and requires durable reconciliation",
+          evidencedJournal.transaction,
+          false,
+          error,
+        );
+      }
+      if (error instanceof ResourcePreparationError) {
+        preparedResources = error.prepared;
+        transaction.providerResources =
+          providerRecordsFromPrepared(preparedResources);
+        transaction.providerResources = error.cleanupCompleted
+          ? markProviderDisposition(transaction.providerResources, "discarded")
+          : markProviderPrepareRetained(transaction.providerResources);
+        await onProgress(transaction);
+        if (candidatePrepared) {
+          if (error.cleanupCompleted) {
+            await this.workspaces.cancelCandidate(request.runId);
+          } else {
+            transaction.quarantinePath =
+              await this.workspaces.quarantineCandidate(request.runId);
+            transaction.quarantineAvailable = true;
+          }
+          candidatePrepared = false;
+        }
+        transaction.disposition = error.cleanupCompleted
+          ? "discarded"
+          : "quarantined";
+        transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
+        transaction.canonicalContentHashAfter =
+          transaction.canonicalContentHashBefore;
+        transaction = finalizeResources(
+          transaction,
+          error.cleanupCompleted ? "discarded" : "quarantined",
+        );
+        transaction.promotionReceipt = createPromotionReceipt(transaction);
+        transaction = await this.transition(
+          transaction,
+          error.cleanupCompleted ? "discarded" : "quarantined",
+          error.cleanupCompleted
+            ? "Resource preparation aborted before Runtime and cleanup completed"
+            : "Resource preparation aborted before Runtime and cleanup requires retry",
+          onProgress,
+        );
+        throw new AirlockRunError(error.message, transaction, false, error);
+      }
+      const cancelled = error instanceof RunCancelledError;
+      let providerCleanupError: unknown = null;
+      if (preparedResources.length > 0) {
+        try {
+          if (cancelled || error instanceof ResourceRuntimeBoundaryError) {
+            await this.resources.discardAll({
+              agentId: request.agentId,
+              runId: request.runId,
+              candidateStateId,
+              candidateResourcesRoot,
+              prepared: preparedResources,
+              quarantines: [],
+              onEvent: recordResourceEvent,
+              onDiscard: async (results) => {
+                transaction.providerResources = markProvidersDiscarded(
+                  transaction.providerResources,
+                  results.map((result) => result.providerId),
+                );
+                await onProgress(transaction);
+              },
+            });
+            transaction.providerResources = markProviderDisposition(
+              transaction.providerResources,
+              cancelled ? "cancelled" : "discarded",
+            );
+          } else {
+            providerQuarantines = await this.resources.quarantineAll({
+              agentId: request.agentId,
+              runId: request.runId,
+              candidateStateId,
+              candidateResourcesRoot,
+              prepared: preparedResources,
+              ...(providerEvidence.length > 0
+                ? { evidence: providerEvidence }
+                : {}),
+              failureStage: lifecycleFailureStage(error),
+              onEvent: recordResourceEvent,
+              onQuarantine: async (quarantines) => {
+                providerQuarantines = structuredClone([...quarantines]);
+                transaction.providerResources = markProviderQuarantined(
+                  transaction.providerResources,
+                  quarantines,
+                );
+                await onProgress(transaction);
+              },
+            });
+            transaction.providerResources = markProviderQuarantined(
+              transaction.providerResources,
+              providerQuarantines,
+            );
+          }
+        } catch (cleanupError) {
+          providerCleanupError = cleanupError;
+          if (cleanupError instanceof ResourceQuarantineError) {
+            providerQuarantines = cleanupError.quarantines;
+            transaction.providerResources = markProviderQuarantined(
+              transaction.providerResources,
+              providerQuarantines,
+            );
+          }
+        }
+      }
+      const cleanupComplete = !providerCleanupError;
+      const cancelledAndClean = cancelled && cleanupComplete;
+      if (candidatePrepared) {
+        if (cancelledAndClean) {
+          await this.workspaces.cancelCandidate(request.runId);
+        } else {
+          transaction.quarantinePath =
+            await this.workspaces.quarantineCandidate(request.runId);
+          transaction.quarantineAvailable = true;
+        }
+      }
+      transaction.disposition = cancelledAndClean ? "cancelled" : "quarantined";
+      transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
+      transaction.canonicalContentHashAfter =
+        transaction.canonicalContentHashBefore;
+      transaction = finalizeResources(
+        transaction,
+        cancelledAndClean ? "cancelled" : "quarantined",
+      );
+      transaction.promotionReceipt = createPromotionReceipt(transaction);
+      transaction = await this.transition(
+        transaction,
+        cancelledAndClean ? "cancelled" : "quarantined",
+        cancelledAndClean
+          ? "Run Transaction was cancelled before Promotion"
+          : cancelled
+            ? "Cancellation retained cleanup-only Quarantine after provider cleanup failed"
+            : "Runtime failed and Candidate State was quarantined",
+        onProgress,
+      );
+      const message = error instanceof Error ? error.message : String(error);
+      const boundedMessage = providerCleanupError
+        ? message + "; Resource Provider cleanup also failed closed"
+        : message;
+      throw new AirlockRunError(
+        boundedMessage,
+        transaction,
+        cancelledAndClean,
+        error,
+      );
+    } finally {
+      if (request.executionId) {
+        this.activeExecutionIds.delete(request.executionId);
+        this.executionCancellationRequests.delete(request.executionId);
+      }
+      const remaining = (this.activeAgentCounts.get(request.agentId) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.activeAgentCounts.delete(request.agentId);
+        this.cancellationRequests.delete(request.agentId);
+      } else {
+        this.activeAgentCounts.set(request.agentId, remaining);
+      }
+    }
+  }
+
+  async promoteSealedCandidate(
+    request: AirlockRunRequest,
+    sealedCandidate: SealedCandidateReference,
+    sealedTransaction: RunTransaction,
+    result: RunnerResult,
+    authority: PromotionAuthority,
+    onProgress: TransactionProgress,
+  ): Promise<AirlockRunResult> {
+    let transaction = structuredClone(sealedTransaction);
+    verifySealedCandidateReference(sealedCandidate, transaction, result);
+    if (
+      sealedCandidate.runId !== request.runId ||
+      transaction.id !== request.runId ||
+      transaction.status !== "sealed" ||
+      transaction.disposition !== null ||
+      !transaction.candidateStateId
+    ) {
+      throw new Error(
+        "Selected Candidate seal contradicts its Run Transaction",
+      );
+    }
+    const candidateStateId = transaction.candidateStateId;
+    const canonical = await this.workspaces.readCanonicalForProviderTransition(
+      request.agentId,
+    );
+    if (
+      canonical.stateId !== transaction.canonicalStateIdBefore ||
+      canonical.contentHash !== transaction.canonicalContentHashBefore ||
+      canonical.stateId !== sealedCandidate.sourceStateId ||
+      canonical.contentHash !== sealedCandidate.sourceContentHash ||
+      canonical.stateId !== request.canonicalStateId
+    ) {
+      throw new StaleCandidateSourceError();
+    }
+
+    const candidateWorkspacePath = await this.workspaces.candidateWorkspacePath(
+      request.runId,
+      true,
+    );
+    const candidateOutboxPath = await this.workspaces.candidateOutboxPath(
+      request.runId,
+      true,
+    );
+    const candidateResourcesRoot = await this.workspaces.candidateResourcesPath(
+      request.runId,
+      true,
+    );
+    const providerIds = providerIdsFromTransaction(transaction);
+    const preparedResources = await this.resources.restorePrepared(
+      candidateResourcesRoot,
+      transaction.providerResources,
+      { providerIds },
+    );
+    const recordResourceEvent = async (
+      event: RunTransaction["providerResourceEvents"][number],
+    ) => {
+      appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      await onProgress(transaction);
+    };
+
+    await this.resources.assertRuntimeBindingsSafe(
+      preparedResources,
+      providerIds,
+    );
+    const validationResult = await this.validator.validate(
+      canonical.workspacePath,
+      candidateWorkspacePath,
+      transaction.outcomeContract,
+      request.runId,
+    );
+    const [sqliteValidation, actionValidation, providerEvidence] =
+      await Promise.all([
+        this.sqlite.validate(
+          candidateWorkspacePath,
+          transaction.outcomeContract.secretPatterns,
+        ),
+        this.actionOutbox.validate(candidateOutboxPath, request.runId),
+        this.resources.describeAndValidate({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: transaction.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          providerIds,
+          onEvent: recordResourceEvent,
+        }),
+      ]);
+    if (!sqliteValidation.snapshot) {
+      throw new Error(
+        "Selected Candidate SQLite state could not be reverified",
+      );
+    }
+    assertSealedCandidateUnchanged({
+      transaction,
+      changes: validationResult.changes,
+      validations: [
+        ...validationResult.validations,
+        sqliteValidation.evidence,
+        actionValidation.evidence,
+        ...providerEvidence.flatMap((resource) =>
+          resource.validations.map((validation) => ({
+            name: resource.providerId + ":" + validation.name,
+            status: validation.status,
+            required: resource.required && validation.required,
+            summary: validation.summary,
+            durationMs: validation.durationMs,
+            output: validation.output,
+          })),
+        ),
+      ],
+      sqliteContentHash: sqliteValidation.snapshot.contentHash,
+      intents: intentEvidence(actionValidation.intents, "deferred"),
+      providerEvidence,
+    });
+
+    transaction = await this.transition(
+      transaction,
+      "promoting",
+      authority.kind === "federated-approval"
+        ? "Pending Admission, operator decision, and every receiver Validation were reverified"
+        : authority.kind === "federated-admission"
+          ? "Federated Admission authority and every receiver Validation were reverified"
+        : "Selected Candidate seal and every required Validation were reverified",
+      onProgress,
+    );
+    const providerPlans = await this.resources.planAll({
+      agentId: request.agentId,
+      runId: request.runId,
+      candidateStateId,
+      candidateResourcesRoot,
+      prepared: preparedResources,
+      evidence: providerEvidence,
+      providerIds,
+      onEvent: recordResourceEvent,
+    });
+    transaction.providerResources = mergeProviderPlans(
+      transaction.providerResources,
+      providerPlans,
+    );
+    const targetProviderVersions = providerPlans.map(versionFromResourcePlan);
+    const plan = await this.workspaces.planPromotion(
+      request.agentId,
+      request.runId,
+      targetProviderVersions,
+      providerPlans,
+      true,
+    );
+
+    try {
+      let journal = await this.promotionJournal.begin({
+        plan,
+        transaction,
+        result,
+        authority,
+      });
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-validated", request.runId);
+
+      const installedBeforeCanonical =
+        await this.resources.promoteBeforeCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          providerIds,
+          onEvent: recordResourceEvent,
+        });
+      transaction.providerResources = mergeInstalledProviderVersions(
+        transaction.providerResources,
+        installedBeforeCanonical,
+      );
+
+      const installed = await this.workspaces.installPromotion(plan);
+      await this.injectPromotionFault?.("after-version-install", request.runId);
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "version-installed",
+        { transaction, targetCanonical: installed },
+      );
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.(
+        "after-version-installed",
+        request.runId,
+      );
+
+      const canonicalState = await this.workspaces.advancePromotion(
+        plan,
+        installed,
+      );
+      transaction = this.recordCanonicalAdvance(transaction, canonicalState);
+      await this.injectPromotionFault?.(
+        "after-canonical-advance",
+        request.runId,
+      );
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "canonical-advanced",
+        { transaction, targetCanonical: canonicalState },
+      );
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.(
+        "after-canonical-advanced",
+        request.runId,
+      );
+
+      const installedResourcesRoot =
+        await this.workspaces.installedResourcesPath(
+          request.agentId,
+          plan.targetStateId,
+        );
+      const installedAfterCanonical =
+        await this.resources.promoteAfterCanonical({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId,
+          candidateResourcesRoot: installedResourcesRoot,
+          prepared: preparedResources,
+          plans: providerPlans,
+          providerIds,
+          onEvent: recordResourceEvent,
+        });
+      transaction.providerResources = mergeInstalledProviderVersions(
+        transaction.providerResources,
+        installedAfterCanonical,
+      );
+
+      const receipts = await this.actionDispatcher.dispatch(
+        request.runId,
+        actionValidation.intents,
+      );
+      await this.injectPromotionFault?.("after-effect-dispatch", request.runId);
+      transaction = this.finalizePromotedEffects(
+        transaction,
+        canonicalState,
+        actionValidation.intents,
+        receipts,
+      );
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "effects-delivered",
+        { transaction, targetCanonical: canonicalState },
+      );
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.(
+        "after-effects-delivered",
+        request.runId,
+      );
+
+      transaction = this.recordTransition(
+        transaction,
+        "promoted",
+        isFederatedPromotionAuthority(authority)
+          ? "Receiver-approved federated Candidate State is now Canonical State"
+          : "Selected Candidate State is now Canonical State",
+      );
+      journal = await this.promotionJournal.advance(
+        request.runId,
+        "completed",
+        {
+          transaction,
+          targetCanonical: canonicalState,
+        },
+      );
+      transaction = journal.transaction;
+      await onProgress(transaction);
+      await this.injectPromotionFault?.("after-completed", request.runId);
+      return { ...result, transaction, canonicalState };
+    } catch (error) {
+      const journal = await this.promotionJournal
+        .read(request.runId)
+        .catch(() => null);
+      if (!journal) throw error;
+      const evidencedTransaction = structuredClone(journal.transaction);
+      evidencedTransaction.providerResources = structuredClone(
+        transaction.providerResources,
+      );
+      evidencedTransaction.providerResourceEvents = structuredClone(
+        transaction.providerResourceEvents,
+      );
+      const evidencedJournal = await this.promotionJournal
+        .updateTransaction(request.runId, evidencedTransaction)
+        .catch(() => journal);
+      throw new AirlockRunError(
+        "Selected Candidate Promotion was interrupted at " +
+          evidencedJournal.phase +
+          " and requires durable reconciliation",
+        evidencedJournal.transaction,
+        false,
+        error,
+      );
+    }
+  }
+
+  async validateAndPromoteFederatedCandidate(
+    request: AirlockRunRequest,
+    initialTransaction: RunTransaction,
+    identity: FederatedRunIdentity,
+    onProgress: TransactionProgress,
+  ): Promise<AirlockRunResult> {
+    let transaction = structuredClone(initialTransaction);
+    let preparedResources: CoordinatedPreparedResource[] = [];
+    let providerEvidence: CoordinatedResourceEvidence[] = [];
+    const candidateWorkspacePath = await this.workspaces.candidateWorkspacePath(
+      request.runId,
+      true,
+    );
+    const candidateOutboxPath = await this.workspaces.candidateOutboxPath(
+      request.runId,
+      true,
+    );
+    const candidateResourcesRoot =
+      await this.workspaces.candidateResourcesPath(request.runId, true);
+    const canonical = await this.workspaces.readCanonical(request.agentId);
+    const candidate = await this.workspaces.inspectFederatedCandidate(
+      request.agentId,
+      request.runId,
+      await this.workspaces.federatedCandidateProvenance(request.runId),
+    );
+    if (
+      !candidate ||
+      canonical.stateId !== request.canonicalStateId ||
+      transaction.canonicalStateIdBefore !== canonical.stateId ||
+      transaction.canonicalContentHashBefore !== canonical.contentHash
+    ) {
+      throw new StaleCandidateSourceError(
+        "Federated Candidate source no longer matches receiver Canonical State",
+      );
+    }
+    transaction.candidateStateId = candidate.candidateStateId;
+    const result: RunnerResult = {
+      output:
+        "Federated work passed receiver admission and local Outcome Contract Validation.",
+      threadId: canonical.codexThreadId,
+      usage: null,
+    };
+    const recordResourceEvent = async (
+      event: RunTransaction["providerResourceEvents"][number],
+    ) => {
+      appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      await onProgress(transaction);
+    };
+    try {
+      const sqliteBefore = await this.sqlite.inspect(canonical.workspacePath);
+      if (sqliteBefore.contentHash !== canonical.sqliteContentHash) {
+        throw new Error("Canonical SQLite snapshot does not match its manifest");
+      }
+      transaction.sqlite = {
+        databasePath: SQLITE_RELATIVE_PATH,
+        integrity: "passed",
+        before: sqliteBefore,
+        candidate: null,
+        after: null,
+      };
+      preparedResources = await this.resources.prepareAll({
+        agentId: request.agentId,
+        runId: request.runId,
+        candidateStateId: candidate.candidateStateId,
+        candidateResourcesRoot,
+        sourceVersions: canonical.providerVersions,
+        onEvent: recordResourceEvent,
+        onPrepared: async (resources) => {
+          preparedResources = structuredClone([...resources]);
+          transaction.providerResources = providerRecordsFromPrepared(resources);
+          await onProgress(transaction);
+        },
+      });
+      transaction.providerResources = providerRecordsFromPrepared(preparedResources);
+      transaction = await this.transition(
+        transaction,
+        "validating",
+        "Receiver is evaluating imported Candidate State under its local Outcome Contract",
+        onProgress,
+      );
+      const validationResult = await this.validator.validate(
+        canonical.workspacePath,
+        candidateWorkspacePath,
+        transaction.outcomeContract,
+        request.runId,
+      );
+      const [sqliteValidation, actionValidation, resourceValidation] =
+        await Promise.all([
+          this.sqlite.validate(
+            candidateWorkspacePath,
+            transaction.outcomeContract.secretPatterns,
+          ),
+          this.actionOutbox.validate(candidateOutboxPath, request.runId),
+          this.resources.describeAndValidate({
+            agentId: request.agentId,
+            runId: request.runId,
+            candidateStateId: candidate.candidateStateId,
+            candidateResourcesRoot,
+            prepared: preparedResources,
+            onEvent: recordResourceEvent,
+          }),
+        ]);
+      providerEvidence = resourceValidation;
+      transaction.providerResources = mergeProviderEvidence(
+        transaction.providerResources,
+        providerEvidence,
+      );
+      transaction.changes = validationResult.changes;
+      transaction.validations = [
+        {
+          name: "federated-receiver-import",
+          status: "passed",
+          required: true,
+          summary:
+            "Receiver imported the exact admitted artifact without invoking a model Runtime",
+          durationMs: 0,
+          output: JSON.stringify(
+            {
+              schemaVersion: 1,
+              admissionId: identity.admissionId,
+              importIdentifier: identity.importIdentifier,
+              producerId: identity.producerId,
+              policyDigest: identity.policyDigest,
+              pendingRecordDigest: identity.pendingRecordDigest ?? null,
+              approvalDecisionDigest: identity.approvalDecisionDigest ?? null,
+            },
+            null,
+            2,
+          ),
+        },
+        ...validationResult.validations,
+        sqliteValidation.evidence,
+        actionValidation.evidence,
+        ...providerEvidence.flatMap((resource) =>
+          resource.validations.map((validation) => ({
+            name: resource.providerId + ":" + validation.name,
+            status: validation.status,
+            required: resource.required && validation.required,
+            summary: validation.summary,
+            durationMs: validation.durationMs,
+            output: validation.output,
+          })),
+        ),
+      ];
+      transaction.sqlite = {
+        databasePath: SQLITE_RELATIVE_PATH,
+        integrity:
+          sqliteValidation.evidence.status === "passed" ? "passed" : "failed",
+        before: sqliteBefore,
+        candidate: sqliteValidation.snapshot,
+        after: null,
+      };
+      transaction.externalActions.intents = intentEvidence(
+        actionValidation.intents,
+        "deferred",
+      );
+      const failedRequiredValidation = transaction.validations.find(
+        (validation) => validation.required && validation.status !== "passed",
+      );
+      if (failedRequiredValidation) {
+        const providerQuarantines = await this.resources.quarantineAll({
+          agentId: request.agentId,
+          runId: request.runId,
+          candidateStateId: candidate.candidateStateId,
+          candidateResourcesRoot,
+          prepared: preparedResources,
+          evidence: providerEvidence,
+          failureStage: "validate",
+          onEvent: recordResourceEvent,
+        });
+        transaction.providerResources = markProviderQuarantined(
+          transaction.providerResources,
+          providerQuarantines,
+        );
+        transaction.quarantinePath = await this.workspaces.quarantineCandidate(
+          request.runId,
+        );
+        transaction.quarantineAvailable = true;
+        transaction.disposition = "quarantined";
+        transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
+        transaction.canonicalContentHashAfter =
+          transaction.canonicalContentHashBefore;
+        transaction.externalActions.intents = intentEvidence(
+          actionValidation.intents,
+          "rejected",
+        );
+        if (transaction.sqlite) transaction.sqlite.after = sqliteBefore;
+        transaction = finalizeResources(transaction, "quarantined", undefined, {
+          sqlite: sqliteBefore.contentHash,
+          "external-actions": externalActionFingerprint([]),
+        });
+        transaction.promotionReceipt = createPromotionReceipt(transaction);
+        transaction = await this.transition(
+          transaction,
+          "quarantined",
+          "Imported Candidate failed receiver Validation " +
+            failedRequiredValidation.name,
+          onProgress,
+        );
+        return { ...result, transaction, canonicalState: null };
+      }
+      transaction = await this.transition(
+        transaction,
+        "sealed",
+        "Imported Candidate passed receiver Validation and is sealed for local Promotion",
+        onProgress,
+      );
+      const seal = createSealedCandidateReference({
+        identity: {
+          candidateSetId: identity.admissionId,
+          competitorId: identity.importIdentifier,
+        },
+        transaction,
+        result,
+      });
+      return await this.promoteSealedCandidate(
+        request,
+        seal,
+        transaction,
+        result,
+        federatedPromotionAuthority(identity),
+        onProgress,
+      );
+    } catch (error) {
+      if (error instanceof AirlockRunError) throw error;
+      const journal = await this.promotionJournal.read(request.runId).catch(() => null);
+      if (journal) {
+        throw new AirlockRunError(
+          "Federated Promotion was interrupted at " +
             journal.phase +
             " and requires durable reconciliation",
           journal.transaction,
@@ -441,44 +1536,173 @@ export class AirlockRunner {
           error,
         );
       }
-      const cancelled = error instanceof RunCancelledError;
-      if (candidatePrepared) {
-        if (cancelled) {
-          await this.workspaces.cancelCandidate(request.runId);
-        } else {
-          transaction.quarantinePath = await this.workspaces.quarantineCandidate(
-            request.runId,
-          );
-          transaction.quarantineAvailable = true;
-        }
-      }
-      transaction.disposition = cancelled ? "cancelled" : "quarantined";
-      transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
-      transaction.canonicalContentHashAfter =
-        transaction.canonicalContentHashBefore;
-      transaction = finalizeResources(
-        transaction,
-        cancelled ? "cancelled" : "quarantined",
+      throw error;
+    }
+  }
+
+  async disposeSealedCandidate(
+    agentId: string,
+    sealedTransaction: RunTransaction,
+    policy: "retain" | "discard",
+    onProgress: TransactionProgress,
+    onProviderDiscarded?: (transaction: RunTransaction) => Promise<void>,
+  ): Promise<RunTransaction> {
+    let transaction = structuredClone(sealedTransaction);
+    if (
+      transaction.status !== "sealed" ||
+      transaction.disposition !== null ||
+      !transaction.candidateStateId
+    ) {
+      throw new Error(
+        "Only a sealed unselected Candidate can receive loser disposition",
       );
-      transaction.promotionReceipt = createPromotionReceipt(transaction);
-      transaction = await this.transition(
+    }
+    const candidateExists = await this.workspaces.candidateExists(
+      transaction.id,
+      true,
+    );
+    const retainedQuarantinePath = await this.workspaces.retainedQuarantinePath(
+      transaction.id,
+    );
+    if (!candidateExists) {
+      if (policy === "retain" && retainedQuarantinePath) {
+        return this.finalizeSealedLoserDisposition(
+          transaction,
+          policy,
+          retainedQuarantinePath,
+          onProgress,
+        );
+      }
+      throw new Error(
+        "Sealed loser physical state contradicts its durable cleanup evidence",
+      );
+    }
+    if (retainedQuarantinePath) {
+      throw new Error("Sealed loser has both Candidate State and Quarantine");
+    }
+    const candidateResourcesRoot = await this.workspaces.candidateResourcesPath(
+      transaction.id,
+      true,
+    );
+    const providerIds = providerIdsFromTransaction(transaction);
+    const prepared = await this.resources.restorePrepared(
+      candidateResourcesRoot,
+      transaction.providerResources,
+      { providerIds },
+    );
+    const evidence = providerEvidenceFromTransaction(transaction);
+    const recordResourceEvent = async (
+      event: RunTransaction["providerResourceEvents"][number],
+    ) => {
+      appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      await onProgress(transaction);
+    };
+
+    if (policy === "retain") {
+      let quarantines: ResourceQuarantineHandle[] = [];
+      quarantines = await this.resources.quarantineAll({
+        agentId,
+        runId: transaction.id,
+        candidateStateId: transaction.candidateStateId,
+        candidateResourcesRoot,
+        prepared,
+        evidence,
+        providerIds,
+        failureStage: "validate",
+        onEvent: recordResourceEvent,
+        onQuarantine: async (progress) => {
+          quarantines = structuredClone([...progress]);
+          transaction.providerResources = markProviderQuarantined(
+            transaction.providerResources,
+            quarantines,
+          );
+          await onProgress(transaction);
+        },
+      });
+      transaction.providerResources = markProviderQuarantined(
+        transaction.providerResources,
+        quarantines,
+      );
+      const quarantinePath = await this.workspaces.quarantineCandidate(
+        transaction.id,
+        true,
+      );
+      return this.finalizeSealedLoserDisposition(
         transaction,
-        cancelled ? "cancelled" : "quarantined",
-        cancelled
-          ? "Run Transaction was cancelled before Promotion"
-          : "Runtime failed and Candidate State was quarantined",
+        policy,
+        quarantinePath,
         onProgress,
       );
-      const message = error instanceof Error ? error.message : String(error);
-      throw new AirlockRunError(message, transaction, cancelled, error);
-    } finally {
-      this.activeAgentIds.delete(request.agentId);
-      this.cancellationRequests.delete(request.agentId);
     }
+
+    const finalized = await this.finalizeSealedLoserDisposition(
+      transaction,
+      policy,
+      null,
+      onProgress,
+    );
+    const cleaned = await this.discardRetainedProviderState(
+      agentId,
+      finalized,
+      path.dirname(candidateResourcesRoot),
+    );
+    await onProviderDiscarded?.(cleaned);
+    await this.workspaces.cancelCandidate(transaction.id, true);
+    return finalized;
+  }
+
+  private finalizeSealedLoserDisposition(
+    transactionAtStart: RunTransaction,
+    policy: "retain" | "discard",
+    quarantinePath: string | null,
+    onProgress: TransactionProgress,
+  ): Promise<RunTransaction> {
+    let transaction = structuredClone(transactionAtStart);
+    transaction.quarantinePath = quarantinePath;
+    transaction.quarantineAvailable = policy === "retain";
+    transaction.discardedAt = policy === "discard" ? now() : null;
+    transaction.disposition = policy === "retain" ? "quarantined" : "discarded";
+    if (policy === "discard") {
+      transaction.providerResources = markProviderDisposition(
+        transaction.providerResources,
+        "discarded",
+      );
+    }
+    transaction.canonicalStateIdAfter = transaction.canonicalStateIdBefore;
+    transaction.canonicalContentHashAfter =
+      transaction.canonicalContentHashBefore;
+    transaction.externalActions.intents =
+      transaction.externalActions.intents.map((intent) => ({
+        ...intent,
+        status: "rejected",
+        deliveredAt: null,
+      }));
+    if (transaction.sqlite?.before) {
+      transaction.sqlite.after = structuredClone(transaction.sqlite.before);
+    }
+    transaction = finalizeResources(
+      transaction,
+      policy === "retain" ? "quarantined" : "discarded",
+    );
+    transaction.promotionReceipt = createPromotionReceipt(transaction);
+    return this.transition(
+      transaction,
+      policy === "retain" ? "quarantined" : "discarded",
+      policy === "retain"
+        ? "Unselected Candidate was retained as Quarantine"
+        : "Unselected Candidate was discarded with bounded evidence retained",
+      onProgress,
+    );
   }
 
   async reconcilePromotions(
     recoverCompletedRunIds: Set<string>,
+    authorityContext: PromotionRecoveryAuthorityContext = {
+      candidateSetRunIds: new Set(),
+      expectedCandidateSetAuthorities: new Map(),
+      expectedFederatedAuthorities: new Map(),
+      terminalPromotionTransactions: new Map(),
+    },
   ): Promise<{
     recovered: ReconciledPromotion[];
     failures: PromotionRecoveryFailure[];
@@ -489,24 +1713,42 @@ export class AirlockRunner {
     const failures: PromotionRecoveryFailure[] = scan.errors.map((error) => ({
       runId: error.runId,
       agentId: null,
-      message: error.message,
+      message: this.sanitizeRecoveryError(
+        error.message,
+        "Promotion recovery journal scan failed closed",
+      ),
       transaction: null,
     }));
     const protectedRunIds = new Set<string>();
     for (const record of scan.records) {
-      if (record.phase === "completed" && !recoverCompletedRunIds.has(record.runId)) {
+      if (
+        record.phase === "completed" &&
+        !recoverCompletedRunIds.has(record.runId)
+      ) {
         continue;
       }
       protectedRunIds.add(record.runId);
       try {
-        recovered.push(await this.reconcilePromotion(record));
+        assertRecoveryAuthority(record, authorityContext);
+        recovered.push(
+          await this.reconcilePromotion(
+            record,
+            authorityContext.terminalPromotionTransactions.get(record.runId) ??
+              null,
+          ),
+        );
         protectedRunIds.delete(record.runId);
       } catch (error) {
-        const message =
+        const message = this.sanitizeRecoveryError(
           "Promotion recovery failed: " +
-          (error instanceof Error ? error.message : String(error));
+            (error instanceof Error ? error.message : String(error)),
+          "Promotion recovery failed closed",
+        );
+        const latestRecord = await this.promotionJournal
+          .read(record.runId)
+          .catch(() => record);
         const failedRecord = await this.promotionJournal
-          .recordRecoveryError(record.runId, record.transaction, message)
+          .recordRecoveryError(record.runId, latestRecord.transaction, message)
           .catch(() => record);
         failures.push({
           runId: record.runId,
@@ -521,16 +1763,59 @@ export class AirlockRunner {
 
   private async reconcilePromotion(
     initial: PromotionJournalRecord,
+    terminalAuthority: RunTransaction | null,
   ): Promise<ReconciledPromotion> {
     let record = structuredClone(initial);
     let transaction = structuredClone(record.transaction);
+    const priorCompletedRecovery =
+      record.phase === "completed" &&
+      record.transaction.recovery.recoveredAfterRestart
+        ? inspectCompletedPromotionRecovery(
+            record.transaction,
+            terminalAuthority,
+          )
+        : { complete: false, normalizedProviderResourceEvents: null };
+    const wasAlreadyRecovered = priorCompletedRecovery.complete;
     transaction.recovery = {
       ...transaction.recovery,
       recoveredAfterRestart: true,
       recoveryError: null,
     };
+    const recordResourceEvent = async (
+      event: RunTransaction["providerResourceEvents"][number],
+    ) => {
+      appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      record = await this.promotionJournal.updateTransaction(
+        record.runId,
+        transaction,
+      );
+      transaction = record.transaction;
+    };
 
     if (record.phase === "validated") {
+      const providerIds = providerIdsFromPlan(record.plan);
+      const candidateResourcesRoot =
+        await this.workspaces.promotionResourcesPath(record.plan);
+      const prepared = await this.resources.restorePrepared(
+        candidateResourcesRoot,
+        transaction.providerResources,
+        { providerIds },
+      );
+      const installedVersions = await this.resources.promoteBeforeCanonical({
+        agentId: record.agentId,
+        runId: record.runId,
+        candidateStateId:
+          transaction.candidateStateId ?? record.plan.targetStateId,
+        candidateResourcesRoot,
+        prepared,
+        plans: record.plan.resourcePlans,
+        providerIds,
+        onEvent: recordResourceEvent,
+      });
+      transaction.providerResources = mergeInstalledProviderVersions(
+        transaction.providerResources,
+        installedVersions,
+      );
       const installed = await this.workspaces.installPromotion(record.plan);
       record = await this.promotionJournal.advance(
         record.runId,
@@ -548,6 +1833,15 @@ export class AirlockRunner {
         record.plan,
         record.targetCanonical,
       );
+      await this.resources.reconcile({
+        agentId: record.agentId,
+        runId: record.runId,
+        plans: record.plan.resourcePlans,
+        expectedVersions: record.targetCanonical.providerVersions,
+        visibility: "canonical-manifest",
+        providerIds: providerIdsFromPlan(record.plan),
+        onEvent: recordResourceEvent,
+      });
       const canonical = await this.workspaces.advancePromotion(
         record.plan,
         installed,
@@ -562,7 +1856,42 @@ export class AirlockRunner {
     }
 
     if (record.phase === "canonical-advanced") {
+      const providerIds = providerIdsFromPlan(record.plan);
       const canonical = await this.verifyJournalCanonical(record);
+      const installedResourcesRoot =
+        await this.workspaces.installedResourcesPath(
+          record.agentId,
+          record.plan.targetStateId,
+        );
+      const prepared = await this.resources.restorePrepared(
+        installedResourcesRoot,
+        transaction.providerResources,
+        { providerIds },
+      );
+      const installedVersions = await this.resources.promoteAfterCanonical({
+        agentId: record.agentId,
+        runId: record.runId,
+        candidateStateId:
+          transaction.candidateStateId ?? record.plan.targetStateId,
+        candidateResourcesRoot: installedResourcesRoot,
+        prepared,
+        plans: record.plan.resourcePlans,
+        providerIds,
+        onEvent: recordResourceEvent,
+      });
+      transaction.providerResources = mergeInstalledProviderVersions(
+        transaction.providerResources,
+        installedVersions,
+      );
+      await this.resources.reconcile({
+        agentId: record.agentId,
+        runId: record.runId,
+        plans: record.plan.resourcePlans,
+        expectedVersions: canonical.providerVersions,
+        visibility: "post-promotion-reconciled",
+        providerIds,
+        onEvent: recordResourceEvent,
+      });
       const actionValidation = await this.actionOutbox.validate(
         path.join(canonical.outboxPath, "intents.jsonl"),
         record.runId,
@@ -590,7 +1919,14 @@ export class AirlockRunner {
 
     if (record.phase === "effects-delivered") {
       const canonical = await this.verifyJournalCanonical(record);
+      const verificationEvents: RunTransaction["providerResourceEvents"] = [];
+      await this.verifyProviderVersions(record, canonical, (event) => {
+        appendBoundedResourceEvent(verificationEvents, event);
+      });
       await this.verifyDeliveredEffects(record, canonical);
+      for (const event of verificationEvents) {
+        appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+      }
       transaction = this.recordTransition(
         transaction,
         "promoted",
@@ -603,13 +1939,39 @@ export class AirlockRunner {
       transaction = record.transaction;
     } else if (record.phase === "completed") {
       const canonical = await this.verifyJournalCanonical(record);
+      const verificationEvents: RunTransaction["providerResourceEvents"] = [];
+      await this.verifyProviderVersions(record, canonical, (event) => {
+        appendBoundedResourceEvent(verificationEvents, event);
+      });
       await this.verifyDeliveredEffects(record, canonical);
-      transaction.recovery.recoveredAfterRestart = true;
-      record = await this.promotionJournal.updateTransaction(
-        record.runId,
-        transaction,
-      );
-      transaction = record.transaction;
+      transaction.status = "promoted";
+      if (priorCompletedRecovery.normalizedProviderResourceEvents) {
+        transaction.providerResourceEvents =
+          priorCompletedRecovery.normalizedProviderResourceEvents;
+      }
+      if (wasAlreadyRecovered) {
+        if (
+          record.transaction.status === "recovery-error" ||
+          record.transaction.recovery.recoveryError !== null ||
+          priorCompletedRecovery.normalizedProviderResourceEvents !== null
+        ) {
+          record = await this.promotionJournal.updateTransaction(
+            record.runId,
+            transaction,
+          );
+        }
+        transaction = record.transaction;
+      } else {
+        for (const event of verificationEvents) {
+          appendBoundedResourceEvent(transaction.providerResourceEvents, event);
+        }
+        transaction.recovery.recoveredAfterRestart = true;
+        record = await this.promotionJournal.updateTransaction(
+          record.runId,
+          transaction,
+        );
+        transaction = record.transaction;
+      }
     }
 
     if (!record.targetCanonical) {
@@ -665,6 +2027,31 @@ export class AirlockRunner {
     }
   }
 
+  private async verifyProviderVersions(
+    record: PromotionJournalRecord,
+    canonical: CanonicalStateReference,
+    onEvent: (event: RunTransaction["providerResourceEvents"][number]) => void,
+  ): Promise<void> {
+    await this.resources.reconcile({
+      agentId: record.agentId,
+      runId: record.runId,
+      plans: record.plan.resourcePlans,
+      expectedVersions: canonical.providerVersions,
+      visibility: "canonical-manifest",
+      providerIds: providerIdsFromPlan(record.plan),
+      onEvent,
+    });
+    await this.resources.reconcile({
+      agentId: record.agentId,
+      runId: record.runId,
+      plans: record.plan.resourcePlans,
+      expectedVersions: canonical.providerVersions,
+      visibility: "post-promotion-reconciled",
+      providerIds: providerIdsFromPlan(record.plan),
+      onEvent,
+    });
+  }
+
   private recordCanonicalAdvance(
     transaction: RunTransaction,
     canonicalState: CanonicalStateReference,
@@ -691,6 +2078,11 @@ export class AirlockRunner {
       receipts,
     );
     next.externalActions.deliveredCount = receipts.length;
+    next.providerResources = next.providerResources.map((resource) => ({
+      ...resource,
+      disposition: "promoted",
+      summary: resource.label + " accepted in the new Canonical State",
+    }));
     next = finalizeResources(next, "promoted", canonicalState, {
       sqlite: next.sqlite?.after?.contentHash ?? null,
       "external-actions": externalActionFingerprint(receipts),
@@ -699,8 +2091,13 @@ export class AirlockRunner {
     return next;
   }
 
-  private assertNotCancelled(agentId: string): void {
-    if (this.cancellationRequests.has(agentId)) throw new RunCancelledError();
+  private assertNotCancelled(agentId: string, executionId?: string): void {
+    if (
+      this.cancellationRequests.has(agentId) ||
+      (executionId && this.executionCancellationRequests.has(executionId))
+    ) {
+      throw new RunCancelledError();
+    }
   }
 
   private async transition(
@@ -726,6 +2123,265 @@ export class AirlockRunner {
   }
 }
 
+function inspectCompletedPromotionRecovery(
+  transaction: RunTransaction,
+  terminalAuthority: RunTransaction | null,
+): {
+  complete: boolean;
+  normalizedProviderResourceEvents: RunTransaction["providerResourceEvents"] | null;
+} {
+  const visibilityRank = {
+    "canonical-manifest": 0,
+    "post-promotion-reconciled": 1,
+    "best-effort": 2,
+  } as const;
+  const expectedProviders = transaction.providerResources
+    .map((resource) => ({
+      providerId: resource.providerId,
+      resourceKind: resource.resourceKind,
+      visibility: resource.capabilities.promotionVisibility,
+    }))
+    .sort((left, right) => {
+      const visibilityDifference =
+        visibilityRank[left.visibility] - visibilityRank[right.visibility];
+      return (
+        visibilityDifference ||
+        (left.resourceKind + "\u0000" + left.providerId).localeCompare(
+          right.resourceKind + "\u0000" + right.providerId,
+        )
+      );
+    });
+  if (expectedProviders.length === 0) {
+    return { complete: true, normalizedProviderResourceEvents: null };
+  }
+  const events = transaction.providerResourceEvents;
+  let recoveryEventStart: number | null = null;
+  if (terminalAuthority) {
+    const authorityEvents = terminalAuthority.providerResourceEvents;
+    if (
+      events.length < authorityEvents.length ||
+      canonicalJson(events.slice(0, authorityEvents.length)) !==
+        canonicalJson(authorityEvents)
+    ) {
+      throw new Error(
+        "Completed Promotion journal contradicts immutable provider evidence",
+      );
+    }
+    recoveryEventStart = authorityEvents.length;
+  } else {
+    let start = events.length;
+    while (start > 0 && events[start - 1]?.stage === "reconcile") {
+      start -= 1;
+    }
+    if (start < events.length) {
+      recoveryEventStart = start;
+    }
+  }
+  if (recoveryEventStart === null) {
+    return { complete: false, normalizedProviderResourceEvents: null };
+  }
+  const attempts = parseCompletedPromotionRecoveryAttempts(
+    events.slice(recoveryEventStart),
+    expectedProviders,
+  );
+  if (!attempts) {
+    throw new Error(
+      "Completed Promotion journal has malformed provider recovery evidence",
+    );
+  }
+  const authorityNeedsFirstRecovery = Boolean(
+    terminalAuthority && !terminalAuthority.recovery.recoveredAfterRestart,
+  );
+  const normalizedRecoveryEvents =
+    authorityNeedsFirstRecovery && attempts.completeEvents.length > 0
+      ? attempts.completeEvents.slice(-expectedProviders.length)
+      : attempts.completeEvents;
+  const normalizedProviderResourceEvents = [
+    ...events.slice(0, recoveryEventStart),
+    ...normalizedRecoveryEvents,
+  ];
+  const changed =
+    canonicalJson(normalizedProviderResourceEvents) !== canonicalJson(events);
+  return {
+    complete:
+      Boolean(terminalAuthority?.recovery.recoveredAfterRestart) ||
+      (authorityNeedsFirstRecovery && normalizedRecoveryEvents.length > 0) ||
+      attempts.lastAttemptComplete,
+    normalizedProviderResourceEvents: changed
+      ? normalizedProviderResourceEvents
+      : null,
+  };
+}
+
+function parseCompletedPromotionRecoveryAttempts(
+  events: RunTransaction["providerResourceEvents"],
+  expectedProviders: Array<{
+    providerId: string;
+    resourceKind: string;
+    visibility:
+      | "canonical-manifest"
+      | "post-promotion-reconciled"
+      | "best-effort";
+  }>,
+): {
+  completeEvents: RunTransaction["providerResourceEvents"];
+  lastAttemptComplete: boolean;
+} | null {
+  if (events.length === 0) {
+    return { completeEvents: [], lastAttemptComplete: false };
+  }
+  const exactEventKeys = [
+    "schemaVersion",
+    "providerId",
+    "resourceKind",
+    "stage",
+    "status",
+    "summary",
+    "at",
+  ].sort();
+  const completeEvents: RunTransaction["providerResourceEvents"] = [];
+  let attempt: RunTransaction["providerResourceEvents"] = [];
+  let expectedIndex = 0;
+  let lastAttemptComplete = false;
+  for (const event of events) {
+    let expected = expectedProviders[expectedIndex];
+    const firstExpected = expectedProviders[0]!;
+    if (
+      expectedIndex > 0 &&
+      (event.providerId !== expected?.providerId ||
+        event.resourceKind !== expected.resourceKind) &&
+      event.providerId === firstExpected.providerId &&
+      event.resourceKind === firstExpected.resourceKind
+    ) {
+      attempt = [];
+      expectedIndex = 0;
+      lastAttemptComplete = false;
+      expected = firstExpected;
+    }
+    if (
+      !expected ||
+      canonicalJson(Object.keys(event).sort()) !==
+        canonicalJson(exactEventKeys) ||
+      event.schemaVersion !== 1 ||
+      event.providerId !== expected.providerId ||
+      event.resourceKind !== expected.resourceKind ||
+      event.stage !== "reconcile" ||
+      (event.status !== "passed" && event.status !== "failed") ||
+      typeof event.summary !== "string" ||
+      event.summary.length === 0 ||
+      event.summary.length > 512 ||
+      !Number.isFinite(Date.parse(event.at))
+    ) {
+      return null;
+    }
+    attempt.push(structuredClone(event));
+    if (event.status === "failed") {
+      attempt = [];
+      expectedIndex = 0;
+      lastAttemptComplete = false;
+      continue;
+    }
+    expectedIndex += 1;
+    if (expectedIndex === expectedProviders.length) {
+      completeEvents.push(...attempt);
+      attempt = [];
+      expectedIndex = 0;
+      lastAttemptComplete = true;
+    } else {
+      lastAttemptComplete = false;
+    }
+  }
+  return { completeEvents, lastAttemptComplete };
+}
+
+function assertRecoveryAuthority(
+  record: PromotionJournalRecord,
+  context: PromotionRecoveryAuthorityContext,
+): void {
+  const expected = context.expectedCandidateSetAuthorities.get(record.runId);
+  const expectedFederated = context.expectedFederatedAuthorities.get(record.runId);
+  if (record.authority.kind === "ordinary-run") {
+    if (
+      context.candidateSetRunIds.has(record.runId) ||
+      expected ||
+      expectedFederated
+    ) {
+      throw new Error(
+        "Promotion journal is missing its persisted specialized authority",
+      );
+    }
+    return;
+  }
+  if (isFederatedPromotionAuthority(record.authority)) {
+    if (
+      !expectedFederated ||
+      canonicalJson(record.authority) !== canonicalJson(expectedFederated)
+    ) {
+      throw new Error(
+        "Federated Promotion journal contradicts its immutable Admission Record",
+      );
+    }
+    return;
+  }
+  if (!expected) {
+    throw new Error(
+      "Candidate Set Promotion journal has no valid persisted winner authority",
+    );
+  }
+  if (canonicalJson(record.authority) !== canonicalJson(expected)) {
+    throw new Error(
+      "Candidate Set Promotion journal contradicts its persisted winner authority",
+    );
+  }
+}
+
+function isFederatedPromotionAuthority(
+  authority: PromotionAuthority,
+): authority is Extract<
+  PromotionAuthority,
+  { kind: "federated-admission" | "federated-approval" }
+> {
+  return (
+    authority.kind === "federated-admission" ||
+    authority.kind === "federated-approval"
+  );
+}
+
+function federatedPromotionAuthority(
+  identity: FederatedRunIdentity,
+): Extract<
+  PromotionAuthority,
+  { kind: "federated-admission" | "federated-approval" }
+> {
+  const hasApproval =
+    identity.pendingRecordDigest !== undefined ||
+    identity.approvalDecisionDigest !== undefined;
+  if (hasApproval) {
+    if (!identity.pendingRecordDigest || !identity.approvalDecisionDigest) {
+      throw new Error("Federated approval authority evidence is incomplete");
+    }
+    return {
+      schemaVersion: 1,
+      kind: "federated-approval",
+      admissionId: identity.admissionId,
+      importIdentifier: identity.importIdentifier,
+      pendingRecordDigest: identity.pendingRecordDigest,
+      approvalDecisionDigest: identity.approvalDecisionDigest,
+      producerId: identity.producerId,
+      policyDigest: identity.policyDigest,
+    };
+  }
+  return {
+    schemaVersion: 1,
+    kind: "federated-admission",
+    admissionId: identity.admissionId,
+    importIdentifier: identity.importIdentifier,
+    recordDigest: identity.recordDigest,
+    producerId: identity.producerId,
+    policyDigest: identity.policyDigest,
+  };
+}
+
 export function finalizeResources(
   transaction: RunTransaction,
   disposition: "promoted" | "quarantined" | "discarded" | "cancelled",
@@ -744,7 +2400,7 @@ export function finalizeResources(
           : undefined;
     const fingerprintAfter =
       resource.kind in fingerprints
-        ? fingerprints[resource.kind] ?? null
+        ? (fingerprints[resource.kind] ?? null)
         : disposition === "promoted" && canonicalFingerprint
           ? canonicalFingerprint
           : resource.fingerprintBefore;
@@ -756,11 +2412,211 @@ export function finalizeResources(
         disposition === "promoted"
           ? resource.label + " accepted in the new Canonical State"
           : disposition === "discarded"
-            ? resource.label + " Quarantine was discarded; Canonical State stayed unchanged"
-          : resource.label + " remained on the prior Canonical State",
+            ? resource.label +
+              " Quarantine was discarded; Canonical State stayed unchanged"
+            : resource.label + " remained on the prior Canonical State",
     };
   });
   return next;
+}
+
+function mergeProviderEvidence(
+  existing: RunTransaction["providerResources"],
+  evidence: readonly CoordinatedResourceEvidence[],
+): RunTransaction["providerResources"] {
+  const byProvider = new Map(
+    evidence.map((resource) => [resource.providerId, resource]),
+  );
+  return existing.map((resource) => {
+    const accepted = byProvider.get(resource.providerId);
+    if (!accepted) return resource;
+    return {
+      ...resource,
+      change: structuredClone(accepted.change),
+      validations: structuredClone(accepted.validations),
+      summary: accepted.change.summary,
+    };
+  });
+}
+
+function providerRecordsFromPrepared(
+  prepared: readonly CoordinatedPreparedResource[],
+): RunTransaction["providerResources"] {
+  return prepared.map((resource) => ({
+    schemaVersion: 1,
+    providerId: resource.providerId,
+    resourceKind: resource.resourceKind,
+    label: resource.label,
+    required: resource.required,
+    capabilities: structuredClone(resource.capabilities),
+    source: structuredClone(resource.source),
+    candidate: structuredClone(resource.candidate),
+    runtimeBinding: resource.runtimeBinding
+      ? {
+          schemaVersion: 1,
+          relativePath: resource.runtimeBinding.relativePath,
+          access: resource.runtimeBinding.access,
+        }
+      : null,
+    change: null,
+    validations: [],
+    promotionPlan: null,
+    installedVersion: null,
+    quarantine: null,
+    disposition: null,
+    summary: "Resource Provider Candidate is isolated from Canonical State",
+  }));
+}
+
+function mergeProviderPlans(
+  existing: RunTransaction["providerResources"],
+  plans: readonly ResourcePromotionPlan[],
+): RunTransaction["providerResources"] {
+  const byProvider = new Map(plans.map((plan) => [plan.providerId, plan]));
+  return existing.map((resource) => ({
+    ...resource,
+    promotionPlan:
+      byProvider.get(resource.providerId) ?? resource.promotionPlan,
+  }));
+}
+
+function mergeInstalledProviderVersions(
+  existing: RunTransaction["providerResources"],
+  versions: readonly ResourceVersionReference[],
+): RunTransaction["providerResources"] {
+  const byProvider = new Map(
+    versions.map((version) => [version.providerId, version]),
+  );
+  return existing.map((resource) => ({
+    ...resource,
+    installedVersion:
+      byProvider.get(resource.providerId) ?? resource.installedVersion,
+  }));
+}
+
+function providerEvidenceFromTransaction(
+  transaction: RunTransaction,
+): CoordinatedResourceEvidence[] {
+  return transaction.providerResources.map((resource) => {
+    if (!resource.change) {
+      throw new Error(
+        "Sealed Candidate is missing Resource Provider change evidence",
+      );
+    }
+    return {
+      schemaVersion: 1,
+      providerId: resource.providerId,
+      resourceKind: resource.resourceKind,
+      label: resource.label,
+      required: resource.required,
+      capabilities: structuredClone(resource.capabilities),
+      source: structuredClone(resource.source),
+      candidate: structuredClone(resource.candidate),
+      change: structuredClone(resource.change),
+      validations: structuredClone(resource.validations),
+      promotionPlan: null,
+      installedVersion: null,
+      quarantine: null,
+    };
+  });
+}
+
+function markProviderQuarantined(
+  existing: RunTransaction["providerResources"],
+  quarantines: readonly ResourceQuarantineHandle[],
+): RunTransaction["providerResources"] {
+  const byProvider = new Map(
+    quarantines.map((quarantine) => [quarantine.providerId, quarantine]),
+  );
+  return existing.map((resource) => ({
+    ...resource,
+    quarantine: byProvider.get(resource.providerId) ?? resource.quarantine,
+    disposition: byProvider.has(resource.providerId)
+      ? "quarantined"
+      : resource.disposition,
+    summary: byProvider.has(resource.providerId)
+      ? resource.label + " retained its rejected Candidate as Quarantine"
+      : resource.label + " cleanup remains pending in composite Quarantine",
+  }));
+}
+
+function markProvidersDiscarded(
+  existing: RunTransaction["providerResources"],
+  providerIds: readonly string[],
+): RunTransaction["providerResources"] {
+  const discarded = new Set(providerIds);
+  return existing.map((resource) =>
+    discarded.has(resource.providerId)
+      ? {
+          ...resource,
+          disposition: "discarded" as const,
+          summary:
+            resource.label + " Candidate was discarded with retained evidence",
+        }
+      : resource,
+  );
+}
+
+function markProviderDisposition(
+  existing: RunTransaction["providerResources"],
+  disposition: "cancelled" | "discarded",
+): RunTransaction["providerResources"] {
+  return existing.map((resource) => ({
+    ...resource,
+    disposition,
+    summary:
+      resource.label +
+      (disposition === "cancelled"
+        ? " Candidate was cancelled before Promotion"
+        : " Quarantine was discarded"),
+  }));
+}
+
+function markProviderPrepareRetained(
+  existing: RunTransaction["providerResources"],
+): RunTransaction["providerResources"] {
+  return existing.map((resource) => ({
+    ...resource,
+    disposition: "quarantined",
+    summary:
+      resource.label +
+      " Candidate was retained for idempotent cleanup after preparation failed",
+  }));
+}
+
+function hasFailedProviderPrepare(transaction: RunTransaction): boolean {
+  return transaction.providerResourceEvents.some(
+    (event) => event.stage === "prepare" && event.status === "failed",
+  );
+}
+
+function versionFromResourcePlan(
+  plan: ResourcePromotionPlan,
+): ResourceVersionReference {
+  return {
+    schemaVersion: 1,
+    providerId: plan.providerId,
+    resourceKind: plan.resourceKind,
+    versionId: plan.targetVersionId,
+    fingerprint: plan.targetFingerprint,
+    metadata: structuredClone(plan.metadata),
+  };
+}
+
+function providerIdsFromPlan(plan: {
+  sourceProviderVersions: readonly ResourceVersionReference[];
+}): string[] {
+  return plan.sourceProviderVersions.map((version) => version.providerId);
+}
+
+function providerIdsFromTransaction(transaction: RunTransaction): string[] {
+  return transaction.providerResources.map((resource) => resource.providerId);
+}
+
+function lifecycleFailureStage(error: unknown) {
+  return error instanceof ResourceLifecycleError
+    ? error.stage
+    : ("runtime" as const);
 }
 
 function externalActionFingerprint(
@@ -771,11 +2627,160 @@ function externalActionFingerprint(
       idempotencyKey: receipt.idempotencyKey,
       deliveredAt: receipt.deliveredAt,
     }))
-    .sort((left, right) => left.idempotencyKey.localeCompare(right.idempotencyKey));
+    .sort((left, right) =>
+      left.idempotencyKey.localeCompare(right.idempotencyKey),
+    );
   return (
     "sha256:" +
     createHash("sha256").update(JSON.stringify(normalized)).digest("hex")
   );
+}
+
+function createSealedCandidateReference(input: {
+  identity: DeferredSelectionIdentity;
+  transaction: RunTransaction;
+  result: RunnerResult;
+}): SealedCandidateReference {
+  if (!input.transaction.candidateStateId) {
+    throw new Error("Eligible Candidate has no Candidate State identifier");
+  }
+  const unsigned = {
+    schemaVersion: 1 as const,
+    candidateSetId: input.identity.candidateSetId,
+    competitorId: input.identity.competitorId,
+    runId: input.transaction.id,
+    candidateStateId: input.transaction.candidateStateId,
+    sourceStateId: input.transaction.canonicalStateIdBefore,
+    sourceContentHash: input.transaction.canonicalContentHashBefore,
+    outcomeContractVersion: input.transaction.outcomeContractVersion,
+    transactionEvidenceHash: evidenceHash(input.transaction),
+    runtimeResultHash: evidenceHash(input.result),
+    sealedAt: now(),
+  };
+  return {
+    ...unsigned,
+    sealDigest: evidenceHash(unsigned),
+  };
+}
+
+function verifySealedCandidateReference(
+  seal: SealedCandidateReference,
+  transaction: RunTransaction,
+  result: RunnerResult,
+): void {
+  const unsigned = {
+    schemaVersion: seal.schemaVersion,
+    candidateSetId: seal.candidateSetId,
+    competitorId: seal.competitorId,
+    runId: seal.runId,
+    candidateStateId: seal.candidateStateId,
+    sourceStateId: seal.sourceStateId,
+    sourceContentHash: seal.sourceContentHash,
+    outcomeContractVersion: seal.outcomeContractVersion,
+    transactionEvidenceHash: seal.transactionEvidenceHash,
+    runtimeResultHash: seal.runtimeResultHash,
+    sealedAt: seal.sealedAt,
+  };
+  if (
+    seal.schemaVersion !== 1 ||
+    seal.transactionEvidenceHash !== evidenceHash(transaction) ||
+    seal.runtimeResultHash !== evidenceHash(result) ||
+    seal.sealDigest !== evidenceHash(unsigned) ||
+    seal.candidateStateId !== transaction.candidateStateId ||
+    seal.sourceStateId !== transaction.canonicalStateIdBefore ||
+    seal.sourceContentHash !== transaction.canonicalContentHashBefore ||
+    seal.outcomeContractVersion !== transaction.outcomeContractVersion
+  ) {
+    throw new Error(
+      "Selected Candidate seal failed deterministic verification",
+    );
+  }
+}
+
+function assertSealedCandidateUnchanged(input: {
+  transaction: RunTransaction;
+  changes: RunTransaction["changes"];
+  validations: RunTransaction["validations"];
+  sqliteContentHash: string;
+  intents: RunTransaction["externalActions"]["intents"];
+  providerEvidence: readonly CoordinatedResourceEvidence[];
+}): void {
+  const failedRequired = input.validations.find(
+    (validation) => validation.required && validation.status !== "passed",
+  );
+  if (failedRequired) {
+    throw new Error(
+      "Selected Candidate failed Promotion-time Validation: " +
+        failedRequired.name,
+    );
+  }
+  if (evidenceHash(input.changes) !== evidenceHash(input.transaction.changes)) {
+    throw new Error("Selected Candidate workspace changed after it was sealed");
+  }
+  if (
+    !input.transaction.sqlite?.candidate ||
+    input.transaction.sqlite.candidate.contentHash !== input.sqliteContentHash
+  ) {
+    throw new Error(
+      "Selected Candidate SQLite state changed after it was sealed",
+    );
+  }
+  if (
+    evidenceHash(input.intents) !==
+    evidenceHash(input.transaction.externalActions.intents)
+  ) {
+    throw new Error("Selected Candidate outbox changed after it was sealed");
+  }
+  const storedProviders = new Map(
+    input.transaction.providerResources.map((resource) => [
+      resource.providerId,
+      resource,
+    ]),
+  );
+  if (storedProviders.size !== input.providerEvidence.length) {
+    throw new Error(
+      "Selected Candidate Resource Provider set changed after sealing",
+    );
+  }
+  for (const evidence of input.providerEvidence) {
+    const stored = storedProviders.get(evidence.providerId);
+    if (
+      !stored ||
+      evidenceHash(evidence.candidate) !== evidenceHash(stored.candidate) ||
+      evidence.change.fingerprintCandidate !==
+        stored.change?.fingerprintCandidate ||
+      evidence.change.fingerprintBefore !== stored.change?.fingerprintBefore
+    ) {
+      throw new Error(
+        "Selected Candidate Resource Provider state changed after sealing",
+      );
+    }
+  }
+}
+
+function evidenceHash(value: unknown): string {
+  return (
+    "sha256:" + createHash("sha256").update(canonicalJson(value)).digest("hex")
+  );
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value))
+    return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value && typeof value === "object") {
+    return (
+      "{" +
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) =>
+          Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+        )
+        .map(([key, item]) => JSON.stringify(key) + ":" + canonicalJson(item))
+        .join(",") +
+      "}"
+    );
+  }
+  return JSON.stringify(value);
 }
 
 export function createPromotionReceipt(
@@ -786,13 +2791,11 @@ export function createPromotionReceipt(
     !transaction.canonicalStateIdAfter ||
     !transaction.canonicalContentHashAfter
   ) {
-    throw new Error("Cannot create a receipt for an incomplete Run Transaction");
+    throw new Error(
+      "Cannot create a receipt for an incomplete Run Transaction",
+    );
   }
-  const validationEvidenceHash =
-    "sha256:" +
-    createHash("sha256")
-      .update(JSON.stringify(transaction.validations))
-      .digest("hex");
+  const validationEvidenceHash = promotionValidationEvidenceHash(transaction);
   return {
     runTransactionId: transaction.id,
     disposition: transaction.disposition,

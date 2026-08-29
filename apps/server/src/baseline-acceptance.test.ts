@@ -9,6 +9,7 @@ import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
+import { waitForRunStatus } from "../test/agent-service-workflow.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -98,7 +99,7 @@ describe("Phase 0 baseline acceptance", () => {
     });
     expect(firstTurn.statusCode).toBe(202);
     const firstRunId = firstTurn.json<{ run: { id: string } }>().run.id;
-    await expect.poll(() => firstService.getRun(firstRunId).status).toBe("completed");
+    await waitForRunStatus(firstService, firstRunId, "completed");
 
     const secondTurn = await firstApp.inject({
       method: "POST",
@@ -107,7 +108,7 @@ describe("Phase 0 baseline acceptance", () => {
     });
     expect(secondTurn.statusCode).toBe(202);
     const secondRunId = secondTurn.json<{ run: { id: string } }>().run.id;
-    await expect.poll(() => firstService.getRun(secondRunId).status).toBe("completed");
+    await waitForRunStatus(firstService, secondRunId, "completed");
     expect(runner.requests.map((request) => request.threadId)).toEqual([
       null,
       "baseline-thread",

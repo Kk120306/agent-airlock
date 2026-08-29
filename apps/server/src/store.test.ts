@@ -2,6 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createDefaultSelectionContract } from "./candidate-selection.js";
+import { createDefaultOutcomeContract } from "./outcome-contract.js";
 import { JsonStore } from "./store.js";
 
 const temporaryDirectories: string[] = [];
@@ -15,7 +17,7 @@ afterEach(async () => {
 });
 
 describe("JsonStore", () => {
-  it("migrates starter version 1 data to version 7", async () => {
+  it("migrates starter version 1 data to version 10", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-migration-"));
     temporaryDirectories.push(root);
     const filePath = path.join(root, "db.json");
@@ -59,7 +61,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 10,
       agents: [
         {
           canonicalStateId: "",
@@ -68,7 +70,7 @@ describe("JsonStore", () => {
       ],
       runs: [{ transaction: null }],
     });
-    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 7 });
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({ version: 10 });
   });
 
   it("does not publish a mutation in memory when persistence fails", async () => {
@@ -178,7 +180,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 10,
       agents: [
         {
           outcomeContract: {
@@ -237,7 +239,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -248,7 +250,39 @@ describe("JsonStore", () => {
         },
       ],
     });
+
+    const restarted = new JsonStore(filePath);
+    await restarted.initialize();
+    expect(restarted.snapshot()).toEqual(store.snapshot());
   });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])(
+    "persists a version %i migration that the same binary can reopen",
+    async (version) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), "launchpad-store-restartable-migration-"),
+      );
+      temporaryDirectories.push(root);
+      const filePath = path.join(root, "db.json");
+      await writeFile(
+        filePath,
+        JSON.stringify({
+          version,
+          agents: [],
+          messages: [],
+          runs: [],
+          ...(version === 9 ? { candidateSets: [] } : {}),
+        }) + "\n",
+      );
+
+      const first = new JsonStore(filePath);
+      await first.initialize();
+      const firstSnapshot = first.snapshot();
+      const second = new JsonStore(filePath);
+      await second.initialize();
+      expect(second.snapshot()).toEqual(firstSnapshot);
+    },
+  );
 
   it("migrates Phase 3 data without inventing data or effect evidence", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v4-migration-"));
@@ -276,7 +310,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -321,7 +355,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -375,7 +409,7 @@ describe("JsonStore", () => {
     await store.initialize();
 
     expect(store.snapshot()).toMatchObject({
-      version: 7,
+      version: 10,
       runs: [
         {
           transaction: {
@@ -389,5 +423,344 @@ describe("JsonStore", () => {
         },
       ],
     });
+  });
+
+  it("adds empty provider evidence vectors to Phase 7 transactions", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v7-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 7,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-7-run",
+            transaction: {
+              id: "phase-7-run",
+              status: "promoted",
+              disposition: "promoted",
+              recovery: {
+                journalPhase: "completed",
+                recoveredAfterRestart: false,
+                recoveryError: null,
+              },
+            },
+          },
+          {
+            id: "phase-7-run-without-transaction",
+            transaction: null,
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toMatchObject({
+      version: 10,
+      runs: [
+        {
+          id: "phase-7-run",
+          transaction: {
+            providerResources: [],
+            providerResourceEvents: [],
+            recovery: { journalPhase: "completed" },
+          },
+        },
+        {
+          id: "phase-7-run-without-transaction",
+          transaction: null,
+        },
+      ],
+    });
+  });
+
+  it("adds Candidate Set links without inventing Phase 8 competition history", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v8-migration-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 8,
+        agents: [],
+        messages: [],
+        runs: [
+          {
+            id: "phase-8-run",
+            agentId: "phase-8-agent",
+            status: "completed",
+            prompt: "ordinary Phase 8 Run",
+            output: "done",
+            error: null,
+            usage: null,
+            transaction: null,
+            startedAt: "2026-08-25T00:00:00.000Z",
+            completedAt: "2026-08-25T00:00:01.000Z",
+            createdAt: "2026-08-25T00:00:00.000Z",
+          },
+        ],
+      }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await store.initialize();
+
+    expect(store.snapshot()).toEqual({
+      version: 10,
+      agents: [],
+      messages: [],
+      runs: [
+        {
+          id: "phase-8-run",
+          agentId: "phase-8-agent",
+          candidateSetId: null,
+          competitorId: null,
+          status: "completed",
+          prompt: "ordinary Phase 8 Run",
+          output: "done",
+          error: null,
+          usage: null,
+          transaction: null,
+          startedAt: "2026-08-25T00:00:00.000Z",
+          completedAt: "2026-08-25T00:00:01.000Z",
+          createdAt: "2026-08-25T00:00:00.000Z",
+        },
+      ],
+      candidateSets: [],
+      assuranceProposals: [],
+      outcomeContractVersions: [],
+    });
+  });
+
+  it("rejects version 9 data that omits the Candidate Set aggregate", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-invalid-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({ version: 9, agents: [], messages: [], runs: [] }) + "\n",
+    );
+
+    const store = new JsonStore(filePath);
+    await expect(store.initialize()).rejects.toThrow("Unsupported database format");
+  });
+
+  it("rejects malformed Agent contracts before persisting a version 9 migration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-agent-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    const createdAt = "2026-08-25T00:00:00.000Z";
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 9,
+        agents: [
+          {
+            id: "agent-one",
+            name: "Malformed Agent",
+            description: "",
+            instructions: "",
+            status: "ready",
+            workspacePath: "/tmp/agent-one",
+            canonicalStateId: "state-one",
+            outcomeContract: {
+              ...createDefaultOutcomeContract(2, createdAt),
+              maxChangedFiles: "unbounded",
+            },
+            codexThreadId: null,
+            lastError: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        messages: [],
+        runs: [],
+        candidateSets: [],
+      }) + "\n",
+    );
+
+    await expect(new JsonStore(filePath).initialize()).rejects.toThrow(
+      /Outcome Contract/,
+    );
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
+      version: 9,
+      agents: [{ outcomeContract: { maxChangedFiles: "unbounded" } }],
+    });
+  });
+
+  it("rejects duplicate Agent identities before persisting a version 9 migration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-duplicate-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    const createdAt = "2026-08-25T00:00:00.000Z";
+    const agent = {
+      id: "agent-one",
+      name: "Duplicate Agent",
+      description: "",
+      instructions: "",
+      status: "ready",
+      workspacePath: "/tmp/agent-one",
+      canonicalStateId: "state-one",
+      outcomeContract: createDefaultOutcomeContract(2, createdAt),
+      codexThreadId: null,
+      lastError: null,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 9,
+        agents: [agent, structuredClone(agent)],
+        messages: [],
+        runs: [],
+        candidateSets: [],
+      }) + "\n",
+    );
+
+    await expect(new JsonStore(filePath).initialize()).rejects.toThrow(
+      "Agent identity or Outcome Contract is invalid",
+    );
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toMatchObject({
+      version: 9,
+      agents: [{ id: "agent-one" }, { id: "agent-one" }],
+    });
+  });
+
+  it("rejects malformed version 9 Candidate Set records before recovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-candidate-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 9,
+        agents: [],
+        messages: [],
+        runs: [],
+        candidateSets: [{ schemaVersion: 1, hiddenWinnerOverride: "run-two" }],
+      }) + "\n",
+    );
+
+    await expect(new JsonStore(filePath).initialize()).rejects.toThrow(
+      /Candidate Set contains unknown or missing fields/,
+    );
+  });
+
+  it("rejects exact-shape version 9 Candidate Sets with invalid nested values", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "launchpad-store-v9-nested-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "db.json");
+    const createdAt = "2026-08-25T00:00:00.000Z";
+    const digest = "sha256:" + "a".repeat(64);
+    const competitor = (id: string, runId: string) => ({
+      id,
+      runId,
+      executorProfileId: "standard-v1",
+      strategyInstruction: "Explore a bounded valid implementation.",
+      status: "pending",
+      criterionValues: {},
+      exclusions: [],
+      evaluationDurationMs: null,
+      resultThreadId: null,
+      seal: null,
+      loserDisposition: "pending",
+      error: null,
+      startedAt: null,
+      completedAt: null,
+    });
+    const database = {
+      version: 9,
+      agents: [],
+      messages: [],
+      runs: [
+        {
+          id: "run-one",
+          agentId: "agent-one",
+          candidateSetId: "set-one",
+          competitorId: "one",
+        },
+        {
+          id: "run-two",
+          agentId: "agent-one",
+          candidateSetId: "set-one",
+          competitorId: "two",
+        },
+      ],
+      candidateSets: [
+        {
+          schemaVersion: 1,
+          id: "set-one",
+          agentId: "agent-one",
+          objective: "Explore two bounded valid approaches.",
+          source: {
+            stateId: "state-one",
+            contentHash: digest,
+            workspaceContentHash: digest,
+            sessionContentHash: digest,
+            sqliteContentHash: digest,
+            outboxContentHash: digest,
+            codexThreadId: null,
+            providerVersions: [],
+          },
+          outcomeContract: createDefaultOutcomeContract(1, createdAt),
+          selectionContract: createDefaultSelectionContract(),
+          competitors: [
+            competitor("one", "run-one"),
+            competitor("two", "run-two"),
+          ],
+          maxConcurrency: 2,
+          budget: {
+            maxDurationMsPerCompetitor: 600_000,
+            maxTotalTokens: 2_000_000,
+            maxTotalChangedBytes: 200_000_000,
+          },
+          loserPolicy: "discard",
+          phase: "admitted",
+          selectionDecision: null,
+          selectedCompetitorId: null,
+          winnerRunId: null,
+          cancellationRequested: false,
+          recoveryError: null,
+          createdAt,
+          updatedAt: createdAt,
+          decidedAt: null,
+          completedAt: null,
+        },
+      ],
+    };
+    await writeFile(filePath, JSON.stringify(database) + "\n");
+    await expect(new JsonStore(filePath).initialize()).resolves.toBeUndefined();
+
+    const mutations: Array<(value: any) => void> = [
+      (value) => {
+        value.candidateSets[0].objective = 7;
+      },
+      (value) => {
+        value.candidateSets[0].source.hiddenAuthority = "forged";
+      },
+      (value) => {
+        value.candidateSets[0].selectionContract.hiddenAuthority = "forged";
+      },
+      (value) => {
+        value.candidateSets[0].competitors[0].status = "unknown";
+        value.candidateSets[0].competitors[0].criterionValues = {
+          "total-tokens": -1,
+        };
+      },
+    ];
+    for (const mutate of mutations) {
+      const malformed = structuredClone(database);
+      mutate(malformed);
+      await writeFile(filePath, JSON.stringify(malformed) + "\n");
+      await expect(new JsonStore(filePath).initialize()).rejects.toThrow(
+        /Candidate Set/,
+      );
+    }
   });
 });

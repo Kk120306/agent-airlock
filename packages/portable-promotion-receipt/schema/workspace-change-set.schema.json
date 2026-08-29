@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-airlock.dev/schema/workspace-change-set-v1.json",
+  "title": "Agent Airlock Workspace Change Set Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "artifact", "artifactDigest"],
+  "properties": {
+    "schema": { "const": "agent-airlock/workspace-change-set-envelope" },
+    "schemaVersion": { "const": 1 },
+    "artifactDigest": { "$ref": "#/$defs/digest" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "baseStateDigest", "resultStateDigest", "operations"],
+      "properties": {
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "schemaVersion", "canonicalization", "digestAlgorithm", "pathSemantics"],
+          "properties": {
+            "schema": { "const": "agent-airlock/workspace-change-set" },
+            "schemaVersion": { "const": 1 },
+            "canonicalization": { "const": "RFC8785" },
+            "digestAlgorithm": { "const": "SHA-256" },
+            "pathSemantics": { "const": "normalized-relative-posix-nfc" }
+          }
+        },
+        "baseStateDigest": { "$ref": "#/$defs/digest" },
+        "resultStateDigest": { "$ref": "#/$defs/digest" },
+        "operations": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/write" },
+              { "$ref": "#/$defs/delete" },
+              { "$ref": "#/$defs/rename" }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!.*\\/$)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*(?:^|/)(?:\\.git|\\.agent-airlock)(?:/|$)).+$"
+    },
+    "write": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "path", "mediaType", "encoding", "content", "contentDigest", "byteLength", "priorContentDigest"],
+      "properties": {
+        "operation": { "enum": ["add", "modify"] },
+        "path": { "$ref": "#/$defs/path" },
+        "mediaType": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]{0,63}/[a-z0-9][a-z0-9.+-]{0,63}$" },
+        "encoding": { "const": "base64url" },
+        "content": { "type": "string", "pattern": "^[A-Za-z0-9_-]*$" },
+        "contentDigest": { "$ref": "#/$defs/digest" },
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 5242880 },
+        "priorContentDigest": {
+          "oneOf": [
+            { "$ref": "#/$defs/digest" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "delete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "path", "priorContentDigest"],
+      "properties": {
+        "operation": { "const": "delete" },
+        "path": { "$ref": "#/$defs/path" },
+        "priorContentDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "rename": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "fromPath", "toPath", "contentDigest"],
+      "properties": {
+        "operation": { "const": "rename" },
+        "fromPath": { "$ref": "#/$defs/path" },
+        "toPath": { "$ref": "#/$defs/path" },
+        "contentDigest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}

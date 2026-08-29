@@ -2,7 +2,7 @@
 
 ## Free deterministic demo
 
-Use this path for development, judging rehearsal, and automated evidence while organizer credentials are pending.
+Use this path for development, judging rehearsal, and deterministic automated evidence.
 It builds the production application, binds Fastify to `127.0.0.1:3199`, seeds one `Airlock Demo` Agent, and runs a deterministic local Codex protocol fixture.
 It does not require Docker, a ModelArk key, or paid inference.
 
@@ -31,6 +31,46 @@ npm run test:demo:e2e
 `test:demo` verifies port conflicts, clean reset, process shutdown, seeding, and restart persistence.
 `test:demo:e2e` verifies Promotion, destructive Quarantine, unchanged Canonical State, Repair lineage, two accepted mock effects, session continuity, reload persistence, and a 390-pixel layout.
 
+## Real Codex container proof
+
+Use this path to turn the automated Chrome-to-container acceptance gate into an interactive judge demo.
+It requires Docker, Colima, or Podman but no ModelArk credential or paid inference.
+
+```bash
+npm run demo:runtime -- --reset
+```
+
+The real Runtime launcher admits the judge path only after seven safe readiness checks pass.
+With the demo running, inspect the same checks independently:
+
+```bash
+npm run demo:readiness
+npm run demo:readiness -- --json
+```
+
+The report proves only local demo readiness and intentionally excludes configured provider values.
+The ModelArk launcher runs the same local checks only after its mandatory live provider preflight succeeds.
+Open <http://127.0.0.1:3200> and select `Run passing Candidate` under `Full safety loop`.
+The production control plane launches the pinned real Codex CLI in a disposable container and serves deterministic Responses tool-call events from a host-local fixture.
+Codex executes the requested write only inside Candidate State.
+Airlock requires `AGENTS.md` and `protocol-proof.txt`, protects `AGENTS.md`, caps the change, and runs `test "$(cat protocol-proof.txt)" = candidate-only` before Promotion.
+Then select `Run failing Candidate` to make real Codex write deliberately invalid content in a second isolated Candidate.
+The browser must show `REAL RUNTIME PROOF`, the local inference disclosure, the `Run` to `Validate` to `Promote` to `Verify` path, a compact evidence-backed Quarantine verdict, and an unchanged canonical fingerprint.
+The canonical workspace must still contain `candidate-only`, while the retained Quarantine contains `unsafe-candidate`.
+Select `Repair retained Candidate` to start a fresh real Codex Run from the retained Candidate and bounded failed-Validation evidence.
+The browser must show the repaired child linked to its quarantined parent, all nine required Validations passing, and Canonical State advancing only after the repair succeeds.
+Open the complete success evidence to show `Journal completed`, then open the rejection evidence to show the decisive `command:protocol-content` failure without crowding the primary judge story.
+Select `Generate and verify proof` on the repaired Run to create a private-by-default two-decision chain and confirm its signatures and Canonical handoff locally.
+State persists under the dedicated `.local/airlock-container-demo` root unless `--reset` is supplied.
+If the seeded Outcome Contract is edited, restart with `--reset` to restore the guaranteed judge path instead of silently overwriting operator policy.
+The launcher never reads `.env`, never calls ModelArk, and refuses any alternate state root.
+
+Run the same journey as an automated Chrome assertion with:
+
+```bash
+npm run test:container-browser
+```
+
 ## Credentialed ModelArk POC
 
 The local profile runs the React/Fastify control plane on macOS or Linux and
@@ -51,16 +91,57 @@ Requirements:
 ```bash
 cp .env.example .env
 # Fill ARK_API_KEY, ARK_MODEL, and the region-matching ARK_BASE_URL.
+# Optionally list activated free-quota fallbacks in ARK_MODEL_FALLBACKS.
+npm run check:modelark
+npm run poc:doctor
 npm run poc
 ```
 
 `npm run poc` loads `.env` automatically.
+`npm run poc:doctor` proves each live prerequisite, Candidate session copy isolation, and a real two-turn Codex tool call against a local Responses fixture without printing configured values, model output, provider request identifiers, or account metadata.
+Use its result before the live demo to distinguish a ModelArk capacity failure from a container or application failure.
+Before building the Runtime, it performs a minimal Responses API request and requires a completed response with non-empty assistant `output_text`.
+An HTTP success or `completed` status without generated assistant text fails the preflight.
+The credential and model output are never printed.
+Successful preflight passes a bounded credential-free handoff into the server with a timestamp, request counts, a configured-model selection index, and SHA-256 commitments to the selected model and provider origin.
+The guided live judge profile refuses missing, stale, malformed, wrong-model, or wrong-origin handoffs before displaying live-proof mode.
+`ARK_MODEL_FALLBACKS` accepts a comma-separated list of operator-approved models and is bounded to four unique models including `ARK_MODEL`.
+Only HTTP 404 and 429 advance to the next model.
+Allowlisted temporary capacity and burst-protection responses receive a bounded warm-up, with numeric `Retry-After` guidance capped at 10 seconds per wait and 15 seconds across the configured model list.
+Authentication, network, timeout, malformed-response, and all other failures stop immediately.
+The model that completes preflight becomes the Runtime's `ARK_MODEL`.
+Keep Free Credits Only Mode enabled for every activated model because the launcher does not change or verify account billing settings.
+Confirm that every configured model is activated and visibly has remaining free quota in Model activation before the demo.
+After `Run live Candidate` completes a promoted file, SQLite, Codex-session, and one-effect transaction, the guided launcher records a private signed Portable Evidence Packet under its managed state root.
+The packet includes only the safe execution-profile disclosure and excludes credentials, provider URLs, raw endpoint identifiers, prompts, Runtime output, and environment values.
+Verify the latest recorded packet without contacting ModelArk:
+
+```bash
+npm run verify:modelark-evidence
+```
+
+Run the complete browser-driven conformance journey with one bounded command:
+
+```bash
+npm run prove:modelark -- --reset
+```
+
+Add `--headed` to watch the production Chrome interaction during rehearsal or recording.
+The command requires the existing live preflight, exact four-resource Promotion, single post-Promotion effect, signed packet capture, and offline verification before it returns success.
+It returns a safe `provider-unavailable` result when the free-only provider boundary has no capacity and never switches billing mode or stores raw provider output.
+The owner-only result capsule is only a projection over the signed packet and does not add provider authority or a trusted timestamp.
+
+This command verifies historical signed evidence only.
+It does not replace `npm run check:modelark` or prove current provider availability.
+Use `AIRLOCK_SKIP_MODELARK_PREFLIGHT=true` only to bypass the generic `npm run poc` fail-fast provider check explicitly.
+The `npm run demo:modelark` judge profile always rejects that bypass.
 Explicit process environment variables take precedence.
-Keep the Beijing default for mainland Volcengine credentials.
-For BytePlus Asia Pacific credentials, use:
+The repository default targets the BytePlus Asia Pacific TechJam region.
+Use the documented Dola Model ID directly, or replace it with a Responses-capable endpoint ID from the same region:
 
 ```dotenv
 ARK_BASE_URL=https://ark.ap-southeast.bytepluses.com/api/v3
+ARK_MODEL=dola-seed-2-1-turbo-260628
 ```
 
 See [BytePlus region availability](https://docs.byteplus.com/en/docs/ModelArk/2191806) when selecting a regional data-plane URL.
@@ -146,7 +227,7 @@ podman run --rm docker.io/library/alpine:3.20 echo PODMAN_OK
 ```bash
 CONTAINER_ENGINE=podman \
 ARK_API_KEY=your-ark-api-key \
-ARK_MODEL=ep-your-endpoint-id \
+ARK_MODEL=dola-seed-2-1-turbo-260628 \
 npm run poc
 ```
 
@@ -159,7 +240,7 @@ build.
 ```bash
 CONTAINER_RUNTIME_APT_PACKAGES='ca-certificates git ripgrep python3 build-essential' \
 ARK_API_KEY=your-ark-api-key \
-ARK_MODEL=ep-your-endpoint-id \
+ARK_MODEL=dola-seed-2-1-turbo-260628 \
 npm run poc
 ```
 
@@ -181,6 +262,7 @@ ModelArk credentials and endpoints are isolated by provider and region.
 A `401` response saying that the API key does not exist usually means the key is invalid or `ARK_BASE_URL` points to the wrong provider or region.
 A `404` response saying that a model or endpoint does not exist usually means `ARK_MODEL` is incorrect, unavailable to the API key, not activated, or belongs to another region.
 Confirm all three Ark values together before retrying.
+The live preflight and a complete browser-to-container Promotion passed against the BytePlus Asia Pacific Responses API on 2026-08-27.
 
 Check Runtime readiness:
 

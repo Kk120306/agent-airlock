@@ -16,6 +16,7 @@ describe("Container Codex runner", () => {
       CONTAINER_ENGINE: "podman",
       CONTAINER_RUNTIME_IMAGE: "runtime:test",
       CONTAINER_USER: "501:20",
+      CONTAINER_HOST_GATEWAY: "true",
       RUNTIME_INSTANCE_ID: "test-instance",
     });
     const args = buildContainerRunArgs(
@@ -25,6 +26,20 @@ describe("Container Codex runner", () => {
         codexHomePath: "/tmp/candidate-codex-home",
         outboxPath: "/tmp/candidate-outbox/intents.jsonl",
         repairReferencePath: "/tmp/candidate/repair-reference",
+        resourceBindings: [
+          {
+            providerId: "acceptance-object",
+            hostPath: "/tmp/candidate/resources/acceptance-object/object.json",
+            runtimePath: "/airlock/resources/acceptance-object/object.json",
+            access: "read-write",
+          },
+          {
+            providerId: "policy-bundle",
+            hostPath: "/tmp/candidate/resources/policy-bundle/policy.json",
+            runtimePath: "/airlock/resources/policy-bundle/policy.json",
+            access: "read-only",
+          },
+        ],
         prompt: "write a small program",
         threadId: null,
       },
@@ -48,8 +63,28 @@ describe("Container Codex runner", () => {
     );
     expect(args).toContain("AIRLOCK_REPAIR_REFERENCE_PATH=/airlock-repair-reference");
     expect(args).toContain("/airlock-repair-reference");
+    expect(args).toContain(
+      "AIRLOCK_RESOURCE_ACCEPTANCE_OBJECT_PATH=/airlock/resources/acceptance-object/object.json",
+    );
+    expect(args).toContain(
+      "AIRLOCK_RESOURCE_POLICY_BUNDLE_PATH=/airlock/resources/policy-bundle/policy.json",
+    );
+    expect(args).toContain(
+      "type=bind,src=/tmp/candidate/resources/acceptance-object/object.json,dst=/airlock/resources/acceptance-object/object.json",
+    );
+    expect(args).toContain(
+      "type=bind,src=/tmp/candidate/resources/policy-bundle/policy.json,dst=/airlock/resources/policy-bundle/policy.json,readonly",
+    );
+    expect(args).toContain(
+      "/airlock/resources/acceptance-object/object.json",
+    );
+    expect(args).toContain("/airlock/resources/policy-bundle/policy.json");
+    expect(args).not.toContain(
+      "AIRLOCK_RESOURCE_ACCEPTANCE_OBJECT_PATH=/tmp/candidate/resources/acceptance-object/object.json",
+    );
     expect(args).toContain("io.codejam.instance-id=test-instance");
     expect(args).toContain("keep-id");
+    expect(args).not.toContain("host.docker.internal:host-gateway");
     expect(args).not.toContain("secret-that-must-not-appear-in-argv");
     expect(args.join(" ")).not.toContain("mock-deliveries");
   });
@@ -73,5 +108,28 @@ describe("Container Codex runner", () => {
     );
     expect(args.slice(-3)).toEqual(["resume", "thread-123", "continue"]);
     expect(args).not.toContain("keep-id");
+    expect(args).not.toContain("host.docker.internal:host-gateway");
+  });
+
+  it("adds the explicit local host gateway only for a Docker fixture", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      RUNTIME_PROVIDER: "container",
+      CONTAINER_ENGINE: "docker",
+      CONTAINER_HOST_GATEWAY: "true",
+    });
+    const args = buildContainerRunArgs(
+      {
+        agentId: "agent",
+        workspacePath: "/tmp/workspace",
+        codexHomePath: "/tmp/candidate-codex-home",
+        outboxPath: "/tmp/candidate-outbox/intents.jsonl",
+        prompt: "prove the fixture boundary",
+        threadId: null,
+      },
+      config,
+    );
+    expect(args).toContain("--add-host");
+    expect(args).toContain("host.docker.internal:host-gateway");
   });
 });
