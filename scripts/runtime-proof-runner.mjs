@@ -2792,6 +2792,7 @@ export async function createPlaywrightRuntimeProofDriver({
   const { chromium } = await import("@playwright/test");
   let browser;
   let mobileBrowser;
+  let mobileContext;
   let mobileGuard = null;
   let detachBrowserAbort = () => {};
   try {
@@ -2805,9 +2806,9 @@ export async function createPlaywrightRuntimeProofDriver({
     browser = await chromium.launch({ channel: "chrome", headless });
     const closeBrowserOnAbort = () => {
       void Promise.allSettled(
-        [mobileBrowser, browser]
+        [mobileContext, mobileBrowser, browser]
           .filter(Boolean)
-          .map((ownedBrowser) => ownedBrowser.close()),
+          .map((ownedResource) => ownedResource.close()),
       );
     };
     signal?.addEventListener("abort", closeBrowserOnAbort, { once: true });
@@ -2829,9 +2830,15 @@ export async function createPlaywrightRuntimeProofDriver({
     let mobileChainSource = null;
 
     async function assertMobileReplay(runs) {
-      if (mobileBrowser) throw new RuntimeProofError("viewport-invalid");
-      mobileBrowser = await chromium.launch({ channel: "chrome", headless: true });
-      const mobileContext = await mobileBrowser.newContext({
+      if (mobileContext) throw new RuntimeProofError("viewport-invalid");
+      if (!headless) {
+        mobileBrowser = await chromium.launch({
+          channel: "chrome",
+          headless: true,
+        });
+      }
+      const mobileContextOwner = mobileBrowser ?? browser;
+      mobileContext = await mobileContextOwner.newContext({
         serviceWorkers: "block",
         viewport: RUNTIME_PROOF_MOBILE_VIEWPORT,
       });
@@ -3026,12 +3033,12 @@ export async function createPlaywrightRuntimeProofDriver({
           }
           const mobileFailure = new AbortController();
           const mobileReplay = assertMobileReplay(runs).catch((error) => {
-            mobileFailure.abort(
+            const safeError =
               error instanceof RuntimeProofError
                 ? error
-                : new RuntimeProofError("viewport-invalid"),
-            );
-            throw error;
+                : new RuntimeProofError("browser-failed");
+            mobileFailure.abort(safeError);
+            throw safeError;
           });
           await Promise.all([
             presentation.dwell(
@@ -3115,10 +3122,10 @@ export async function createPlaywrightRuntimeProofDriver({
           }
         }
         detachBrowserAbort();
-        for (const ownedBrowser of [mobileBrowser, browser]) {
-          if (!ownedBrowser) continue;
+        for (const ownedResource of [mobileContext, mobileBrowser, browser]) {
+          if (!ownedResource) continue;
           try {
-            await ownedBrowser.close();
+            await ownedResource.close();
           } catch (error) {
             closeError ??= error;
           }
@@ -3136,9 +3143,9 @@ export async function createPlaywrightRuntimeProofDriver({
   } catch (error) {
     detachBrowserAbort();
     await Promise.allSettled(
-      [mobileBrowser, browser]
+      [mobileContext, mobileBrowser, browser]
         .filter(Boolean)
-        .map((ownedBrowser) => ownedBrowser.close()),
+        .map((ownedResource) => ownedResource.close()),
     );
     abortIfNeeded(signal);
     if (error instanceof RuntimeProofError) throw error;

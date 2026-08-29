@@ -546,7 +546,10 @@ for (const requiredReadOnlyReplayMarker of [
   'url.searchParams.set("recordingSafeRunId", safeRunId);',
   'url.searchParams.set("recordingUnsafeRunId", unsafeRunId);',
   'url.searchParams.set("recordingRepairRunId", repairedRunId);',
-  'mobileBrowser = await chromium.launch({ channel: "chrome", headless: true });',
+  "if (!headless) {",
+  "mobileBrowser = await chromium.launch({",
+  "const mobileContextOwner = mobileBrowser ?? browser;",
+  "mobileContext = await mobileContextOwner.newContext({",
   "assertMatchingRuntimeProofDecisionChainSources(",
   "await browserDriver.assertRecordingBoard(runs);",
 ]) {

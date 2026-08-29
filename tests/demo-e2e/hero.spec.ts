@@ -277,7 +277,9 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   });
   await verifier.locator('.receipt-dropzone input[type="file"]').setInputFiles(chainPath!);
   await expect(verifier.getByText("Every included proof matches")).toBeVisible();
-  await expect(verifier.getByText("2 signed decisions linked")).toBeVisible();
+  await expect(
+    verifier.getByText("2 signed decisions linked", { exact: true }),
+  ).toBeVisible();
   const ancestryCommitment = verifier.getByRole("region", {
     name: "Signed ancestry commitment",
   });
@@ -287,8 +289,12 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   await expect(
     ancestryCommitment.getByText(parentEnvelope.receiptDigest),
   ).toBeVisible();
-  await expect(verifier.getByText("0 API calls · 0 uploads · 16 MB custody / 4 MB other proofs"))
-    .toBeVisible();
+  await expect(
+    verifier.getByText(
+      "0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
+      { exact: true },
+    ),
+  ).toBeVisible();
   expect(localVerificationRequests).toEqual([]);
   await verifier.getByRole("button", { name: "Close receipt verifier" }).click();
   page.off("request", recordVerificationRequest);
