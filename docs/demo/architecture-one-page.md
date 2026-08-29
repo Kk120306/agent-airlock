@@ -1,139 +1,112 @@
 # Agent Airlock one-page architecture
 
+**Selected track:** Track 1 - Agent Launchpad: Design and Build Lightweight Agent Middleware.
+
+## One reusable capability
+
+Agent Airlock adds one transactional execution boundary to the starter kit's shared `AgentRunner` seam, so the same isolation, Validation, Promotion, Quarantine, and Repair rules apply to every Agent Run.
+The official scoring lens is 40% end-to-end middleware behavior, 25% technical design and integration, 20% verification and robustness, and 15% demo and reproducibility.
+
+![Agent Airlock one-page architecture](agent-airlock-one-page.png)
+
 ## Falsifiable guarantee
 
-An Agent Run may freely mutate its isolated workspace, reasoning, SQLite data, and supported action outbox, but none can change accepted reality unless every required Validation passes.
+An Agent Run may freely mutate its isolated workspace, Codex session, SQLite data, and supported action outbox, but none can change Canonical State unless every required Validation passes.
 
 ```mermaid
-flowchart LR
-    Operator["Operator"] --> UI["Starter-kit React Playground"]
+%%{init: {"theme": "base", "flowchart": {"wrappingWidth": 420}, "themeVariables": {"fontSize": "24px", "lineColor": "#3c3a58"}}}%%
+flowchart TB
+    Title["AGENT AIRLOCK · TRACK 1<br/>Transactional execution middleware for every Agent Run"]
 
-    subgraph Trusted["Trusted control plane"]
-        API["Fastify API and AgentService"]
-        Airlock["Agent Airlock Run Transaction"]
-        Contract["Versioned Outcome Contract snapshot"]
-        Validate["Deterministic Validators"]
-        Decision{"All required Validations pass?"}
-        Journal["Durable Promotion journal"]
-        Manifest["Atomic canonical.json recovery point"]
-        Lineage["Bounded Repair lineage and freshness gate"]
-        Receipt["Bounded and redacted Promotion Receipt"]
-        API --> Airlock
-        Contract --> Airlock
-        Airlock --> Validate
-        Validate --> Decision
-        Decision -->|Yes| Journal
-        Journal -->|Install verified version| Manifest
-        Decision -->|No| Receipt
-        Lineage --> Airlock
-        Manifest --> Receipt
-    end
+    subgraph Execute["1 · EXECUTE ONE STARTER-KIT PATH"]
+        direction LR
+        UI["React Playground<br/>Agent CRUD + lifecycle"]
+        API["Fastify API<br/>AgentService"]
+        Airlock["Shared Airlock wrapper<br/>AgentRunner seam"]
+        Inference["Local Responses fixture<br/>or optional ModelArk"]
+        Runtime["Pinned Codex CLI<br/>disposable container"]
+        Candidate["Run-owned Candidate<br/>files + session + SQLite + outbox"]
 
-    UI --> API
-
-    subgraph Untrusted["Untrusted execution"]
-        Runtime["Starter-kit Codex Runtime"]
-        Fixture["Deterministic local Responses inference fixture"]
-        Candidate["Run-owned workspace, Codex home, SQLite, and action outbox"]
-        Check["Disposable validation copy in constrained container"]
-        Ark["ModelArk Responses API"]
+        UI --> API --> Airlock
+        Inference --> Runtime
+        Airlock -->|TRUST BOUNDARY<br/>Candidate-only bindings| Runtime
         Runtime <--> Candidate
-        Runtime <-->|Credentialed live inference| Ark
-        Runtime <-->|Free deterministic inference| Fixture
-        Candidate --> Check
     end
 
-    Airlock -->|Every real-Runtime judge Run| Runtime
-    Candidate --> Validate
-    Check --> Validate
+    subgraph Decision["2 · TRUSTED OUTCOME CONTRACT DECISION"]
+        direction LR
+        Complete["Complete Candidate<br/>crosses back to control plane"]
+        Contract{"GUARANTEE<br/>Only if every required check passes<br/>may Candidate become Canonical"}
+        subgraph PassLane["PASS"]
+            direction LR
+            Promote["Durable Promotion journal<br/>atomic manifest advance"]
+            Canonical["Canonical State<br/>accepted reality"]
+            Effect["Typed external effect<br/>only after Promotion"]
+            Promote --> Canonical --> Effect
+        end
+        subgraph FailLane["FAIL"]
+            direction LR
+            Quarantine["Quarantine<br/>accepted state unchanged"]
+            Repair["Bounded Repair child<br/>same contract + fresh outbox"]
+            Reenter["RE-ENTER SAME PATH<br/>Airlock + Candidate + Contract"]
+            Quarantine --> Repair --> Reenter
+        end
 
-    subgraph Accepted["Accepted Whole-Agent state"]
-        Versions["Immutable workspace, session, data, and outbox evidence"]
-        Canonical["Canonical workspace, thread, and SQLite snapshot"]
-        Versions --> Canonical
+        Complete --> Contract
+        Contract -->|PASS| Promote
+        Contract -->|FAIL| Quarantine
+        Reenter -. "repeat until pass or depth limit" .-> Contract
     end
 
-    subgraph Recovery["Rejected future recovery"]
-        Quarantine["Quarantined workspace, memory, data, and intents"]
-        Reference["Disposable verified Canonical workspace reference"]
-        Quarantine -->|Repair fork with fresh outbox| Lineage
-        Reference --> Lineage
+    subgraph Verify["3 · PRESERVE AND VERIFY EVIDENCE"]
+        direction LR
+        Decisions["Promotion + Quarantine + Repair<br/>persisted Run decisions"]
+        Evidence["Redacted receipt + signed lineage<br/>evidence only, never Promotion authority"]
+        Proof["JUDGE-VISIBLE PROOF<br/>harmless failure + recovery + verifier"]
+        Decisions --> Evidence --> Proof
     end
 
-    subgraph Effects["Post-Promotion effects"]
-        Dispatcher["Idempotent dispatcher"]
-        Mock["Atomic mock-delivery store"]
-        Dispatcher --> Mock
-    end
+    Title ~~~ Execute
+    Execute -->|complete Candidate| Decision
+    Decision -->|persist every disposition| Verify
 
-    subgraph Evidence["Portable evidence, never Promotion authority"]
-        Chain["Signed two-decision chain"]
-        Verifier["Browser-local zero-upload verifier"]
-        Chain --> Verifier
-    end
-
-    Manifest -->|Advance exactly once| Versions
-    Manifest -->|Only after advance| Dispatcher
-    Dispatcher -->|Receipt acknowledgement| Journal
-    Canonical -->|Copy at Run start| Candidate
-    Receipt --> UI
-    Receipt -->|Export redacted evidence| Chain
-    UI -->|Open exact chain| Verifier
-    Decision -->|No accepted mutation| Quarantine
-    Canonical -->|Exact freshness match| Reference
+    classDef trusted fill:#eeedff,stroke:#6558d9,color:#171333,stroke-width:2px;
+    classDef untrusted fill:#fff3df,stroke:#bd6518,color:#3d250d,stroke-width:2px;
+    classDef headline fill:#171333,stroke:#171333,color:#ffffff,stroke-width:2px;
+    class API,Airlock,Complete,Contract,Promote,Canonical,Effect,Quarantine,Repair,Reenter,Decisions,Evidence trusted;
+    class Inference,Runtime,Candidate untrusted;
+    class Title,Proof headline;
 ```
 
-## One Run, one decision
+The standalone Mermaid source is [agent-airlock-one-page.mmd](agent-airlock-one-page.mmd).
+The complete implementation architecture remains in [agent-airlock.md](../architecture/agent-airlock.md).
 
-1. Airlock resolves and verifies the current immutable Canonical State.
-2. Airlock copies its workspace, Codex home, and SQLite database into Run-owned Candidate State and creates a fresh dedicated outbox.
-3. Both real-Runtime judge paths execute the pinned Codex CLI in a disposable container against the same Candidate State and `AgentRunner` seam.
-4. The credentialed path supplies Codex with ModelArk inference, while the free path supplies deterministic Responses-protocol inference and labels that substitution in the terminal, API, and browser.
-5. Codex may change files, data, reasoning, and supported action intents only inside Candidate State.
-6. Airlock calculates a bounded change set and evaluates workspace policy, SQLite integrity and schema, semantic data secrets, and strict action-intent limits.
-7. Project commands run against a disposable copy with no network, no application credentials, a read-only root, dropped capabilities, and resource limits.
-8. A pass first records an approved decision, then moves the complete candidate into a new immutable version and atomically advances `canonical.json`.
-9. Only after that advance may the idempotent mock consumer claim a validated notification intent, and every boundary advances the monotonic journal.
-10. A failure, Runtime error, or cancellation quarantines all candidate resources and produces no mock effect.
-11. The Playground receives one disposition whose resource fingerprints, data snapshot, effect status, evidence hash, and decisive failure agree with persisted state.
-12. The operator may discard mutable Quarantine state or fork one bounded Repair Run that resumes rejected memory, preserves useful work, uses a fresh outbox, and must pass the original contract before Promotion.
-13. After interruption, startup verifies the journal, installed version, canonical manifest, and mock receipts before reconstructing operator-facing metadata.
+## Five-step flow
+
+1. The operator sends any Agent task through the existing React Playground, Fastify API, and `AgentService`, which route it through the shared Airlock wrapper at the `AgentRunner` seam.
+2. Airlock copies the immutable Canonical workspace, Codex session, and SQLite snapshot into Run-owned Candidate State, creates a fresh outbox, and gives the disposable Codex container no mutable Canonical State path.
+3. Airlock snapshots the Agent's versioned Outcome Contract and validates the complete Candidate, including file policy, SQLite integrity, bounded action intents, secret scanning, and constrained project commands.
+4. A pass records durable approval, installs one immutable version, and atomically advances `canonical.json`, while a failure quarantines every Candidate resource and a Repair child must re-enter the same boundary with the original contract, exact failure evidence, verified Canonical reference, and fresh outbox.
+5. Supported effects become claimable only after the manifest advances, while the receipt and optional signed decision chain preserve evidence without becoming Promotion authority.
+
+## What is real in the canonical proof
+
+The React UI, Fastify API, `AgentService`, `AgentRunner`, pinned Codex CLI, disposable container, Candidate file mutation, `.airlock/demo.sqlite` mutation, persistent session, outbox, Validation, Promotion journal, atomic manifest change, Quarantine, Repair, and browser-local verification are real.
+Only remote inference is replaced by the disclosed local deterministic Responses fixture.
+ModelArk remains a separate optional conformance path when free capacity is available and is not required for the Track 1 middleware proof.
 
 ## Trust and recovery boundary
 
-The Fastify control plane, Airlock state manager, and canonical manifest are trusted in this proof of concept.
-The Agent Runtime, generated project content, and project validation commands are untrusted.
-The atomic canonical manifest is the only source of accepted state, while the journal is the durable approved decision that recovery completes forward.
+The Fastify control plane, Airlock state manager, Outcome Contract source, Promotion journal, and atomic canonical manifest are trusted for this proof of concept.
+The Agent Runtime, generated project content, project validation commands, and all Candidate resources are untrusted.
 Canonical workspace, Codex-session, and SQLite versions are never mounted writable into the Runtime or validation container.
-The platform-owned delivery store is never mounted into either execution boundary.
+Startup recovery may finish only the exact durable approved decision recorded before interruption and fails closed on physical fingerprint contradiction.
 
-## Implemented and tested through the Phase 22 recording release
+## Deliberate limitations
 
-- Starter-kit Agent CRUD, lifecycle controls, Playground chat, persistence, Codex runner seam, and container path remain intact.
-- Promotion, destructive Quarantine, Runtime failure, and cancellation preserve the documented canonical-state invariant.
-- Outcome Contracts are versioned and snapshotted per Run.
-- Validation evidence is size bounded, duration bounded, and redacted before persistence.
-- A production-browser journey proves safe Promotion followed by destructive Quarantine and unchanged accepted reality.
-- The same journey stores rejected reasoning in Quarantine and proves that the next turn resumes only accepted reasoning.
-- A Whole-Agent resource ledger shows one disposition across workspace, Agent memory, SQLite, and supported external actions.
-- A promoted multi-resource fixture changes code and data and produces one mock notification under duplicate dispatch attempts.
-- A rejected multi-resource fixture preserves its changed database and intent in Quarantine while canonical data and delivery count remain unchanged.
-- A repaired child starts from the exact Quarantine, restores protected canonical content from a verified disposable reference, retains useful rejected work, intentionally resubmits its action, and promotes with ancestry in its receipt.
-- Stale, missing, duplicate-child, and exhausted-depth repairs fail before execution, while discard is idempotent and retains decision evidence.
-- An opt-in real-container suite proves validation containment without an Ark key or writable canonical mount.
-- Eight deterministic interruption seams converge across two restarts to one canonical version, one assistant message, and at most one supported mock effect.
-- A physical fingerprint contradiction fails closed with visible recovery evidence, while root-confined retention preserves bounded evidence and unrelated host data.
-- One loopback-only command seeds the four-step production demo, discloses the deterministic fixture, and preserves Agent state across restart without a ModelArk credential or paid inference.
-- A dedicated production Chrome journey proves the complete hero path and asserts that the 390-pixel viewport has no document-level overflow.
-- The real-Codex judge path proves one model-directed Candidate mutation across an exact file, SQLite row, persistent session, and deferred effect before showing Whole-Agent proof complete.
-- A credentialed live path requires a fresh generated-output preflight bound to the configured model and provider origin, the same four-resource result, an execution-profile commitment, and an independent artifact-and-database Validation before it presents ModelArk conformance as complete.
-- Signed Promotion Receipts bind redacted decision evidence into a Merkle root and verify offline without the Airlock server, ModelArk, a wallet, or a network request.
-- Optional selective disclosure, local transparency proofs, and digest-only EVM calldata add portable trust without making a public blockchain transaction part of Promotion.
-- The canonical recording creates exactly three fresh real-Runtime Runs, derives one Outcome Brief from persisted evidence, and verifies the rejected-parent to promoted-Repair chain with zero uploads or API calls.
-
-## Deliberate non-claims
-
-The exactly-once guarantee ends at the atomic mock consumer and does not claim a distributed transaction with arbitrary providers.
-Unrestricted Runtime network egress can bypass the supported outbox.
-The journal is designed for one local control-plane process and does not claim power-loss durability or distributed coordination.
-A local-process Repair Run receives a disposable canonical copy whose integrity is promotion-gated, while the container provider additionally mounts that copy read-only.
+- Exactly-once delivery ends at the supported atomic local consumer and is not a distributed transaction with arbitrary providers.
+- Unrestricted Runtime traffic outside the typed outbox is not transactionally controlled.
+- The journal targets one local control-plane process and does not claim distributed consensus or power-loss durability.
+- Ordinary containers are not hardened multi-tenant isolation.
+- Signatures prove artifact integrity and lineage, not Runtime correctness, signer identity, or policy sufficiency.
+- Live ModelArk availability and model quality are not claimed by the deterministic core recording.

@@ -61,7 +61,7 @@ test("a real browser exports and independently verifies a Fastify-backed receipt
   page.on("request", recordRequest);
   await page.getByRole("button", { name: "Verify a receipt" }).click();
   const verifier = page.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
   await verifier.locator('.receipt-dropzone input[type="file"]').setInputFiles(packetPath!);
   await expect(verifier.getByText("Cryptographic proof valid")).toBeVisible();
@@ -262,7 +262,7 @@ test("a real browser exports and independently verifies a Fastify-backed receipt
 
   await page.getByRole("button", { name: "Verify a receipt" }).click();
   const mobileVerifier = page.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
   await mobileVerifier
     .locator('.receipt-dropzone input[type="file"]')

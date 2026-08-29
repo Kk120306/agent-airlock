@@ -355,7 +355,7 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
   await page.route("**/api/**", (route) => route.abort("internetdisconnected"));
   await page.getByRole("button", { name: "Verify a receipt" }).click();
   const proofRoom = page.getByRole("dialog", {
-    name: "Verify trust without trusting this server",
+    name: "Verify integrity locally without querying the server",
   });
   await proofRoom.locator('.receipt-dropzone input[type="file"]')
     .setInputFiles(custodyPath!);

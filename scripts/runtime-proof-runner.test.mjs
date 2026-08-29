@@ -125,6 +125,7 @@ function makeRunSet() {
       outcomeContract: outcomeContract(),
       validations: validation("passed"),
       resources: resources("promoted"),
+      changes: { files: [{ path: "protocol-proof.txt", kind: "added" }] },
       events: [
         {
           status: "promoting",
@@ -146,6 +147,7 @@ function makeRunSet() {
         intents: [
           {
             id: "protocol-release-ready",
+            type: "demo.notification.requested",
             status: "delivered",
             idempotencyKey: "effect-promotion",
             deliveredAt: "2026-08-28T10:00:01.200Z",
@@ -178,6 +180,7 @@ function makeRunSet() {
       outcomeContract: outcomeContract(),
       validations: validation("failed"),
       resources: resources("quarantined"),
+      changes: { files: [{ path: "protocol-proof.txt", kind: "modified" }] },
       events: [],
       sqlite: {
         candidate: { rows: [{ id: "demo", value: "unsafe-candidate" }] },
@@ -188,6 +191,7 @@ function makeRunSet() {
         intents: [
           {
             id: "protocol-unsafe",
+            type: "demo.notification.requested",
             status: "rejected",
             idempotencyKey: "effect-quarantine",
             deliveredAt: null,
@@ -220,6 +224,7 @@ function makeRunSet() {
       outcomeContract: outcomeContract(),
       validations: validation("passed"),
       resources: resources("promoted"),
+      changes: { files: [{ path: "protocol-proof.txt", kind: "modified" }] },
       events: [
         {
           status: "promoting",
@@ -241,6 +246,7 @@ function makeRunSet() {
         intents: [
           {
             id: "protocol-repair-ready",
+            type: "demo.notification.requested",
             status: "delivered",
             idempotencyKey: "effect-repair",
             deliveredAt: "2026-08-28T10:00:03.200Z",
@@ -828,6 +834,15 @@ test("rejects every required Run-set contradiction", async (context) => {
       },
     ],
     [
+      "Promotion protocol file evidence is missing",
+      "promotion-invalid",
+      (runs) => {
+        runs.find(
+          (run) => run.id === "run-promotion",
+        ).transaction.changes.files = [];
+      },
+    ],
+    [
       "Promotion required Validation failed",
       "promotion-invalid",
       (runs) => {
@@ -874,6 +889,15 @@ test("rejects every required Run-set contradiction", async (context) => {
       },
     ],
     [
+      "Promotion effect type drifted",
+      "promotion-invalid",
+      (runs) => {
+        runs.find(
+          (run) => run.id === "run-promotion",
+        ).transaction.externalActions.intents[0].type = "unexpected.effect";
+      },
+    ],
+    [
       "Repair Candidate SQLite value is missing",
       "repair-invalid",
       (runs) => {
@@ -911,6 +935,15 @@ test("rejects every required Run-set contradiction", async (context) => {
       "quarantine-invalid",
       (runs) => {
         runs.find((run) => run.id === "run-quarantine").transaction.resources[0].disposition = "promoted";
+      },
+    ],
+    [
+      "Quarantine protocol file evidence is missing",
+      "quarantine-invalid",
+      (runs) => {
+        runs.find(
+          (run) => run.id === "run-quarantine",
+        ).transaction.changes.files = [];
       },
     ],
     [

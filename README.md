@@ -1,14 +1,21 @@
 # Agent Airlock
 
+**TikTok TechJam 2026 selected track:** Track 1 - Agent Launchpad: Design and Build Lightweight Agent Middleware.
+
 Agent Airlock is transactional execution middleware built inside the CodeJam Agent Launchpad starter kit.
 Every Agent task runs against isolated Candidate State, and only an outcome that satisfies its versioned Outcome Contract may become Canonical State.
 Rejected work remains inspectable and can be repaired without contaminating accepted files, Agent memory, SQLite data, or supported external actions.
 
+The submission delivers one reusable platform capability for every Agent Run: isolate, validate, promote, quarantine, and repair persistent Agent state at the shared `AgentRunner` boundary.
+The official Track 1 scoring lens is 40% end-to-end middleware behavior, 25% technical design and integration, 20% verification and robustness, and 15% demo and reproducibility.
+
 > Agents may explore many futures, but only validated futures become reality.
 
-Selected middleware direction: transactional Agent state safety and failure recovery.
+Selected middleware direction: transactional Agent state safety and failure recovery across every Agent, rather than a custom behavior for one demo Agent.
 
-Start with the [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), then read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
+Start with the [ready-to-paste Devpost submission](docs/demo/DEVPOST_SUBMISSION.md), [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), and [static one-page architecture](docs/demo/agent-airlock-one-page.png).
+The [architecture notes and Mermaid source](docs/demo/architecture-one-page.md) explain that judging asset in detail.
+Then read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [complete architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
 Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
 
 ## Canonical three-minute recording
@@ -27,7 +34,10 @@ Start screen capture, then run:
 npm run prove:runtime -- --reset --headed
 ```
 
-Phase 22 passed on this release candidate through the full headed command above, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
+Use `npm run prove:runtime -- --reset --headed --json` when the visible recording pass also needs the bounded machine-readable proof capsule on stdout.
+
+The settled release candidate passed `npm run prove:runtime -- --reset --json` and `npm run audit:release`.
+Run the headed command once immediately before capture, and treat its terminal `Real Runtime proof: PASSED` result as the authority for that recording.
 Use `npm run demo:runtime -- --reset` at <http://127.0.0.1:3200> when a persistent stage-by-stage rehearsal is more useful than the bounded canonical proof.
 The first proof command warms and verifies the exact application and Runtime image before screen capture.
 During the headed pass, do not click, scroll, switch tabs, or close Chrome.
@@ -40,7 +50,7 @@ The canonical headed runner shows the primary action for the opening narration a
 Use `npm run demo:runtime -- --reset` for the human-click rehearsal path.
 The deadline remains armed through browser shutdown and the actual atomic latest-pointer commit, so a late proof cannot publish.
 The desktop recording remains at 1280 by 720 and presents one primary action, `Prove this release is safe`.
-That action must create exactly three fresh Runs: a valid Promotion, a destructive Quarantine, and a promoted Repair from the retained failure.
+That action must create exactly three fresh Runs: a valid Promotion, an invalid multi-resource Candidate that is quarantined, and a promoted Repair from the retained failure.
 Its Outcome Brief must derive every claim from those persisted Runs, require all four resources to receive one disposition, show effect timing and Canonical fingerprint transitions, and withhold success until a signed two-decision chain verifies locally.
 After the complete Outcome Brief dwell, the runner automatically opens that exact chain in the zero-upload verifier, where the judge can see two valid signatures, the parent link, the Canonical State handoff, `0 API calls`, and `2 signed decisions linked`.
 The recording runner arms a deny-all HTTP and WebSocket boundary before that verifier first opens and keeps it active through browser close.
@@ -66,7 +76,7 @@ npm run demo -- --reset
 ```
 
 Open <http://127.0.0.1:3199> and follow the numbered buttons in the `Judge path` strip.
-The path promotes a four-resource release, quarantines a destructive future, repairs that retained future, and proves session continuity from repaired Canonical State.
+The path promotes a four-resource release, quarantines an invalid multi-resource future, repairs that retained future, and proves session continuity from repaired Canonical State.
 This fixture remains the fastest deterministic regression and fallback demonstration, but it is not the canonical Phase 22 recording.
 The project will not silently switch it to paid inference.
 

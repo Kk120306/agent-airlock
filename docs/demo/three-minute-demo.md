@@ -1,10 +1,70 @@
 # Agent Airlock three-minute demo
 
+**Selected track:** Track 1 - Agent Launchpad: Design and Build Lightweight Agent Middleware.
+
 ## Demo promise
 
 Agent Airlock lets an Agent attempt one Whole-Agent future across files, memory, SQLite data, and supported external actions without allowing a rejected attempt to change accepted reality.
+It is one reusable platform middleware capability applied at the shared `AgentRunner` boundary for every Agent, not custom logic for one demo Agent.
 The canonical recording path uses the starter kit's production React Playground, Fastify control plane, pinned Codex CLI, disposable Runtime container, isolated Candidate State, constrained Validation, Promotion journal, and persisted Run authority.
-Only the Responses provider is deterministic and local, so the recording needs no ModelArk credential, provider capacity, wallet, blockchain, or paid inference.
+Only remote inference is replaced by a deterministic local Responses fixture.
+The React UI, Fastify API, `AgentService`, `AgentRunner`, pinned Codex CLI, container Runtime, file mutation, SQLite mutation, persistent session, outbox, Validation, Promotion, recovery, and browser evidence paths are real.
+The recording therefore needs no ModelArk credential, provider capacity, wallet, blockchain, or paid inference.
+
+## Word-for-word recording script
+
+Read the following script exactly.
+Let the automated runner control both actions, and use the visible state transitions rather than adding improvised claims.
+
+### Opening frame
+
+> Agent Airlock is reusable transactional middleware for every CodeJam Agent.
+>
+> Real Codex runs in an isolated Candidate inside a disposable container.
+>
+> Only the trusted control plane can promote validated state.
+>
+> Remote inference is the only local fixture.
+
+### While the three Runs execute
+
+> One action now proves success, harmless rejection, and recovery through the same platform path.
+>
+> The first Run asks Codex to write candidate-only to protocol-proof.txt, set the demo inventory row in .airlock/demo.sqlite to candidate-only, and prepare the protocol-release-ready notification in the deferred outbox.
+>
+> Nothing is written directly to accepted state.
+
+### Outcome Brief
+
+> The first Candidate passed every required Validation, so the workspace, Codex session, SQLite snapshot, and outbox received one Promotion.
+>
+> Its Canonical fingerprint advanced before the supported notification effect was delivered.
+>
+> The second Run attempted an invalid multi-resource Candidate.
+>
+> It wrote unsafe-candidate to the file and database row and prepared protocol-unsafe, but the required command:protocol-content Validation failed.
+>
+> Airlock quarantined all four resources, delivered zero effects, and the before and after Canonical fingerprints stayed identical.
+>
+> The third Run is a bounded Repair child of that retained Quarantine.
+>
+> It received the exact failure evidence, a verified Canonical reference, the original Outcome Contract, and a fresh outbox.
+>
+> It restored protocol-proof.txt and the SQLite row to candidate-only, passed every required Validation, promoted all four resources, and delivered the fresh protocol-repair-ready effect only after Promotion.
+
+### Zero-upload verifier
+
+> This verifier makes zero API calls and uploads nothing.
+>
+> It checks both signatures, the Quarantine-to-Repair parent link, and the exact Canonical handoff.
+>
+> That proves artifact integrity and lineage, not Runtime correctness, signer identity, or policy sufficiency.
+>
+> The next step is hardened network egress behind the same Outcome Contract.
+>
+> Only validated futures become reality.
+
+This script makes the official Track 1 scoring story explicit: 40% end-to-end middleware behavior, 25% technical design and integration, 20% verification and robustness, and 15% demo and reproducibility.
 
 ## Recording prerequisites
 
@@ -28,12 +88,15 @@ Start the recording pass only after that command succeeds:
 npm run prove:runtime -- --reset --headed
 ```
 
+Use `npm run prove:runtime -- --reset --headed --json` when the visible recording pass also needs the bounded machine-readable proof capsule on stdout.
+
 Start screen capture before entering the headed command and trim everything before the first Chrome frame, or start capture as soon as Chrome opens.
 Do not click, scroll, switch tabs, or close Chrome during the canonical pass.
 The runner owns both proof actions, the viewport, presentation timing, verifier transition, and browser shutdown.
 Stop capture only after Chrome closes and the terminal prints `Real Runtime proof: PASSED`.
 
-Phase 22 passed on this release candidate through `npm run prove:runtime -- --reset --headed`, `npm run prove:runtime -- --reset --json`, `npm run prove:runtime -- --reset --headed --json`, and `npm run audit:release`.
+The settled release candidate passed `npm run prove:runtime -- --reset --json` and `npm run audit:release`.
+Run the headed command once immediately before capture, and require its terminal `Real Runtime proof: PASSED` result for the submitted recording.
 It uses deadline-aware presentation pacing under a hard 180-second recording budget.
 A successful headed proof preserves the complete 15-second opening, 85-second desktop Outcome Brief, and 25-second desktop verifier dwells plus a 5-second browser-close reserve.
 Run completion is capped early enough to leave that full 115-second post-Run presentation tail and 15-second release headroom, and the runner returns `recording-timeout` instead of shortening narration when the complete sequence cannot fit.
@@ -58,7 +121,7 @@ After 0:15, follow the visible screen state rather than a stopwatch.
 
 ### 0:00 to 0:15 - Establish the guarantee
 
-Point to `REAL RUNTIME PROOF`, the selected recording Agent, and its visible versioned Outcome Contract.
+Point to `TRACK 1 · AGENT LAUNCHPAD`, the selected recording Agent, and its visible versioned Outcome Contract.
 State the falsifiable guarantee: the Runtime may mutate only Candidate State, and only Airlock may advance the atomic Canonical State manifest after every required Validation passes.
 Point out that real Codex is running inside a disposable container while a local deterministic Responses fixture removes provider capacity from the recording risk.
 
@@ -67,7 +130,7 @@ Point out that real Codex is running inside a disposable container while a local
 Do not select `Prove this release is safe` during the canonical headed recording.
 The runner invokes it exactly once after the opening guarantee is visible for the full 15 seconds.
 Use `npm run demo:runtime -- --reset` for a human-click rehearsal.
-The guided proof must start exactly three fresh Runs in order: a valid Candidate, a destructive Candidate, and a Repair Run from the retained Quarantine.
+The guided proof must start exactly three fresh Runs in order: a valid Candidate, an invalid multi-resource Candidate, and a Repair Run from the retained Quarantine.
 Keep the recording on the three-step progress guide while the Runs complete.
 After signed verification succeeds, the final evidence-derived Outcome Brief replaces the working view and becomes the single frame for the evidence walk-through.
 Run completion may take up to 35 seconds, and the Outcome Brief appears immediately when the proof finishes.
@@ -78,7 +141,7 @@ On the completed Outcome Brief, show the first fresh Run as `Promotion` only aft
 Point to the visible passed-Validation count, four promoted resources, advanced Canonical fingerprint, and exactly one post-Promotion effect.
 Explain that the persisted transaction evidence also records the accepted SQLite value and ordered Promotion journal without crowding the compact recording brief.
 
-### Outcome Brief, next 20 seconds - Quarantine the destructive future
+### Outcome Brief, next 20 seconds - Quarantine the invalid future
 
 On the completed Outcome Brief, show the second fresh Run as `Quarantine` after its required Validation rejects the deliberately invalid result.
 Point to the visible failed-Validation count, four quarantined resources, and the identical before and after Canonical fingerprints.
@@ -97,7 +160,7 @@ Show the valid Promotion, harmless rejection, promoted Repair, Canonical fingerp
 Require the final verdict to remain unavailable until Airlock verifies the two-decision chain from quarantined parent to promoted repair child.
 
 The runner keeps the completed Outcome Brief visible for 85 seconds in total.
-Use the remaining Outcome Brief time to show `Release proven safe`, all three fresh Run identifiers, the two signed decisions, and the final summary without scrolling.
+Use the remaining Outcome Brief time to show the final evidence-derived verdict, all three fresh Run identifiers, the two signed decisions, and the final summary without scrolling.
 
 ### Final visible state, 25 seconds - Verify beyond the running app
 
