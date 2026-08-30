@@ -3,7 +3,7 @@
 **TikTok TechJam 2026 selected track:** Track 1 - Agent Launchpad: Design and Build Lightweight Agent Middleware.
 
 Agent Airlock is transactional execution middleware built inside the CodeJam Agent Launchpad starter kit.
-Every Agent task runs against isolated Candidate State, and only an outcome that satisfies its versioned Outcome Contract may become Canonical State.
+Every Run Transaction executes against isolated Candidate State, and only an outcome that satisfies its versioned Outcome Contract may become Canonical State.
 Rejected work remains inspectable and can be repaired without contaminating accepted files, Agent memory, SQLite data, or supported external actions.
 
 The submission delivers one reusable platform capability for every Agent Run: isolate, validate, promote, quarantine, and repair persistent Agent state at the shared `AgentRunner` boundary.
@@ -11,12 +11,35 @@ The official Track 1 scoring lens is 40% end-to-end middleware behavior, 25% tec
 
 > Agents may explore many futures, but only validated futures become reality.
 
-Selected middleware direction: transactional Agent state safety and failure recovery across every Agent, rather than a custom behavior for one demo Agent.
+## Judge quickstart
 
-Start with the [ready-to-paste Devpost submission](docs/demo/DEVPOST_SUBMISSION.md), [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), and [static one-page architecture](docs/demo/agent-airlock-one-page.png).
-The [architecture notes and Mermaid source](docs/demo/architecture-one-page.md) explain that judging asset in detail.
-Then read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [complete architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
-Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
+| Question | Answer |
+| --- | --- |
+| What is it? | Transactional state middleware for persistent AI Agents. |
+| Where is it integrated? | The shared `AgentRunner` boundary inside the required CodeJam starter kit. |
+| What is protected? | Workspace files, the persistent Codex session, SQLite data, and supported external-action intents. |
+| What happens on failure? | The entire Candidate is quarantined, Canonical State stays unchanged, and a bounded Repair Run may continue from retained work. |
+| What is real in the canonical proof? | React, Fastify, `AgentService`, `AgentRunner`, the pinned Codex CLI, a disposable container, resource mutations, Validation, Promotion, Quarantine, Repair, persistence, and signed verification. |
+| What is deterministic? | Only remote Responses inference is replaced by a local protocol fixture so judging does not depend on quota, credentials, or provider availability. |
+| What does it cost to reproduce? | Nothing beyond the local machine and an installed Docker-compatible engine. |
+
+Run the complete production-browser proof:
+
+```bash
+git clone https://github.com/Kk120306/agent-airlock.git
+cd agent-airlock
+npm install
+npm run prove:runtime -- --reset --headed
+```
+
+The command succeeds only after one valid Promotion, one rejected Candidate that leaves Canonical State unchanged, one promoted Repair, and independent verification of the exact signed decision chain.
+The terminal result `Real Runtime proof: PASSED` is the authority for a successful run.
+
+[![Agent Airlock one-page architecture](docs/demo/agent-airlock-one-page.png)](docs/demo/architecture-one-page.md)
+
+For the judging story, start with the [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), [three-minute narration](docs/demo/three-minute-demo.md), [judge checklist](docs/demo/JUDGE_CHECKLIST.md), and [one-page architecture notes](docs/demo/architecture-one-page.md).
+For implementation detail, read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), and [complete architecture](docs/architecture/agent-airlock.md).
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) tracks unresolved product and architecture decisions.
 
 Before submitting, run the zero-network handoff audit:
 
@@ -112,6 +135,12 @@ Run `npm run demo:runtime` without `--reset` to inspect restart persistence.
 > This is a single-user proof of concept, not a production multi-tenant sandbox.
 > Do not use production data or credentials.
 > See [SECURITY.md](SECURITY.md).
+
+<details>
+<summary><strong>Advanced capability demos and protocol gates</strong></summary>
+
+These extensions demonstrate how the same transactional boundary grows beyond the canonical Track 1 proof.
+They are not required for the three-minute recording.
 
 ## Phase 8 provider extension demo
 
@@ -241,6 +270,8 @@ npm run check:phase11
 
 These commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
 
+</details>
+
 ## Deterministic fallback screenshots
 
 ### Four-step judge path
@@ -300,6 +331,9 @@ Run `npm run test:container-transaction` when a container engine is available.
 This zero-cost production-server proof drives the pinned real Codex CLI through the CodeJam HTTP seam, real Candidate workspace, isolated Validation container, Promotion journal, signed receipt, restart, and resumed accepted session.
 It uses a local Responses fixture and therefore proves the integration path, not live ModelArk availability or model quality.
 Run `npm run test:container-browser` for the corresponding real Chrome-to-Codex container Promotion proof.
+
+<details>
+<summary><strong>Optional credentialed ModelArk conformance path</strong></summary>
 
 ## Credentialed ModelArk browser SOP
 
@@ -472,6 +506,8 @@ Colima uses `CONTAINER_ENGINE=docker` because it exposes the Docker CLI.
 
 For a clean Linux host, follow the
 [rootless Podman setup](docs/LOCAL_POC.md#rootless-podman-on-linux).
+
+</details>
 
 ## Docker Compose
 

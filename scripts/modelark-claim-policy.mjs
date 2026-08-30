@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 const approvedModelArkBoundaryDigests = Object.freeze({
   "README.md":
-    "sha256:07b95f357cc0650333db91427ea3ac0ab7d3de8cd11ad186a1c51648de076952",
+    "sha256:b7f8ab61b36c41c457af896a0c55e490e57638a72dd6926c2c21b798e7261ddb",
   "docs/demo/DEVPOST_SUBMISSION.md":
     "sha256:1d2a4b0422d6996f01b08ead90ac04dcfbce34fe0d736ecbf272b26f7f2f0a9a",
   "docs/demo/SUBMISSION_BRIEF.md":
