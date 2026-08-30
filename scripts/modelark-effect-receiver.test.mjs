@@ -105,6 +105,46 @@ test("the ModelArk effect receiver rejects a forged idempotency key", async () =
   }
 });
 
+test("a failed receipt commit is not acknowledged from memory on retry", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "airlock-http-effect-"));
+  const filePath = path.join(root, "deliveries.json");
+  let commitAttempt = 0;
+  const receiver = await startModelArkEffectReceiver({
+    host: "127.0.0.1",
+    port: 0,
+    filePath,
+    persistenceOperations: {
+      beforeCommit() {
+        commitAttempt += 1;
+        if (commitAttempt === 2) {
+          throw new Error("simulated receipt commit failure");
+        }
+      },
+    },
+  });
+  try {
+    const request = deliveryRequest();
+    const failed = await postDelivery(receiver.url, request);
+    assert.equal(failed.status, 503);
+    assert.equal(
+      JSON.parse(await readFile(filePath, "utf8")).deliveries.length,
+      0,
+    );
+
+    const retried = await postDelivery(receiver.url, request);
+    assert.equal(retried.status, 200);
+    const accepted = await retried.json();
+    assert.equal(accepted.receipt.idempotencyKey, request.idempotencyKey);
+    assert.equal(
+      JSON.parse(await readFile(filePath, "utf8")).deliveries.length,
+      1,
+    );
+  } finally {
+    await receiver.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("the ModelArk effect receiver rejects a symlinked store directory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "airlock-http-effect-"));
   const outside = path.join(root, "outside");

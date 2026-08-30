@@ -162,7 +162,12 @@ function validatePersistedReceipt(receipt) {
   }
 }
 
-export async function startModelArkEffectReceiver({ host, port, filePath }) {
+export async function startModelArkEffectReceiver({
+  host,
+  port,
+  filePath,
+  persistenceOperations = {},
+}) {
   const storeDirectory = path.dirname(filePath);
   await mkdir(storeDirectory, { recursive: true, mode: 0o700 });
   const directoryStatus = await lstat(storeDirectory);
@@ -210,14 +215,19 @@ export async function startModelArkEffectReceiver({ host, port, filePath }) {
   }
 
   let queue = Promise.resolve();
-  async function persist() {
+  async function persist(nextDatabase) {
     const temporary = filePath + "." + randomUUID() + ".tmp";
     try {
-      await writeFile(temporary, JSON.stringify(database, null, 2) + "\n", {
-        encoding: "utf8",
-        mode: 0o600,
-        flag: "wx",
-      });
+      await writeFile(
+        temporary,
+        JSON.stringify(nextDatabase, null, 2) + "\n",
+        {
+          encoding: "utf8",
+          mode: 0o600,
+          flag: "wx",
+        },
+      );
+      await persistenceOperations.beforeCommit?.({ temporary, filePath });
       await rename(temporary, filePath);
     } catch (error) {
       await unlink(temporary).catch((cleanupError) => {
@@ -226,7 +236,7 @@ export async function startModelArkEffectReceiver({ host, port, filePath }) {
       throw error;
     }
   }
-  if (!(await exists(filePath))) await persist();
+  if (!(await exists(filePath))) await persist(database);
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -280,8 +290,12 @@ export async function startModelArkEffectReceiver({ host, port, filePath }) {
           payloadHash: validated.intent.payloadHash,
           deliveredAt: new Date().toISOString(),
         };
-        database.deliveries.push(receipt);
-        await persist();
+        const nextDatabase = {
+          schemaVersion: 1,
+          deliveries: [...database.deliveries, receipt],
+        };
+        await persist(nextDatabase);
+        database = nextDatabase;
         return { receipt };
       });
       queue = operation.then(
