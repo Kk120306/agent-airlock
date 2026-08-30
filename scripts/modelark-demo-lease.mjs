@@ -560,20 +560,23 @@ export function acquireModelArkDemoLease({
 export async function acquireModelArkDemoStartupLease({
   host,
   port,
+  additionalPorts = [],
   ...lease
 }) {
-  const portAvailable = await new Promise((resolve) => {
-    const probe = net.createServer();
-    probe.unref();
-    probe.once("error", () => resolve(false));
-    probe.listen({ host, port, exclusive: true }, () => {
-      probe.close(() => resolve(true));
+  for (const candidatePort of [port, ...additionalPorts]) {
+    const portAvailable = await new Promise((resolve) => {
+      const probe = net.createServer();
+      probe.unref();
+      probe.once("error", () => resolve(false));
+      probe.listen({ host, port: candidatePort, exclusive: true }, () => {
+        probe.close(() => resolve(true));
+      });
     });
-  });
-  if (!portAvailable) {
-    throw new Error(
-      `The live ModelArk demo port is already in use: http://${host}:${port}`,
-    );
+    if (!portAvailable) {
+      throw new Error(
+        `The live ModelArk demo port is already in use: http://${host}:${candidatePort}`,
+      );
+    }
   }
   return acquireModelArkDemoLease(lease);
 }

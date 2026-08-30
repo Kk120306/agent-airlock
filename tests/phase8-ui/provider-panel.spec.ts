@@ -42,6 +42,12 @@ const system: SystemInfo = {
   protocolFixtureMode: false,
   modelArkDemoMode: false,
   modelArkPreflight: null,
+  externalActionDelivery: {
+    mode: "atomic-local-store",
+    destination: "demo-console",
+    transport: "platform-local-store",
+    idempotency: "atomic-store-enforced",
+  },
   inferenceMode: "modelark",
   arkConfigured: true,
   arkBaseUrl: "http://127.0.0.1:1/api/v3",

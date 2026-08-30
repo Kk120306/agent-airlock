@@ -9,7 +9,9 @@ flowchart LR
     Service --> Store["JSON store"]
     Service --> Airlock["AirlockRunner"]
     Airlock --> Workspace["Candidate and Canonical State"]
-    Airlock --> Effects["Post-Promotion mock effect store"]
+    Airlock --> Effects["Post-Promotion effect dispatcher"]
+    Effects --> Mock["Atomic local consumer"]
+    Effects --> HTTP["Live-only idempotent HTTP receiver"]
     Airlock --> Runner{"AgentRunner"}
     Airlock --> Validate["Outcome Validator"]
     Validate --> ValidationContainer["Constrained validation container"]
@@ -60,6 +62,7 @@ data/launchpad.json                         Agent, message, Run, contract, and e
 data/promotion-journal/RunID.json           Durable approved decision and monotonic recovery phase
 workspaces/AgentID/canonical.json           Accepted state pointer and content hash
 data/mock-deliveries.json                    Idempotent mock external effects
+data/http-delivery-receipts.json             Live HTTP delivery receipts
 workspaces/AgentID/versions/StateID/         Immutable workspace, Codex home, data, and outbox evidence
 workspaces/.candidates/RunID/                Mutable workspace, Codex home, and dedicated outbox for one Run
 workspaces/.quarantine/RunID/                Rejected Candidate State
@@ -78,7 +81,7 @@ one process only.
 
 Both providers use argv-only process execution, bound output and time, resume the stored Codex thread, and escalate termination after a grace period.
 Airlock passes only a Candidate State workspace, Codex home, and dedicated outbox path to either provider.
-The platform-owned delivery store is never mounted into the Runtime.
+The platform-owned delivery stores and live receiver endpoint are never mounted or passed into the Runtime.
 
 ### Outcome Validator
 
@@ -95,6 +98,10 @@ The candidate-owned outbox accepts only `demo.notification.requested` intents in
 Airlock derives a stable idempotency key, promotes the complete candidate, verifies that the canonical manifest advanced, and then calls the atomic mock consumer.
 Rejected candidates produce no mock delivery.
 The exactly-once claim applies only to the mock consumer, and unrestricted Runtime networking remains a disclosed bypass outside the supported outbox path.
+
+The managed live ModelArk profile replaces only that consumer with a trusted loopback HTTP receiver.
+The control plane maps the fixed logical destination, the receiver recomputes the request commitments, and an exact retry returns the original durable receipt.
+The live proof requires that receipt and claims at-least-once transport to an idempotent consumer rather than distributed exactly-once delivery.
 
 ## Deployment profiles
 

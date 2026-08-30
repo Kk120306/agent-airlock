@@ -35,6 +35,7 @@ flowchart LR
     AR --> VE["Outcome Validator"]
     AR --> ED["Post-Promotion effect dispatcher"]
     ED --> MS["Atomic mock-delivery store"]
+    ED --> HR["Live-only idempotent HTTP receiver"]
     VE --> VC["Constrained validation container"]
     VE --> CS
     AR --> PR["Promotion, Quarantine, or Discard"]
@@ -242,10 +243,12 @@ Provider removal, provider identity replacement, and Capability Claim replacemen
 The Agent submits the strict `demo.notification.requested` type through the path named by `AIRLOCK_OUTBOX_PATH`.
 The control plane validates the JSONL file after Runtime exit and before Promotion.
 The complete candidate, including the validated outbox, becomes immutable before the dispatcher runs.
-The dispatcher verifies the new canonical state, atomically claims the mock effect by stable idempotency key, and records a bounded receipt.
+The dispatcher verifies the new canonical state, claims the supported effect by stable idempotency key, and records a bounded receipt.
 
 Duplicate and concurrent dispatch attempts create one local mock effect and return the same receipt.
 This exactly-once claim does not extend beyond the atomic mock consumer.
+The managed live ModelArk profile instead maps `demo-console` to a trusted loopback HTTP receiver that recomputes commitments, atomically stores one receipt, and returns that receipt on replay.
+The live proof requires the exact matching HTTP receipt and claims only at-least-once transport to an idempotent consumer.
 The POC does not intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
@@ -332,6 +335,7 @@ The authority-first Selection, terminal replay, and append-only transparency loc
 - [x] Gate both judge launchers on a reproducible credential-safe readiness report that never returns the configured provider URL or model identifier.
 - [x] Require live preflight success to include non-empty assistant `output_text` so an HTTP success or provider `completed` status alone cannot unlock the judge path.
 - [x] Carry a fresh credential-free preflight handoff into server admission, visible readiness, and signed execution-profile evidence while keeping it explicitly an Airlock attestation.
+- [x] Deliver the promoted live intent through a real loopback HTTP receiver with receiver-enforced idempotency and require its exact receipt in the one-command proof.
 - [ ] Rerun the complete provider-backed browser transaction when free ModelArk capacity is available.
 
 ## Phase 12 federated acceptance
@@ -416,6 +420,7 @@ Implementation and acceptance are tracked by [Build the recording-grade real Run
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
 - The implemented outbox protects only external actions routed through its interface.
 - The platform-owned mock delivery store is never mounted into the Runtime.
+- The live ModelArk receiver endpoint is selected by the trusted control plane and is never supplied by Candidate content or exposed to the Runtime.
 - The platform-owned Promotion journal is never mounted into the Runtime.
 - Resource Providers run inside the trusted control plane, receive bounded lifecycle context, and never receive the application store or arbitrary environment variables.
 - Provider Runtime bindings are rooted under the isolated Candidate and are derived by the trusted core.

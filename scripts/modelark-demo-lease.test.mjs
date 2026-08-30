@@ -231,6 +231,19 @@ test("a surviving server blocks reset before stale lease takeover", async () => 
       }),
       /demo port is already in use/,
     );
+    await assert.rejects(
+      acquireModelArkDemoStartupLease({
+        host: "127.0.0.1",
+        port: 0,
+        additionalPorts: [address.port],
+        stateRoot,
+        resetRequested: true,
+        ownerPid: 202,
+        nonce: secondNonce,
+        processExists: () => false,
+      }),
+      /demo port is already in use/,
+    );
     const activeOwner = JSON.parse(
       await readFile(`${stateRoot}.active-proof/owner.json`, "utf8"),
     );

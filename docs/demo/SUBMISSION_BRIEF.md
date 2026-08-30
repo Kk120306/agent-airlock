@@ -104,7 +104,8 @@ npm run prove:modelark -- --reset --headed
 That command requires an activated Responses-compatible model, valid Ark credentials, a region-matching base URL, and available Free Credits Only Mode capacity.
 It performs a fresh provider preflight before any live-proof UI may start, never disables free-only protection, never falls back to paid inference, and fails closed on provider unavailability.
 The launcher cannot verify account billing settings, so the operator must keep Free Credits Only Mode enabled for every configured model.
-A successful Run must create the exact file and SQLite result, promote all four resources, release one typed effect after Promotion, capture a signed credential-free packet, and verify that packet offline.
+A successful Run must create the exact file and SQLite result, promote all four resources, release one typed effect through the durable loopback HTTP receiver after Promotion, capture a signed credential-free packet, and verify that packet offline.
+The proof runner verifies the exact receiver receipt for that Run before recording success.
 
 The deterministic core recording does not claim live ModelArk inference or model quality.
 The live execution profile is an Airlock control-plane attestation committed by the signed receipt, not a BytePlus signature.
@@ -123,7 +124,8 @@ No credential, raw endpoint identifier, base URL, environment value, prompt, or 
 
 ## Deliberate limits
 
-- Exactly-once effect delivery ends at the supported atomic local consumer and is not a distributed transaction with arbitrary providers.
+- Exactly-once effect delivery ends at the supported atomic local consumer.
+- The live profile proves at-least-once HTTP transport to a receiver-enforced idempotent consumer, not a distributed transaction with arbitrary providers.
 - Runtime traffic outside the typed outbox is not transactionally controlled.
 - The journal targets one local control-plane process and does not claim distributed consensus or power-loss durability.
 - Ordinary containers are not hardened multi-tenant isolation.

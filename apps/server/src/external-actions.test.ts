@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ExternalActionOutbox,
+  HttpExternalActionDispatcher,
   MockExternalActionDispatcher,
 } from "./external-actions.js";
 
@@ -120,6 +121,65 @@ describe("External action outbox", () => {
 
     expect(first[0]).toEqual(second[0]);
     expect(second[0]).toEqual(third[0]);
+    expect(await restarted.list()).toHaveLength(1);
+  });
+
+  it("delivers through HTTP once and reuses the durable receiver receipt", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-http-effects-"));
+    temporaryDirectories.push(root);
+    const outboxPath = path.join(root, "intents.jsonl");
+    await writeFile(outboxPath, notification() + "\n", "utf8");
+    const intents = (await new ExternalActionOutbox().validate(outboxPath, "run-1"))
+      .intents;
+    const intent = intents[0]!;
+    let requestCount = 0;
+    const fetchStub = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestCount += 1;
+      expect(init?.headers).toMatchObject({
+        "idempotency-key": intent.idempotencyKey,
+      });
+      return Response.json({
+        schema: "agent-airlock/external-action-delivery-receipt",
+        schemaVersion: 1,
+        accepted: true,
+        receipt: {
+          idempotencyKey: intent.idempotencyKey,
+          runId: "run-1",
+          intentId: intent.id,
+          type: intent.type,
+          destination: intent.payload.destination,
+          subject: intent.payload.subject,
+          payloadHash: intent.payloadHash,
+          deliveredAt: "2026-08-30T00:00:00.000Z",
+        },
+      });
+    }) as typeof fetch;
+    const storePath = path.join(root, "http-delivery-receipts.json");
+    const dispatcher = new HttpExternalActionDispatcher(
+      "http://127.0.0.1:3202/v1/effects/demo-console",
+      storePath,
+      "demo-console",
+      fetchStub,
+    );
+    await dispatcher.initialize();
+
+    const first = await dispatcher.dispatch("run-1", intents);
+    const second = await dispatcher.dispatch("run-1", intents);
+    const restarted = new HttpExternalActionDispatcher(
+      "http://127.0.0.1:3202/v1/effects/demo-console",
+      storePath,
+      "demo-console",
+      (async () => {
+        throw new Error("the receiver must not be contacted after local recovery");
+      }) as typeof fetch,
+    );
+    await restarted.initialize();
+    const third = await restarted.dispatch("run-1", intents);
+
+    expect(requestCount).toBe(1);
+    expect(first).toEqual(second);
+    expect(second).toEqual(third);
+    expect(first[0]?.deliveryMode).toBe("idempotent-http");
     expect(await restarted.list()).toHaveLength(1);
   });
 });

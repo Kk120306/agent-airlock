@@ -37,6 +37,17 @@ function fixture(mode = "runtime") {
       modelArkDemoMode: !runtime,
       inferenceMode: runtime ? "local-responses-protocol-fixture" : "modelark",
       arkConfigured: true,
+      externalActionDelivery: runtime
+        ? {
+            mode: "atomic-local-store",
+            transport: "platform-local-store",
+            idempotency: "atomic-store-enforced",
+          }
+        : {
+            mode: "idempotent-http",
+            transport: "loopback-http",
+            idempotency: "receiver-enforced",
+          },
       modelArkPreflight: runtime
         ? null
         : {

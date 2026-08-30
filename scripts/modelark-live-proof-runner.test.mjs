@@ -212,9 +212,20 @@ function browserFixture(events) {
   };
 }
 
-function fetchFixture(runsAfterInvocation) {
+function fetchFixture(runsAfterInvocation, overrides = {}) {
   let runRequests = 0;
   return async (url) => {
+    if (url.endsWith("/api/system")) {
+      return Response.json({
+        modelArkDemoMode: true,
+        externalActionDelivery: {
+          mode: "idempotent-http",
+          transport: "loopback-http",
+          idempotency: "receiver-enforced",
+        },
+        ...(overrides.system ?? {}),
+      });
+    }
     if (url.endsWith("/api/agents")) {
       return Response.json({
         agents: [{ id: "agent-live-modelark", name: "Live ModelArk Proof" }],
@@ -226,9 +237,113 @@ function fetchFixture(runsAfterInvocation) {
         runs: runRequests === 1 ? [] : runsAfterInvocation,
       });
     }
+    if (url.endsWith("/api/effects")) {
+      if (overrides.effects) {
+        return Response.json({ effects: overrides.effects });
+      }
+      const run = runsAfterInvocation.find(
+        (candidate) => candidate.transaction?.disposition === "promoted",
+      );
+      const intent = run?.transaction?.externalActions?.intents?.[0];
+      return Response.json({
+        effects: intent
+          ? [
+              {
+                idempotencyKey: intent.idempotencyKey,
+                runId: run.id,
+                intentId: intent.id,
+                type: intent.type,
+                destination: intent.destination,
+                subject: intent.subject,
+                payloadHash: commitment(
+                  JSON.stringify({
+                    destination: intent.destination,
+                    subject: intent.subject,
+                    body: "The live Whole-Agent Candidate passed.",
+                  }),
+                ),
+                deliveredAt: intent.deliveredAt,
+                deliveryMode: "idempotent-http",
+              },
+            ]
+          : [],
+      });
+    }
     return new Response(null, { status: 404 });
   };
 }
+
+test("refuses to start without the real HTTP effect profile", async () => {
+  const events = [];
+  await assert.rejects(
+    runLiveModelArkProofSession({
+      baseUrl: "http://127.0.0.1:3201",
+      stateRoot: "/unused",
+      browserDriver: browserFixture(events),
+      fetchImpl: fetchFixture([completeRun()], {
+        system: {
+          externalActionDelivery: {
+            mode: "atomic-local-store",
+            transport: "platform-local-store",
+            idempotency: "atomic-store-enforced",
+          },
+        },
+      }),
+    }),
+    (error) =>
+      error instanceof LiveModelArkProofError &&
+      error.failureClass === "startup-failed",
+  );
+  assert.deepEqual(events, ["closed"]);
+});
+
+test("rejects Promotion when the matching HTTP receiver receipt is absent", async () => {
+  const events = [];
+  await assert.rejects(
+    runLiveModelArkProofSession({
+      baseUrl: "http://127.0.0.1:3201",
+      stateRoot: "/unused",
+      browserDriver: browserFixture(events),
+      fetchImpl: fetchFixture([completeRun()], { effects: [] }),
+    }),
+    (error) =>
+      error instanceof LiveModelArkProofError &&
+      error.failureClass === "run-failed",
+  );
+  assert.deepEqual(events, ["invoked", "closed"]);
+});
+
+test("rejects a matching HTTP receipt with the wrong payload commitment", async () => {
+  const events = [];
+  const run = completeRun();
+  const intent = run.transaction.externalActions.intents[0];
+  await assert.rejects(
+    runLiveModelArkProofSession({
+      baseUrl: "http://127.0.0.1:3201",
+      stateRoot: "/unused",
+      browserDriver: browserFixture(events),
+      fetchImpl: fetchFixture([run], {
+        effects: [
+          {
+            idempotencyKey: intent.idempotencyKey,
+            runId: run.id,
+            intentId: intent.id,
+            type: intent.type,
+            destination: intent.destination,
+            subject: intent.subject,
+            payloadHash: "sha256:" + "0".repeat(64),
+            deliveredAt: intent.deliveredAt,
+            deliveryMode: "idempotent-http",
+          },
+        ],
+      }),
+    }),
+    (error) =>
+      error instanceof LiveModelArkProofError &&
+      error.failureClass === "run-failed",
+  );
+  assert.deepEqual(events, ["invoked", "closed"]);
+});
 
 test("drives one browser Run and writes an owner-only verified result", async () => {
   const stateRoot = await mkdtemp(path.join(os.tmpdir(), "airlock-live-proof-"));

@@ -52,6 +52,8 @@ const liveModelArkDemoEnvironment = {
   ARK_MODEL: liveModelArkModel,
   ARK_BASE_URL: liveModelArkBaseUrl,
   AIRLOCK_MODELARK_PREFLIGHT_PROOF: JSON.stringify(liveModelArkPreflightProof),
+  AIRLOCK_EFFECT_WEBHOOK_URL:
+    "http://127.0.0.1:3202/v1/effects/demo-console",
 } as const;
 
 describe("deterministic demo configuration", () => {
@@ -124,6 +126,22 @@ describe("live ModelArk judge demo configuration", () => {
       attemptCount: 1,
       requestCount: 1,
     });
+    expect(config.externalActionWebhookUrl).toBe(
+      "http://127.0.0.1:3202/v1/effects/demo-console",
+    );
+  });
+
+  it.each([
+    ["remote receiver", "https://effects.example.com/v1/effects/demo-console"],
+    ["wrong receiver path", "http://127.0.0.1:3202/v1/effects/other"],
+    ["receiver credentials", "http://user:pass@127.0.0.1:3202/v1/effects/demo-console"],
+  ])("rejects a %s", (_name, webhookUrl) => {
+    expect(() =>
+      loadConfig({
+        ...liveModelArkDemoEnvironment,
+        AIRLOCK_EFFECT_WEBHOOK_URL: webhookUrl,
+      }),
+    ).toThrow(/loopback ModelArk demo receiver/);
   });
 
   it("shares the BytePlus AP default with the provider preflight", () => {

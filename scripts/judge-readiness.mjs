@@ -144,8 +144,17 @@ export async function inspectJudgeReadiness({
     typeof contract === "object" &&
     JSON.stringify(comparableExactDemoContract(contract)) ===
       JSON.stringify(profile.contract);
+  const effectDeliveryReady =
+    evaluatedMode === "modelark"
+      ? system?.externalActionDelivery?.mode === "idempotent-http" &&
+        system.externalActionDelivery.transport === "loopback-http" &&
+        system.externalActionDelivery.idempotency === "receiver-enforced"
+      : system?.externalActionDelivery?.mode === "atomic-local-store" &&
+        system.externalActionDelivery.transport === "platform-local-store" &&
+        system.externalActionDelivery.idempotency === "atomic-store-enforced";
   const profileReady =
     mode === evaluatedMode &&
+    effectDeliveryReady &&
     (evaluatedMode !== "modelark" ||
       (system?.arkConfigured === true &&
         system?.modelArkPreflight?.generatedAssistantOutput === true &&
@@ -188,7 +197,7 @@ export async function inspectJudgeReadiness({
       profileReady
         ? evaluatedMode === "runtime"
           ? "The no-cost real Runtime proof profile is active."
-          : `The credentialed ModelArk proof profile is active after a provider preflight generated assistant output in ${system.modelArkPreflight.requestCount} bounded request${system.modelArkPreflight.requestCount === 1 ? "" : "s"}.`
+          : `The credentialed ModelArk proof profile is active after a provider preflight generated assistant output in ${system.modelArkPreflight.requestCount} bounded request${system.modelArkPreflight.requestCount === 1 ? "" : "s"}, with a real idempotent HTTP effect receiver.`
         : "The active server does not match the requested judge proof profile.",
     ),
     readinessCheck(

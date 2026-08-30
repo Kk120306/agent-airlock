@@ -53,7 +53,11 @@ export interface ExternalActionValidationResult {
   intents: ParsedExternalActionIntent[];
 }
 
-export interface MockDeliveryReceipt {
+export type ExternalActionDeliveryMode =
+  | "atomic-local-store"
+  | "idempotent-http";
+
+export interface ExternalActionDeliveryReceipt {
   idempotencyKey: string;
   runId: string;
   intentId: string;
@@ -62,12 +66,61 @@ export interface MockDeliveryReceipt {
   subject: string;
   payloadHash: string;
   deliveredAt: string;
+  deliveryMode: ExternalActionDeliveryMode;
 }
 
-interface MockDeliveryDatabase {
-  version: 1;
-  deliveries: MockDeliveryReceipt[];
+export type MockDeliveryReceipt = ExternalActionDeliveryReceipt;
+
+export interface ExternalActionDispatcher {
+  readonly deliveryMode: ExternalActionDeliveryMode;
+  initialize(): Promise<void>;
+  dispatch(
+    runId: string,
+    intents: ParsedExternalActionIntent[],
+  ): Promise<ExternalActionDeliveryReceipt[]>;
+  list(): Promise<ExternalActionDeliveryReceipt[]>;
 }
+
+interface DeliveryDatabase {
+  version: 1;
+  deliveries: ExternalActionDeliveryReceipt[];
+}
+
+const httpDeliveryResponseSchema = z
+  .object({
+    schema: z.literal("agent-airlock/external-action-delivery-receipt"),
+    schemaVersion: z.literal(1),
+    accepted: z.literal(true),
+    receipt: z
+      .object({
+        idempotencyKey: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+        runId: idSchema,
+        intentId: idSchema,
+        type: z.literal("demo.notification.requested"),
+        destination: z.string().trim().min(1).max(64),
+        subject: z.string().trim().min(1).max(120),
+        payloadHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+        deliveredAt: z.string().datetime({ offset: true }),
+      })
+      .strict(),
+  })
+  .strict();
+
+const deliveryReceiptSchema = z
+  .object({
+    idempotencyKey: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    runId: idSchema,
+    intentId: idSchema,
+    type: z.literal("demo.notification.requested"),
+    destination: z.string().trim().min(1).max(64),
+    subject: z.string().trim().min(1).max(120),
+    payloadHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    deliveredAt: z.string().datetime({ offset: true }),
+    deliveryMode: z.enum(["atomic-local-store", "idempotent-http"]),
+  })
+  .strict();
+
+const MAXIMUM_DELIVERY_RESPONSE_BYTES = 16 * 1024;
 
 const exists = async (target: string): Promise<boolean> => {
   try {
@@ -77,6 +130,47 @@ const exists = async (target: string): Promise<boolean> => {
     return false;
   }
 };
+
+function parseDeliveryDatabase(
+  value: unknown,
+  expectedMode: ExternalActionDeliveryMode,
+  allowLegacyMode: boolean,
+): DeliveryDatabase {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join("\0") !== "deliveries\0version"
+  ) {
+    throw new Error("Unsupported delivery receipt store format");
+  }
+  const candidate = value as { version?: unknown; deliveries?: unknown };
+  if (candidate.version !== 1 || !Array.isArray(candidate.deliveries)) {
+    throw new Error("Unsupported delivery receipt store format");
+  }
+  const deliveries = candidate.deliveries.map((raw) => {
+    const normalized =
+      allowLegacyMode &&
+      raw !== null &&
+      typeof raw === "object" &&
+      !Array.isArray(raw) &&
+      !("deliveryMode" in raw)
+        ? { ...raw, deliveryMode: expectedMode }
+        : raw;
+    const parsed = deliveryReceiptSchema.safeParse(normalized);
+    if (!parsed.success || parsed.data.deliveryMode !== expectedMode) {
+      throw new Error("Unsupported delivery receipt store format");
+    }
+    return parsed.data;
+  });
+  if (
+    new Set(deliveries.map((delivery) => delivery.idempotencyKey)).size !==
+    deliveries.length
+  ) {
+    throw new Error("Delivery receipt store contains duplicate evidence");
+  }
+  return { version: 1, deliveries };
+}
 
 const hash = (value: string) =>
   "sha256:" + createHash("sha256").update(value).digest("hex");
@@ -180,7 +274,8 @@ export class ExternalActionOutbox {
   }
 }
 
-export class MockExternalActionDispatcher {
+export class MockExternalActionDispatcher implements ExternalActionDispatcher {
+  readonly deliveryMode = "atomic-local-store" as const;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly filePath: string) {}
@@ -215,6 +310,7 @@ export class MockExternalActionDispatcher {
           subject: intent.payload.subject,
           payloadHash: intent.payloadHash,
           deliveredAt: new Date().toISOString(),
+          deliveryMode: this.deliveryMode,
         };
         database.deliveries.push(receipt);
         return receipt;
@@ -231,20 +327,15 @@ export class MockExternalActionDispatcher {
     return structuredClone((await this.read()).deliveries);
   }
 
-  private async read(): Promise<MockDeliveryDatabase> {
-    const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as
-      | MockDeliveryDatabase
-      | Record<string, unknown>;
-    if (
-      parsed.version !== 1 ||
-      !Array.isArray((parsed as MockDeliveryDatabase).deliveries)
-    ) {
-      throw new Error("Unsupported mock delivery store format");
-    }
-    return parsed as MockDeliveryDatabase;
+  private async read(): Promise<DeliveryDatabase> {
+    return parseDeliveryDatabase(
+      JSON.parse(await readFile(this.filePath, "utf8")),
+      this.deliveryMode,
+      true,
+    );
   }
 
-  private async persist(database: MockDeliveryDatabase): Promise<void> {
+  private async persist(database: DeliveryDatabase): Promise<void> {
     const temporary = this.filePath + "." + randomUUID() + ".tmp";
     await writeFile(temporary, JSON.stringify(database, null, 2) + "\n", {
       encoding: "utf8",
@@ -254,10 +345,172 @@ export class MockExternalActionDispatcher {
   }
 }
 
+export class HttpExternalActionDispatcher
+  implements ExternalActionDispatcher
+{
+  readonly deliveryMode = "idempotent-http" as const;
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly endpoint: string,
+    private readonly filePath: string,
+    private readonly allowedDestination = "demo-console",
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  async initialize(): Promise<void> {
+    await mkdir(path.dirname(this.filePath), { recursive: true });
+    if (!(await exists(this.filePath))) {
+      await this.persist({ version: 1, deliveries: [] });
+    } else {
+      await this.read();
+    }
+  }
+
+  async dispatch(
+    runId: string,
+    intents: ParsedExternalActionIntent[],
+  ): Promise<ExternalActionDeliveryReceipt[]> {
+    let receipts: ExternalActionDeliveryReceipt[] = [];
+    const operation = this.queue.then(async () => {
+      const database = await this.read();
+      for (const intent of intents) {
+        const existing = database.deliveries.find(
+          (delivery) => delivery.idempotencyKey === intent.idempotencyKey,
+        );
+        if (existing) {
+          receipts.push(existing);
+          continue;
+        }
+        if (intent.payload.destination !== this.allowedDestination) {
+          throw new Error(
+            "External action destination is not mapped to a trusted receiver",
+          );
+        }
+        const receipt = await this.deliver(runId, intent);
+        database.deliveries.push(receipt);
+        await this.persist(database);
+        receipts.push(receipt);
+      }
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+    return structuredClone(receipts);
+  }
+
+  async list(): Promise<ExternalActionDeliveryReceipt[]> {
+    await this.queue;
+    return structuredClone((await this.read()).deliveries);
+  }
+
+  private async deliver(
+    runId: string,
+    intent: ParsedExternalActionIntent,
+  ): Promise<ExternalActionDeliveryReceipt> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(this.endpoint, {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": intent.idempotencyKey,
+        },
+        body: JSON.stringify({
+          schema: "agent-airlock/external-action-delivery-request",
+          schemaVersion: 1,
+          runId,
+          intent: {
+            id: intent.id,
+            type: intent.type,
+            destination: intent.payload.destination,
+            subject: intent.payload.subject,
+            body: intent.payload.body,
+            payloadHash: intent.payloadHash,
+          },
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch {
+      throw new Error("Trusted external action receiver is unavailable");
+    }
+    if (!response.ok) {
+      throw new Error(
+        "Trusted external action receiver rejected delivery with HTTP " +
+          response.status,
+      );
+    }
+    const source = await readBoundedResponse(response);
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(source);
+    } catch {
+      throw new Error("Trusted external action receiver returned invalid JSON");
+    }
+    const parsed = httpDeliveryResponseSchema.safeParse(decoded);
+    if (!parsed.success) {
+      throw new Error("Trusted external action receiver returned invalid evidence");
+    }
+    const receipt = parsed.data.receipt;
+    if (
+      receipt.idempotencyKey !== intent.idempotencyKey ||
+      receipt.runId !== runId ||
+      receipt.intentId !== intent.id ||
+      receipt.type !== intent.type ||
+      receipt.destination !== intent.payload.destination ||
+      receipt.subject !== intent.payload.subject ||
+      receipt.payloadHash !== intent.payloadHash
+    ) {
+      throw new Error(
+        "Trusted external action receiver returned contradictory evidence",
+      );
+    }
+    return { ...receipt, deliveryMode: this.deliveryMode };
+  }
+
+  private async read(): Promise<DeliveryDatabase> {
+    return parseDeliveryDatabase(
+      JSON.parse(await readFile(this.filePath, "utf8")),
+      this.deliveryMode,
+      false,
+    );
+  }
+
+  private async persist(database: DeliveryDatabase): Promise<void> {
+    const temporary = this.filePath + "." + randomUUID() + ".tmp";
+    await writeFile(temporary, JSON.stringify(database, null, 2) + "\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await rename(temporary, this.filePath);
+  }
+}
+
+async function readBoundedResponse(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAXIMUM_DELIVERY_RESPONSE_BYTES) {
+        throw new Error("Trusted external action receiver response is too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export function intentEvidence(
   intents: ParsedExternalActionIntent[],
   status: ExternalActionIntentEvidence["status"],
-  receipts: MockDeliveryReceipt[] = [],
+  receipts: ExternalActionDeliveryReceipt[] = [],
 ): ExternalActionIntentEvidence[] {
   return intents.map((intent) => {
     const receipt = receipts.find(
