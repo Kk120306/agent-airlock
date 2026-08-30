@@ -291,7 +291,7 @@ These commands require no ModelArk key, paid inference, provider purchase, walle
 
 - Free demo: Node.js 22+, npm 10+, and installed Google Chrome for browser verification.
 - Canonical recording: the free-demo requirements plus Docker, Colima, or Podman for the disposable real Codex Runtime.
-- Live ModelArk POC: the free-demo requirements plus Docker, Colima, or Podman and a ModelArk API key for an activated Responses-compatible model.
+- Live ModelArk POC: the free-demo requirements plus Docker, Colima, or Podman, a ModelArk API key for an activated Responses-compatible model, and provider-side Free Credits Only Mode when no paid inference is allowed.
 
 Codex CLI is included in the Runtime image and is not required on the host for the credentialed container path.
 The deterministic demo uses the checked-in protocol fixture and does not require a container engine.
@@ -305,6 +305,8 @@ Run `npm run test:container-browser` for the corresponding real Chrome-to-Codex 
 
 Use this path for the final live provider conformance journey.
 The deterministic demo above remains the reproducible judging and regression path.
+Before starting, confirm that `Model activation` shows `Free Credits Only Mode` as enabled in the same ModelArk region.
+Agent Airlock never disables that provider-side guard, and the live launcher fails before the UI when free capacity is unavailable.
 
 For the guided judge flow, run:
 
@@ -320,7 +322,10 @@ Missing, stale, malformed, wrong-model, or wrong-origin handoffs fail closed.
 Open <http://127.0.0.1:3201> and select `Run live Candidate`.
 ModelArk must direct Codex to create `modelark-proof.txt` containing exactly `modelark-live`, update the Candidate SQLite row to `modelark-live`, and submit exactly one typed `modelark-live-ready` action intent.
 Airlock validates the actual Candidate file and database independently of the model response, promotes workspace, Codex session, SQLite, and outbox under one decision, and dispatches the intent only after Canonical State advances.
-The resulting judge view reports conformance complete only when all four resources are promoted and exactly one deferred effect is delivered, then exposes the signed portable receipt.
+The launcher hosts a separate durable loopback HTTP receiver for that effect.
+The receiver recomputes the payload and idempotency commitments, stores one bounded receipt, and returns the original receipt on exact replay after interruption or restart.
+The resulting judge view reports conformance complete only when all four resources are promoted and the exact matching HTTP effect receipt exists, then exposes the signed portable receipt.
+This proves real HTTP transport to an idempotent consumer, not delivery by an email, Slack, or public-webhook provider.
 After that complete live Promotion, the launcher automatically captures a private, credential-free Portable Evidence Packet with the safe ModelArk execution-profile disclosure.
 That signed disclosure binds the generated-output preflight facts to the successful Runtime profile without storing the generated text.
 It remains an Airlock control-plane attestation and is not a BytePlus-signed statement.
@@ -420,7 +425,7 @@ In the guided Web UI:
 1. Select `Run live Candidate`.
 2. Watch the Candidate create the exact artifact, update SQLite, and submit one deferred action before the required state Validation completes.
 3. Confirm that `execution-profile` attests the live ModelArk Responses profile through a model identifier commitment rather than embedding the raw identifier.
-4. Confirm that workspace, Codex session, SQLite, and outbox all show `promoted`, the database value is `modelark-live`, and exactly one `modelark-live-ready` effect is delivered after Promotion.
+4. Confirm that workspace, Codex session, SQLite, and outbox all show `promoted`, the database value is `modelark-live`, and exactly one `modelark-live-ready` effect is delivered through the receiver-enforced HTTP path after Promotion.
 5. Confirm that the canonical fingerprint advances only for this complete promoted result.
 6. Select `Generate and verify proof` to verify the signed decision locally and selectively disclose the safe execution-profile leaf when requested.
 

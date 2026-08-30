@@ -443,6 +443,12 @@ export interface SystemInfo {
     | "modelark";
   arkConfigured: boolean;
   modelProfileDisclosure: "configured-status-only";
+  externalActionDelivery: {
+    mode: "atomic-local-store" | "idempotent-http";
+    destination: "demo-console";
+    transport: "platform-local-store" | "loopback-http";
+    idempotency: "atomic-store-enforced" | "receiver-enforced";
+  };
   codexAvailable: boolean;
   codexSandboxMode: string;
   competingFutures: {

@@ -47,6 +47,7 @@ test("the guided launcher cannot inherit a provider-preflight bypass", () => {
       host: "127.0.0.1",
       port: 3201,
       stateRoot: "/tmp/agent-airlock-modelark-demo",
+      effectReceiverUrl: "http://127.0.0.1:3202/v1/effects/demo-console",
     },
   );
   assert.equal(environment.AIRLOCK_SKIP_MODELARK_PREFLIGHT, "false");
@@ -54,6 +55,10 @@ test("the guided launcher cannot inherit a provider-preflight bypass", () => {
   assert.equal(environment.RUNTIME_PROVIDER, "container");
   assert.equal(environment.CODEX_BIN, "codex");
   assert.equal(environment.ARK_API_KEY, "hidden-test-key");
+  assert.equal(
+    environment.AIRLOCK_EFFECT_WEBHOOK_URL,
+    "http://127.0.0.1:3202/v1/effects/demo-console",
+  );
 });
 
 test("seeding creates exactly one Agent and installs the exact Outcome Contract", async () => {

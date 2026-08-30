@@ -22,6 +22,7 @@ import {
   acquireModelArkDemoStartupLease,
   releaseModelArkDemoLease,
 } from "./modelark-demo-lease.mjs";
+import { startModelArkEffectReceiver } from "./modelark-effect-receiver.mjs";
 
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const argumentsList = process.argv.slice(2);
@@ -150,6 +151,20 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     "AIRLOCK_MODELARK_DEMO_PORT must be an integer from 1 through 65535",
   );
 }
+const effectReceiverPort = Number.parseInt(
+  process.env.AIRLOCK_MODELARK_EFFECT_PORT ?? String(port + 1),
+  10,
+);
+if (
+  !Number.isInteger(effectReceiverPort) ||
+  effectReceiverPort < 1 ||
+  effectReceiverPort > 65_535 ||
+  effectReceiverPort === port
+) {
+  throw new Error(
+    "AIRLOCK_MODELARK_EFFECT_PORT must be a distinct integer from 1 through 65535",
+  );
+}
 
 const markerContent = "Agent Airlock live ModelArk demo state\n";
 const leaseNonce =
@@ -159,6 +174,7 @@ const leaseNonce =
 const ownership = await acquireModelArkDemoStartupLease({
   host,
   port,
+  additionalPorts: [effectReceiverPort],
   stateRoot: requestedStateRoot,
   resetRequested,
   ownerProcessGroupId: process.platform === "win32" ? null : process.pid,
@@ -195,6 +211,22 @@ if (existingEntries && existingEntries.length > 0) {
 if (resetRequested) await rm(stateRoot, { recursive: true, force: true });
 await mkdir(stateRoot, { recursive: true });
 await writeFile(markerPath, markerContent, { encoding: "utf8", mode: 0o600 });
+
+const effectReceiver = await startModelArkEffectReceiver({
+  host,
+  port: effectReceiverPort,
+  filePath: path.join(
+    stateRoot,
+    "external-action-receiver",
+    "deliveries.json",
+  ),
+});
+let effectReceiverClosed = false;
+async function closeEffectReceiver() {
+  if (effectReceiverClosed) return;
+  effectReceiverClosed = true;
+  await effectReceiver.close();
+}
 
 let child = null;
 let childExit = null;
@@ -244,6 +276,7 @@ child = spawn(path.join(projectRoot, "scripts", "start-local-poc.sh"), [], {
     host,
     port,
     stateRoot,
+    effectReceiverUrl: effectReceiver.url,
   }),
   stdio: "inherit",
   detached: false,
@@ -285,6 +318,7 @@ while (Date.now() < startupDeadline) {
 
 if (!ready) {
   await stopChild();
+  await closeEffectReceiver();
   console.error(
     "[modelark-demo] The live ModelArk demo failed its preflight or startup checks.",
   );
@@ -329,21 +363,26 @@ try {
   );
   console.log("Inference: provider-backed ModelArk Responses API.");
   console.log("Runtime: real Codex CLI in a disposable container.");
+  console.log(
+    "Effects: real loopback HTTP delivery with receiver-enforced idempotency after Promotion.",
+  );
   console.log("Judge action: Run live Candidate.");
   console.log(
-    "Whole-Agent proof: exact artifact, SQLite value, deferred effect, and signed Promotion.",
+    "Whole-Agent proof: exact artifact, SQLite value, real HTTP effect, and signed Promotion.",
   );
   console.log("Prompt: " + liveModelArkPrompt);
   console.log("State persists across restart. Add --reset for a clean proof.");
   console.log("");
 } catch (error) {
   await stopChild();
+  await closeEffectReceiver();
   throw error;
 }
 
 const outcome = await childExit;
 captureController?.abort();
 await captureTask;
+await closeEffectReceiver();
 if (process.platform === "win32") ownership.release();
 if (outcome.error instanceof Error) throw outcome.error;
 if (!stopping && outcome.code !== 0) process.exitCode = outcome.code ?? 1;

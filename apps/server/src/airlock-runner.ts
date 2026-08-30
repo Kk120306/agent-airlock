@@ -8,10 +8,10 @@ import type {
 } from "@agent-airlock/transactional-resource-sdk";
 import {
   EXTERNAL_ACTION_BYPASS_DISCLOSURE,
+  type ExternalActionDeliveryReceipt,
+  type ExternalActionDispatcher,
   ExternalActionOutbox,
   intentEvidence,
-  MockExternalActionDispatcher,
-  type MockDeliveryReceipt,
   type ParsedExternalActionIntent,
 } from "./external-actions.js";
 import { RunCancelledError } from "./errors.js";
@@ -251,7 +251,7 @@ export class AirlockRunner {
     private readonly validator: OutcomeValidator,
     private readonly sqlite: SqliteResource,
     private readonly actionOutbox: ExternalActionOutbox,
-    private readonly actionDispatcher: MockExternalActionDispatcher,
+    private readonly actionDispatcher: ExternalActionDispatcher,
     private readonly promotionJournal: PromotionJournal,
     private readonly resources: ResourceCoordinator,
     private readonly injectPromotionFault?: PromotionFaultInjector,
@@ -2069,7 +2069,7 @@ export class AirlockRunner {
     transaction: RunTransaction,
     canonicalState: CanonicalStateReference,
     parsedIntents: ParsedExternalActionIntent[],
-    receipts: MockDeliveryReceipt[],
+    receipts: ExternalActionDeliveryReceipt[],
   ): RunTransaction {
     let next = structuredClone(transaction);
     next.externalActions.intents = intentEvidence(

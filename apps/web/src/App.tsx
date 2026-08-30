@@ -1185,10 +1185,12 @@ function LiveModelArkGuide({
   runs,
   busy,
   onRun,
+  deliveryMode,
 }: {
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => void;
+  deliveryMode: "atomic-local-store" | "idempotent-http";
 }) {
   const [qualification, setQualification] = useState<{
     source: AgentRun[] | null;
@@ -1246,7 +1248,11 @@ function LiveModelArkGuide({
               {completed ? "Run another live Candidate" : "Run live Candidate"}
             </strong>
             <small>
-              ModelArk must prepare code, data, memory, and one deferred effect.
+              ModelArk must prepare code, data, memory, and one deferred effect
+              {deliveryMode === "idempotent-http"
+                ? " delivered through real HTTP"
+                : ""}
+              .
             </small>
           </div>
         </button>
@@ -6029,6 +6035,11 @@ export default function App() {
                 Output and credentials remain private. This is not
                 BytePlus-signed telemetry.
               </p>
+              <p>
+                {system.externalActionDelivery.mode === "idempotent-http"
+                  ? "Promoted effects cross a real loopback HTTP receiver with receiver-enforced idempotency."
+                  : "Promoted effects use the platform-local durable proof consumer."}
+              </p>
             </div>
           </div>
         ) : null}
@@ -6631,6 +6642,7 @@ export default function App() {
                     runs={runs}
                     busy={demoActionBusy}
                     onRun={(content) => void runPrompt(content)}
+                    deliveryMode={system.externalActionDelivery.mode}
                   />
                 ) : null}
               </div>

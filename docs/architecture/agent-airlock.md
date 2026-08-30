@@ -35,6 +35,7 @@ flowchart LR
     AR --> VE["Outcome Validator"]
     AR --> ED["Post-Promotion effect dispatcher"]
     ED --> MS["Atomic mock-delivery store"]
+    ED --> HR["Live-only idempotent HTTP receiver"]
     VE --> VC["Constrained validation container"]
     VE --> CS
     AR --> PR["Promotion, Quarantine, or Discard"]
@@ -126,7 +127,7 @@ The platform data layout adds one journal record per approved Run:
 ```text
 APP_DATA_DIR/
 ├── launchpad.json
-├── mock-deliveries.json
+├── mock-deliveries.json or http-delivery-receipts.json
 └── promotion-journal/<run-id>.json
 ```
 
@@ -262,10 +263,17 @@ Provider removal, provider identity replacement, and Capability Claim replacemen
 The Agent submits the strict `demo.notification.requested` type through the path named by `AIRLOCK_OUTBOX_PATH`.
 The control plane validates the JSONL file after Runtime exit and before Promotion.
 The complete candidate, including the validated outbox, becomes immutable before the dispatcher runs.
-The dispatcher verifies the new canonical state, atomically claims the mock effect by stable idempotency key, and records a bounded receipt.
+The dispatcher verifies the new canonical state, claims the supported effect by stable idempotency key, and records a bounded receipt.
 
+The canonical deterministic proof uses the atomic local mock consumer.
 Duplicate and concurrent dispatch attempts create one local mock effect and return the same receipt.
 This exactly-once claim does not extend beyond the atomic mock consumer.
+
+The managed live ModelArk profile maps only the logical `demo-console` destination to a control-plane-selected loopback HTTP receiver.
+The receiver recomputes the payload and idempotency commitments, persists one receipt atomically, and returns the original receipt for an exact replay.
+The live proof runner requires the matching HTTP receipt before it records conformance success.
+This profile proves at-least-once HTTP transport to an idempotent consumer with one accepted effect identity, not distributed exactly-once delivery to arbitrary providers.
+ADR 0021 records the live-only HTTP boundary.
 The POC does not intercept arbitrary network traffic from the Agent Runtime.
 
 ## Persistence model
@@ -273,7 +281,7 @@ The POC does not intercept arbitrary network traffic from the Agent Runtime.
 The version 10 JSON store remains the control-plane metadata source for Agents, messages, Runs, Outcome Contracts, Candidate Sets, Assurance Proposals, and operator-visible evidence.
 Immutable state versions and quarantined candidates live on disk outside the JSON document.
 Promotion moves the complete workspace and Codex-session candidate to an immutable version and atomically replaces `canonical.json`.
-Startup reconciliation treats an ordinary Run journal or the conjunction of a replayed Candidate Set decision and its matching journal authority as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the atomic mock-delivery store as effect truth.
+Startup reconciliation treats an ordinary Run journal or the conjunction of a replayed Candidate Set decision and its matching journal authority as the approved decision, the immutable version as installed state, `canonical.json` as accepted reality, and the configured durable delivery receipt store as effect truth.
 It verifies physical fingerprints before repairing cached workspace, state, thread, Run, message, receipt, and effect metadata in the JSON store.
 Phase 5 persists repair ancestry, mutable Quarantine availability, discard timestamps, and the same lineage in each Promotion Receipt.
 Phase 6 persists Promotion journal position, recovered-after-restart evidence, and bounded recovery errors.
@@ -443,6 +451,7 @@ The boundary is resolved by [Define the recording-grade real Runtime proof contr
 - The existing ordinary container remains a POC isolation mechanism rather than a hardened multi-tenant sandbox.
 - The implemented outbox protects only external actions routed through its interface.
 - The platform-owned mock delivery store is never mounted into the Runtime.
+- The live ModelArk receiver URL is selected by the control plane, is never read from Candidate content, and is never mounted or passed into the Runtime.
 - The platform-owned Promotion journal is never mounted into the Runtime.
 - Resource Providers run inside the trusted control plane, receive bounded lifecycle context, and never receive the application store or arbitrary environment variables.
 - Provider Runtime bindings are rooted under the isolated Candidate and are derived by the trusted core.

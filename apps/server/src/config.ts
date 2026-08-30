@@ -43,6 +43,7 @@ const envSchema = z.object({
     .default("false")
     .transform((value) => value === "true"),
   AIRLOCK_MODELARK_PREFLIGHT_PROOF: z.string().max(4_096).optional(),
+  AIRLOCK_EFFECT_WEBHOOK_URL: z.string().url().optional(),
   AIRLOCK_HTTP_OBJECT_URL: z.string().url().optional(),
   AIRLOCK_HTTP_OBJECT_SOCKET: z.string().min(1).optional(),
   AIRLOCK_HTTP_OBJECT_VERSION_ID: z
@@ -230,6 +231,25 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
       arkUrl.origin,
     );
   }
+  let externalActionWebhookUrl: string | null = null;
+  if (env.AIRLOCK_EFFECT_WEBHOOK_URL) {
+    const webhookUrl = new URL(env.AIRLOCK_EFFECT_WEBHOOK_URL);
+    const validWebhookProfile =
+      env.AIRLOCK_MODELARK_DEMO_MODE &&
+      webhookUrl.protocol === "http:" &&
+      loopbackHosts.has(webhookUrl.hostname) &&
+      webhookUrl.username === "" &&
+      webhookUrl.password === "" &&
+      webhookUrl.search === "" &&
+      webhookUrl.hash === "" &&
+      webhookUrl.pathname === "/v1/effects/demo-console";
+    if (!validWebhookProfile) {
+      throw new Error(
+        "AIRLOCK_EFFECT_WEBHOOK_URL is supported only by the loopback ModelArk demo receiver",
+      );
+    }
+    externalActionWebhookUrl = webhookUrl.toString();
+  }
   if (!loopbackHosts.has(env.HOST)) {
     if (authToken.length < 24 || authToken.startsWith("replace-")) {
       throw new Error(
@@ -307,6 +327,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     protocolFixtureMode: env.AIRLOCK_PROTOCOL_FIXTURE_MODE,
     modelArkDemoMode: env.AIRLOCK_MODELARK_DEMO_MODE,
     modelArkPreflightProof,
+    externalActionWebhookUrl,
     httpObjectResource:
       env.AIRLOCK_HTTP_OBJECT_URL &&
       env.AIRLOCK_HTTP_OBJECT_VERSION_ID &&

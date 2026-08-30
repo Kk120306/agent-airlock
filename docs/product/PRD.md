@@ -21,7 +21,8 @@ The product promise is simple:
 Phases 0 through 11 are regression-locked on the published post-hackathon release.
 The current working snapshot adds credential-safe ModelArk diagnostics, a real Codex container transaction, a Chrome-to-container acceptance gate, and additional Portable Trust policy artifacts that must preserve every earlier guarantee.
 The release makes workspace, Codex-session, and SQLite changes transactional, versions and snapshots each Outcome Contract, constrains configured Validation commands, and presents bounded Whole-Agent decision evidence in the existing Playground.
-Typed notification intents use a candidate-owned outbox and an idempotent mock consumer that can claim an effect only after the canonical manifest advances.
+Typed notification intents use a candidate-owned outbox and a control-plane dispatcher that can claim an effect only after the canonical manifest advances.
+The canonical proof uses the atomic local consumer, while the managed live ModelArk proof uses a real loopback HTTP receiver with receiver-enforced idempotency.
 An operator can now repair or discard a Quarantine, while bounded ancestry, canonical freshness checks, a fresh outbox, and the original Outcome Contract keep recovery fail-closed.
 A platform-owned Promotion journal now reconciles every approved decision forward after process interruption, verifies physical fingerprints before repairing metadata, and fails closed on contradiction.
 Positive Candidate and Quarantine retention windows remove only expired mutable state while preserving bounded decision evidence.
@@ -259,7 +260,7 @@ This journey describes the complete product direction, including later roadmap p
 - A reviewer must be able to distinguish reproducible middleware proof from completed local live ModelArk conformance.
 - The guided live ModelArk judge launcher must force a successful provider preflight, must not inherit the generic preflight-skip escape hatch, and must not display live-proof mode before that preflight succeeds.
 - The guided live ModelArk judge launcher must seed exactly one Agent whose Outcome Contract independently checks an exact artifact and SQLite value, preserve that exact persisted contract across restart, and refuse policy drift without an explicit reset.
-- The live judge UI must report Whole-Agent proof complete only when workspace, Codex session, SQLite, and external actions are promoted together and exactly one typed effect is delivered after Promotion.
+- The live judge UI must report Whole-Agent proof complete only when workspace, Codex session, SQLite, and external actions are promoted together and exactly one typed effect is delivered after Promotion through the trusted idempotent HTTP receiver.
 - Every completed Runtime execution must add a required trusted execution-profile Validation before the Promotion decision.
 - Live ModelArk execution-profile evidence must commit to the configured model identity with SHA-256, identify the Codex CLI, Responses protocol, and Runtime class, and exclude credentials, raw endpoint identifiers, base URLs, and environment values.
 - The signed portable receipt must commit to execution-profile evidence through its Validation Merkle root and permit bounded selective disclosure of the safe attestation summary.
@@ -292,7 +293,7 @@ This journey describes the complete product direction, including later roadmap p
 ## Reliability requirements
 
 - Promotion processing must be idempotent.
-- Duplicate delivery of an External Action Intent must not duplicate its mock external effect.
+- Duplicate delivery of an External Action Intent must not duplicate its accepted effect under either the atomic local consumer or the managed idempotent HTTP receiver.
 - Validation output must respect the existing bounded-output philosophy.
 - Candidate and Quarantine retention must be configurable.
 - Cleanup must never delete the current Canonical State version.
@@ -323,7 +324,7 @@ This journey describes the complete product direction, including later roadmap p
 - Its recovery proof links the rejected parent to a promoted repair child and exports both signed decisions as one independently verifiable chain.
 - `npm run check` passes.
 - A rejected SQLite mutation leaves canonical query results unchanged.
-- A deferred mock external action executes once after promotion and zero times after rejection.
+- A deferred external action executes once after promotion and zero times after rejection under the selected delivery profile.
 - A quarantined destructive Run can be repaired and promoted without changing Canonical State before the repaired promotion.
 - The repaired Run preserves useful rejected work, restores protected canonical content, uses a fresh outbox, and records bounded lineage.
 - Discard removes mutable Quarantine state idempotently while retaining bounded decision evidence.
@@ -405,7 +406,8 @@ These capabilities are not dependencies of the frozen Phase 7 hackathon release.
 - Full atomicity across local state and arbitrary external providers is not claimed.
 - The outbox only controls actions routed through the platform interface.
 - Copy-based Candidate State preparation may be slower for very large workspaces.
-- Exactly-once delivery is claimed only for the atomic local mock consumer, not arbitrary third-party providers.
+- Exactly-once delivery is claimed only for the atomic local consumer.
+- The live HTTP profile claims at-least-once transport to a receiver-enforced idempotent consumer with one accepted effect identity, not distributed exactly-once delivery to arbitrary third-party providers.
 - Local transparency provides append-only and split-view evidence to observers that retain checkpoints, not a globally witnessed timestamp.
 - Offline EVM calldata generation does not submit, fund, confirm, or monitor a blockchain transaction.
 

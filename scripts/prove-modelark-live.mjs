@@ -179,6 +179,7 @@ try {
     console.log("Live ModelArk proof: PASSED");
     console.log("Production browser invocation: passed");
     console.log("Complete Whole-Agent Promotion: passed");
+    console.log("Post-Promotion idempotent HTTP effect: passed");
     console.log("Signed packet capture: passed");
     console.log("Offline packet verification: passed");
     console.log(`Receipt digest: ${result.receiptDigest}`);

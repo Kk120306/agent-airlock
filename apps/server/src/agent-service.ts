@@ -57,9 +57,11 @@ import {
 import { HttpError, RunCancelledError } from "./errors.js";
 import { buildExecutionProfileEvidence } from "./execution-profile.js";
 import {
+  type ExternalActionDeliveryReceipt,
+  type ExternalActionDispatcher,
   ExternalActionOutbox,
+  HttpExternalActionDispatcher,
   MockExternalActionDispatcher,
-  type MockDeliveryReceipt,
 } from "./external-actions.js";
 import {
   FederatedAdmissionCoordinator,
@@ -234,7 +236,7 @@ export class AgentService {
     Promise<void>
   >();
   private readonly runner: AirlockRunner;
-  private readonly actionDispatcher: MockExternalActionDispatcher;
+  private readonly actionDispatcher: ExternalActionDispatcher;
   private readonly promotionJournal: PromotionJournal;
   private readonly portableDecisionJournal: PortableDecisionJournal;
   private readonly agentDeletionJournal: AgentDeletionJournal;
@@ -262,9 +264,14 @@ export class AgentService {
   ) {
     this.runnerEnforcesTokenBudgets =
       runner.tokenBudgetEnforcement === "provider-boundary";
-    this.actionDispatcher = new MockExternalActionDispatcher(
-      path.join(config.dataDirectory, "mock-deliveries.json"),
-    );
+    this.actionDispatcher = config.externalActionWebhookUrl
+      ? new HttpExternalActionDispatcher(
+          config.externalActionWebhookUrl,
+          path.join(config.dataDirectory, "http-delivery-receipts.json"),
+        )
+      : new MockExternalActionDispatcher(
+          path.join(config.dataDirectory, "mock-deliveries.json"),
+        );
     this.promotionJournal = new PromotionJournal(
       path.join(config.dataDirectory, "promotion-journal"),
     );
@@ -2992,7 +2999,7 @@ export class AgentService {
     return this.getCandidateSet(candidateSetId);
   }
 
-  async listExternalEffects(): Promise<MockDeliveryReceipt[]> {
+  async listExternalEffects(): Promise<ExternalActionDeliveryReceipt[]> {
     return this.actionDispatcher.list();
   }
 
@@ -3870,6 +3877,18 @@ export class AgentService {
           : "modelark",
       arkConfigured: isArkConfigured(this.config),
       modelProfileDisclosure: "configured-status-only",
+      externalActionDelivery: {
+        mode: this.actionDispatcher.deliveryMode,
+        destination: "demo-console",
+        transport:
+          this.actionDispatcher.deliveryMode === "idempotent-http"
+            ? "loopback-http"
+            : "platform-local-store",
+        idempotency:
+          this.actionDispatcher.deliveryMode === "idempotent-http"
+            ? "receiver-enforced"
+            : "atomic-store-enforced",
+      },
       codexAvailable: await this.runner.isAvailable(),
       codexSandboxMode: this.config.codexSandboxMode,
       competingFutures: {

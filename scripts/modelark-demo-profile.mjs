@@ -63,7 +63,7 @@ export const comparableContract = comparableDemoContract;
 
 export function buildLiveModelArkDemoEnvironment(
   baseEnvironment,
-  { host, port, stateRoot },
+  { host, port, stateRoot, effectReceiverUrl },
 ) {
   return {
     ...baseEnvironment,
@@ -74,6 +74,7 @@ export function buildLiveModelArkDemoEnvironment(
     AIRLOCK_PROTOCOL_FIXTURE_MODE: "false",
     AIRLOCK_MODELARK_DEMO_MODE: "true",
     AIRLOCK_SKIP_MODELARK_PREFLIGHT: "false",
+    AIRLOCK_EFFECT_WEBHOOK_URL: effectReceiverUrl,
     RUNTIME_PROVIDER: "container",
     CODEX_BIN: "codex",
     RUNTIME_INSTANCE_ID: "airlock-modelark-demo",

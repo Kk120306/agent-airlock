@@ -14,6 +14,7 @@ A Run without that durable decision never becomes Canonical State during recover
 | `canonical.json`                         | The currently accepted Whole-Agent state.                                                                                              |
 | Immutable historical Canonical manifest  | The complete workspace, Codex home, SQLite, outbox, thread, provider, and composite reference for one exact accepted state identifier. |
 | Atomic mock-delivery store               | The supported local external effect was claimed.                                                                                       |
+| Live HTTP delivery receipt store         | The managed live receiver accepted the exact idempotency key and can return its original receipt on replay.                            |
 | Resource Provider immutable version      | The exact provider target in the durable Promotion plan was installed.                                                                 |
 | Resource Registry generation             | The exact additive provider contracts accepted by this deployment.                                                                     |
 | Registry Transition journal              | A provider addition was verified and planned for one Agent before canonical advancement.                                               |
@@ -152,7 +153,7 @@ Every provider-controlled lifecycle string is bounded and credential-checked bef
 A normal recovered Run displays `Journal completed` and notes that startup reconciliation completed the approved Promotion.
 A contradiction displays `Recovery failed closed` with bounded failure evidence and places the Agent in `error` state.
 Preserve the data directory for diagnosis and compare the journal plan, immutable target fingerprints, and canonical manifest before taking manual action.
-Do not edit `canonical.json`, a journal record, or the mock-delivery store independently.
+Do not edit `canonical.json`, a journal record, or either delivery receipt store independently.
 
 ## Verification
 

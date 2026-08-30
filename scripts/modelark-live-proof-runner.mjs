@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   isCompleteLiveModelArkPromotion,
   liveModelArkEvidenceNameForRun,
@@ -18,6 +19,17 @@ const DEFAULT_RUN_TIMEOUT_MS = 600_000;
 const DEFAULT_EVIDENCE_TIMEOUT_MS = 20_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const LIVE_MODELARK_EFFECT_PAYLOAD_HASH =
+  "sha256:" +
+  createHash("sha256")
+    .update(
+      JSON.stringify({
+        destination: "demo-console",
+        subject: "ModelArk release ready",
+        body: "The live Whole-Agent Candidate passed.",
+      }),
+    )
+    .digest("hex");
 
 const FAILURE_MESSAGES = Object.freeze({
   "provider-unavailable":
@@ -99,6 +111,25 @@ function terminalFailure(run) {
     return new LiveModelArkProofError("run-failed");
   }
   return null;
+}
+
+function hasExactHttpEffectReceipt(run, effects) {
+  const intent = run?.transaction?.externalActions?.intents?.[0];
+  if (!intent || !Array.isArray(effects)) return false;
+  const matches = effects.filter(
+    (effect) => effect?.idempotencyKey === intent.idempotencyKey,
+  );
+  return (
+    matches.length === 1 &&
+    matches[0]?.runId === run.id &&
+    matches[0]?.intentId === intent.id &&
+    matches[0]?.type === intent.type &&
+    matches[0]?.destination === intent.destination &&
+    matches[0]?.subject === intent.subject &&
+    matches[0]?.payloadHash === LIVE_MODELARK_EFFECT_PAYLOAD_HASH &&
+    matches[0]?.deliveredAt === intent.deliveredAt &&
+    matches[0]?.deliveryMode === "idempotent-http"
+  );
 }
 
 async function waitForTerminalRun({
@@ -360,6 +391,20 @@ export async function runLiveModelArkProofSession({
   resultPublicationOperations,
 }) {
   try {
+    const system = await requestJson(
+      baseUrl,
+      "/api/system",
+      fetchImpl,
+      signal,
+    );
+    if (
+      system?.modelArkDemoMode !== true ||
+      system?.externalActionDelivery?.mode !== "idempotent-http" ||
+      system?.externalActionDelivery?.transport !== "loopback-http" ||
+      system?.externalActionDelivery?.idempotency !== "receiver-enforced"
+    ) {
+      throw new LiveModelArkProofError("startup-failed");
+    }
     const { agents } = await requestJson(
       baseUrl,
       "/api/agents",
@@ -386,6 +431,15 @@ export async function runLiveModelArkProofSession({
       signal,
       waitImpl,
     });
+    const { effects } = await requestJson(
+      baseUrl,
+      "/api/effects",
+      fetchImpl,
+      signal,
+    );
+    if (!hasExactHttpEffectReceipt(run, effects)) {
+      throw new LiveModelArkProofError("run-failed");
+    }
     await browserDriver.assertBoundVerdict(run.id);
     abortError(signal);
     const evidence = await waitForVerifiedEvidence({
