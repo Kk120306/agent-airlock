@@ -340,6 +340,48 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   );
 });
 
+test("fails closed while reverifying a previously accepted receipt", async ({
+  page,
+}) => {
+  await serveProductionBundle(page, []);
+  await page.goto("http://airlock.local/");
+
+  const panel = page.getByRole("region", { name: "Portable trust receipt" });
+  await panel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(panel.getByText("Self-check passed", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toBeEnabled();
+
+  let releaseReverification!: () => void;
+  const reverificationGate = new Promise<void>((resolve) => {
+    releaseReverification = resolve;
+  });
+  await page.route(
+    "**/api/runs/run-golden/portable-receipt",
+    async (route) => {
+      await reverificationGate;
+      await route.fallback();
+    },
+  );
+
+  await panel.getByRole("button", { name: "Regenerate receipt" }).click();
+  await expect(panel.getByText("Checking receipt", { exact: true })).toBeVisible();
+  await expect(panel.locator(".portable-result")).toHaveAttribute(
+    "data-valid",
+    "false",
+  );
+  await expect(
+    panel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toBeDisabled();
+
+  releaseReverification();
+  await expect(panel.getByText("Self-check passed", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toBeEnabled();
+});
+
 test("presents the live ModelArk judge path as provider-backed and falsifiable", async ({
   page,
 }) => {
@@ -885,6 +927,96 @@ test("focuses a historical repaired Run and retries its proof after a transient 
   expect(requests).toHaveLength(2);
 });
 
+test("stops an in-flight safety loop when the operator switches Agents", async ({
+  page,
+}) => {
+  const safeRun = structuredClone(run);
+  safeRun.id = "run-agent-switch-safe";
+  safeRun.agentId = agent.id;
+  safeRun.transaction!.resources = (
+    ["workspace", "codex-session", "sqlite", "external-actions"] as const
+  ).map((kind) => ({
+    kind,
+    label: kind,
+    disposition: "promoted" as const,
+    fingerprintBefore: "sha256:" + "a".repeat(64),
+    fingerprintAfter: "sha256:" + "b".repeat(64),
+    summary: `${kind} promoted.`,
+  }));
+  safeRun.transaction!.sqlite = {
+    databasePath: ".airlock/demo.sqlite",
+    integrity: "passed",
+    before: null,
+    candidate: null,
+    after: {
+      contentHash: "sha256:" + "b".repeat(64),
+      rowCount: 1,
+      rows: [{ id: "demo", value: "candidate-only", updatedAt: timestamp }],
+    },
+  };
+  safeRun.transaction!.externalActions = {
+    outboxPath: "outbox/intents.jsonl",
+    intents: [
+      {
+        id: "agent-switch-safe-effect",
+        type: "demo.notification.requested",
+        destination: "demo-console",
+        subject: "Safe release",
+        idempotencyKey: "agent-switch-safe-effect-key",
+        status: "delivered",
+        deliveredAt: timestamp,
+      },
+    ],
+    deliveredCount: 1,
+    bypassDisclosure: "No effect bypass is available.",
+  };
+  const secondAgent: Agent = {
+    ...agent,
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "Second guardian",
+    workspacePath: "/bounded/second-workspace",
+    canonicalStateId: "second-state",
+    codexThreadId: "thread-second",
+  };
+  const requests: Array<Record<string, unknown>> = [];
+  await serveProductionBundle(
+    page,
+    requests,
+    { current: safeRun },
+    undefined,
+    {
+      ...system,
+      protocolFixtureMode: true,
+      inferenceMode: "local-responses-protocol-fixture",
+    },
+    {
+      agents: [agent, secondAgent],
+      runs: [safeRun],
+      runsByAgentId: {
+        [agent.id]: [],
+        [secondAgent.id]: [],
+      },
+    },
+  );
+  await page.goto("http://airlock.local/");
+
+  const guide = page.getByRole("region", { name: "Full safety loop" });
+  await guide.getByRole("button", { name: "Run complete safety loop" }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  const secondAgentButton = page.getByRole("button", {
+    name: /Second guardian/,
+  });
+  await secondAgentButton.click();
+  await expect(secondAgentButton).toHaveClass(/selected/);
+
+  await page.waitForTimeout(1_250);
+  expect(requests).toHaveLength(1);
+  await expect(page.locator(`[data-airlock-run-id="${safeRun.id}"]`))
+    .toHaveCount(0);
+  await expect(page.getByText("Verifying signed recovery", { exact: true }))
+    .toHaveCount(0);
+});
+
 test("ignores a delayed receipt response after the Run decision changes", async ({
   page,
 }) => {
@@ -947,6 +1079,8 @@ async function serveProductionBundle(
   options: {
     origin?: string;
     runs?: AgentRun[];
+    agents?: Agent[];
+    runsByAgentId?: Record<string, AgentRun[]>;
     portableReceiptFailures?: { remaining: number };
   } = {},
 ): Promise<void> {
@@ -969,6 +1103,9 @@ async function serveProductionBundle(
       url.pathname.endsWith("/messages")
     ) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
+      const requestedAgentId =
+        url.pathname.match(/^\/api\/agents\/([^/]+)\/messages$/)?.[1] ??
+        agent.id;
       requests.push(body);
       await route.fulfill({
         status: 202,
@@ -977,7 +1114,7 @@ async function serveProductionBundle(
           run: runState.current,
           message: {
             id: "message-live",
-            agentId: agent.id,
+            agentId: requestedAgentId,
             role: "user",
             content: body.content,
             createdAt: timestamp,
@@ -1064,6 +1201,8 @@ async function serveProductionBundle(
       runState.current,
       systemState,
       options.runs,
+      options.agents,
+      options.runsByAgentId,
     );
     if (response) {
       await route.fulfill({
@@ -1082,12 +1221,17 @@ function apiResponse(
   activeRun: AgentRun,
   systemState: SystemInfo,
   runs: AgentRun[] = [activeRun],
+  agents: Agent[] = [agent],
+  runsByAgentId?: Record<string, AgentRun[]>,
 ): unknown {
   if (pathname === "/api/auth") return { required: false };
   if (pathname === "/api/system") return systemState;
-  if (pathname === "/api/agents") return { agents: [agent] };
+  if (pathname === "/api/agents") return { agents };
   if (pathname.endsWith("/messages")) return { messages: [] };
-  if (pathname.endsWith("/runs")) return { runs };
+  const agentRunsMatch = pathname.match(/^\/api\/agents\/([^/]+)\/runs$/);
+  if (agentRunsMatch) {
+    return { runs: runsByAgentId?.[agentRunsMatch[1]!] ?? runs };
+  }
   if (pathname === `/api/runs/${activeRun.id}`) return { run: activeRun };
   if (pathname.endsWith("/candidate-sets")) return { candidateSets: [] };
   if (pathname.endsWith("/assurance-proposals")) return { proposals: [] };

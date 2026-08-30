@@ -8,15 +8,21 @@ import type {
 import type { AgentRun, RunTransaction } from "./types";
 import {
   advancesCanonicalState,
+  beginRequestGeneration,
   deriveRecordingReplayHydration,
+  getPortableProofDisplayState,
   hasDistinctRepairEffectKey,
   hasExactRecordingDecisionChain,
   hasExactRecordingEffect,
   hasExactRecordingResources,
   hasExactFreshRecordingRunIds,
+  hasLocallyVerifiedPortableProof,
   hasRepairRecordingLineage,
   hasRootRecordingLineage,
   hasValidTerminalRecordingRun,
+  invalidateRequestGeneration,
+  isCurrentRequestGeneration,
+  isPortableProofActionable,
   isSafeRecordingIdentifier,
   parseRecordingReplayRunIds,
   recordingResourceKinds,
@@ -299,6 +305,146 @@ function resources(
     summary: kind,
   }));
 }
+
+describe("portable proof local verification", () => {
+  it("requires both the server self-check and browser verifier", () => {
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: true,
+        dirty: false,
+      }),
+    ).toBe(true);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: false,
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: false,
+        browserVerificationValid: true,
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: null,
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: true,
+        dirty: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("distinguishes in-flight and stale proofs from failed proofs", () => {
+    expect(
+      getPortableProofDisplayState({
+        hasResult: true,
+        verificationValid: false,
+        busy: true,
+        dirty: false,
+      }),
+    ).toBe("verifying");
+    expect(
+      getPortableProofDisplayState({
+        hasResult: true,
+        verificationValid: false,
+        busy: false,
+        dirty: true,
+      }),
+    ).toBe("stale");
+    expect(
+      getPortableProofDisplayState({
+        hasResult: true,
+        verificationValid: false,
+        busy: false,
+        dirty: false,
+      }),
+    ).toBe("failed");
+    expect(
+      getPortableProofDisplayState({
+        hasResult: true,
+        verificationValid: true,
+        busy: false,
+        dirty: false,
+      }),
+    ).toBe("verified");
+    expect(
+      getPortableProofDisplayState({
+        hasResult: false,
+        verificationValid: true,
+        busy: false,
+        dirty: false,
+      }),
+    ).toBe("empty");
+
+    expect(isPortableProofActionable("verified")).toBe(true);
+    expect(isPortableProofActionable("verifying")).toBe(false);
+    expect(isPortableProofActionable("stale")).toBe(false);
+    expect(isPortableProofActionable("failed")).toBe(false);
+  });
+
+  it("accepts only the latest async completion and fails closed on teardown", async () => {
+    const state = { current: 0 };
+    const older = beginRequestGeneration(state);
+    const newer = beginRequestGeneration(state);
+    const committed: string[] = [];
+    let releaseOlder!: () => void;
+    let releaseNewer!: () => void;
+    const olderResult = new Promise<void>((resolve) => {
+      releaseOlder = resolve;
+    });
+    const newerResult = new Promise<void>((resolve) => {
+      releaseNewer = resolve;
+    });
+    const commitWhenCurrent = async (
+      generation: number,
+      value: string,
+      completion: Promise<void>,
+    ) => {
+      await completion;
+      if (isCurrentRequestGeneration(state, generation)) {
+        committed.push(value);
+      }
+    };
+    const olderCompletion = commitWhenCurrent(older, "older", olderResult);
+    const newerCompletion = commitWhenCurrent(newer, "newer", newerResult);
+
+    expect(isCurrentRequestGeneration(state, older)).toBe(false);
+    expect(isCurrentRequestGeneration(state, newer)).toBe(true);
+
+    releaseNewer();
+    await newerCompletion;
+    releaseOlder();
+    await olderCompletion;
+    expect(committed).toEqual(["newer"]);
+
+    let releaseUnmounted!: () => void;
+    const unmountedResult = new Promise<void>((resolve) => {
+      releaseUnmounted = resolve;
+    });
+    const unmounted = beginRequestGeneration(state);
+    const unmountedCompletion = commitWhenCurrent(
+      unmounted,
+      "unmounted",
+      unmountedResult,
+    );
+    invalidateRequestGeneration(state);
+    releaseUnmounted();
+    await unmountedCompletion;
+    expect(isCurrentRequestGeneration(state, unmounted)).toBe(false);
+    expect(committed).toEqual(["newer"]);
+  });
+});
 
 describe("recording outcome fail-closed policy", () => {
   it("binds the verified two-packet chain to the displayed Quarantine and Repair", () => {

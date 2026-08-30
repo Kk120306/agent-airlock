@@ -30,15 +30,21 @@ import type {
 import { api, ApiError, setAuthToken } from "./api";
 import {
   advancesCanonicalState,
+  beginRequestGeneration,
   deriveRecordingReplayHydration,
+  getPortableProofDisplayState,
   hasDistinctRepairEffectKey,
   hasExactRecordingDecisionChain,
   hasExactRecordingEffect,
   hasExactRecordingResources,
   hasExactFreshRecordingRunIds,
+  hasLocallyVerifiedPortableProof,
   hasRepairRecordingLineage,
   hasRootRecordingLineage,
   hasValidTerminalRecordingRun,
+  invalidateRequestGeneration,
+  isCurrentRequestGeneration,
+  isPortableProofActionable,
   parseRecordingReplayRunIds,
   type RecordingReplayRunIds,
 } from "./recording-outcome-policy";
@@ -202,6 +208,7 @@ type PortableVerifierArtifact =
 
 type AutomaticProofState = {
   runId: string;
+  evidenceRevision: string;
   requestNonce: number;
   status: "requested" | "verified" | "failed";
   error?: string;
@@ -217,6 +224,17 @@ type AutomaticProofVerification = {
   decisionCount: number;
   leafReceiptDigest?: ReceiptDigest | null;
 };
+
+function portableEvidenceRevision(run: AgentRun | null): string | null {
+  const transaction = run?.transaction;
+  const receipt = transaction?.promotionReceipt;
+  if (!transaction || !receipt) return null;
+  return [
+    transaction.disposition,
+    receipt.createdAt,
+    receipt.validationEvidenceHash,
+  ].join(":");
+}
 
 type RecordingAttemptRunIds = RecordingReplayRunIds;
 
@@ -372,11 +390,13 @@ function JudgeProofSummary({
 }
 
 function ProtocolScenarioGuide({
+  agentId,
   runs,
   busy,
   onRun,
   onRepair,
   onRequestProof,
+  onSelectRunForProof,
   automaticProof,
   recordingMode = false,
   readOnlyReplayMode = false,
@@ -384,11 +404,13 @@ function ProtocolScenarioGuide({
   onRecordingAttemptStart,
   onRecordingAttemptComplete,
 }: {
+  agentId: string;
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => Promise<AgentRun | null>;
   onRepair: (runId: string) => Promise<AgentRun | null>;
-  onRequestProof: (runId: string) => void;
+  onRequestProof: (run: AgentRun) => void;
+  onSelectRunForProof: (run: AgentRun) => void;
   automaticProof: AutomaticProofState | null;
   recordingMode?: boolean;
   readOnlyReplayMode?: boolean;
@@ -400,6 +422,14 @@ function ProtocolScenarioGuide({
     "promote" | "quarantine" | "repair" | "verify" | null
   >(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
+  const attemptGenerationRef = useRef(0);
+
+  useEffect(() => {
+    invalidateRequestGeneration(attemptGenerationRef);
+    setAutomationStage(null);
+    setAutomationError(null);
+    return () => invalidateRequestGeneration(attemptGenerationRef);
+  }, [agentId]);
   const scenarioRuns = recordingMode
     ? recordingRunIds
       ? runs.filter((run) =>
@@ -473,6 +503,12 @@ function ProtocolScenarioGuide({
 
   const runCompleteLoop = async () => {
     if (readOnlyReplayMode) return;
+    const attemptGeneration = beginRequestGeneration(attemptGenerationRef);
+    const attemptIsCurrent = () =>
+      isCurrentRequestGeneration(
+        attemptGenerationRef,
+        attemptGeneration,
+      );
     if (recordingMode) onRecordingAttemptStart?.();
     setAutomationError(null);
     setAutomationStage("promote");
@@ -480,7 +516,12 @@ function ProtocolScenarioGuide({
       const safeRun = recordingMode
         ? await onRun(protocolFixturePrompts.promote)
         : (promoted ?? (await onRun(protocolFixturePrompts.promote)));
-      if (!safeRun || !provesWholeAgentPromotion(safeRun, "candidate-only")) {
+      if (!attemptIsCurrent()) return;
+      if (
+        !safeRun ||
+        safeRun.agentId !== agentId ||
+        !provesWholeAgentPromotion(safeRun, "candidate-only")
+      ) {
         setAutomationError(
           "Safety loop stopped: the passing Candidate did not produce the required Whole-Agent Promotion.",
         );
@@ -491,7 +532,11 @@ function ProtocolScenarioGuide({
       const rejectedRun = recordingMode
         ? await onRun(protocolFixturePrompts.challenge)
         : (quarantined ?? (await onRun(protocolFixturePrompts.challenge)));
-      if (rejectedRun?.transaction?.disposition !== "quarantined") {
+      if (!attemptIsCurrent()) return;
+      if (
+        rejectedRun?.agentId !== agentId ||
+        rejectedRun.transaction?.disposition !== "quarantined"
+      ) {
         setAutomationError(
           "Safety loop stopped: the invalid Candidate did not produce the required Quarantine decision.",
         );
@@ -501,7 +546,9 @@ function ProtocolScenarioGuide({
       if (recordingMode || !repaired) {
         setAutomationStage("repair");
         const repairRun = await onRepair(rejectedRun.id);
+        if (!attemptIsCurrent()) return;
         if (
+          repairRun?.agentId !== agentId ||
           repairRun?.transaction?.disposition !== "promoted" ||
           repairRun.transaction.lineage.depth < 1
         ) {
@@ -518,10 +565,14 @@ function ProtocolScenarioGuide({
             repairedRunId: repairRun.id,
           });
         }
-        onRequestProof(repairRun.id);
+        onRequestProof(repairRun);
       }
     } finally {
-      setAutomationStage((current) => (current === "verify" ? current : null));
+      if (attemptIsCurrent()) {
+        setAutomationStage((current) =>
+          current === "verify" ? current : null,
+        );
+      }
     }
   };
   const automationLabel =
@@ -555,7 +606,7 @@ function ProtocolScenarioGuide({
             <button
               type="button"
               className="button button-primary protocol-run-all"
-              onClick={() => repaired && onRequestProof(repaired.id)}
+              onClick={() => repaired && onSelectRunForProof(repaired)}
               disabled={busy || automationStage !== null || !repaired}
             >
               {!recordingMode && <span aria-hidden="true">↻</span>}
@@ -1353,8 +1404,25 @@ function CustodyPolicyControl({
   const [policyReport, setPolicyReport] =
     useState<TrustPolicyVerificationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const rotationReadGeneration = useRef(0);
+  const policyReadGeneration = useRef(0);
+  const rotationVerificationGeneration = useRef(0);
+  const policyVerificationGeneration = useRef(0);
+
+  useEffect(
+    () => () => {
+      invalidateRequestGeneration(rotationReadGeneration);
+      invalidateRequestGeneration(policyReadGeneration);
+      invalidateRequestGeneration(rotationVerificationGeneration);
+      invalidateRequestGeneration(policyVerificationGeneration);
+    },
+    [],
+  );
 
   useEffect(() => {
+    const generation = beginRequestGeneration(
+      rotationVerificationGeneration,
+    );
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (rotationSource === null || !/^sha256:[a-f0-9]{64}$/.test(trustedRoot)) {
@@ -1363,11 +1431,17 @@ function CustodyPolicyControl({
         cancelled = true;
       };
     }
+    setRotationReport(null);
     void verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser(
       rotationSource,
       [trustedRoot as ReceiptDigest],
     ).then((next) => {
-      if (!cancelled) setRotationReport(next);
+      if (
+        !cancelled &&
+        isCurrentRequestGeneration(rotationVerificationGeneration, generation)
+      ) {
+        setRotationReport(next);
+      }
     });
     return () => {
       cancelled = true;
@@ -1375,6 +1449,7 @@ function CustodyPolicyControl({
   }, [authorityFingerprint, rotationSource]);
 
   useEffect(() => {
+    const generation = beginRequestGeneration(policyVerificationGeneration);
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (policySource === null || !/^sha256:[a-f0-9]{64}$/.test(trustedRoot)) {
@@ -1384,6 +1459,8 @@ function CustodyPolicyControl({
         cancelled = true;
       };
     }
+    setPolicyReport(null);
+    onPolicy(null);
     const roots = [
       trustedRoot as ReceiptDigest,
       ...(rotationReport?.valid && rotationReport.nextAuthorityKeyId
@@ -1394,7 +1471,12 @@ function CustodyPolicyControl({
       policySource,
       roots,
     ).then((next) => {
-      if (cancelled) return;
+      if (
+        cancelled ||
+        !isCurrentRequestGeneration(policyVerificationGeneration, generation)
+      ) {
+        return;
+      }
       setPolicyReport(next);
       onPolicy(next.valid ? next.policy : null);
     });
@@ -1409,7 +1491,25 @@ function CustodyPolicyControl({
     kind: "rotation" | "policy",
   ) => {
     if (!file) return;
+    const generation = beginRequestGeneration(
+      kind === "rotation" ? rotationReadGeneration : policyReadGeneration,
+    );
     setError(null);
+    if (kind === "rotation") {
+      invalidateRequestGeneration(rotationVerificationGeneration);
+      invalidateRequestGeneration(policyVerificationGeneration);
+      setRotationFilename(file.name);
+      setRotationSource(null);
+      setRotationReport(null);
+      setPolicyReport(null);
+      onPolicy(null);
+    } else {
+      invalidateRequestGeneration(policyVerificationGeneration);
+      setPolicyFilename(file.name);
+      setPolicySource(null);
+      setPolicyReport(null);
+      onPolicy(null);
+    }
     if (file.size < 1 || file.size > maximumBytes) {
       setError(
         `${role} ${kind} file is empty or exceeds its local byte limit.`,
@@ -1418,14 +1518,18 @@ function CustodyPolicyControl({
     }
     try {
       const source = await file.text();
+      const state =
+        kind === "rotation" ? rotationReadGeneration : policyReadGeneration;
+      if (!isCurrentRequestGeneration(state, generation)) return;
       if (kind === "rotation") {
-        setRotationFilename(file.name);
         setRotationSource(source);
       } else {
-        setPolicyFilename(file.name);
         setPolicySource(source);
       }
     } catch {
+      const state =
+        kind === "rotation" ? rotationReadGeneration : policyReadGeneration;
+      if (!isCurrentRequestGeneration(state, generation)) return;
       setError(
         `The browser could not read the ${role.toLowerCase()} ${kind} file.`,
       );
@@ -1455,7 +1559,16 @@ function CustodyPolicyControl({
         <input
           type="text"
           value={authorityFingerprint}
-          onChange={(event) => setAuthorityFingerprint(event.target.value)}
+          onChange={(event) => {
+            invalidateRequestGeneration(rotationReadGeneration);
+            invalidateRequestGeneration(policyReadGeneration);
+            invalidateRequestGeneration(rotationVerificationGeneration);
+            invalidateRequestGeneration(policyVerificationGeneration);
+            setAuthorityFingerprint(event.target.value);
+            setRotationReport(null);
+            setPolicyReport(null);
+            onPolicy(null);
+          }}
           placeholder="sha256: authority fingerprint"
           spellCheck={false}
           autoComplete="off"
@@ -1512,20 +1625,31 @@ function CustodyProofRoom({
   packet,
   report,
 }: {
-  packet: ReceiverCustodyPacket;
-  report: ReceiverCustodyVerificationReport;
+  packet: ReceiverCustodyPacket | null;
+  report: ReceiverCustodyVerificationReport | null;
 }) {
   const [producerPolicy, setProducerPolicy] =
     useState<SigningKeyTrustPolicy | null>(null);
   const [receiverPolicy, setReceiverPolicy] =
     useState<SigningKeyTrustPolicy | null>(null);
-  const [trustReport, setTrustReport] =
-    useState<ReceiverCustodyTrustReport | null>(null);
-  const [tamperReport, setTamperReport] =
-    useState<ReceiverCustodyVerificationReport | null>(null);
-  const [tamperAttack, setTamperAttack] =
-    useState<ReceiverCustodyTamperAttack | null>(null);
-  const [tamperBusy, setTamperBusy] = useState(false);
+  const [trustEvaluation, setTrustEvaluation] = useState<{
+    packet: ReceiverCustodyPacket;
+    report: ReceiverCustodyTrustReport;
+  } | null>(null);
+  const [renderedEvidence, setRenderedEvidence] = useState<{
+    packet: ReceiverCustodyPacket;
+    report: ReceiverCustodyVerificationReport;
+  } | null>(() => (packet && report ? { packet, report } : null));
+  const [tamperEvaluation, setTamperEvaluation] = useState<{
+    packet: ReceiverCustodyPacket;
+    attack: ReceiverCustodyTamperAttack;
+    report: ReceiverCustodyVerificationReport;
+  } | null>(null);
+  const [pendingTamper, setPendingTamper] = useState<{
+    packet: ReceiverCustodyPacket;
+    attack: ReceiverCustodyTamperAttack;
+  } | null>(null);
+  const tamperGenerationRef = useRef(0);
   const verdictRef = useRef<HTMLDivElement | null>(null);
   const tamperRef = useRef<HTMLDivElement | null>(null);
   const onProducerPolicy = useCallback(
@@ -1538,13 +1662,30 @@ function CustodyProofRoom({
   );
 
   useEffect(() => {
-    verdictRef.current?.focus();
-  }, [report]);
+    if (packet && report) setRenderedEvidence({ packet, report });
+  }, [packet, report]);
+
+  useEffect(() => {
+    invalidateRequestGeneration(tamperGenerationRef);
+    setTamperEvaluation(null);
+    setPendingTamper(null);
+  }, [packet, report]);
+
+  useEffect(() => {
+    if (
+      packet &&
+      report &&
+      renderedEvidence?.packet === packet &&
+      renderedEvidence.report === report
+    ) {
+      verdictRef.current?.focus();
+    }
+  }, [packet, renderedEvidence, report]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!producerPolicy && !receiverPolicy) {
-      setTrustReport(null);
+    if (!packet || (!producerPolicy && !receiverPolicy)) {
+      setTrustEvaluation(null);
       return () => {
         cancelled = true;
       };
@@ -1553,39 +1694,76 @@ function CustodyProofRoom({
       producer: producerPolicy,
       receiver: receiverPolicy,
     }).then((next) => {
-      if (!cancelled) setTrustReport(next);
+      if (!cancelled) setTrustEvaluation({ packet, report: next });
     });
     return () => {
       cancelled = true;
     };
   }, [packet, producerPolicy, receiverPolicy]);
 
+  if (!renderedEvidence) return null;
+  const displayedPacket = renderedEvidence.packet;
+  const displayedReport = renderedEvidence.report;
+  const evidenceCurrent =
+    displayedPacket === packet && displayedReport === report;
+  const trustReport =
+    evidenceCurrent && trustEvaluation?.packet === displayedPacket
+      ? trustEvaluation.report
+      : null;
+  const currentTamper =
+    evidenceCurrent && tamperEvaluation?.packet === displayedPacket
+      ? tamperEvaluation
+      : null;
+  const currentPendingTamper =
+    evidenceCurrent && pendingTamper?.packet === displayedPacket
+      ? pendingTamper
+      : null;
+
   const runAttack = async (attack: ReceiverCustodyTamperAttack) => {
-    setTamperBusy(true);
-    setTamperAttack(attack);
+    if (!evidenceCurrent || packet !== displayedPacket) return;
+    const attackPacket = displayedPacket;
+    const generation = beginRequestGeneration(tamperGenerationRef);
+    setTamperEvaluation(null);
+    setPendingTamper({ packet: attackPacket, attack });
     try {
-      const copy = createReceiverCustodyTamperedCopy(packet, attack);
-      setTamperReport(
-        await verifyReceiverCustodyPacketJsonInBrowser(JSON.stringify(copy)),
+      const copy = createReceiverCustodyTamperedCopy(attackPacket, attack);
+      const nextReport = await verifyReceiverCustodyPacketJsonInBrowser(
+        JSON.stringify(copy),
       );
-      window.setTimeout(() => tamperRef.current?.focus(), 0);
+      if (!isCurrentRequestGeneration(tamperGenerationRef, generation)) return;
+      setTamperEvaluation({
+        packet: attackPacket,
+        attack,
+        report: nextReport,
+      });
+      window.setTimeout(() => {
+        if (isCurrentRequestGeneration(tamperGenerationRef, generation)) {
+          tamperRef.current?.focus();
+        }
+      }, 0);
     } finally {
-      setTamperBusy(false);
+      if (isCurrentRequestGeneration(tamperGenerationRef, generation)) {
+        setPendingTamper(null);
+      }
     }
   };
 
-  const story = report.story;
+  const story = displayedReport.story;
   const failedCheck =
-    tamperReport?.checks.find((check) => !check.valid) ?? null;
+    currentTamper?.report.checks.find((check) => !check.valid) ?? null;
   const trustComplete =
     trustReport?.policiesDistinct === true &&
     trustReport.producer?.trusted === true &&
     trustReport.receiver?.trusted === true;
 
-  if (!report.valid || !story) {
-    const failed = report.checks.find((check) => !check.valid);
+  if (!displayedReport.valid || !story) {
+    const failed = displayedReport.checks.find((check) => !check.valid);
     return (
-      <div className="custody-proof-room" data-valid="false">
+      <div
+        className="custody-proof-room"
+        data-valid="false"
+        hidden={!evidenceCurrent}
+      >
         <div
           className="verifier-verdict"
           ref={verdictRef}
@@ -1603,7 +1781,7 @@ function CustodyProofRoom({
         <details className="custody-proof-details">
           <summary>Inspect failed cryptographic checks</summary>
           <div className="verifier-checks">
-            {report.checks.map((check) => (
+            {displayedReport.checks.map((check) => (
               <div key={check.name} data-valid={check.valid}>
                 <span>{check.valid ? "PASS" : "FAIL"}</span>
                 <div>
@@ -1653,7 +1831,11 @@ function CustodyProofRoom({
   ];
 
   return (
-    <div className="custody-proof-room" data-valid="true">
+    <div
+      className="custody-proof-room"
+      data-valid="true"
+      hidden={!evidenceCurrent}
+    >
       <div
         className="custody-primary-verdict"
         ref={verdictRef}
@@ -1758,27 +1940,27 @@ function CustodyProofRoom({
         <div className="custody-attack-actions">
           <button
             type="button"
-            disabled={tamperBusy}
+            disabled={currentPendingTamper !== null}
             onClick={() => void runAttack("remove-admission")}
           >
             Remove Admission
           </button>
           <button
             type="button"
-            disabled={tamperBusy}
+            disabled={currentPendingTamper !== null}
             onClick={() => void runAttack("alter-reviewed-evidence")}
           >
             Alter reviewed evidence
           </button>
           <button
             type="button"
-            disabled={tamperBusy}
+            disabled={currentPendingTamper !== null}
             onClick={() => void runAttack("rewrite-disposition")}
           >
             Rewrite disposition
           </button>
         </div>
-        {tamperReport && (
+        {currentTamper && (
           <div
             className="custody-attack-result"
             ref={tamperRef}
@@ -1796,8 +1978,9 @@ function CustodyProofRoom({
               <button
                 type="button"
                 onClick={() => {
-                  setTamperAttack(null);
-                  setTamperReport(null);
+                  invalidateRequestGeneration(tamperGenerationRef);
+                  setPendingTamper(null);
+                  setTamperEvaluation(null);
                 }}
               >
                 Reset disposable copy
@@ -1805,7 +1988,7 @@ function CustodyProofRoom({
             </div>
           </div>
         )}
-        {tamperAttack && !tamperReport && (
+        {currentPendingTamper && !currentTamper && (
           <small>Verifying disposable attack locally…</small>
         )}
       </section>
@@ -1813,7 +1996,7 @@ function CustodyProofRoom({
       <details className="custody-proof-details">
         <summary>Inspect cryptographic checks and commitments</summary>
         <div className="verifier-checks">
-          {report.checks.map((check) => (
+          {displayedReport.checks.map((check) => (
             <div key={check.name} data-valid={check.valid}>
               <span>PASS</span>
               <div>
@@ -1885,6 +2068,9 @@ function ReceiptVerifier({
   const [custodyReport, setCustodyReport] =
     useState<ReceiverCustodyVerificationReport | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
+  const [verificationSourceKind, setVerificationSourceKind] = useState<
+    "generated" | "file" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [trustPolicySource, setTrustPolicySource] = useState<string | null>(
     null,
@@ -1912,60 +2098,101 @@ function ReceiptVerifier({
     null,
   );
   const [approvalReason, setApprovalReason] = useState("");
+  const verificationGeneration = useRef(0);
+  const trustPolicyReadGeneration = useRef(0);
+  const trustPolicyVerificationGeneration = useRef(0);
+  const authorityRotationReadGeneration = useRef(0);
+  const authorityRotationVerificationGeneration = useRef(0);
+
+  const beginVerification = useCallback(
+    (sourceName: string, sourceKind: "generated" | "file") => {
+      const generation = beginRequestGeneration(verificationGeneration);
+      setFilename(sourceName);
+      setVerificationSourceKind(sourceKind);
+      setReport(null);
+      setPacketReport(null);
+      setChainReport(null);
+      setDecisionChain(null);
+      setEnvelope(null);
+      setCustodyPacket(null);
+      setCustodyReport(null);
+      setError(null);
+      setBusy(true);
+      return generation;
+    },
+    [],
+  );
 
   const verifySource = useCallback(
-    async (source: string, sourceName: string) => {
-    setFilename(sourceName);
-    setReport(null);
-    setPacketReport(null);
-    setChainReport(null);
-    setDecisionChain(null);
-    setEnvelope(null);
-    setCustodyPacket(null);
-    setCustodyReport(null);
-    setError(null);
-    setBusy(true);
-    try {
-      const parsed = JSON.parse(source) as PortableVerifierArtifact;
+    async (
+      sourceValue: string | Promise<string>,
+      sourceName: string,
+      sourceKind: "generated" | "file",
+    ) => {
+      const generation = beginVerification(sourceName, sourceKind);
+      try {
+        const source = await sourceValue;
+        if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+          return;
+        }
+        const parsed = JSON.parse(source) as PortableVerifierArtifact;
         if (
           parsed.schema === "agent-airlock/portable-receiver-chain-of-custody"
         ) {
-        const nextCustodyReport =
-          await verifyReceiverCustodyPacketJsonInBrowser(source);
-        setCustodyPacket(parsed);
-        setCustodyReport(nextCustodyReport);
-      } else if (parsed.schema === "agent-airlock/portable-decision-chain") {
-        const nextChainReport =
-          await verifyPortableDecisionChainJsonInBrowser(source);
-        const leafPacket = parsed.packets.at(-1);
-        const leafPacketReport = nextChainReport.packets.at(-1) ?? null;
-        setChainReport(nextChainReport);
-        setDecisionChain(parsed);
-        setPacketReport(leafPacketReport);
-        setReport(leafPacketReport?.receipt ?? null);
-        if (leafPacket) setEnvelope(leafPacket.envelope);
-        if (!leafPacketReport) {
-          setError("The browser could not verify this decision chain.");
-        }
-      } else if (parsed.schema === "agent-airlock/portable-evidence-packet") {
-        const nextPacketReport =
-          await verifyPortableEvidencePacketJsonInBrowser(source);
-        setPacketReport(nextPacketReport);
-        setReport(nextPacketReport.receipt);
-        if (nextPacketReport.valid) setEnvelope(parsed.envelope);
-      } else {
+          const nextCustodyReport =
+            await verifyReceiverCustodyPacketJsonInBrowser(source);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          setCustodyPacket(parsed);
+          setCustodyReport(nextCustodyReport);
+        } else if (parsed.schema === "agent-airlock/portable-decision-chain") {
+          const nextChainReport =
+            await verifyPortableDecisionChainJsonInBrowser(source);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          const leafPacket = parsed.packets.at(-1);
+          const leafPacketReport = nextChainReport.packets.at(-1) ?? null;
+          setChainReport(nextChainReport);
+          setDecisionChain(parsed);
+          setPacketReport(leafPacketReport);
+          setReport(leafPacketReport?.receipt ?? null);
+          if (leafPacket) setEnvelope(leafPacket.envelope);
+          if (!leafPacketReport) {
+            setError("The browser could not verify this decision chain.");
+          }
+        } else if (
+          parsed.schema === "agent-airlock/portable-evidence-packet"
+        ) {
+          const nextPacketReport =
+            await verifyPortableEvidencePacketJsonInBrowser(source);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          setPacketReport(nextPacketReport);
+          setReport(nextPacketReport.receipt);
+          if (nextPacketReport.valid) setEnvelope(parsed.envelope);
+        } else {
           const nextReport =
             await verifyPortablePromotionEnvelopeJsonInBrowser(source);
-        setReport(nextReport);
-        if (nextReport.valid) setEnvelope(parsed);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          setReport(nextReport);
+          if (nextReport.valid) setEnvelope(parsed);
+        }
+      } catch {
+        if (isCurrentRequestGeneration(verificationGeneration, generation)) {
+          setError("The browser could not read this receipt file.");
+        }
+      } finally {
+        if (isCurrentRequestGeneration(verificationGeneration, generation)) {
+          setBusy(false);
+        }
       }
-    } catch {
-      setError("The browser could not read this receipt file.");
-    } finally {
-      setBusy(false);
-    }
     },
-    [],
+    [beginVerification],
   );
 
   useEffect(() => {
@@ -2005,6 +2232,11 @@ function ReceiptVerifier({
       ?.querySelector<HTMLElement>("[data-verifier-close]")
       ?.focus();
     return () => {
+      invalidateRequestGeneration(verificationGeneration);
+      invalidateRequestGeneration(trustPolicyReadGeneration);
+      invalidateRequestGeneration(trustPolicyVerificationGeneration);
+      invalidateRequestGeneration(authorityRotationReadGeneration);
+      invalidateRequestGeneration(authorityRotationVerificationGeneration);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
       openerRef.current?.focus();
@@ -2022,10 +2254,17 @@ function ReceiptVerifier({
               "agent-airlock/portable-receiver-chain-of-custody"
           ? "Generated receiver custody proof"
           : "Generated receipt";
-    void verifySource(JSON.stringify(initialArtifact), sourceName);
+    void verifySource(
+      JSON.stringify(initialArtifact),
+      sourceName,
+      "generated",
+    );
   }, [initialArtifact, verifySource]);
 
   useEffect(() => {
+    const generation = beginRequestGeneration(
+      trustPolicyVerificationGeneration,
+    );
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (
@@ -2037,6 +2276,7 @@ function ReceiptVerifier({
         cancelled = true;
       };
     }
+    setTrustPolicyReport(null);
     void verifySignedSigningKeyTrustPolicyEnvelopeJsonInBrowser(
       trustPolicySource,
       [
@@ -2048,7 +2288,15 @@ function ReceiptVerifier({
           : []),
       ],
     ).then((nextReport) => {
-      if (!cancelled) setTrustPolicyReport(nextReport);
+      if (
+        !cancelled &&
+        isCurrentRequestGeneration(
+          trustPolicyVerificationGeneration,
+          generation,
+        )
+      ) {
+        setTrustPolicyReport(nextReport);
+      }
     });
     return () => {
       cancelled = true;
@@ -2056,6 +2304,9 @@ function ReceiptVerifier({
   }, [authorityFingerprint, authorityRotationReport, trustPolicySource]);
 
   useEffect(() => {
+    const generation = beginRequestGeneration(
+      authorityRotationVerificationGeneration,
+    );
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (
@@ -2067,11 +2318,20 @@ function ReceiptVerifier({
         cancelled = true;
       };
     }
+    setAuthorityRotationReport(null);
     void verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser(
       authorityRotationSource,
       [trustedRoot as ReceiptDigest],
     ).then((nextReport) => {
-      if (!cancelled) setAuthorityRotationReport(nextReport);
+      if (
+        !cancelled &&
+        isCurrentRequestGeneration(
+          authorityRotationVerificationGeneration,
+          generation,
+        )
+      ) {
+        setAuthorityRotationReport(nextReport);
+      }
     });
     return () => {
       cancelled = true;
@@ -2081,20 +2341,20 @@ function ReceiptVerifier({
   const verifyFile = async (file: File | undefined) => {
     if (!file) return;
     if (file.size < 1 || file.size > 16 * 1_048_576) {
+      beginVerification(file.name, "file");
       setError(
         "Choose a non-empty receiver custody proof no larger than 16 MB, or another portable proof no larger than 4 MB.",
       );
+      setBusy(false);
       return;
     }
-    try {
-      await verifySource(await file.text(), file.name);
-    } catch {
-      setError("The browser could not read this receipt file.");
-    }
+    await verifySource(file.text(), file.name, "file");
   };
 
   const importTrustPolicy = async (file: File | undefined) => {
     if (!file) return;
+    const generation = beginRequestGeneration(trustPolicyReadGeneration);
+    invalidateRequestGeneration(trustPolicyVerificationGeneration);
     setTrustPolicyFilename(file.name);
     setTrustPolicySource(null);
     setTrustPolicyReport(null);
@@ -2106,8 +2366,19 @@ function ReceiptVerifier({
       return;
     }
     try {
-      setTrustPolicySource(await file.text());
+      const source = await file.text();
+      if (
+        !isCurrentRequestGeneration(trustPolicyReadGeneration, generation)
+      ) {
+        return;
+      }
+      setTrustPolicySource(source);
     } catch (reason) {
+      if (
+        !isCurrentRequestGeneration(trustPolicyReadGeneration, generation)
+      ) {
+        return;
+      }
       setTrustPolicyError(
         reason instanceof Error
           ? reason.message
@@ -2118,9 +2389,13 @@ function ReceiptVerifier({
 
   const importAuthorityRotation = async (file: File | undefined) => {
     if (!file) return;
+    const generation = beginRequestGeneration(authorityRotationReadGeneration);
+    invalidateRequestGeneration(authorityRotationVerificationGeneration);
+    invalidateRequestGeneration(trustPolicyVerificationGeneration);
     setAuthorityRotationFilename(file.name);
     setAuthorityRotationSource(null);
     setAuthorityRotationReport(null);
+    setTrustPolicyReport(null);
     setAuthorityRotationError(null);
     if (file.size < 1 || file.size > 65_536) {
       setAuthorityRotationError(
@@ -2129,8 +2404,19 @@ function ReceiptVerifier({
       return;
     }
     try {
-      setAuthorityRotationSource(await file.text());
+      const source = await file.text();
+      if (
+        !isCurrentRequestGeneration(authorityRotationReadGeneration, generation)
+      ) {
+        return;
+      }
+      setAuthorityRotationSource(source);
     } catch (reason) {
+      if (
+        !isCurrentRequestGeneration(authorityRotationReadGeneration, generation)
+      ) {
+        return;
+      }
       setAuthorityRotationError(
         reason instanceof Error
           ? reason.message
@@ -2142,6 +2428,7 @@ function ReceiptVerifier({
   const evidenceValid = report
     ? (chainReport?.valid ?? packetReport?.valid ?? report.valid)
     : false;
+  const artifactValid = custodyReport?.valid ?? evidenceValid;
   const organizationalTrustEvaluations =
     report && envelope && trustPolicyReport?.valid && trustPolicyReport.policy
       ? (
@@ -2262,26 +2549,29 @@ function ReceiptVerifier({
         <label
           className="receipt-dropzone"
           data-loaded={filename !== null}
-          data-generated={initialArtifact !== null}
+          data-generated={verificationSourceKind === "generated"}
         >
           <input
             type="file"
             accept="application/json,.json"
+            disabled={busy}
             onChange={(event) => void verifyFile(event.target.files?.[0])}
           />
           <span aria-hidden="true">⌁</span>
           <strong>
-            {initialArtifact
-              ? "Generated decision chain loaded"
-              : (filename ??
-                "Choose a receipt, custody proof, packet, or decision chain")}
+            {filename ??
+              "Choose a receipt, custody proof, packet, or decision chain"}
           </strong>
           <small>
             {busy
               ? "Verifying locally…"
-              : initialArtifact
+              : verificationSourceKind === "generated" && artifactValid
                 ? "Verified directly from the exact generated artifact"
-                : "Select an exported Agent Airlock JSON file"}
+                : filename && artifactValid
+                  ? "Verified directly from the selected local file"
+                  : filename
+                    ? "Local verification did not accept this artifact"
+                    : "Select an exported Agent Airlock JSON file"}
           </small>
         </label>
 
@@ -2291,9 +2581,7 @@ function ReceiptVerifier({
           </div>
         )}
 
-        {custodyPacket && custodyReport && (
-          <CustodyProofRoom packet={custodyPacket} report={custodyReport} />
-        )}
+        <CustodyProofRoom packet={custodyPacket} report={custodyReport} />
 
         {report && (
           <div className="verifier-report" data-valid={evidenceValid}>
@@ -2470,9 +2758,21 @@ function ReceiptVerifier({
                     <input
                       type="text"
                       value={authorityFingerprint}
-                      onChange={(event) =>
-                        setAuthorityFingerprint(event.target.value)
-                      }
+                      onChange={(event) => {
+                        invalidateRequestGeneration(trustPolicyReadGeneration);
+                        invalidateRequestGeneration(
+                          trustPolicyVerificationGeneration,
+                        );
+                        invalidateRequestGeneration(
+                          authorityRotationReadGeneration,
+                        );
+                        invalidateRequestGeneration(
+                          authorityRotationVerificationGeneration,
+                        );
+                        setAuthorityFingerprint(event.target.value);
+                        setAuthorityRotationReport(null);
+                        setTrustPolicyReport(null);
+                      }}
                       placeholder="sha256: authority fingerprint"
                       spellCheck={false}
                       autoComplete="off"
@@ -2592,7 +2892,7 @@ function ReceiptVerifier({
             {trustPolicyReport && (
               <section
                 className="verifier-trust-chain"
-                aria-label="Verified trust chain"
+                aria-label="Trust policy evaluation details"
               >
                 <div className="verifier-chain-heading">
                   <span className="eyebrow">Decision path</span>
@@ -2702,6 +3002,8 @@ function PortableTrustExport({
   onVerifyArtifact?: (artifact: PortableVerifierArtifact) => void;
   onAutomaticProofResult?: (
     runId: string,
+    evidenceRevision: string,
+    requestNonce: number | null,
     verification: AutomaticProofVerification,
   ) => void;
 }) {
@@ -2712,26 +3014,37 @@ function PortableTrustExport({
   const [selectedDisclosures, setSelectedDisclosures] = useState<string[]>([]);
   const [localAnchor, setLocalAnchor] = useState(false);
   const [evmPayload, setEvmPayload] = useState(false);
+  const [browserVerificationValid, setBrowserVerificationValid] = useState<
+    boolean | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [federatedExportBusy, setFederatedExportBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const requestGeneration = useRef(0);
   const automaticGenerationRequest = useRef<string | null>(null);
 
+  useEffect(
+    () => () => {
+      invalidateRequestGeneration(requestGeneration);
+    },
+    [],
+  );
+
   useEffect(() => {
-    requestGeneration.current += 1;
+    invalidateRequestGeneration(requestGeneration);
     setResult(null);
     setAvailableDisclosures([]);
     setSelectedDisclosures([]);
     setLocalAnchor(false);
     setEvmPayload(false);
+    setBrowserVerificationValid(null);
     setBusy(false);
     setDirty(false);
   }, [runId, evidenceRevision]);
 
   const generate = async () => {
-    const generation = requestGeneration.current + 1;
-    requestGeneration.current = generation;
+    const generation = beginRequestGeneration(requestGeneration);
+    setBrowserVerificationValid(null);
     setBusy(true);
     try {
       const exported = await api.exportPortableReceipt(runId, {
@@ -2748,36 +3061,52 @@ function PortableTrustExport({
         : await verifyPortableEvidencePacketJsonInBrowser(
             JSON.stringify(exported.packet),
           );
-      if (requestGeneration.current !== generation) return;
+      if (!isCurrentRequestGeneration(requestGeneration, generation)) return;
       setResult(exported);
+      setBrowserVerificationValid(browserReport.valid);
       setAvailableDisclosures(exported.availableDisclosures);
       setDirty(false);
       const valid = exported.verification.valid && browserReport.valid;
-      onAutomaticProofResult?.(runId, {
+      onAutomaticProofResult?.(
+        runId,
+        evidenceRevision,
+        automaticProofRequestNonce,
+        {
         valid,
         error: valid
           ? undefined
-          : "The generated decision chain failed local browser verification.",
+          : exported.verification.valid
+            ? "The generated proof failed local browser verification."
+            : "The generated proof failed the server self-check.",
         artifact,
         decisionCount: exported.decisionChain?.packets.length ?? 1,
         leafReceiptDigest: exported.decisionChain
           ? (browserReport as PortableDecisionChainVerificationReport)
               .leafReceiptDigest
           : null,
-      });
+        },
+      );
     } catch (reason) {
-      if (requestGeneration.current === generation) {
+      if (isCurrentRequestGeneration(requestGeneration, generation)) {
+        setBrowserVerificationValid(false);
         const message =
           reason instanceof Error ? reason.message : String(reason);
         onError(message);
-        onAutomaticProofResult?.(runId, {
-          valid: false,
-          error: message,
-          decisionCount: 0,
-        });
+        onAutomaticProofResult?.(
+          runId,
+          evidenceRevision,
+          automaticProofRequestNonce,
+          {
+            valid: false,
+            error: message,
+            decisionCount: 0,
+          },
+        );
       }
     } finally {
-      if (requestGeneration.current === generation) setBusy(false);
+      if (isCurrentRequestGeneration(requestGeneration, generation)) {
+        setBusy(false);
+      }
     }
   };
 
@@ -2801,20 +3130,21 @@ function PortableTrustExport({
 
   useEffect(() => {
     if (automaticProofRequestNonce === null) return;
-    const requestIdentity = `${runId}:${automaticProofRequestNonce}`;
+    const requestIdentity = `${runId}:${evidenceRevision}:${automaticProofRequestNonce}`;
     if (automaticGenerationRequest.current === requestIdentity) return;
     automaticGenerationRequest.current = requestIdentity;
     void generate();
-  }, [automaticProofRequestNonce, runId]);
+  }, [automaticProofRequestNonce, evidenceRevision, runId]);
 
   const invalidatePendingExport = () => {
-    requestGeneration.current += 1;
+    invalidateRequestGeneration(requestGeneration);
+    setBrowserVerificationValid(null);
     setBusy(false);
     setDirty(true);
   };
 
   const downloadJson = (value: unknown, filename: string) => {
-    if (!result || dirty) return;
+    if (!result || dirty || busy) return;
     const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], {
       type: "application/json",
     });
@@ -2885,7 +3215,22 @@ function PortableTrustExport({
     </>
   );
   const hasDecisionChain = (result?.decisionChain?.packets.length ?? 0) > 1;
-  const proofVerified = result?.verification.valid === true && !dirty;
+  const proofVerified = hasLocallyVerifiedPortableProof({
+    serverVerificationValid: result?.verification.valid,
+    browserVerificationValid,
+    dirty,
+  });
+  const displayedResultVerified = judgeProofMode
+    ? proofVerified
+    : result?.verification.valid === true && !dirty;
+  const displayedResultState = getPortableProofDisplayState({
+    hasResult: result !== null,
+    verificationValid: displayedResultVerified,
+    busy,
+    dirty,
+  });
+  const displayedResultActionable =
+    isPortableProofActionable(displayedResultState);
   const requiredDisclosureCount = availableDisclosures.filter(
     (disclosure) => disclosure.required,
   ).length;
@@ -3058,22 +3403,36 @@ function PortableTrustExport({
       )}
 
       {result && (
-        <div className="portable-result" data-valid={result.verification.valid}>
+        <div className="portable-result" data-valid={displayedResultActionable}>
           <div className="portable-result-status">
             <span aria-hidden="true">
-              {result.verification.valid ? "✓" : "!"}
+              {displayedResultActionable ? "✓" : "!"}
             </span>
             <div>
               <strong>
-                {result.verification.valid
+                {displayedResultState === "verifying"
                   ? judgeProofMode
-                    ? "Signed proof verified locally"
-                    : "Self-check passed"
-                  : "Receipt verification failed"}
+                    ? "Verifying proof locally"
+                    : "Checking receipt"
+                  : displayedResultState === "stale"
+                    ? judgeProofMode
+                      ? "Proof needs regeneration"
+                      : "Receipt needs regeneration"
+                    : displayedResultVerified
+                      ? judgeProofMode
+                        ? "Signed proof verified locally"
+                        : "Self-check passed"
+                      : judgeProofMode
+                        ? "Proof verification failed"
+                        : "Receipt verification failed"}
               </strong>
               <small>
-                {dirty
+                {displayedResultState === "verifying"
+                  ? "Running the local verifier against the newly generated artifact."
+                  : displayedResultState === "stale"
                   ? "Options changed. Regenerate before downloading."
+                  : judgeProofMode && !proofVerified
+                    ? "The server self-check and browser verifier did not both accept this proof. Regenerate before relying on it."
                   : hasDecisionChain
                     ? judgeProofMode
                       ? `${result.decisionChain!.packets.length} signed decisions verified locally with every Canonical State handoff intact.`
@@ -3099,7 +3458,7 @@ function PortableTrustExport({
                     `agent-airlock-receipt-${runId}.json`,
                   )
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultActionable}
               >
                 Download receipt JSON
               </button>
@@ -3110,15 +3469,13 @@ function PortableTrustExport({
                 type="button"
                 className="button button-ghost"
                 onClick={() => void exportFederatedBundle()}
-                  disabled={
-                    dirty || !result.verification.valid || federatedExportBusy
-                  }
+                disabled={!displayedResultActionable || federatedExportBusy}
               >
-                  {federatedExportBusy ? (
-                    <Spinner />
-                  ) : (
-                    "Download federated work"
-                  )}
+                {federatedExportBusy ? (
+                  <Spinner />
+                ) : (
+                  "Download federated work"
+                )}
               </button>
             )}
             {(!judgeProofMode || !hasDecisionChain) && (
@@ -3131,7 +3488,7 @@ function PortableTrustExport({
                     `agent-airlock-evidence-${runId}.json`,
                   )
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultActionable}
               >
                 {judgeProofMode
                   ? "Download verified evidence packet"
@@ -3148,7 +3505,7 @@ function PortableTrustExport({
                     `agent-airlock-decision-chain-${runId}.json`,
                   )
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultActionable}
               >
                 {judgeProofMode
                   ? "Download verified decision chain"
@@ -3162,7 +3519,7 @@ function PortableTrustExport({
                 onClick={() =>
                   onVerifyArtifact(result.decisionChain ?? result.packet)
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultActionable}
               >
                 Inspect in zero-upload verifier
               </button>
@@ -3209,7 +3566,7 @@ function PortableTrustExport({
                   <button
                     type="button"
                     className="button button-ghost"
-                    disabled={dirty || !result.verification.valid}
+                    disabled={!displayedResultActionable}
                     onClick={() =>
                       downloadJson(
                         result.anchor,
@@ -3231,7 +3588,7 @@ function PortableTrustExport({
                   <button
                     type="button"
                     className="button button-ghost"
-                    disabled={dirty || !result.verification.valid}
+                    disabled={!displayedResultActionable}
                     onClick={() =>
                       downloadJson(
                         result.evmPayload,
@@ -3619,6 +3976,7 @@ function CandidateSetEvidence({
         candidateSet.phase === "completed" &&
         candidateSet.winnerRunId && (
           <PortableTrustExport
+            key={`${candidateSet.winnerRunId}:${candidateSet.selectionDecision!.decisionDigest}`}
             runId={candidateSet.winnerRunId}
             evidenceRevision={candidateSet.selectionDecision!.decisionDigest}
             onError={onPortableError}
@@ -3665,6 +4023,8 @@ function AirlockEvidence({
   onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
   onAutomaticProofResult: (
     runId: string,
+    evidenceRevision: string,
+    requestNonce: number | null,
     verification: AutomaticProofVerification,
   ) => void;
 }) {
@@ -4183,6 +4543,7 @@ function AirlockEvidence({
           </footer>
           {portableTrustAvailable && !recoveryFailed && (
             <PortableTrustExport
+              key={`${run.id}:${transaction.disposition}:${transaction.promotionReceipt.createdAt}:${transaction.promotionReceipt.validationEvidenceHash}`}
               runId={run.id}
               evidenceRevision={[
                 transaction.disposition,
@@ -5073,6 +5434,8 @@ function FederationAirlock({
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
   const [messages, setMessages] = useState<Message[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
@@ -5113,31 +5476,41 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestAutomaticProof = useCallback(
-    (runId: string) => {
+    (targetRun: AgentRun) => {
+      if (selectedIdRef.current !== targetRun.agentId) return;
+      const runId = targetRun.id;
+      const evidenceRevision = portableEvidenceRevision(targetRun);
+      if (evidenceRevision === null) return;
       setError(null);
-      setActiveRun((current) =>
-        current?.id === runId
-          ? current
-          : (runs.find((run) => run.id === runId) ?? current),
-      );
       setAutomaticProof((current) => ({
         runId,
-        requestNonce: current?.runId === runId ? current.requestNonce + 1 : 1,
+        evidenceRevision,
+        requestNonce:
+          current?.runId === runId &&
+          current.evidenceRevision === evidenceRevision
+            ? current.requestNonce + 1
+            : 1,
         status: "requested",
       }));
     },
-    [runs],
+    [],
+  );
+  const selectRunForProof = useCallback(
+    (targetRun: AgentRun) => {
+      if (selectedIdRef.current !== targetRun.agentId) return;
+      setActiveRun(targetRun);
+      requestAutomaticProof(targetRun);
+    },
+    [requestAutomaticProof],
   );
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
   const [recordingDismissed, setRecordingDismissed] = useState(false);
   const messageEnd = useRef<HTMLDivElement>(null);
-  const selectedIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const pollingRunIds = useRef(new Set<string>());
   const pollingCandidateSetIds = useRef(new Set<string>());
   const recordingReplayRequestRef = useRef<string | null>(null);
-  selectedIdRef.current = selectedId;
 
   const selected = useMemo(
     () => agents.find((agent) => agent.id === selectedId) ?? null,
@@ -5333,7 +5706,8 @@ export default function App() {
       canonicalStateId: hydration.canonicalStateId,
       runIds: hydration.runIds,
     });
-    requestAutomaticProof(hydration.repairedRun.id);
+    setActiveRun(hydration.repairedRun);
+    requestAutomaticProof(hydration.repairedRun);
   }, [
     recordingMode,
     recordingReplaySelection,
@@ -5361,25 +5735,35 @@ export default function App() {
 
   useEffect(() => {
     const transaction = activeRun?.transaction;
+    const evidenceRevision = portableEvidenceRevision(activeRun);
     if (
       recordingMode ||
       !system?.protocolFixtureMode ||
       activeRun?.status !== "completed" ||
       transaction?.disposition !== "promoted" ||
-      transaction.lineage.depth < 1
+      transaction.lineage.depth < 1 ||
+      evidenceRevision === null
     ) {
       return;
     }
     setAutomaticProof((current) =>
-      current?.runId === activeRun.id
+      current?.runId === activeRun.id &&
+      current.evidenceRevision === evidenceRevision
         ? current
-        : { runId: activeRun.id, requestNonce: 1, status: "requested" },
+        : {
+            runId: activeRun.id,
+            evidenceRevision,
+            requestNonce: 1,
+            status: "requested",
+          },
     );
   }, [
     activeRun?.id,
     activeRun?.status,
     activeRun?.transaction?.disposition,
     activeRun?.transaction?.lineage.depth,
+    activeRun?.transaction?.promotionReceipt?.createdAt,
+    activeRun?.transaction?.promotionReceipt?.validationEvidenceHash,
     recordingMode,
     system?.protocolFixtureMode,
   ]);
@@ -6610,11 +6994,13 @@ export default function App() {
                 ) : null}
                 {system?.protocolFixtureMode ? (
                   <ProtocolScenarioGuide
+                    agentId={selected.id}
                     runs={runs}
                     busy={demoActionBusy}
                     onRun={runPrompt}
                     onRepair={repairActiveRun}
                     onRequestProof={requestAutomaticProof}
+                    onSelectRunForProof={selectRunForProof}
                     automaticProof={automaticProof}
                     recordingMode={recordingMode}
                     readOnlyReplayMode={
@@ -6749,6 +7135,8 @@ export default function App() {
                     modelArkProofMode={system?.modelArkDemoMode === true}
                     automaticProofRequestNonce={
                       activeRun.id === automaticProof?.runId &&
+                      automaticProof.evidenceRevision ===
+                        portableEvidenceRevision(activeRun) &&
                       automaticProof.status === "requested"
                         ? automaticProof.requestNonce
                         : null
@@ -6758,9 +7146,17 @@ export default function App() {
                       setVerifierArtifact(artifact);
                       setShowReceiptVerifier(true);
                     }}
-                    onAutomaticProofResult={(runId, verification) => {
+                    onAutomaticProofResult={(
+                      runId,
+                      evidenceRevision,
+                      requestNonce,
+                      verification,
+                    ) => {
                       setAutomaticProof((current) =>
-                        current?.runId === runId
+                        current?.runId === runId &&
+                        current.evidenceRevision === evidenceRevision &&
+                        requestNonce !== null &&
+                        current.requestNonce === requestNonce
                           ? {
                               ...current,
                               status: verification.valid

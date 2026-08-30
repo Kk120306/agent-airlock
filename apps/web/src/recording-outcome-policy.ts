@@ -44,6 +44,74 @@ type RecordingEffectExpectation = {
 export const recordingResourceKinds: RunTransaction["resources"][number]["kind"][] =
   ["workspace", "codex-session", "sqlite", "external-actions"];
 
+export function hasLocallyVerifiedPortableProof({
+  serverVerificationValid,
+  browserVerificationValid,
+  dirty,
+}: {
+  serverVerificationValid: boolean | null | undefined;
+  browserVerificationValid: boolean | null;
+  dirty: boolean;
+}): boolean {
+  return (
+    serverVerificationValid === true &&
+    browserVerificationValid === true &&
+    !dirty
+  );
+}
+
+export type PortableProofDisplayState =
+  | "empty"
+  | "verifying"
+  | "stale"
+  | "verified"
+  | "failed";
+
+export type RequestGenerationState = { current: number };
+
+export function beginRequestGeneration(
+  state: RequestGenerationState,
+): number {
+  state.current += 1;
+  return state.current;
+}
+
+export function invalidateRequestGeneration(
+  state: RequestGenerationState,
+): void {
+  state.current += 1;
+}
+
+export function isCurrentRequestGeneration(
+  state: RequestGenerationState,
+  generation: number,
+): boolean {
+  return state.current === generation;
+}
+
+export function getPortableProofDisplayState({
+  hasResult,
+  verificationValid,
+  busy,
+  dirty,
+}: {
+  hasResult: boolean;
+  verificationValid: boolean;
+  busy: boolean;
+  dirty: boolean;
+}): PortableProofDisplayState {
+  if (!hasResult) return "empty";
+  if (busy) return "verifying";
+  if (dirty) return "stale";
+  return verificationValid ? "verified" : "failed";
+}
+
+export function isPortableProofActionable(
+  state: PortableProofDisplayState,
+): boolean {
+  return state === "verified";
+}
+
 export function hasExactRecordingResources(
   transaction: RunTransaction,
   disposition: "promoted" | "quarantined",

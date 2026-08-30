@@ -405,9 +405,13 @@ test("two independent Airlocks transfer signed work and keep Promotion local", a
   await expect(proofRoom.getByText("Both trust domains authorized")).toBeVisible();
   await expect(proofRoom.getByText("The signing key is trusted for this receipt's decision time and scope."))
     .toHaveCount(2);
+  await proofRoom.getByRole("button", { name: "Rewrite disposition" }).click();
+  await expect(proofRoom.getByText(/Attack detected at/)).toBeVisible();
   await proofRoom.locator('.receipt-dropzone input[type="file"]')
     .setInputFiles(quarantinedCustodyPath!);
+  await expect(proofRoom.getByText(/Attack detected at/)).not.toBeVisible();
   await expect(proofRoom.getByText("Receiver containment path complete")).toBeVisible();
+  await expect(proofRoom.getByText("Cryptographically valid")).toBeVisible();
   await expect(proofRoom.getByText("Candidate quarantined")).toBeVisible();
   await expect(
     custodyPathRegion.getByRole("listitem").last().getByText(/Canonical State remained at/),
