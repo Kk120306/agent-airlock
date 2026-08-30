@@ -139,7 +139,9 @@ test("a real browser exports and independently verifies a Fastify-backed receipt
     .setInputFiles(trustPolicyPath);
   await expect(verifier.getByText("Policy authority verified")).toBeVisible();
   await expect(verifier.getByText("Organizational signer trust passed")).toBeVisible();
-  const trustChain = verifier.getByRole("region", { name: "Verified trust chain" });
+  const trustChain = verifier.getByRole("region", {
+    name: "Trust policy evaluation details",
+  });
   await expect(trustChain.getByText("Pinned root")).toBeVisible();
   await expect(trustChain.getByText("Key rotation")).toBeVisible();
   await expect(trustChain.getByText("Continuity verified")).toBeVisible();
@@ -160,6 +162,7 @@ test("a real browser exports and independently verifies a Fastify-backed receipt
   expect(localVerificationRequests).toEqual([]);
 
   trustPolicy.keys[0]!.status = "compromised";
+  trustPolicy.policyId = "compromised-policy-v2";
   const compromisedPolicyPath = testInfo.outputPath("compromised-trust-policy.json");
   await writeFile(
     compromisedPolicyPath,
@@ -176,7 +179,27 @@ test("a real browser exports and independently verifies a Fastify-backed receipt
     .setInputFiles(compromisedPolicyPath);
   await expect(verifier.getByText("Organizational signer trust failed")).toBeVisible();
   await expect(verifier.getByText(/marks this signing key as compromised/)).toBeVisible();
+  await expect(verifier.getByText("compromised-policy-v2", { exact: true })).toBeVisible();
   expect(localVerificationRequests).toEqual([]);
+
+  await page.evaluate(() => {
+    const originalText = File.prototype.text;
+    File.prototype.text = function () {
+      const result = originalText.call(this);
+      if (this.name !== "judge-trust-policy.json") return result;
+      return new Promise<string>((resolve, reject) => {
+        window.setTimeout(() => void result.then(resolve, reject), 250);
+      });
+    };
+  });
+  const policyInput = trustRegion.getByLabel("Import signed policy");
+  await policyInput.setInputFiles(trustPolicyPath);
+  await policyInput.setInputFiles(compromisedPolicyPath);
+  await expect(verifier.getByText("compromised-policy-v2", { exact: true })).toBeVisible();
+  await page.waitForTimeout(350);
+  await expect(verifier.getByText("compromised-policy-v2", { exact: true })).toBeVisible();
+  await expect(verifier.getByText("Organizational signer trust failed")).toBeVisible();
+  await expect(verifier.getByText("Organizational signer trust passed")).not.toBeVisible();
 
   const tamperedPacket = JSON.parse(packetSource) as {
     evmPayload: { calldata: string };

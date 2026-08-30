@@ -340,6 +340,48 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
   );
 });
 
+test("fails closed while reverifying a previously accepted receipt", async ({
+  page,
+}) => {
+  await serveProductionBundle(page, []);
+  await page.goto("http://airlock.local/");
+
+  const panel = page.getByRole("region", { name: "Portable trust receipt" });
+  await panel.getByRole("button", { name: "Generate receipt" }).click();
+  await expect(panel.getByText("Self-check passed", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toBeEnabled();
+
+  let releaseReverification!: () => void;
+  const reverificationGate = new Promise<void>((resolve) => {
+    releaseReverification = resolve;
+  });
+  await page.route(
+    "**/api/runs/run-golden/portable-receipt",
+    async (route) => {
+      await reverificationGate;
+      await route.fallback();
+    },
+  );
+
+  await panel.getByRole("button", { name: "Regenerate receipt" }).click();
+  await expect(panel.getByText("Checking receipt", { exact: true })).toBeVisible();
+  await expect(panel.locator(".portable-result")).toHaveAttribute(
+    "data-valid",
+    "false",
+  );
+  await expect(
+    panel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toBeDisabled();
+
+  releaseReverification();
+  await expect(panel.getByText("Self-check passed", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Download receipt JSON" }),
+  ).toBeEnabled();
+});
+
 test("presents the live ModelArk judge path as provider-backed and falsifiable", async ({
   page,
 }) => {

@@ -30,7 +30,9 @@ import type {
 import { api, ApiError, setAuthToken } from "./api";
 import {
   advancesCanonicalState,
+  beginRequestGeneration,
   deriveRecordingReplayHydration,
+  getPortableProofDisplayState,
   hasDistinctRepairEffectKey,
   hasExactRecordingDecisionChain,
   hasExactRecordingEffect,
@@ -40,6 +42,9 @@ import {
   hasRepairRecordingLineage,
   hasRootRecordingLineage,
   hasValidTerminalRecordingRun,
+  invalidateRequestGeneration,
+  isCurrentRequestGeneration,
+  isPortableProofActionable,
   parseRecordingReplayRunIds,
   type RecordingReplayRunIds,
 } from "./recording-outcome-policy";
@@ -203,6 +208,7 @@ type PortableVerifierArtifact =
 
 type AutomaticProofState = {
   runId: string;
+  evidenceRevision: string;
   requestNonce: number;
   status: "requested" | "verified" | "failed";
   error?: string;
@@ -218,6 +224,17 @@ type AutomaticProofVerification = {
   decisionCount: number;
   leafReceiptDigest?: ReceiptDigest | null;
 };
+
+function portableEvidenceRevision(run: AgentRun | null): string | null {
+  const transaction = run?.transaction;
+  const receipt = transaction?.promotionReceipt;
+  if (!transaction || !receipt) return null;
+  return [
+    transaction.disposition,
+    receipt.createdAt,
+    receipt.validationEvidenceHash,
+  ].join(":");
+}
 
 type RecordingAttemptRunIds = RecordingReplayRunIds;
 
@@ -1354,8 +1371,25 @@ function CustodyPolicyControl({
   const [policyReport, setPolicyReport] =
     useState<TrustPolicyVerificationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const rotationReadGeneration = useRef(0);
+  const policyReadGeneration = useRef(0);
+  const rotationVerificationGeneration = useRef(0);
+  const policyVerificationGeneration = useRef(0);
+
+  useEffect(
+    () => () => {
+      invalidateRequestGeneration(rotationReadGeneration);
+      invalidateRequestGeneration(policyReadGeneration);
+      invalidateRequestGeneration(rotationVerificationGeneration);
+      invalidateRequestGeneration(policyVerificationGeneration);
+    },
+    [],
+  );
 
   useEffect(() => {
+    const generation = beginRequestGeneration(
+      rotationVerificationGeneration,
+    );
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (rotationSource === null || !/^sha256:[a-f0-9]{64}$/.test(trustedRoot)) {
@@ -1364,11 +1398,17 @@ function CustodyPolicyControl({
         cancelled = true;
       };
     }
+    setRotationReport(null);
     void verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser(
       rotationSource,
       [trustedRoot as ReceiptDigest],
     ).then((next) => {
-      if (!cancelled) setRotationReport(next);
+      if (
+        !cancelled &&
+        isCurrentRequestGeneration(rotationVerificationGeneration, generation)
+      ) {
+        setRotationReport(next);
+      }
     });
     return () => {
       cancelled = true;
@@ -1376,6 +1416,7 @@ function CustodyPolicyControl({
   }, [authorityFingerprint, rotationSource]);
 
   useEffect(() => {
+    const generation = beginRequestGeneration(policyVerificationGeneration);
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (policySource === null || !/^sha256:[a-f0-9]{64}$/.test(trustedRoot)) {
@@ -1385,6 +1426,8 @@ function CustodyPolicyControl({
         cancelled = true;
       };
     }
+    setPolicyReport(null);
+    onPolicy(null);
     const roots = [
       trustedRoot as ReceiptDigest,
       ...(rotationReport?.valid && rotationReport.nextAuthorityKeyId
@@ -1395,7 +1438,12 @@ function CustodyPolicyControl({
       policySource,
       roots,
     ).then((next) => {
-      if (cancelled) return;
+      if (
+        cancelled ||
+        !isCurrentRequestGeneration(policyVerificationGeneration, generation)
+      ) {
+        return;
+      }
       setPolicyReport(next);
       onPolicy(next.valid ? next.policy : null);
     });
@@ -1410,7 +1458,25 @@ function CustodyPolicyControl({
     kind: "rotation" | "policy",
   ) => {
     if (!file) return;
+    const generation = beginRequestGeneration(
+      kind === "rotation" ? rotationReadGeneration : policyReadGeneration,
+    );
     setError(null);
+    if (kind === "rotation") {
+      invalidateRequestGeneration(rotationVerificationGeneration);
+      invalidateRequestGeneration(policyVerificationGeneration);
+      setRotationFilename(file.name);
+      setRotationSource(null);
+      setRotationReport(null);
+      setPolicyReport(null);
+      onPolicy(null);
+    } else {
+      invalidateRequestGeneration(policyVerificationGeneration);
+      setPolicyFilename(file.name);
+      setPolicySource(null);
+      setPolicyReport(null);
+      onPolicy(null);
+    }
     if (file.size < 1 || file.size > maximumBytes) {
       setError(
         `${role} ${kind} file is empty or exceeds its local byte limit.`,
@@ -1419,14 +1485,18 @@ function CustodyPolicyControl({
     }
     try {
       const source = await file.text();
+      const state =
+        kind === "rotation" ? rotationReadGeneration : policyReadGeneration;
+      if (!isCurrentRequestGeneration(state, generation)) return;
       if (kind === "rotation") {
-        setRotationFilename(file.name);
         setRotationSource(source);
       } else {
-        setPolicyFilename(file.name);
         setPolicySource(source);
       }
     } catch {
+      const state =
+        kind === "rotation" ? rotationReadGeneration : policyReadGeneration;
+      if (!isCurrentRequestGeneration(state, generation)) return;
       setError(
         `The browser could not read the ${role.toLowerCase()} ${kind} file.`,
       );
@@ -1456,7 +1526,16 @@ function CustodyPolicyControl({
         <input
           type="text"
           value={authorityFingerprint}
-          onChange={(event) => setAuthorityFingerprint(event.target.value)}
+          onChange={(event) => {
+            invalidateRequestGeneration(rotationReadGeneration);
+            invalidateRequestGeneration(policyReadGeneration);
+            invalidateRequestGeneration(rotationVerificationGeneration);
+            invalidateRequestGeneration(policyVerificationGeneration);
+            setAuthorityFingerprint(event.target.value);
+            setRotationReport(null);
+            setPolicyReport(null);
+            onPolicy(null);
+          }}
           placeholder="sha256: authority fingerprint"
           spellCheck={false}
           autoComplete="off"
@@ -1886,6 +1965,9 @@ function ReceiptVerifier({
   const [custodyReport, setCustodyReport] =
     useState<ReceiverCustodyVerificationReport | null>(null);
   const [filename, setFilename] = useState<string | null>(null);
+  const [verificationSourceKind, setVerificationSourceKind] = useState<
+    "generated" | "file" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [trustPolicySource, setTrustPolicySource] = useState<string | null>(
     null,
@@ -1913,60 +1995,101 @@ function ReceiptVerifier({
     null,
   );
   const [approvalReason, setApprovalReason] = useState("");
+  const verificationGeneration = useRef(0);
+  const trustPolicyReadGeneration = useRef(0);
+  const trustPolicyVerificationGeneration = useRef(0);
+  const authorityRotationReadGeneration = useRef(0);
+  const authorityRotationVerificationGeneration = useRef(0);
+
+  const beginVerification = useCallback(
+    (sourceName: string, sourceKind: "generated" | "file") => {
+      const generation = beginRequestGeneration(verificationGeneration);
+      setFilename(sourceName);
+      setVerificationSourceKind(sourceKind);
+      setReport(null);
+      setPacketReport(null);
+      setChainReport(null);
+      setDecisionChain(null);
+      setEnvelope(null);
+      setCustodyPacket(null);
+      setCustodyReport(null);
+      setError(null);
+      setBusy(true);
+      return generation;
+    },
+    [],
+  );
 
   const verifySource = useCallback(
-    async (source: string, sourceName: string) => {
-    setFilename(sourceName);
-    setReport(null);
-    setPacketReport(null);
-    setChainReport(null);
-    setDecisionChain(null);
-    setEnvelope(null);
-    setCustodyPacket(null);
-    setCustodyReport(null);
-    setError(null);
-    setBusy(true);
-    try {
-      const parsed = JSON.parse(source) as PortableVerifierArtifact;
+    async (
+      sourceValue: string | Promise<string>,
+      sourceName: string,
+      sourceKind: "generated" | "file",
+    ) => {
+      const generation = beginVerification(sourceName, sourceKind);
+      try {
+        const source = await sourceValue;
+        if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+          return;
+        }
+        const parsed = JSON.parse(source) as PortableVerifierArtifact;
         if (
           parsed.schema === "agent-airlock/portable-receiver-chain-of-custody"
         ) {
-        const nextCustodyReport =
-          await verifyReceiverCustodyPacketJsonInBrowser(source);
-        setCustodyPacket(parsed);
-        setCustodyReport(nextCustodyReport);
-      } else if (parsed.schema === "agent-airlock/portable-decision-chain") {
-        const nextChainReport =
-          await verifyPortableDecisionChainJsonInBrowser(source);
-        const leafPacket = parsed.packets.at(-1);
-        const leafPacketReport = nextChainReport.packets.at(-1) ?? null;
-        setChainReport(nextChainReport);
-        setDecisionChain(parsed);
-        setPacketReport(leafPacketReport);
-        setReport(leafPacketReport?.receipt ?? null);
-        if (leafPacket) setEnvelope(leafPacket.envelope);
-        if (!leafPacketReport) {
-          setError("The browser could not verify this decision chain.");
-        }
-      } else if (parsed.schema === "agent-airlock/portable-evidence-packet") {
-        const nextPacketReport =
-          await verifyPortableEvidencePacketJsonInBrowser(source);
-        setPacketReport(nextPacketReport);
-        setReport(nextPacketReport.receipt);
-        if (nextPacketReport.valid) setEnvelope(parsed.envelope);
-      } else {
+          const nextCustodyReport =
+            await verifyReceiverCustodyPacketJsonInBrowser(source);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          setCustodyPacket(parsed);
+          setCustodyReport(nextCustodyReport);
+        } else if (parsed.schema === "agent-airlock/portable-decision-chain") {
+          const nextChainReport =
+            await verifyPortableDecisionChainJsonInBrowser(source);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          const leafPacket = parsed.packets.at(-1);
+          const leafPacketReport = nextChainReport.packets.at(-1) ?? null;
+          setChainReport(nextChainReport);
+          setDecisionChain(parsed);
+          setPacketReport(leafPacketReport);
+          setReport(leafPacketReport?.receipt ?? null);
+          if (leafPacket) setEnvelope(leafPacket.envelope);
+          if (!leafPacketReport) {
+            setError("The browser could not verify this decision chain.");
+          }
+        } else if (
+          parsed.schema === "agent-airlock/portable-evidence-packet"
+        ) {
+          const nextPacketReport =
+            await verifyPortableEvidencePacketJsonInBrowser(source);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          setPacketReport(nextPacketReport);
+          setReport(nextPacketReport.receipt);
+          if (nextPacketReport.valid) setEnvelope(parsed.envelope);
+        } else {
           const nextReport =
             await verifyPortablePromotionEnvelopeJsonInBrowser(source);
-        setReport(nextReport);
-        if (nextReport.valid) setEnvelope(parsed);
+          if (!isCurrentRequestGeneration(verificationGeneration, generation)) {
+            return;
+          }
+          setReport(nextReport);
+          if (nextReport.valid) setEnvelope(parsed);
+        }
+      } catch {
+        if (isCurrentRequestGeneration(verificationGeneration, generation)) {
+          setError("The browser could not read this receipt file.");
+        }
+      } finally {
+        if (isCurrentRequestGeneration(verificationGeneration, generation)) {
+          setBusy(false);
+        }
       }
-    } catch {
-      setError("The browser could not read this receipt file.");
-    } finally {
-      setBusy(false);
-    }
     },
-    [],
+    [beginVerification],
   );
 
   useEffect(() => {
@@ -2006,6 +2129,11 @@ function ReceiptVerifier({
       ?.querySelector<HTMLElement>("[data-verifier-close]")
       ?.focus();
     return () => {
+      invalidateRequestGeneration(verificationGeneration);
+      invalidateRequestGeneration(trustPolicyReadGeneration);
+      invalidateRequestGeneration(trustPolicyVerificationGeneration);
+      invalidateRequestGeneration(authorityRotationReadGeneration);
+      invalidateRequestGeneration(authorityRotationVerificationGeneration);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
       openerRef.current?.focus();
@@ -2023,10 +2151,17 @@ function ReceiptVerifier({
               "agent-airlock/portable-receiver-chain-of-custody"
           ? "Generated receiver custody proof"
           : "Generated receipt";
-    void verifySource(JSON.stringify(initialArtifact), sourceName);
+    void verifySource(
+      JSON.stringify(initialArtifact),
+      sourceName,
+      "generated",
+    );
   }, [initialArtifact, verifySource]);
 
   useEffect(() => {
+    const generation = beginRequestGeneration(
+      trustPolicyVerificationGeneration,
+    );
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (
@@ -2038,6 +2173,7 @@ function ReceiptVerifier({
         cancelled = true;
       };
     }
+    setTrustPolicyReport(null);
     void verifySignedSigningKeyTrustPolicyEnvelopeJsonInBrowser(
       trustPolicySource,
       [
@@ -2049,7 +2185,15 @@ function ReceiptVerifier({
           : []),
       ],
     ).then((nextReport) => {
-      if (!cancelled) setTrustPolicyReport(nextReport);
+      if (
+        !cancelled &&
+        isCurrentRequestGeneration(
+          trustPolicyVerificationGeneration,
+          generation,
+        )
+      ) {
+        setTrustPolicyReport(nextReport);
+      }
     });
     return () => {
       cancelled = true;
@@ -2057,6 +2201,9 @@ function ReceiptVerifier({
   }, [authorityFingerprint, authorityRotationReport, trustPolicySource]);
 
   useEffect(() => {
+    const generation = beginRequestGeneration(
+      authorityRotationVerificationGeneration,
+    );
     let cancelled = false;
     const trustedRoot = authorityFingerprint.trim();
     if (
@@ -2068,11 +2215,20 @@ function ReceiptVerifier({
         cancelled = true;
       };
     }
+    setAuthorityRotationReport(null);
     void verifySignedPolicyAuthorityRotationEnvelopeJsonInBrowser(
       authorityRotationSource,
       [trustedRoot as ReceiptDigest],
     ).then((nextReport) => {
-      if (!cancelled) setAuthorityRotationReport(nextReport);
+      if (
+        !cancelled &&
+        isCurrentRequestGeneration(
+          authorityRotationVerificationGeneration,
+          generation,
+        )
+      ) {
+        setAuthorityRotationReport(nextReport);
+      }
     });
     return () => {
       cancelled = true;
@@ -2082,20 +2238,20 @@ function ReceiptVerifier({
   const verifyFile = async (file: File | undefined) => {
     if (!file) return;
     if (file.size < 1 || file.size > 16 * 1_048_576) {
+      beginVerification(file.name, "file");
       setError(
         "Choose a non-empty receiver custody proof no larger than 16 MB, or another portable proof no larger than 4 MB.",
       );
+      setBusy(false);
       return;
     }
-    try {
-      await verifySource(await file.text(), file.name);
-    } catch {
-      setError("The browser could not read this receipt file.");
-    }
+    await verifySource(file.text(), file.name, "file");
   };
 
   const importTrustPolicy = async (file: File | undefined) => {
     if (!file) return;
+    const generation = beginRequestGeneration(trustPolicyReadGeneration);
+    invalidateRequestGeneration(trustPolicyVerificationGeneration);
     setTrustPolicyFilename(file.name);
     setTrustPolicySource(null);
     setTrustPolicyReport(null);
@@ -2107,8 +2263,19 @@ function ReceiptVerifier({
       return;
     }
     try {
-      setTrustPolicySource(await file.text());
+      const source = await file.text();
+      if (
+        !isCurrentRequestGeneration(trustPolicyReadGeneration, generation)
+      ) {
+        return;
+      }
+      setTrustPolicySource(source);
     } catch (reason) {
+      if (
+        !isCurrentRequestGeneration(trustPolicyReadGeneration, generation)
+      ) {
+        return;
+      }
       setTrustPolicyError(
         reason instanceof Error
           ? reason.message
@@ -2119,9 +2286,13 @@ function ReceiptVerifier({
 
   const importAuthorityRotation = async (file: File | undefined) => {
     if (!file) return;
+    const generation = beginRequestGeneration(authorityRotationReadGeneration);
+    invalidateRequestGeneration(authorityRotationVerificationGeneration);
+    invalidateRequestGeneration(trustPolicyVerificationGeneration);
     setAuthorityRotationFilename(file.name);
     setAuthorityRotationSource(null);
     setAuthorityRotationReport(null);
+    setTrustPolicyReport(null);
     setAuthorityRotationError(null);
     if (file.size < 1 || file.size > 65_536) {
       setAuthorityRotationError(
@@ -2130,8 +2301,19 @@ function ReceiptVerifier({
       return;
     }
     try {
-      setAuthorityRotationSource(await file.text());
+      const source = await file.text();
+      if (
+        !isCurrentRequestGeneration(authorityRotationReadGeneration, generation)
+      ) {
+        return;
+      }
+      setAuthorityRotationSource(source);
     } catch (reason) {
+      if (
+        !isCurrentRequestGeneration(authorityRotationReadGeneration, generation)
+      ) {
+        return;
+      }
       setAuthorityRotationError(
         reason instanceof Error
           ? reason.message
@@ -2143,6 +2325,7 @@ function ReceiptVerifier({
   const evidenceValid = report
     ? (chainReport?.valid ?? packetReport?.valid ?? report.valid)
     : false;
+  const artifactValid = custodyReport?.valid ?? evidenceValid;
   const organizationalTrustEvaluations =
     report && envelope && trustPolicyReport?.valid && trustPolicyReport.policy
       ? (
@@ -2263,26 +2446,29 @@ function ReceiptVerifier({
         <label
           className="receipt-dropzone"
           data-loaded={filename !== null}
-          data-generated={initialArtifact !== null}
+          data-generated={verificationSourceKind === "generated"}
         >
           <input
             type="file"
             accept="application/json,.json"
+            disabled={busy}
             onChange={(event) => void verifyFile(event.target.files?.[0])}
           />
           <span aria-hidden="true">⌁</span>
           <strong>
-            {initialArtifact
-              ? "Generated decision chain loaded"
-              : (filename ??
-                "Choose a receipt, custody proof, packet, or decision chain")}
+            {filename ??
+              "Choose a receipt, custody proof, packet, or decision chain"}
           </strong>
           <small>
             {busy
               ? "Verifying locally…"
-              : initialArtifact
+              : verificationSourceKind === "generated" && artifactValid
                 ? "Verified directly from the exact generated artifact"
-                : "Select an exported Agent Airlock JSON file"}
+                : filename && artifactValid
+                  ? "Verified directly from the selected local file"
+                  : filename
+                    ? "Local verification did not accept this artifact"
+                    : "Select an exported Agent Airlock JSON file"}
           </small>
         </label>
 
@@ -2471,9 +2657,21 @@ function ReceiptVerifier({
                     <input
                       type="text"
                       value={authorityFingerprint}
-                      onChange={(event) =>
-                        setAuthorityFingerprint(event.target.value)
-                      }
+                      onChange={(event) => {
+                        invalidateRequestGeneration(trustPolicyReadGeneration);
+                        invalidateRequestGeneration(
+                          trustPolicyVerificationGeneration,
+                        );
+                        invalidateRequestGeneration(
+                          authorityRotationReadGeneration,
+                        );
+                        invalidateRequestGeneration(
+                          authorityRotationVerificationGeneration,
+                        );
+                        setAuthorityFingerprint(event.target.value);
+                        setAuthorityRotationReport(null);
+                        setTrustPolicyReport(null);
+                      }}
                       placeholder="sha256: authority fingerprint"
                       spellCheck={false}
                       autoComplete="off"
@@ -2593,7 +2791,7 @@ function ReceiptVerifier({
             {trustPolicyReport && (
               <section
                 className="verifier-trust-chain"
-                aria-label="Verified trust chain"
+                aria-label="Trust policy evaluation details"
               >
                 <div className="verifier-chain-heading">
                   <span className="eyebrow">Decision path</span>
@@ -2703,6 +2901,8 @@ function PortableTrustExport({
   onVerifyArtifact?: (artifact: PortableVerifierArtifact) => void;
   onAutomaticProofResult?: (
     runId: string,
+    evidenceRevision: string,
+    requestNonce: number | null,
     verification: AutomaticProofVerification,
   ) => void;
 }) {
@@ -2722,8 +2922,15 @@ function PortableTrustExport({
   const requestGeneration = useRef(0);
   const automaticGenerationRequest = useRef<string | null>(null);
 
+  useEffect(
+    () => () => {
+      invalidateRequestGeneration(requestGeneration);
+    },
+    [],
+  );
+
   useEffect(() => {
-    requestGeneration.current += 1;
+    invalidateRequestGeneration(requestGeneration);
     setResult(null);
     setAvailableDisclosures([]);
     setSelectedDisclosures([]);
@@ -2735,8 +2942,7 @@ function PortableTrustExport({
   }, [runId, evidenceRevision]);
 
   const generate = async () => {
-    const generation = requestGeneration.current + 1;
-    requestGeneration.current = generation;
+    const generation = beginRequestGeneration(requestGeneration);
     setBrowserVerificationValid(null);
     setBusy(true);
     try {
@@ -2754,38 +2960,52 @@ function PortableTrustExport({
         : await verifyPortableEvidencePacketJsonInBrowser(
             JSON.stringify(exported.packet),
           );
-      if (requestGeneration.current !== generation) return;
+      if (!isCurrentRequestGeneration(requestGeneration, generation)) return;
       setResult(exported);
       setBrowserVerificationValid(browserReport.valid);
       setAvailableDisclosures(exported.availableDisclosures);
       setDirty(false);
       const valid = exported.verification.valid && browserReport.valid;
-      onAutomaticProofResult?.(runId, {
+      onAutomaticProofResult?.(
+        runId,
+        evidenceRevision,
+        automaticProofRequestNonce,
+        {
         valid,
         error: valid
           ? undefined
-          : "The generated decision chain failed local browser verification.",
+          : exported.verification.valid
+            ? "The generated proof failed local browser verification."
+            : "The generated proof failed the server self-check.",
         artifact,
         decisionCount: exported.decisionChain?.packets.length ?? 1,
         leafReceiptDigest: exported.decisionChain
           ? (browserReport as PortableDecisionChainVerificationReport)
               .leafReceiptDigest
           : null,
-      });
+        },
+      );
     } catch (reason) {
-      if (requestGeneration.current === generation) {
+      if (isCurrentRequestGeneration(requestGeneration, generation)) {
         setBrowserVerificationValid(false);
         const message =
           reason instanceof Error ? reason.message : String(reason);
         onError(message);
-        onAutomaticProofResult?.(runId, {
-          valid: false,
-          error: message,
-          decisionCount: 0,
-        });
+        onAutomaticProofResult?.(
+          runId,
+          evidenceRevision,
+          automaticProofRequestNonce,
+          {
+            valid: false,
+            error: message,
+            decisionCount: 0,
+          },
+        );
       }
     } finally {
-      if (requestGeneration.current === generation) setBusy(false);
+      if (isCurrentRequestGeneration(requestGeneration, generation)) {
+        setBusy(false);
+      }
     }
   };
 
@@ -2809,21 +3029,21 @@ function PortableTrustExport({
 
   useEffect(() => {
     if (automaticProofRequestNonce === null) return;
-    const requestIdentity = `${runId}:${automaticProofRequestNonce}`;
+    const requestIdentity = `${runId}:${evidenceRevision}:${automaticProofRequestNonce}`;
     if (automaticGenerationRequest.current === requestIdentity) return;
     automaticGenerationRequest.current = requestIdentity;
     void generate();
-  }, [automaticProofRequestNonce, runId]);
+  }, [automaticProofRequestNonce, evidenceRevision, runId]);
 
   const invalidatePendingExport = () => {
-    requestGeneration.current += 1;
+    invalidateRequestGeneration(requestGeneration);
     setBrowserVerificationValid(null);
     setBusy(false);
     setDirty(true);
   };
 
   const downloadJson = (value: unknown, filename: string) => {
-    if (!result || dirty) return;
+    if (!result || dirty || busy) return;
     const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], {
       type: "application/json",
     });
@@ -2902,6 +3122,14 @@ function PortableTrustExport({
   const displayedResultVerified = judgeProofMode
     ? proofVerified
     : result?.verification.valid === true && !dirty;
+  const displayedResultState = getPortableProofDisplayState({
+    hasResult: result !== null,
+    verificationValid: displayedResultVerified,
+    busy,
+    dirty,
+  });
+  const displayedResultActionable =
+    isPortableProofActionable(displayedResultState);
   const requiredDisclosureCount = availableDisclosures.filter(
     (disclosure) => disclosure.required,
   ).length;
@@ -3074,23 +3302,33 @@ function PortableTrustExport({
       )}
 
       {result && (
-        <div className="portable-result" data-valid={displayedResultVerified}>
+        <div className="portable-result" data-valid={displayedResultActionable}>
           <div className="portable-result-status">
             <span aria-hidden="true">
-              {displayedResultVerified ? "✓" : "!"}
+              {displayedResultActionable ? "✓" : "!"}
             </span>
             <div>
               <strong>
-                {displayedResultVerified
+                {displayedResultState === "verifying"
                   ? judgeProofMode
-                    ? "Signed proof verified locally"
-                    : "Self-check passed"
-                  : judgeProofMode
-                    ? "Proof verification failed"
-                    : "Receipt verification failed"}
+                    ? "Verifying proof locally"
+                    : "Checking receipt"
+                  : displayedResultState === "stale"
+                    ? judgeProofMode
+                      ? "Proof needs regeneration"
+                      : "Receipt needs regeneration"
+                    : displayedResultVerified
+                      ? judgeProofMode
+                        ? "Signed proof verified locally"
+                        : "Self-check passed"
+                      : judgeProofMode
+                        ? "Proof verification failed"
+                        : "Receipt verification failed"}
               </strong>
               <small>
-                {dirty
+                {displayedResultState === "verifying"
+                  ? "Running the local verifier against the newly generated artifact."
+                  : displayedResultState === "stale"
                   ? "Options changed. Regenerate before downloading."
                   : judgeProofMode && !proofVerified
                     ? "The server self-check and browser verifier did not both accept this proof. Regenerate before relying on it."
@@ -3119,7 +3357,7 @@ function PortableTrustExport({
                     `agent-airlock-receipt-${runId}.json`,
                   )
                 }
-                disabled={!displayedResultVerified}
+                disabled={!displayedResultActionable}
               >
                 Download receipt JSON
               </button>
@@ -3130,7 +3368,7 @@ function PortableTrustExport({
                 type="button"
                 className="button button-ghost"
                 onClick={() => void exportFederatedBundle()}
-                disabled={!displayedResultVerified || federatedExportBusy}
+                disabled={!displayedResultActionable || federatedExportBusy}
               >
                 {federatedExportBusy ? (
                   <Spinner />
@@ -3149,7 +3387,7 @@ function PortableTrustExport({
                     `agent-airlock-evidence-${runId}.json`,
                   )
                 }
-                disabled={!displayedResultVerified}
+                disabled={!displayedResultActionable}
               >
                 {judgeProofMode
                   ? "Download verified evidence packet"
@@ -3166,7 +3404,7 @@ function PortableTrustExport({
                     `agent-airlock-decision-chain-${runId}.json`,
                   )
                 }
-                disabled={!displayedResultVerified}
+                disabled={!displayedResultActionable}
               >
                 {judgeProofMode
                   ? "Download verified decision chain"
@@ -3180,7 +3418,7 @@ function PortableTrustExport({
                 onClick={() =>
                   onVerifyArtifact(result.decisionChain ?? result.packet)
                 }
-                disabled={!displayedResultVerified}
+                disabled={!displayedResultActionable}
               >
                 Inspect in zero-upload verifier
               </button>
@@ -3227,7 +3465,7 @@ function PortableTrustExport({
                   <button
                     type="button"
                     className="button button-ghost"
-                    disabled={!displayedResultVerified}
+                    disabled={!displayedResultActionable}
                     onClick={() =>
                       downloadJson(
                         result.anchor,
@@ -3249,7 +3487,7 @@ function PortableTrustExport({
                   <button
                     type="button"
                     className="button button-ghost"
-                    disabled={!displayedResultVerified}
+                    disabled={!displayedResultActionable}
                     onClick={() =>
                       downloadJson(
                         result.evmPayload,
@@ -3637,6 +3875,7 @@ function CandidateSetEvidence({
         candidateSet.phase === "completed" &&
         candidateSet.winnerRunId && (
           <PortableTrustExport
+            key={`${candidateSet.winnerRunId}:${candidateSet.selectionDecision!.decisionDigest}`}
             runId={candidateSet.winnerRunId}
             evidenceRevision={candidateSet.selectionDecision!.decisionDigest}
             onError={onPortableError}
@@ -3683,6 +3922,8 @@ function AirlockEvidence({
   onVerifyArtifact: (artifact: PortableVerifierArtifact) => void;
   onAutomaticProofResult: (
     runId: string,
+    evidenceRevision: string,
+    requestNonce: number | null,
     verification: AutomaticProofVerification,
   ) => void;
 }) {
@@ -4201,6 +4442,7 @@ function AirlockEvidence({
           </footer>
           {portableTrustAvailable && !recoveryFailed && (
             <PortableTrustExport
+              key={`${run.id}:${transaction.disposition}:${transaction.promotionReceipt.createdAt}:${transaction.promotionReceipt.validationEvidenceHash}`}
               runId={run.id}
               evidenceRevision={[
                 transaction.disposition,
@@ -5132,6 +5374,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const requestAutomaticProof = useCallback(
     (runId: string) => {
+      const targetRun =
+        activeRun?.id === runId
+          ? activeRun
+          : (runs.find((run) => run.id === runId) ?? null);
+      const evidenceRevision = portableEvidenceRevision(targetRun);
+      if (!targetRun || evidenceRevision === null) return;
       setError(null);
       setActiveRun((current) =>
         current?.id === runId
@@ -5140,11 +5388,16 @@ export default function App() {
       );
       setAutomaticProof((current) => ({
         runId,
-        requestNonce: current?.runId === runId ? current.requestNonce + 1 : 1,
+        evidenceRevision,
+        requestNonce:
+          current?.runId === runId &&
+          current.evidenceRevision === evidenceRevision
+            ? current.requestNonce + 1
+            : 1,
         status: "requested",
       }));
     },
-    [runs],
+    [activeRun, runs],
   );
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
@@ -5379,25 +5632,35 @@ export default function App() {
 
   useEffect(() => {
     const transaction = activeRun?.transaction;
+    const evidenceRevision = portableEvidenceRevision(activeRun);
     if (
       recordingMode ||
       !system?.protocolFixtureMode ||
       activeRun?.status !== "completed" ||
       transaction?.disposition !== "promoted" ||
-      transaction.lineage.depth < 1
+      transaction.lineage.depth < 1 ||
+      evidenceRevision === null
     ) {
       return;
     }
     setAutomaticProof((current) =>
-      current?.runId === activeRun.id
+      current?.runId === activeRun.id &&
+      current.evidenceRevision === evidenceRevision
         ? current
-        : { runId: activeRun.id, requestNonce: 1, status: "requested" },
+        : {
+            runId: activeRun.id,
+            evidenceRevision,
+            requestNonce: 1,
+            status: "requested",
+          },
     );
   }, [
     activeRun?.id,
     activeRun?.status,
     activeRun?.transaction?.disposition,
     activeRun?.transaction?.lineage.depth,
+    activeRun?.transaction?.promotionReceipt?.createdAt,
+    activeRun?.transaction?.promotionReceipt?.validationEvidenceHash,
     recordingMode,
     system?.protocolFixtureMode,
   ]);
@@ -6767,6 +7030,8 @@ export default function App() {
                     modelArkProofMode={system?.modelArkDemoMode === true}
                     automaticProofRequestNonce={
                       activeRun.id === automaticProof?.runId &&
+                      automaticProof.evidenceRevision ===
+                        portableEvidenceRevision(activeRun) &&
                       automaticProof.status === "requested"
                         ? automaticProof.requestNonce
                         : null
@@ -6776,9 +7041,17 @@ export default function App() {
                       setVerifierArtifact(artifact);
                       setShowReceiptVerifier(true);
                     }}
-                    onAutomaticProofResult={(runId, verification) => {
+                    onAutomaticProofResult={(
+                      runId,
+                      evidenceRevision,
+                      requestNonce,
+                      verification,
+                    ) => {
                       setAutomaticProof((current) =>
-                        current?.runId === runId
+                        current?.runId === runId &&
+                        current.evidenceRevision === evidenceRevision &&
+                        requestNonce !== null &&
+                        current.requestNonce === requestNonce
                           ? {
                               ...current,
                               status: verification.valid
