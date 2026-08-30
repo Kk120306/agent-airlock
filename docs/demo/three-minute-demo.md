@@ -20,6 +20,8 @@ Let the automated runner control both actions, and use the visible state transit
 
 > Agent Airlock is reusable transactional middleware for every CodeJam Agent.
 >
+> The selected Real Runtime Proof Agent is READY in the starter-kit Playground.
+>
 > Real Codex runs in an isolated Candidate inside a disposable container.
 >
 > Only the trusted control plane can promote validated state.
@@ -28,7 +30,7 @@ Let the automated runner control both actions, and use the visible state transit
 
 ### While the three Runs execute
 
-> One action now proves success, harmless rejection, and recovery through the same platform path.
+> From this Playground, one real multi-resource task now proves success, harmless rejection, and recovery through the same frontend-to-Agent path.
 >
 > The first Run asks Codex to write candidate-only to protocol-proof.txt, set the demo inventory row in .airlock/demo.sqlite to candidate-only, and prepare the protocol-release-ready notification in the deferred outbox.
 >
@@ -61,6 +63,8 @@ Let the automated runner control both actions, and use the visible state transit
 > That proves artifact integrity and lineage, not Runtime correctness, signer identity, or policy sufficiency.
 >
 > The next step is hardened network egress behind the same Outcome Contract.
+>
+> The Agent remains READY, and the operator can continue in the Playground.
 >
 > Only validated futures become reality.
 

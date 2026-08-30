@@ -4,7 +4,7 @@ const approvedModelArkBoundaryDigests = Object.freeze({
   "README.md":
     "sha256:07b95f357cc0650333db91427ea3ac0ab7d3de8cd11ad186a1c51648de076952",
   "docs/demo/DEVPOST_SUBMISSION.md":
-    "sha256:d31cd6ee6d0194ea75da63e0913560db7d0ff034f1954f1834dca5ce8d31e9cf",
+    "sha256:1d2a4b0422d6996f01b08ead90ac04dcfbce34fe0d736ecbf272b26f7f2f0a9a",
   "docs/demo/SUBMISSION_BRIEF.md":
     "sha256:daec5fb307470eac5948ca71d7dd3d5e946c0360f02067c02bff64a329acdaf2",
   "docs/demo/JUDGE_CHECKLIST.md":
@@ -14,7 +14,7 @@ const approvedModelArkBoundaryDigests = Object.freeze({
   "docs/product/OUTCOME_ROADMAP.md":
     "sha256:5f29c2d611df068123119ef04974641e35eb9d294b9903a63c7ed847d7cfc3a9",
   "docs/demo/three-minute-demo.md":
-    "sha256:fdcc7759f1d899c464422a2c3b70bdb5d0d68f70f7484388f2aed19b7f7657d2",
+    "sha256:4167aee46e267b2e73ac4561f8d1175344f3cfa5072a753957962efaf69dfc28",
   "docs/demo/architecture-one-page.md":
     "sha256:a39246e8dbc4e1fff74b4f1cb8d0992d73a2cd27db3d321d99a9f7dcc1b23e70",
 });

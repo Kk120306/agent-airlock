@@ -58,6 +58,8 @@ Signatures remain evidence and never become Promotion authority.
 
 ## End-to-end demo
 
+The recording begins with the selected `Real Runtime Proof` Agent visibly `READY` in the starter-kit Playground.
+The Playground then invokes one real multi-resource task through the production frontend-to-Agent path.
 One action creates exactly three fresh persisted Runs through React, Fastify, `AgentService`, the shared `AgentRunner` boundary, pinned Codex CLI, and a disposable container Runtime.
 The first Run writes `candidate-only` to `protocol-proof.txt`, sets the `demo` inventory row in `.airlock/demo.sqlite` to `candidate-only`, and prepares the deferred `protocol-release-ready` notification.
 Every required Validation passes, all four resources promote together, the Canonical fingerprint advances, and the effect is delivered only after Promotion.
@@ -65,6 +67,16 @@ The second Run writes `unsafe-candidate` to the same file and row and prepares `
 The required `command:protocol-content` Validation fails, so all four resources are quarantined, zero effects are delivered, and the Canonical fingerprint remains identical.
 The third Run repairs that retained Candidate, restores the required file and SQLite values, uses a fresh outbox, passes every required Validation, promotes all four resources, and delivers `protocol-repair-ready` after Promotion.
 The exact quarantined-parent to promoted-Repair decision chain then opens in a browser-local verifier that reports zero API calls, validates both signatures, checks the parent digest, and proves the Canonical State handoff.
+The final screen shows the Agent still `READY` with `Continue in Playground` enabled, so the platform remains understandable and controllable after failure and recovery.
+
+### Required live demo map
+
+1. The opening frame identifies the selected runnable Agent, its `READY` lifecycle state, and its versioned Outcome Contract.
+2. The production Playground invokes a real Whole-Agent task through React, Fastify, `AgentService`, and `AgentRunner`.
+3. Real Codex in a disposable container mutates an isolated file, SQLite snapshot, persistent session, and deferred-action outbox.
+4. Airlock displays required Validation results, four-resource dispositions, Canonical fingerprints, effect ordering, Run identifiers, receipts, and signed Repair lineage.
+5. The invalid Candidate is quarantined with zero effects and an unchanged Canonical fingerprint, then a bounded Repair child recovers the retained work.
+6. The closing frame verifies the signed chain locally and shows the Agent still `READY` with the Playground continuation control enabled.
 
 ## Official Track 1 rubric map
 
