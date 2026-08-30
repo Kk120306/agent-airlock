@@ -390,11 +390,13 @@ function JudgeProofSummary({
 }
 
 function ProtocolScenarioGuide({
+  agentId,
   runs,
   busy,
   onRun,
   onRepair,
   onRequestProof,
+  onSelectRunForProof,
   automaticProof,
   recordingMode = false,
   readOnlyReplayMode = false,
@@ -402,11 +404,13 @@ function ProtocolScenarioGuide({
   onRecordingAttemptStart,
   onRecordingAttemptComplete,
 }: {
+  agentId: string;
   runs: AgentRun[];
   busy: boolean;
   onRun: (prompt: string) => Promise<AgentRun | null>;
   onRepair: (runId: string) => Promise<AgentRun | null>;
-  onRequestProof: (runId: string) => void;
+  onRequestProof: (run: AgentRun) => void;
+  onSelectRunForProof: (run: AgentRun) => void;
   automaticProof: AutomaticProofState | null;
   recordingMode?: boolean;
   readOnlyReplayMode?: boolean;
@@ -418,6 +422,14 @@ function ProtocolScenarioGuide({
     "promote" | "quarantine" | "repair" | "verify" | null
   >(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
+  const attemptGenerationRef = useRef(0);
+
+  useEffect(() => {
+    invalidateRequestGeneration(attemptGenerationRef);
+    setAutomationStage(null);
+    setAutomationError(null);
+    return () => invalidateRequestGeneration(attemptGenerationRef);
+  }, [agentId]);
   const scenarioRuns = recordingMode
     ? recordingRunIds
       ? runs.filter((run) =>
@@ -491,6 +503,12 @@ function ProtocolScenarioGuide({
 
   const runCompleteLoop = async () => {
     if (readOnlyReplayMode) return;
+    const attemptGeneration = beginRequestGeneration(attemptGenerationRef);
+    const attemptIsCurrent = () =>
+      isCurrentRequestGeneration(
+        attemptGenerationRef,
+        attemptGeneration,
+      );
     if (recordingMode) onRecordingAttemptStart?.();
     setAutomationError(null);
     setAutomationStage("promote");
@@ -498,7 +516,12 @@ function ProtocolScenarioGuide({
       const safeRun = recordingMode
         ? await onRun(protocolFixturePrompts.promote)
         : (promoted ?? (await onRun(protocolFixturePrompts.promote)));
-      if (!safeRun || !provesWholeAgentPromotion(safeRun, "candidate-only")) {
+      if (!attemptIsCurrent()) return;
+      if (
+        !safeRun ||
+        safeRun.agentId !== agentId ||
+        !provesWholeAgentPromotion(safeRun, "candidate-only")
+      ) {
         setAutomationError(
           "Safety loop stopped: the passing Candidate did not produce the required Whole-Agent Promotion.",
         );
@@ -509,7 +532,11 @@ function ProtocolScenarioGuide({
       const rejectedRun = recordingMode
         ? await onRun(protocolFixturePrompts.challenge)
         : (quarantined ?? (await onRun(protocolFixturePrompts.challenge)));
-      if (rejectedRun?.transaction?.disposition !== "quarantined") {
+      if (!attemptIsCurrent()) return;
+      if (
+        rejectedRun?.agentId !== agentId ||
+        rejectedRun.transaction?.disposition !== "quarantined"
+      ) {
         setAutomationError(
           "Safety loop stopped: the invalid Candidate did not produce the required Quarantine decision.",
         );
@@ -519,7 +546,9 @@ function ProtocolScenarioGuide({
       if (recordingMode || !repaired) {
         setAutomationStage("repair");
         const repairRun = await onRepair(rejectedRun.id);
+        if (!attemptIsCurrent()) return;
         if (
+          repairRun?.agentId !== agentId ||
           repairRun?.transaction?.disposition !== "promoted" ||
           repairRun.transaction.lineage.depth < 1
         ) {
@@ -536,10 +565,14 @@ function ProtocolScenarioGuide({
             repairedRunId: repairRun.id,
           });
         }
-        onRequestProof(repairRun.id);
+        onRequestProof(repairRun);
       }
     } finally {
-      setAutomationStage((current) => (current === "verify" ? current : null));
+      if (attemptIsCurrent()) {
+        setAutomationStage((current) =>
+          current === "verify" ? current : null,
+        );
+      }
     }
   };
   const automationLabel =
@@ -573,7 +606,7 @@ function ProtocolScenarioGuide({
             <button
               type="button"
               className="button button-primary protocol-run-all"
-              onClick={() => repaired && onRequestProof(repaired.id)}
+              onClick={() => repaired && onSelectRunForProof(repaired)}
               disabled={busy || automationStage !== null || !repaired}
             >
               {!recordingMode && <span aria-hidden="true">↻</span>}
@@ -1592,20 +1625,31 @@ function CustodyProofRoom({
   packet,
   report,
 }: {
-  packet: ReceiverCustodyPacket;
-  report: ReceiverCustodyVerificationReport;
+  packet: ReceiverCustodyPacket | null;
+  report: ReceiverCustodyVerificationReport | null;
 }) {
   const [producerPolicy, setProducerPolicy] =
     useState<SigningKeyTrustPolicy | null>(null);
   const [receiverPolicy, setReceiverPolicy] =
     useState<SigningKeyTrustPolicy | null>(null);
-  const [trustReport, setTrustReport] =
-    useState<ReceiverCustodyTrustReport | null>(null);
-  const [tamperReport, setTamperReport] =
-    useState<ReceiverCustodyVerificationReport | null>(null);
-  const [tamperAttack, setTamperAttack] =
-    useState<ReceiverCustodyTamperAttack | null>(null);
-  const [tamperBusy, setTamperBusy] = useState(false);
+  const [trustEvaluation, setTrustEvaluation] = useState<{
+    packet: ReceiverCustodyPacket;
+    report: ReceiverCustodyTrustReport;
+  } | null>(null);
+  const [renderedEvidence, setRenderedEvidence] = useState<{
+    packet: ReceiverCustodyPacket;
+    report: ReceiverCustodyVerificationReport;
+  } | null>(() => (packet && report ? { packet, report } : null));
+  const [tamperEvaluation, setTamperEvaluation] = useState<{
+    packet: ReceiverCustodyPacket;
+    attack: ReceiverCustodyTamperAttack;
+    report: ReceiverCustodyVerificationReport;
+  } | null>(null);
+  const [pendingTamper, setPendingTamper] = useState<{
+    packet: ReceiverCustodyPacket;
+    attack: ReceiverCustodyTamperAttack;
+  } | null>(null);
+  const tamperGenerationRef = useRef(0);
   const verdictRef = useRef<HTMLDivElement | null>(null);
   const tamperRef = useRef<HTMLDivElement | null>(null);
   const onProducerPolicy = useCallback(
@@ -1618,13 +1662,30 @@ function CustodyProofRoom({
   );
 
   useEffect(() => {
-    verdictRef.current?.focus();
-  }, [report]);
+    if (packet && report) setRenderedEvidence({ packet, report });
+  }, [packet, report]);
+
+  useEffect(() => {
+    invalidateRequestGeneration(tamperGenerationRef);
+    setTamperEvaluation(null);
+    setPendingTamper(null);
+  }, [packet, report]);
+
+  useEffect(() => {
+    if (
+      packet &&
+      report &&
+      renderedEvidence?.packet === packet &&
+      renderedEvidence.report === report
+    ) {
+      verdictRef.current?.focus();
+    }
+  }, [packet, renderedEvidence, report]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!producerPolicy && !receiverPolicy) {
-      setTrustReport(null);
+    if (!packet || (!producerPolicy && !receiverPolicy)) {
+      setTrustEvaluation(null);
       return () => {
         cancelled = true;
       };
@@ -1633,39 +1694,76 @@ function CustodyProofRoom({
       producer: producerPolicy,
       receiver: receiverPolicy,
     }).then((next) => {
-      if (!cancelled) setTrustReport(next);
+      if (!cancelled) setTrustEvaluation({ packet, report: next });
     });
     return () => {
       cancelled = true;
     };
   }, [packet, producerPolicy, receiverPolicy]);
 
+  if (!renderedEvidence) return null;
+  const displayedPacket = renderedEvidence.packet;
+  const displayedReport = renderedEvidence.report;
+  const evidenceCurrent =
+    displayedPacket === packet && displayedReport === report;
+  const trustReport =
+    evidenceCurrent && trustEvaluation?.packet === displayedPacket
+      ? trustEvaluation.report
+      : null;
+  const currentTamper =
+    evidenceCurrent && tamperEvaluation?.packet === displayedPacket
+      ? tamperEvaluation
+      : null;
+  const currentPendingTamper =
+    evidenceCurrent && pendingTamper?.packet === displayedPacket
+      ? pendingTamper
+      : null;
+
   const runAttack = async (attack: ReceiverCustodyTamperAttack) => {
-    setTamperBusy(true);
-    setTamperAttack(attack);
+    if (!evidenceCurrent || packet !== displayedPacket) return;
+    const attackPacket = displayedPacket;
+    const generation = beginRequestGeneration(tamperGenerationRef);
+    setTamperEvaluation(null);
+    setPendingTamper({ packet: attackPacket, attack });
     try {
-      const copy = createReceiverCustodyTamperedCopy(packet, attack);
-      setTamperReport(
-        await verifyReceiverCustodyPacketJsonInBrowser(JSON.stringify(copy)),
+      const copy = createReceiverCustodyTamperedCopy(attackPacket, attack);
+      const nextReport = await verifyReceiverCustodyPacketJsonInBrowser(
+        JSON.stringify(copy),
       );
-      window.setTimeout(() => tamperRef.current?.focus(), 0);
+      if (!isCurrentRequestGeneration(tamperGenerationRef, generation)) return;
+      setTamperEvaluation({
+        packet: attackPacket,
+        attack,
+        report: nextReport,
+      });
+      window.setTimeout(() => {
+        if (isCurrentRequestGeneration(tamperGenerationRef, generation)) {
+          tamperRef.current?.focus();
+        }
+      }, 0);
     } finally {
-      setTamperBusy(false);
+      if (isCurrentRequestGeneration(tamperGenerationRef, generation)) {
+        setPendingTamper(null);
+      }
     }
   };
 
-  const story = report.story;
+  const story = displayedReport.story;
   const failedCheck =
-    tamperReport?.checks.find((check) => !check.valid) ?? null;
+    currentTamper?.report.checks.find((check) => !check.valid) ?? null;
   const trustComplete =
     trustReport?.policiesDistinct === true &&
     trustReport.producer?.trusted === true &&
     trustReport.receiver?.trusted === true;
 
-  if (!report.valid || !story) {
-    const failed = report.checks.find((check) => !check.valid);
+  if (!displayedReport.valid || !story) {
+    const failed = displayedReport.checks.find((check) => !check.valid);
     return (
-      <div className="custody-proof-room" data-valid="false">
+      <div
+        className="custody-proof-room"
+        data-valid="false"
+        hidden={!evidenceCurrent}
+      >
         <div
           className="verifier-verdict"
           ref={verdictRef}
@@ -1683,7 +1781,7 @@ function CustodyProofRoom({
         <details className="custody-proof-details">
           <summary>Inspect failed cryptographic checks</summary>
           <div className="verifier-checks">
-            {report.checks.map((check) => (
+            {displayedReport.checks.map((check) => (
               <div key={check.name} data-valid={check.valid}>
                 <span>{check.valid ? "PASS" : "FAIL"}</span>
                 <div>
@@ -1733,7 +1831,11 @@ function CustodyProofRoom({
   ];
 
   return (
-    <div className="custody-proof-room" data-valid="true">
+    <div
+      className="custody-proof-room"
+      data-valid="true"
+      hidden={!evidenceCurrent}
+    >
       <div
         className="custody-primary-verdict"
         ref={verdictRef}
@@ -1838,27 +1940,27 @@ function CustodyProofRoom({
         <div className="custody-attack-actions">
           <button
             type="button"
-            disabled={tamperBusy}
+            disabled={currentPendingTamper !== null}
             onClick={() => void runAttack("remove-admission")}
           >
             Remove Admission
           </button>
           <button
             type="button"
-            disabled={tamperBusy}
+            disabled={currentPendingTamper !== null}
             onClick={() => void runAttack("alter-reviewed-evidence")}
           >
             Alter reviewed evidence
           </button>
           <button
             type="button"
-            disabled={tamperBusy}
+            disabled={currentPendingTamper !== null}
             onClick={() => void runAttack("rewrite-disposition")}
           >
             Rewrite disposition
           </button>
         </div>
-        {tamperReport && (
+        {currentTamper && (
           <div
             className="custody-attack-result"
             ref={tamperRef}
@@ -1876,8 +1978,9 @@ function CustodyProofRoom({
               <button
                 type="button"
                 onClick={() => {
-                  setTamperAttack(null);
-                  setTamperReport(null);
+                  invalidateRequestGeneration(tamperGenerationRef);
+                  setPendingTamper(null);
+                  setTamperEvaluation(null);
                 }}
               >
                 Reset disposable copy
@@ -1885,7 +1988,7 @@ function CustodyProofRoom({
             </div>
           </div>
         )}
-        {tamperAttack && !tamperReport && (
+        {currentPendingTamper && !currentTamper && (
           <small>Verifying disposable attack locally…</small>
         )}
       </section>
@@ -1893,7 +1996,7 @@ function CustodyProofRoom({
       <details className="custody-proof-details">
         <summary>Inspect cryptographic checks and commitments</summary>
         <div className="verifier-checks">
-          {report.checks.map((check) => (
+          {displayedReport.checks.map((check) => (
             <div key={check.name} data-valid={check.valid}>
               <span>PASS</span>
               <div>
@@ -2478,9 +2581,7 @@ function ReceiptVerifier({
           </div>
         )}
 
-        {custodyPacket && custodyReport && (
-          <CustodyProofRoom packet={custodyPacket} report={custodyReport} />
-        )}
+        <CustodyProofRoom packet={custodyPacket} report={custodyReport} />
 
         {report && (
           <div className="verifier-report" data-valid={evidenceValid}>
@@ -5333,6 +5434,8 @@ function FederationAirlock({
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
   const [messages, setMessages] = useState<Message[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
@@ -5373,19 +5476,12 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestAutomaticProof = useCallback(
-    (runId: string) => {
-      const targetRun =
-        activeRun?.id === runId
-          ? activeRun
-          : (runs.find((run) => run.id === runId) ?? null);
+    (targetRun: AgentRun) => {
+      if (selectedIdRef.current !== targetRun.agentId) return;
+      const runId = targetRun.id;
       const evidenceRevision = portableEvidenceRevision(targetRun);
-      if (!targetRun || evidenceRevision === null) return;
+      if (evidenceRevision === null) return;
       setError(null);
-      setActiveRun((current) =>
-        current?.id === runId
-          ? current
-          : (runs.find((run) => run.id === runId) ?? current),
-      );
       setAutomaticProof((current) => ({
         runId,
         evidenceRevision,
@@ -5397,18 +5493,24 @@ export default function App() {
         status: "requested",
       }));
     },
-    [activeRun, runs],
+    [],
+  );
+  const selectRunForProof = useCallback(
+    (targetRun: AgentRun) => {
+      if (selectedIdRef.current !== targetRun.agentId) return;
+      setActiveRun(targetRun);
+      requestAutomaticProof(targetRun);
+    },
+    [requestAutomaticProof],
   );
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
   const [recordingDismissed, setRecordingDismissed] = useState(false);
   const messageEnd = useRef<HTMLDivElement>(null);
-  const selectedIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const pollingRunIds = useRef(new Set<string>());
   const pollingCandidateSetIds = useRef(new Set<string>());
   const recordingReplayRequestRef = useRef<string | null>(null);
-  selectedIdRef.current = selectedId;
 
   const selected = useMemo(
     () => agents.find((agent) => agent.id === selectedId) ?? null,
@@ -5604,7 +5706,8 @@ export default function App() {
       canonicalStateId: hydration.canonicalStateId,
       runIds: hydration.runIds,
     });
-    requestAutomaticProof(hydration.repairedRun.id);
+    setActiveRun(hydration.repairedRun);
+    requestAutomaticProof(hydration.repairedRun);
   }, [
     recordingMode,
     recordingReplaySelection,
@@ -6891,11 +6994,13 @@ export default function App() {
                 ) : null}
                 {system?.protocolFixtureMode ? (
                   <ProtocolScenarioGuide
+                    agentId={selected.id}
                     runs={runs}
                     busy={demoActionBusy}
                     onRun={runPrompt}
                     onRepair={repairActiveRun}
                     onRequestProof={requestAutomaticProof}
+                    onSelectRunForProof={selectRunForProof}
                     automaticProof={automaticProof}
                     recordingMode={recordingMode}
                     readOnlyReplayMode={
