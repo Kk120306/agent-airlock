@@ -400,8 +400,10 @@ function ProtocolScenarioGuide({
   automaticProof,
   recordingMode = false,
   readOnlyReplayMode = false,
+  recordingStartGuard = null,
   recordingRunIds = null,
   onRecordingAttemptStart,
+  onRecordingAttemptAbort,
   onRecordingAttemptComplete,
 }: {
   agentId: string;
@@ -409,13 +411,18 @@ function ProtocolScenarioGuide({
   busy: boolean;
   onRun: (prompt: string) => Promise<AgentRun | null>;
   onRepair: (runId: string) => Promise<AgentRun | null>;
-  onRequestProof: (run: AgentRun) => void;
+  onRequestProof: (run: AgentRun) => boolean;
   onSelectRunForProof: (run: AgentRun) => void;
   automaticProof: AutomaticProofState | null;
   recordingMode?: boolean;
   readOnlyReplayMode?: boolean;
+  recordingStartGuard?: {
+    kind: "checking" | "blocked";
+    message: string;
+  } | null;
   recordingRunIds?: RecordingAttemptRunIds | null;
   onRecordingAttemptStart?: () => void;
+  onRecordingAttemptAbort?: () => void;
   onRecordingAttemptComplete?: (runIds: RecordingAttemptRunIds) => void;
 }) {
   const [automationStage, setAutomationStage] = useState<
@@ -501,8 +508,13 @@ function ProtocolScenarioGuide({
     }
   }, [automaticProof?.error, repairedProofStatus]);
 
+  const failAutomation = (message: string) => {
+    setAutomationError(message);
+    if (recordingMode) onRecordingAttemptAbort?.();
+  };
+
   const runCompleteLoop = async () => {
-    if (readOnlyReplayMode) return;
+    if (readOnlyReplayMode || recordingStartGuard) return;
     const attemptGeneration = beginRequestGeneration(attemptGenerationRef);
     const attemptIsCurrent = () =>
       isCurrentRequestGeneration(
@@ -522,7 +534,7 @@ function ProtocolScenarioGuide({
         safeRun.agentId !== agentId ||
         !provesWholeAgentPromotion(safeRun, "candidate-only")
       ) {
-        setAutomationError(
+        failAutomation(
           "Safety loop stopped: the passing Candidate did not produce the required Whole-Agent Promotion.",
         );
         return;
@@ -537,7 +549,7 @@ function ProtocolScenarioGuide({
         rejectedRun?.agentId !== agentId ||
         rejectedRun.transaction?.disposition !== "quarantined"
       ) {
-        setAutomationError(
+        failAutomation(
           "Safety loop stopped: the invalid Candidate did not produce the required Quarantine decision.",
         );
         return;
@@ -552,8 +564,14 @@ function ProtocolScenarioGuide({
           repairRun?.transaction?.disposition !== "promoted" ||
           repairRun.transaction.lineage.depth < 1
         ) {
-          setAutomationError(
+          failAutomation(
             "Safety loop stopped: the retained Candidate did not produce a promoted Repair lineage.",
+          );
+          return;
+        }
+        if (!onRequestProof(repairRun)) {
+          failAutomation(
+            "Safety loop stopped: the promoted Repair did not provide a complete signed Promotion Receipt for independent verification.",
           );
           return;
         }
@@ -565,7 +583,6 @@ function ProtocolScenarioGuide({
             repairedRunId: repairRun.id,
           });
         }
-        onRequestProof(repairRun);
       }
     } finally {
       if (attemptIsCurrent()) {
@@ -586,6 +603,10 @@ function ProtocolScenarioGuide({
             ? "Verifying signed lineage"
             : readOnlyReplayMode
               ? "Loading read-only proof"
+              : recordingStartGuard?.kind === "checking"
+                ? "Checking recording state"
+                : recordingStartGuard?.kind === "blocked"
+                  ? "Fresh state required"
               : recordingMode
                 ? "Prove this release is safe"
                 : "Run complete safety loop";
@@ -620,7 +641,12 @@ function ProtocolScenarioGuide({
             type="button"
             className="button button-primary protocol-run-all"
             onClick={() => void runCompleteLoop()}
-            disabled={readOnlyReplayMode || busy || automationStage !== null}
+            disabled={
+              readOnlyReplayMode ||
+              Boolean(recordingStartGuard) ||
+              busy ||
+              automationStage !== null
+            }
             aria-busy={automationStage !== null}
           >
             {automationStage ? (
@@ -726,6 +752,20 @@ function ProtocolScenarioGuide({
           </div>
         </button>
       </div>
+      {recordingStartGuard && (
+        <div
+          className="protocol-recording-guard"
+          data-kind={recordingStartGuard.kind}
+          role={recordingStartGuard.kind === "blocked" ? "alert" : "status"}
+        >
+          <strong>
+            {recordingStartGuard.kind === "blocked"
+              ? "Clean recording state required"
+              : "Checking recording state"}
+          </strong>
+          <span>{recordingStartGuard.message}</span>
+        </div>
+      )}
       {automationError && (
         <div className="protocol-automation-error" role="alert">
           <strong>Automatic proof stopped safely</strong>
@@ -1006,13 +1046,23 @@ function RecordingOutcomeBrief({
   const safeEffect = safeTransaction.externalActions.intents[0];
   const unsafeEffect = unsafeTransaction.externalActions.intents[0];
   const repairedEffect = repairedTransaction.externalActions.intents[0];
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   return (
     <section className="recording-outcome" aria-label="Verified Outcome Brief">
       <header className="recording-outcome-heading">
         <div>
           <span className="eyebrow">Verified Outcome Brief</span>
-          <h1>Three Runs. One rule: only validated state moves.</h1>
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+          >
+            Three Runs. One rule: only validated state moves.
+          </h1>
           <p>
             Persisted Run transactions prove all three outcomes. The
             independently verified signed chain proves the Quarantine-to-Repair
@@ -1180,24 +1230,33 @@ function RecordingOutcomeBrief({
           </div>
         </article>
 
-        <article data-outcome="verified">
+        <article
+          className="recording-independent-proof"
+          data-outcome="verified"
+        >
           <header>
             <span>04 · PORTABLE TRUST</span>
             <strong>Verified</strong>
           </header>
-          <h2>An independent verifier can check the recovery chain.</h2>
-          <ul>
+          <div className="recording-independent-proof-copy">
+            <h2>Independent signatures verify integrity and lineage.</h2>
+            <p>
+              They prove what the included key signed, not who authorized
+              Promotion.
+            </p>
+          </div>
+          <ul aria-label="Independent verification results">
             <li>
-              <strong>2</strong>
-              <span>Quarantine-to-Repair signed decisions linked</span>
+              <strong>2/2</strong>
+              <span>signatures valid</span>
             </li>
             <li>
-              <strong>Local</strong>
-              <span>browser cryptographic check passed</span>
+              <strong>PASS</strong>
+              <span>parent digest link</span>
             </li>
             <li>
-              <strong>All</strong>
-              <span>parent links and state handoffs verified</span>
+              <strong>PASS</strong>
+              <span>Canonical handoff</span>
             </li>
           </ul>
           <button
@@ -1205,7 +1264,7 @@ function RecordingOutcomeBrief({
             className="button button-primary recording-verifier-button"
             onClick={onOpenVerifier}
           >
-            Inspect in zero-upload verifier
+            Inspect zero-upload proof
           </button>
         </article>
       </div>
@@ -3144,7 +3203,15 @@ function PortableTrustExport({
   };
 
   const downloadJson = (value: unknown, filename: string) => {
-    if (!result || dirty || busy) return;
+    if (
+      !result ||
+      dirty ||
+      busy ||
+      result.verification.valid !== true ||
+      browserVerificationValid !== true
+    ) {
+      return;
+    }
     const blob = new Blob([JSON.stringify(value, null, 2) + "\n"], {
       type: "application/json",
     });
@@ -3220,9 +3287,7 @@ function PortableTrustExport({
     browserVerificationValid,
     dirty,
   });
-  const displayedResultVerified = judgeProofMode
-    ? proofVerified
-    : result?.verification.valid === true && !dirty;
+  const displayedResultVerified = proofVerified;
   const displayedResultState = getPortableProofDisplayState({
     hasResult: result !== null,
     verificationValid: displayedResultVerified,
@@ -3431,7 +3496,7 @@ function PortableTrustExport({
                   ? "Running the local verifier against the newly generated artifact."
                   : displayedResultState === "stale"
                   ? "Options changed. Regenerate before downloading."
-                  : judgeProofMode && !proofVerified
+                  : !proofVerified
                     ? "The server self-check and browser verifier did not both accept this proof. Regenerate before relying on it."
                   : hasDecisionChain
                     ? judgeProofMode
@@ -3538,7 +3603,11 @@ function PortableTrustExport({
           </div>
           <div className="portable-claims">
             <div>
-              <strong>Cryptographically supported</strong>
+              <strong>
+                {proofVerified
+                  ? "Cryptographically supported"
+                  : "Server-reported claims not accepted locally"}
+              </strong>
               <ul>
                 {result.verification.provenClaims.map((claim) => (
                   <li key={claim}>{claim}</li>
@@ -5455,6 +5524,9 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [runsLoadedAgentId, setRunsLoadedAgentId] = useState<string | null>(
+    null,
+  );
   const [activeCandidateSet, setActiveCandidateSet] =
     useState<CandidateSet | null>(null);
   const [assuranceProposals, setAssuranceProposals] = useState<
@@ -5477,10 +5549,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const requestAutomaticProof = useCallback(
     (targetRun: AgentRun) => {
-      if (selectedIdRef.current !== targetRun.agentId) return;
+      if (selectedIdRef.current !== targetRun.agentId) return false;
       const runId = targetRun.id;
       const evidenceRevision = portableEvidenceRevision(targetRun);
-      if (evidenceRevision === null) return;
+      if (evidenceRevision === null) return false;
       setError(null);
       setAutomaticProof((current) => ({
         runId,
@@ -5492,6 +5564,7 @@ export default function App() {
             : 1,
         status: "requested",
       }));
+      return true;
     },
     [],
   );
@@ -5507,6 +5580,7 @@ export default function App() {
   const [authInput, setAuthInput] = useState("");
   const [recordingDismissed, setRecordingDismissed] = useState(false);
   const messageEnd = useRef<HTMLDivElement>(null);
+  const recordingPlaygroundHeadingRef = useRef<HTMLHeadingElement>(null);
   const mountedRef = useRef(true);
   const pollingRunIds = useRef(new Set<string>());
   const pollingCandidateSetIds = useRef(new Set<string>());
@@ -5533,6 +5607,29 @@ export default function App() {
         : null,
     [automaticProof, recordingAttempt, recordingMode, runs],
   );
+  const recordingEvidenceFailure =
+    recordingMode &&
+    Boolean(recordingAttempt?.runIds) &&
+    automaticProof?.status === "verified" &&
+    recordingOutcome === null;
+  const recordingStartGuard =
+    recordingMode &&
+    recordingReplaySelection.kind === "absent" &&
+    recordingAttempt === null
+      ? runsLoadedAgentId !== selected?.id
+        ? {
+            kind: "checking" as const,
+            message:
+              "Airlock is confirming that this take starts from a pristine Canonical State.",
+          }
+        : runs.length > 0
+          ? {
+              kind: "blocked" as const,
+              message:
+                "This demo state already contains Runs. Stop the launcher and rerun the same demo command with --reset before recording another take.",
+            }
+          : null
+      : null;
 
   const demoStepCompletion = useMemo(() => {
     const assistantOutputs = messages
@@ -5618,6 +5715,7 @@ export default function App() {
 
   useEffect(() => {
     recordingReplayRequestRef.current = null;
+    setRunsLoadedAgentId(null);
     setAutomaticProof(null);
     setRecordingAttempt(null);
     setActiveRun(null);
@@ -5645,6 +5743,7 @@ export default function App() {
           if (selectedIdRef.current !== selectedId) return;
           const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
           setRuns(result.runs);
+          setRunsLoadedAgentId(selectedId);
           setActiveRun(latest);
           const latestCandidateSet =
             candidateSetsResult.candidateSets[0] ?? null;
@@ -6470,7 +6569,20 @@ export default function App() {
           </div>
         )}
 
-        {recordingOutcome && system ? (
+        {recordingEvidenceFailure ? (
+          <section className="recording-proof-failure" role="alert">
+            <span className="eyebrow">Fail-closed recording guard</span>
+            <h1>Outcome evidence contract did not match.</h1>
+            <p>
+              Airlock will not show the judge-facing Outcome Brief without the
+              exact file, SQLite, effect, lineage, and signature evidence.
+            </p>
+            <strong>
+              Stop the launcher and rerun the same demo command with --reset
+              before the next take.
+            </strong>
+          </section>
+        ) : recordingOutcome && system ? (
           <RecordingOutcomeBrief
             outcome={recordingOutcome}
             system={system}
@@ -6487,6 +6599,9 @@ export default function App() {
               const nextUrl = new URL(window.location.href);
               nextUrl.searchParams.delete("recording");
               window.history.replaceState({}, "", nextUrl);
+              window.requestAnimationFrame(() =>
+                recordingPlaygroundHeadingRef.current?.focus(),
+              );
             }}
           />
         ) : selected ? (
@@ -6687,15 +6802,21 @@ export default function App() {
                 >
                   <div>
                     <span className="eyebrow">Playground</span>
-                    <h2>
+                    <h2 ref={recordingPlaygroundHeadingRef} tabIndex={-1}>
                       {system?.demoMode
                         ? "Prove one Agent future is safe"
                         : system?.protocolFixtureMode
-                          ? "Prove transactional safety for a real Agent Run"
+                          ? "Prove transactional safety across three real Agent Runs"
                           : system?.modelArkDemoMode
                             ? "Prove a live ModelArk change is safe"
                         : "Build something with your Agent"}
                     </h2>
+                    {recordingMode && (
+                      <p className="recording-task-summary">
+                        Write protocol-proof.txt, update SQLite, and queue a
+                        deferred notification.
+                      </p>
+                    )}
                     {recordingMode && (
                       <div
                         className="recording-agent-context"
@@ -6728,15 +6849,16 @@ export default function App() {
                     {system?.protocolFixtureMode || system?.modelArkDemoMode ? (
                       <div
                         className="proof-route"
-                        aria-label="Judge proof path"
+                        role="group"
+                        aria-label="Judge proof path: CodeJam AgentRunner creates Candidate State. Agent Airlock applies the Outcome Contract and decides Promotion or Quarantine."
                       >
-                        <span>Run</span>
+                        <span>CodeJam AgentRunner</span>
                         <i aria-hidden="true">→</i>
-                        <span>Validate</span>
+                        <span>Candidate State</span>
                         <i aria-hidden="true">→</i>
-                        <span>Promote</span>
+                        <span>Outcome Contract</span>
                         <i aria-hidden="true">→</i>
-                        <span>Verify</span>
+                        <span>Promote / Quarantine</span>
                       </div>
                     ) : (
                       <>
@@ -7003,6 +7125,7 @@ export default function App() {
                     onSelectRunForProof={selectRunForProof}
                     automaticProof={automaticProof}
                     recordingMode={recordingMode}
+                    recordingStartGuard={recordingStartGuard}
                     readOnlyReplayMode={
                       recordingMode && recordingReplaySelection.kind !== "absent"
                     }
@@ -7015,6 +7138,9 @@ export default function App() {
                         canonicalStateId: selected.canonicalStateId,
                         runIds: null,
                       });
+                    }}
+                    onRecordingAttemptAbort={() => {
+                      setRecordingAttempt(null);
                     }}
                     onRecordingAttemptComplete={(runIds) => {
                       setRecordingAttempt((current) =>

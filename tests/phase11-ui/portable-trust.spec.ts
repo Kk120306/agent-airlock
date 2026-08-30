@@ -3,10 +3,17 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildPortableEvidencePacket,
+  createSignedTransparencyCheckpoint,
+  createTransparencyInclusionProof,
+  encodeOfflineEvmAnchorPayload,
+  generatePortableSigningKey,
+  type PortablePromotionEnvelope,
+} from "@agent-airlock/portable-promotion-receipt";
 import type {
   Agent,
   AgentRun,
-  PortablePromotionEnvelope,
   PortableReceiptExport,
   SystemInfo,
 } from "../../apps/web/src/types";
@@ -17,6 +24,8 @@ const repositoryRoot = path.resolve(
 );
 const webDist = path.join(repositoryRoot, "apps", "web", "dist");
 const timestamp = "2026-08-26T02:00:00.000Z";
+const portableTrustOrigin = "http://localhost";
+const transparencySigningKey = generatePortableSigningKey();
 const sha256 = (value: string) =>
   "sha256:" + createHash("sha256").update(value).digest("hex");
 const goldenDocument = JSON.parse(
@@ -139,8 +148,7 @@ const system: SystemInfo = {
   },
   inferenceMode: "modelark",
   arkConfigured: false,
-  arkBaseUrl: "https://ark.example.invalid",
-  arkModel: null,
+  modelProfileDisclosure: "configured-status-only",
   codexAvailable: true,
   codexSandboxMode: "workspace-write",
   competingFutures: {
@@ -168,7 +176,7 @@ test("exports a private-by-default receipt and explains the proof boundary", asy
 }) => {
   const requests: Array<Record<string, unknown>> = [];
   await serveProductionBundle(page, requests);
-  await page.goto("http://airlock.local/");
+  await page.goto(`${portableTrustOrigin}/`);
 
   const panel = page.getByRole("region", { name: "Portable trust receipt" });
   await expect(
@@ -344,7 +352,7 @@ test("fails closed while reverifying a previously accepted receipt", async ({
   page,
 }) => {
   await serveProductionBundle(page, []);
-  await page.goto("http://airlock.local/");
+  await page.goto(`${portableTrustOrigin}/`);
 
   const panel = page.getByRole("region", { name: "Portable trust receipt" });
   await panel.getByRole("button", { name: "Generate receipt" }).click();
@@ -382,6 +390,51 @@ test("fails closed while reverifying a previously accepted receipt", async ({
   ).toBeEnabled();
 });
 
+test("rejects downloads when browser verification contradicts the server self-check", async ({
+  page,
+}) => {
+  await serveProductionBundle(page, [], { current: run }, undefined, system, {
+    portableReceiptTransform: (exported) => {
+      const tampered = structuredClone(exported);
+      tampered.packet.envelope.receipt.decision.decidedAt =
+        "2026-08-26T00:00:01.000Z";
+      return tampered;
+    },
+  });
+  await page.goto(`${portableTrustOrigin}/`);
+  expect(
+    await page.evaluate(
+      () => globalThis.isSecureContext && Boolean(globalThis.crypto?.subtle),
+    ),
+  ).toBe(true);
+
+  const panel = page.getByRole("region", { name: "Portable trust receipt" });
+  await panel.getByRole("button", { name: "Generate receipt" }).click();
+
+  await expect(
+    panel.getByText("Receipt verification failed", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    panel.getByText("Self-check passed", { exact: true }),
+  ).toHaveCount(0);
+  await expect(panel.locator(".portable-result")).toHaveAttribute(
+    "data-valid",
+    "false",
+  );
+  await expect(
+    panel.getByText("Server-reported claims not accepted locally", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  for (const buttonName of [
+    "Download receipt JSON",
+    "Download evidence packet",
+    "Download federated work",
+  ]) {
+    await expect(panel.getByRole("button", { name: buttonName })).toBeDisabled();
+  }
+});
+
 test("presents the live ModelArk judge path as provider-backed and falsifiable", async ({
   page,
 }) => {
@@ -397,7 +450,6 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       retryDelayMs: 0,
     },
     arkConfigured: true,
-    arkModel: "ep-live-model",
     externalActionDelivery: {
       mode: "idempotent-http",
       destination: "demo-console",
@@ -474,13 +526,20 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     ],
   };
   liveSnapshot.contentHash = sha256(JSON.stringify(liveSnapshot.rows));
-  transaction.resources = [
+  const liveResources: Array<
+    [
+      NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
+      string,
+      string,
+    ]
+  > = [
     ["workspace", "Workspace", "sha256:" + "3".repeat(64)],
     ["codex-session", "Agent memory", "sha256:" + "4".repeat(64)],
     ["sqlite", "SQLite data", liveSnapshot.contentHash],
     ["external-actions", "External actions", ""],
-  ].map(([kind, label, fingerprintAfter]) => ({
-    kind: kind as NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
+  ];
+  transaction.resources = liveResources.map(([kind, label, fingerprintAfter]) => ({
+    kind,
     label,
     disposition: "promoted" as const,
     fingerprintBefore: "sha256:" + "0".repeat(64),
@@ -546,6 +605,16 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       retryDelayMs: 0,
     },
   };
+  const liveValidationNames = [
+    "path-safety",
+    "protected-paths",
+    "required-paths",
+    "change-limits",
+    "secret-patterns",
+    "command:modelark-live-state",
+    "sqlite-resource",
+    "external-action-intents",
+  ];
   transaction.validations = [
     {
       name: "execution-profile",
@@ -556,28 +625,15 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       durationMs: 0,
       output: JSON.stringify(validExecutionProfile),
     },
-    "path-safety",
-    "protected-paths",
-    "required-paths",
-    "change-limits",
-    "secret-patterns",
-    "command:modelark-live-state",
-    "sqlite-resource",
-    "external-action-intents",
-  ].flatMap((validation) =>
-    typeof validation === "string"
-      ? [
-          {
-            name: validation,
-            status: "passed" as const,
-            required: true,
-            summary: validation + " passed",
-            durationMs: 1,
-            output: null,
-          },
-        ]
-      : [validation],
-  );
+    ...liveValidationNames.map((validation) => ({
+      name: validation,
+      status: "passed" as const,
+      required: true,
+      summary: validation + " passed",
+      durationMs: 1,
+      output: null,
+    })),
+  ];
   transaction.recovery = {
     journalPhase: "completed",
     recoveredAfterRestart: false,
@@ -773,7 +829,7 @@ test("invalidates a generated receipt when the Run decision changes", async ({
   const runState = { current: quarantined };
   await serveProductionBundle(page, [], runState);
   page.on("dialog", (dialog) => void dialog.accept());
-  await page.goto("http://airlock.local/");
+  await page.goto(`${portableTrustOrigin}/`);
 
   const panel = page.getByRole("region", { name: "Portable trust receipt" });
   await panel.getByRole("button", { name: "Generate receipt" }).click();
@@ -998,7 +1054,7 @@ test("stops an in-flight safety loop when the operator switches Agents", async (
       },
     },
   );
-  await page.goto("http://airlock.local/");
+  await page.goto(`${portableTrustOrigin}/`);
 
   const guide = page.getByRole("region", { name: "Full safety loop" });
   await guide.getByRole("button", { name: "Run complete safety loop" }).click();
@@ -1036,7 +1092,7 @@ test("ignores a delayed receipt response after the Run decision changes", async 
   });
   await serveProductionBundle(page, [], runState, exportGate);
   page.on("dialog", (dialog) => void dialog.accept());
-  await page.goto("http://airlock.local/");
+  await page.goto(`${portableTrustOrigin}/`);
 
   const panel = page.getByRole("region", { name: "Portable trust receipt" });
   await panel.getByRole("button", { name: "Generate receipt" }).click();
@@ -1082,9 +1138,12 @@ async function serveProductionBundle(
     agents?: Agent[];
     runsByAgentId?: Record<string, AgentRun[]>;
     portableReceiptFailures?: { remaining: number };
+    portableReceiptTransform?: (
+      exported: PortableReceiptExport,
+    ) => PortableReceiptExport;
   } = {},
 ): Promise<void> {
-  const origin = options.origin ?? "http://airlock.local";
+  const origin = options.origin ?? portableTrustOrigin;
   await page.route(`${origin}/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/") {
@@ -1147,10 +1206,14 @@ async function serveProductionBundle(
         return;
       }
       await exportGate;
+      const portableReceipt = portableExport(body);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(portableExport(body)),
+        body: JSON.stringify(
+          options.portableReceiptTransform?.(portableReceipt) ??
+            portableReceipt,
+        ),
       });
       return;
     }
@@ -1246,28 +1309,22 @@ function portableExport(body: Record<string, unknown>): PortableReceiptExport {
   if (!includeDisclosure) envelope.disclosures = [];
   const anchor = body.localAnchor
     ? {
-        checkpoint: {
-          checkpoint: {
-            treeSize: 1,
-            root: "sha256:" + "2".repeat(64),
-            keyId: "sha256:" + "3".repeat(64),
-          },
-          checkpointDigest: "sha256:" + "4".repeat(64),
-        },
-        inclusionProof: { leafIndex: 0, treeSize: 1 },
+        checkpoint: createSignedTransparencyCheckpoint({
+          receiptDigests: [envelope.receiptDigest],
+          priorCheckpointDigest: null,
+          createdAt: timestamp,
+          privateKey: transparencySigningKey.privateKeyPem,
+        }),
+        inclusionProof: createTransparencyInclusionProof(
+          [envelope.receiptDigest],
+          0,
+        ),
       }
     : null;
   const evmPayload = body.evmPayload
-    ? {
-        methodSignature: "anchor(bytes32)" as const,
-        functionSelector: "0xeecdf927",
-        receiptDigest: envelope.receiptDigest,
-        calldata: "0xeecdf927" + "18".repeat(32),
-        privacyClaim: "receipt-digest-only" as const,
-        networkCalls: 0 as const,
-        fundsSpent: 0 as const,
-      }
+    ? encodeOfflineEvmAnchorPayload(envelope.receiptDigest)
     : null;
+  const packet = buildPortableEvidencePacket({ envelope, anchor, evmPayload });
   return {
     envelope,
     verification: {
@@ -1313,12 +1370,7 @@ function portableExport(body: Record<string, unknown>): PortableReceiptExport {
     ],
     anchor,
     evmPayload,
-    packet: {
-      schema: "agent-airlock/portable-evidence-packet",
-      schemaVersion: 1,
-      envelope,
-      anchor,
-      evmPayload,
-    } as unknown as PortableReceiptExport["packet"],
+    packet,
+    decisionChain: null,
   };
 }

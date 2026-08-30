@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { rmdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,5 +13,16 @@ export default async function globalTeardown(): Promise<void> {
   ) {
     throw new Error("Refusing to clean an unexpected container demo root");
   }
-  await rm(managedRoot, { recursive: true, force: true });
+  try {
+    await rmdir(managedRoot);
+  } catch (error) {
+    if (
+      !error ||
+      typeof error !== "object" ||
+      !("code" in error) ||
+      !["ENOENT", "ENOTEMPTY"].includes(String(error.code))
+    ) {
+      throw error;
+    }
+  }
 }

@@ -63,11 +63,11 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(
     page.getByRole("heading", {
-      name: "Prove transactional safety for a real Agent Run",
+      name: "Prove transactional safety across three real Agent Runs",
     }),
   ).toBeVisible();
   await expect(page.getByLabel("Judge proof path")).toContainText(
-    "Run→Validate→Promote→Verify",
+    "CodeJam AgentRunner→Candidate State→Outcome Contract→Promote / Quarantine",
   );
   await expect(page.getByText(/cannot enforce total-token allowances/))
     .not.toBeVisible();
@@ -438,9 +438,14 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toHaveCount(0);
   await expect(
     historicalRecordingGuide.getByRole("button", {
-      name: "Prove this release is safe",
+      name: "Fresh state required",
     }),
-  ).toBeEnabled();
+  ).toBeDisabled();
+  await expect(
+    historicalRecordingGuide.getByRole("alert").getByText(
+      /rerun the same demo command with --reset/,
+    ),
+  ).toBeVisible();
   await page.waitForTimeout(750);
   expect(historicalReceiptRequests).toBe(0);
   page.off("request", trackHistoricalReceiptRequests);
@@ -685,6 +690,20 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(recordingContext.locator(".status")).toBeVisible();
   await expect(recordingContext.getByText(/Outcome Contract v\d+/)).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Prove transactional safety across three real Agent Runs",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Write protocol-proof.txt, update SQLite, and queue a deferred notification.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(page.getByLabel("Judge proof path")).toContainText(
+    "CodeJam AgentRunner→Candidate State→Outcome Contract→Promote / Quarantine",
+  );
   const automatedGuide = page.getByRole("region", { name: "Full safety loop" });
   const proveReleaseButton = automatedGuide.getByRole("button", {
     name: "Prove this release is safe",
@@ -774,6 +793,11 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
       name: "Three Runs. One rule: only validated state moves.",
     }),
   ).toBeVisible({ timeout: 45_000 });
+  await expect(
+    outcomeBrief.getByRole("heading", {
+      name: "Three Runs. One rule: only validated state moves.",
+    }),
+  ).toBeFocused();
   await expect(
     outcomeBrief.getByText("Transactional safety proven", { exact: true }),
   ).toBeVisible();
@@ -872,14 +896,23 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   const verifiedOutcome = outcomeBrief.locator('article[data-outcome="verified"]');
   await expect(
+    verifiedOutcome.getByText("Independent signatures verify integrity and lineage.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(verifiedOutcome.getByText("2/2", { exact: true })).toBeVisible();
+  await expect(
+    verifiedOutcome.getByText("parent digest link", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    verifiedOutcome.getByText("Canonical handoff", { exact: true }),
+  ).toBeVisible();
+  await expect(
     verifiedOutcome.getByText(
-      "Quarantine-to-Repair signed decisions linked",
+      "They prove what the included key signed, not who authorized Promotion.",
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(verifiedOutcome.getByText("browser cryptographic check passed", {
-    exact: true,
-  })).toBeVisible();
   await expect(
     outcomeBrief.getByText("Agent remains READY", { exact: true }),
   ).toBeVisible();
@@ -901,7 +934,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   );
 
   await outcomeBrief
-    .getByRole("button", { name: "Inspect in zero-upload verifier" })
+    .getByRole("button", { name: "Inspect zero-upload proof" })
     .click();
   const automatedVerifier = page.getByRole("dialog", {
     name: "Verify integrity locally without querying the server",
@@ -910,11 +943,20 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     name: "Close receipt verifier",
   });
   await expect(automatedVerifierClose).toBeFocused();
+  await page.keyboard.press("Tab");
+  const automatedVerifierFileInput = automatedVerifier.locator(
+    '.receipt-dropzone input[type="file"]',
+  );
+  await expect(automatedVerifierFileInput).toBeFocused();
+  await expect(automatedVerifier.locator(".receipt-dropzone")).toHaveCSS(
+    "outline-width",
+    "3px",
+  );
   await expect(
     automatedVerifier.getByText("Agent remains READY", { exact: true }),
   ).toBeVisible();
   await outcomeBrief
-    .getByRole("button", { name: "Inspect in zero-upload verifier" })
+    .getByRole("button", { name: "Inspect zero-upload proof" })
     .focus();
   await page.keyboard.press("Tab");
   expect(
@@ -937,7 +979,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await automatedVerifierClose.click();
   await expect(
     outcomeBrief.getByRole("button", {
-      name: "Inspect in zero-upload verifier",
+      name: "Inspect zero-upload proof",
     }),
   ).toBeFocused();
 
@@ -1022,7 +1064,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(mobileOutcomeCardsFit).toBe(true);
 
   const mobileVerifierButton = mobileOutcomeBrief.getByRole("button", {
-    name: "Inspect in zero-upload verifier",
+    name: "Inspect zero-upload proof",
   });
   await mobileVerifierButton.scrollIntoViewIfNeeded();
   const mobileVerifierButtonBox = await mobileVerifierButton.boundingBox();
@@ -1066,11 +1108,21 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(page.locator(".recording-mode")).toHaveCount(0);
   await expect(page.locator(".agent-header")).toBeVisible();
   await expect(page.locator(".composer")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Prove transactional safety across three real Agent Runs",
+    }),
+  ).toBeFocused();
   expect(new URL(page.url()).searchParams.has("recording")).toBe(false);
   await page.goto(recordingUrl);
   await expect(
-    page.getByRole("button", { name: "Prove this release is safe" }),
-  ).toBeEnabled();
+    page.getByRole("button", { name: "Fresh state required" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("alert").getByText(
+      /rerun the same demo command with --reset/,
+    ),
+  ).toBeVisible();
 
   const malformedReplayUrl = new URL(replayUrl);
   malformedReplayUrl.searchParams.delete("recordingRepairRunId");
@@ -1110,8 +1162,8 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     page.getByRole("region", { name: "Verified Outcome Brief" }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Prove this release is safe" }),
-  ).toBeEnabled();
+    page.getByRole("button", { name: "Fresh state required" }),
+  ).toBeDisabled();
   await page.waitForTimeout(750);
   expect(replayedReceiptRequests).toBe(0);
   page.off("request", trackReplayedReceiptRequests);
@@ -1174,7 +1226,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   });
   await expect(offlineOutcomeBrief).toBeVisible({ timeout: 30_000 });
   const offlineVerifierButton = offlineOutcomeBrief.getByRole("button", {
-    name: "Inspect in zero-upload verifier",
+    name: "Inspect zero-upload proof",
   });
   await expect(offlineVerifierButton).toBeEnabled();
   await offlineVerifierPage.waitForLoadState("networkidle");

@@ -645,8 +645,9 @@ for (const requiredReplayPolicyMarker of [
   }
 }
 for (const requiredReadOnlyAppMarker of [
-  "if (readOnlyReplayMode) return;",
-  "disabled={readOnlyReplayMode || busy || automationStage !== null}",
+  "if (readOnlyReplayMode || recordingStartGuard) return;",
+  "readOnlyReplayMode ||",
+  "Boolean(recordingStartGuard) ||",
   'recordingMode && recordingReplaySelection.kind !== "absent"',
 ]) {
   if (!recordingApp.includes(requiredReadOnlyAppMarker)) {
