@@ -2751,18 +2751,26 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
   const verified = board.locator('article[data-outcome="verified"]');
   recordingFields.push(
     await expectExactVisibleText(verified, "Verified"),
-    await expectExactVisibleText(verified, "2"),
     await expectExactVisibleText(
       verified,
-      "Quarantine-to-Repair signed decisions linked",
+      "Independent signatures verify integrity and lineage.",
+    ),
+    await expectExactVisibleText(verified, "2/2"),
+    await expectExactVisibleText(
+      verified,
+      "signatures valid",
     ),
     await expectExactVisibleText(
       verified,
-      "browser cryptographic check passed",
+      "parent digest link",
     ),
     await expectExactVisibleText(
       verified,
-      "parent links and state handoffs verified",
+      "Canonical handoff",
+    ),
+    await expectExactVisibleText(
+      verified,
+      "They prove what the included key signed, not who authorized Promotion.",
     ),
   );
 
@@ -2800,7 +2808,7 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
     throw new RuntimeProofError("viewport-invalid");
   }
   const inspectButton = board.getByRole("button", {
-    name: "Inspect in zero-upload verifier",
+    name: "Inspect zero-upload proof",
     exact: true,
   });
   if (
@@ -3217,7 +3225,7 @@ export async function createPlaywrightRuntimeProofDriver({
           });
           await board
             .getByRole("button", {
-              name: "Inspect in zero-upload verifier",
+              name: "Inspect zero-upload proof",
               exact: true,
             })
             .click();

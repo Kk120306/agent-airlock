@@ -139,8 +139,7 @@ const system: SystemInfo = {
   },
   inferenceMode: "modelark",
   arkConfigured: false,
-  arkBaseUrl: "https://ark.example.invalid",
-  arkModel: null,
+  modelProfileDisclosure: "configured-status-only",
   codexAvailable: true,
   codexSandboxMode: "workspace-write",
   competingFutures: {
@@ -382,6 +381,46 @@ test("fails closed while reverifying a previously accepted receipt", async ({
   ).toBeEnabled();
 });
 
+test("rejects downloads when browser verification contradicts the server self-check", async ({
+  page,
+}) => {
+  await serveProductionBundle(page, [], { current: run }, undefined, system, {
+    portableReceiptTransform: (exported) => {
+      const tampered = structuredClone(exported);
+      tampered.packet.envelope.receipt.decision.decidedAt =
+        "2026-08-26T00:00:01.000Z";
+      return tampered;
+    },
+  });
+  await page.goto("http://airlock.local/");
+
+  const panel = page.getByRole("region", { name: "Portable trust receipt" });
+  await panel.getByRole("button", { name: "Generate receipt" }).click();
+
+  await expect(
+    panel.getByText("Receipt verification failed", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    panel.getByText("Self-check passed", { exact: true }),
+  ).toHaveCount(0);
+  await expect(panel.locator(".portable-result")).toHaveAttribute(
+    "data-valid",
+    "false",
+  );
+  await expect(
+    panel.getByText("Server-reported claims not accepted locally", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  for (const buttonName of [
+    "Download receipt JSON",
+    "Download evidence packet",
+    "Download federated work",
+  ]) {
+    await expect(panel.getByRole("button", { name: buttonName })).toBeDisabled();
+  }
+});
+
 test("presents the live ModelArk judge path as provider-backed and falsifiable", async ({
   page,
 }) => {
@@ -397,7 +436,6 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       retryDelayMs: 0,
     },
     arkConfigured: true,
-    arkModel: "ep-live-model",
     externalActionDelivery: {
       mode: "idempotent-http",
       destination: "demo-console",
@@ -474,13 +512,20 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
     ],
   };
   liveSnapshot.contentHash = sha256(JSON.stringify(liveSnapshot.rows));
-  transaction.resources = [
+  const liveResources: Array<
+    [
+      NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
+      string,
+      string,
+    ]
+  > = [
     ["workspace", "Workspace", "sha256:" + "3".repeat(64)],
     ["codex-session", "Agent memory", "sha256:" + "4".repeat(64)],
     ["sqlite", "SQLite data", liveSnapshot.contentHash],
     ["external-actions", "External actions", ""],
-  ].map(([kind, label, fingerprintAfter]) => ({
-    kind: kind as NonNullable<AgentRun["transaction"]>["resources"][number]["kind"],
+  ];
+  transaction.resources = liveResources.map(([kind, label, fingerprintAfter]) => ({
+    kind,
     label,
     disposition: "promoted" as const,
     fingerprintBefore: "sha256:" + "0".repeat(64),
@@ -546,6 +591,16 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       retryDelayMs: 0,
     },
   };
+  const liveValidationNames = [
+    "path-safety",
+    "protected-paths",
+    "required-paths",
+    "change-limits",
+    "secret-patterns",
+    "command:modelark-live-state",
+    "sqlite-resource",
+    "external-action-intents",
+  ];
   transaction.validations = [
     {
       name: "execution-profile",
@@ -556,28 +611,15 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
       durationMs: 0,
       output: JSON.stringify(validExecutionProfile),
     },
-    "path-safety",
-    "protected-paths",
-    "required-paths",
-    "change-limits",
-    "secret-patterns",
-    "command:modelark-live-state",
-    "sqlite-resource",
-    "external-action-intents",
-  ].flatMap((validation) =>
-    typeof validation === "string"
-      ? [
-          {
-            name: validation,
-            status: "passed" as const,
-            required: true,
-            summary: validation + " passed",
-            durationMs: 1,
-            output: null,
-          },
-        ]
-      : [validation],
-  );
+    ...liveValidationNames.map((validation) => ({
+      name: validation,
+      status: "passed" as const,
+      required: true,
+      summary: validation + " passed",
+      durationMs: 1,
+      output: null,
+    })),
+  ];
   transaction.recovery = {
     journalPhase: "completed",
     recoveredAfterRestart: false,
@@ -1082,6 +1124,9 @@ async function serveProductionBundle(
     agents?: Agent[];
     runsByAgentId?: Record<string, AgentRun[]>;
     portableReceiptFailures?: { remaining: number };
+    portableReceiptTransform?: (
+      exported: PortableReceiptExport,
+    ) => PortableReceiptExport;
   } = {},
 ): Promise<void> {
   const origin = options.origin ?? "http://airlock.local";
@@ -1147,10 +1192,14 @@ async function serveProductionBundle(
         return;
       }
       await exportGate;
+      const portableReceipt = portableExport(body);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(portableExport(body)),
+        body: JSON.stringify(
+          options.portableReceiptTransform?.(portableReceipt) ??
+            portableReceipt,
+        ),
       });
       return;
     }
@@ -1320,5 +1369,6 @@ function portableExport(body: Record<string, unknown>): PortableReceiptExport {
       anchor,
       evmPayload,
     } as unknown as PortableReceiptExport["packet"],
+    decisionChain: null,
   };
 }

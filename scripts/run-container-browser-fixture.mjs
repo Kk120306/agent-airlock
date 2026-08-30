@@ -7,6 +7,11 @@ import {
   assertJudgeReadiness,
   inspectJudgeReadiness,
 } from "./judge-readiness.mjs";
+import {
+  assertContainerFixturePortsAvailable,
+  assertSafeEphemeralContainerDemoStateRoot,
+  ephemeralContainerDemoStateRoot,
+} from "./container-browser-fixture-startup.mjs";
 import { comparableDemoContract } from "./demo-outcome-contract.mjs";
 import {
   realRuntimeProofAgentDescription,
@@ -94,15 +99,20 @@ if (port === fixturePort) {
 }
 const stateRoot = configuredProofSessionRoot
   ? path.resolve(configuredProofSessionRoot)
-  : path.resolve(
-      repoRoot,
-      demoRequested
-        ? ephemeralRequested
-          ? ".e2e-container-demo"
-          : ".local/airlock-container-demo"
-        : process.env.AIRLOCK_CONTAINER_BROWSER_DATA_ROOT ??
-            ".e2e-container-browser",
-    );
+  : demoRequested && ephemeralRequested
+    ? ephemeralContainerDemoStateRoot({
+        repoRoot,
+        controlPort: port,
+        fixturePort,
+        launcherPid: process.pid,
+      })
+    : path.resolve(
+        repoRoot,
+        demoRequested
+          ? ".local/airlock-container-demo"
+          : process.env.AIRLOCK_CONTAINER_BROWSER_DATA_ROOT ??
+              ".e2e-container-browser",
+      );
 
 function isStrictDescendant(parent, candidate) {
   const relative = path.relative(parent, candidate);
@@ -298,14 +308,19 @@ async function seedProtocolDemo(baseUrl) {
 
 const expectedRoot = configuredProofSessionRoot
   ? stateRoot
-  : path.join(
-      repoRoot,
-      demoRequested
-        ? ephemeralRequested
-          ? ".e2e-container-demo"
-          : ".local/airlock-container-demo"
-        : ".e2e-container-browser",
-    );
+  : demoRequested && ephemeralRequested
+    ? ephemeralContainerDemoStateRoot({
+        repoRoot,
+        controlPort: port,
+        fixturePort,
+        launcherPid: process.pid,
+      })
+    : path.join(
+        repoRoot,
+        demoRequested
+          ? ".local/airlock-container-demo"
+          : ".e2e-container-browser",
+      );
 if (stateRoot !== expectedRoot) {
   throw new Error(
     "Container fixture state must resolve to its dedicated managed root",
@@ -313,10 +328,26 @@ if (stateRoot !== expectedRoot) {
 }
 if (configuredProofSessionRoot) {
   await assertManagedProofSession();
-} else if (!demoRequested || resetRequested || ephemeralRequested) {
+}
+await assertContainerFixturePortsAvailable({
+  controlPort: port,
+  fixturePort,
+});
+if (!configuredProofSessionRoot && demoRequested && ephemeralRequested) {
+  await assertSafeEphemeralContainerDemoStateRoot({ repoRoot, stateRoot });
+}
+if (
+  !configuredProofSessionRoot &&
+  (!demoRequested || resetRequested || ephemeralRequested)
+) {
   await rm(stateRoot, { recursive: true, force: true });
 }
-await mkdir(stateRoot, { recursive: true });
+if (!configuredProofSessionRoot && demoRequested && ephemeralRequested) {
+  await mkdir(stateRoot);
+  await assertSafeEphemeralContainerDemoStateRoot({ repoRoot, stateRoot });
+} else {
+  await mkdir(stateRoot, { recursive: true });
+}
 
 const engine = await detectEngine();
 const isPodman = path.basename(engine).toLowerCase() === "podman";

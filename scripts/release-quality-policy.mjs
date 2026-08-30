@@ -12,7 +12,7 @@ export const requiredProjectCheck = Object.freeze([
 export const requiredReleaseAudit = "node scripts/release-audit.mjs";
 
 const requiredCheckScriptsDigest =
-  "sha256:68644d60ff11d72bbf3e1236b3be5834c398ee163490ac5b318bf474d96928a6";
+  "sha256:8456c83304a4346c0bfcf4196c6ccf33188e4a8841dc56b96108f734976997bc";
 
 const requiredRootDelegates = Object.freeze({
   prebuild:
