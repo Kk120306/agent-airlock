@@ -36,6 +36,7 @@ import {
   hasExactRecordingEffect,
   hasExactRecordingResources,
   hasExactFreshRecordingRunIds,
+  hasLocallyVerifiedPortableProof,
   hasRepairRecordingLineage,
   hasRootRecordingLineage,
   hasValidTerminalRecordingRun,
@@ -2712,6 +2713,9 @@ function PortableTrustExport({
   const [selectedDisclosures, setSelectedDisclosures] = useState<string[]>([]);
   const [localAnchor, setLocalAnchor] = useState(false);
   const [evmPayload, setEvmPayload] = useState(false);
+  const [browserVerificationValid, setBrowserVerificationValid] = useState<
+    boolean | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [federatedExportBusy, setFederatedExportBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -2725,6 +2729,7 @@ function PortableTrustExport({
     setSelectedDisclosures([]);
     setLocalAnchor(false);
     setEvmPayload(false);
+    setBrowserVerificationValid(null);
     setBusy(false);
     setDirty(false);
   }, [runId, evidenceRevision]);
@@ -2732,6 +2737,7 @@ function PortableTrustExport({
   const generate = async () => {
     const generation = requestGeneration.current + 1;
     requestGeneration.current = generation;
+    setBrowserVerificationValid(null);
     setBusy(true);
     try {
       const exported = await api.exportPortableReceipt(runId, {
@@ -2750,6 +2756,7 @@ function PortableTrustExport({
           );
       if (requestGeneration.current !== generation) return;
       setResult(exported);
+      setBrowserVerificationValid(browserReport.valid);
       setAvailableDisclosures(exported.availableDisclosures);
       setDirty(false);
       const valid = exported.verification.valid && browserReport.valid;
@@ -2767,6 +2774,7 @@ function PortableTrustExport({
       });
     } catch (reason) {
       if (requestGeneration.current === generation) {
+        setBrowserVerificationValid(false);
         const message =
           reason instanceof Error ? reason.message : String(reason);
         onError(message);
@@ -2809,6 +2817,7 @@ function PortableTrustExport({
 
   const invalidatePendingExport = () => {
     requestGeneration.current += 1;
+    setBrowserVerificationValid(null);
     setBusy(false);
     setDirty(true);
   };
@@ -2885,7 +2894,14 @@ function PortableTrustExport({
     </>
   );
   const hasDecisionChain = (result?.decisionChain?.packets.length ?? 0) > 1;
-  const proofVerified = result?.verification.valid === true && !dirty;
+  const proofVerified = hasLocallyVerifiedPortableProof({
+    serverVerificationValid: result?.verification.valid,
+    browserVerificationValid,
+    dirty,
+  });
+  const displayedResultVerified = judgeProofMode
+    ? proofVerified
+    : result?.verification.valid === true && !dirty;
   const requiredDisclosureCount = availableDisclosures.filter(
     (disclosure) => disclosure.required,
   ).length;
@@ -3058,22 +3074,26 @@ function PortableTrustExport({
       )}
 
       {result && (
-        <div className="portable-result" data-valid={result.verification.valid}>
+        <div className="portable-result" data-valid={displayedResultVerified}>
           <div className="portable-result-status">
             <span aria-hidden="true">
-              {result.verification.valid ? "✓" : "!"}
+              {displayedResultVerified ? "✓" : "!"}
             </span>
             <div>
               <strong>
-                {result.verification.valid
+                {displayedResultVerified
                   ? judgeProofMode
                     ? "Signed proof verified locally"
                     : "Self-check passed"
-                  : "Receipt verification failed"}
+                  : judgeProofMode
+                    ? "Proof verification failed"
+                    : "Receipt verification failed"}
               </strong>
               <small>
                 {dirty
                   ? "Options changed. Regenerate before downloading."
+                  : judgeProofMode && !proofVerified
+                    ? "The server self-check and browser verifier did not both accept this proof. Regenerate before relying on it."
                   : hasDecisionChain
                     ? judgeProofMode
                       ? `${result.decisionChain!.packets.length} signed decisions verified locally with every Canonical State handoff intact.`
@@ -3099,7 +3119,7 @@ function PortableTrustExport({
                     `agent-airlock-receipt-${runId}.json`,
                   )
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultVerified}
               >
                 Download receipt JSON
               </button>
@@ -3110,15 +3130,13 @@ function PortableTrustExport({
                 type="button"
                 className="button button-ghost"
                 onClick={() => void exportFederatedBundle()}
-                  disabled={
-                    dirty || !result.verification.valid || federatedExportBusy
-                  }
+                disabled={!displayedResultVerified || federatedExportBusy}
               >
-                  {federatedExportBusy ? (
-                    <Spinner />
-                  ) : (
-                    "Download federated work"
-                  )}
+                {federatedExportBusy ? (
+                  <Spinner />
+                ) : (
+                  "Download federated work"
+                )}
               </button>
             )}
             {(!judgeProofMode || !hasDecisionChain) && (
@@ -3131,7 +3149,7 @@ function PortableTrustExport({
                     `agent-airlock-evidence-${runId}.json`,
                   )
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultVerified}
               >
                 {judgeProofMode
                   ? "Download verified evidence packet"
@@ -3148,7 +3166,7 @@ function PortableTrustExport({
                     `agent-airlock-decision-chain-${runId}.json`,
                   )
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultVerified}
               >
                 {judgeProofMode
                   ? "Download verified decision chain"
@@ -3162,7 +3180,7 @@ function PortableTrustExport({
                 onClick={() =>
                   onVerifyArtifact(result.decisionChain ?? result.packet)
                 }
-                disabled={dirty || !result.verification.valid}
+                disabled={!displayedResultVerified}
               >
                 Inspect in zero-upload verifier
               </button>
@@ -3209,7 +3227,7 @@ function PortableTrustExport({
                   <button
                     type="button"
                     className="button button-ghost"
-                    disabled={dirty || !result.verification.valid}
+                    disabled={!displayedResultVerified}
                     onClick={() =>
                       downloadJson(
                         result.anchor,
@@ -3231,7 +3249,7 @@ function PortableTrustExport({
                   <button
                     type="button"
                     className="button button-ghost"
-                    disabled={dirty || !result.verification.valid}
+                    disabled={!displayedResultVerified}
                     onClick={() =>
                       downloadJson(
                         result.evmPayload,

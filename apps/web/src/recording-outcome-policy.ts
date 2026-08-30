@@ -44,6 +44,22 @@ type RecordingEffectExpectation = {
 export const recordingResourceKinds: RunTransaction["resources"][number]["kind"][] =
   ["workspace", "codex-session", "sqlite", "external-actions"];
 
+export function hasLocallyVerifiedPortableProof({
+  serverVerificationValid,
+  browserVerificationValid,
+  dirty,
+}: {
+  serverVerificationValid: boolean | null | undefined;
+  browserVerificationValid: boolean | null;
+  dirty: boolean;
+}): boolean {
+  return (
+    serverVerificationValid === true &&
+    browserVerificationValid === true &&
+    !dirty
+  );
+}
+
 export function hasExactRecordingResources(
   transaction: RunTransaction,
   disposition: "promoted" | "quarantined",

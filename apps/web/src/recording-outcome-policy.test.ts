@@ -14,6 +14,7 @@ import {
   hasExactRecordingEffect,
   hasExactRecordingResources,
   hasExactFreshRecordingRunIds,
+  hasLocallyVerifiedPortableProof,
   hasRepairRecordingLineage,
   hasRootRecordingLineage,
   hasValidTerminalRecordingRun,
@@ -299,6 +300,46 @@ function resources(
     summary: kind,
   }));
 }
+
+describe("portable proof local verification", () => {
+  it("requires both the server self-check and browser verifier", () => {
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: true,
+        dirty: false,
+      }),
+    ).toBe(true);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: false,
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: false,
+        browserVerificationValid: true,
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: null,
+        dirty: false,
+      }),
+    ).toBe(false);
+    expect(
+      hasLocallyVerifiedPortableProof({
+        serverVerificationValid: true,
+        browserVerificationValid: true,
+        dirty: true,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("recording outcome fail-closed policy", () => {
   it("binds the verified two-packet chain to the displayed Quarantine and Repair", () => {
