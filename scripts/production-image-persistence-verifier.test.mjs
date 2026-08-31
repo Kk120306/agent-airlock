@@ -24,7 +24,7 @@ import {
 import {
   realRuntimeProofAgentDescription,
   realRuntimeProofAgentInstructions,
-  realRuntimeProofContract,
+  productionImageRuntimeProofContract,
   productionImageBoundaryPrompt,
 } from "./runtime-demo-profile.mjs";
 
@@ -129,7 +129,7 @@ const defaultOutcomeContract = {
 const configuredOutcomeContract = {
   schemaVersion: 1,
   version: 2,
-  ...structuredClone(realRuntimeProofContract),
+  ...structuredClone(productionImageRuntimeProofContract),
   createdAt: "2026-08-31T00:00:01.000Z",
 };
 

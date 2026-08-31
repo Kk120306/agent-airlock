@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import {
   realRuntimeProofAgentDescription,
   realRuntimeProofAgentInstructions,
-  realRuntimeProofContract,
+  productionImageRuntimeProofContract,
   productionImageBoundaryPrompt,
 } from "./runtime-demo-profile.mjs";
 
@@ -587,12 +587,12 @@ function assertExactOutcomeContractHistory(
     !exactOutcomeContract(
       agent?.outcomeContract,
       2,
-      realRuntimeProofContract,
+      productionImageRuntimeProofContract,
     ) ||
     !exactOutcomeContract(
       transaction?.outcomeContract,
       2,
-      realRuntimeProofContract,
+      productionImageRuntimeProofContract,
     ) ||
     JSON.stringify(transaction.outcomeContract) !==
       JSON.stringify(agent.outcomeContract) ||

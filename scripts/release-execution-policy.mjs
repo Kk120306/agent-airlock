@@ -8,7 +8,7 @@ const approvedReleaseSourceDigests = Object.freeze({
   proveRuntimeSource:
     "f9d96158196a8165ed39eaba2e4d139538970cac09624a794606ba45a7690521",
   runtimeProofTestSource:
-    "617a783c934f7cde4442536e4eab0902eee2d0c9f00c411240ab7ba3eb338903",
+    "d0e99ce70eac6b9dbad24678337d9a146ee916d56094a226fa0ba3943805b7b4",
   workflowSource:
     "5652876cff63c7d9bf2d889189801730ca3d9721cf91bc6d705da19f127a007f",
 });
@@ -57,7 +57,7 @@ export const releaseExecutionDependencyPaths = Object.freeze([
 ]);
 
 const approvedReleaseDependencyClosureDigest =
-  "a35c65994268c823ad0b34eef1b3398f3e47f6ad26981663be30e2ac57ee679e";
+  "2c97eaab17844bb78033f6b0310d3a89f95049d3a5f214ad672cf1dcbcb660a2";
 
 function approvedSourceDigest(name, source) {
   return (

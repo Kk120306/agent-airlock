@@ -726,7 +726,7 @@ function requiredValidations(transaction, expected) {
   }
   return required.some(
     (validation) =>
-      validation?.name === "protocol-fixture-content" &&
+      validation?.name === "command:protocol-content" &&
       validation?.status === "failed",
   );
 }
@@ -2580,7 +2580,7 @@ function runtimeProofRecordingExpectation(runs) {
       resourceDisposition:
         "Workspace · Codex session · SQLite · fresh outbox promoted",
       fingerprintTransition: `Canonical ${recordingHashPrefix(repair.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(repair.transaction.canonicalContentHashAfter)}`,
-      validationAndSqlite: `Structural protocol proof · SQLite demo = ${repairSqliteRow?.value}`,
+      validationAndSqlite: `Validation command:protocol-content · SQLite demo = ${repairSqliteRow?.value}`,
       parentAndDepth: `repaired from parent ${repair.transaction.lineage.parentRunId.slice(0, 8)} · depth ${repair.transaction.lineage.depth}`,
       effectType: repairEffect?.type,
       effectDelivery: `${repairEffect?.id} delivered in Promotion with a fresh key`,

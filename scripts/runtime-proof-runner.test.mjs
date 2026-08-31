@@ -95,7 +95,7 @@ function resources(disposition) {
 }
 
 function validation(status) {
-  return [{ name: "protocol-fixture-content", required: true, status }];
+  return [{ name: "command:protocol-content", required: true, status }];
 }
 
 function outcomeContract() {
@@ -1173,7 +1173,7 @@ test("rejects every required Run-set contradiction", async (context) => {
       (runs) => {
         runs.find((run) => run.id === "run-quarantine").transaction.validations = [
           {
-            name: "protocol-fixture-content",
+            name: "command:protocol-content",
             required: true,
             status: "passed",
           },

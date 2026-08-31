@@ -9,7 +9,7 @@ import { chromium } from "@playwright/test";
 import {
   realRuntimeProofAgentDescription,
   realRuntimeProofAgentInstructions,
-  realRuntimeProofContract,
+  productionImageRuntimeProofContract,
   productionImageBoundaryPrompt,
 } from "./runtime-demo-profile.mjs";
 import { requireLoopbackOrigin } from "./check-production-image-browser.mjs";
@@ -155,7 +155,7 @@ function exactContract(transaction) {
       maxAddedBytes: contract?.maxAddedBytes,
       secretPatterns: contract?.secretPatterns,
       validationCommands: contract?.validationCommands,
-    }) === JSON.stringify(realRuntimeProofContract)
+    }) === JSON.stringify(productionImageRuntimeProofContract)
   );
 }
 
@@ -483,7 +483,7 @@ function exactAgentOutcomeContract(agent) {
       maxAddedBytes: contract.maxAddedBytes,
       secretPatterns: contract.secretPatterns,
       validationCommands: contract.validationCommands,
-    }) === JSON.stringify(realRuntimeProofContract)
+    }) === JSON.stringify(productionImageRuntimeProofContract)
   );
 }
 
@@ -790,7 +790,7 @@ async function createTransaction({ authToken, page }) {
     page,
     {
       authToken,
-      body: realRuntimeProofContract,
+      body: productionImageRuntimeProofContract,
       method: "PUT",
       pathname: `/api/agents/${agentId}/outcome-contract`,
     },

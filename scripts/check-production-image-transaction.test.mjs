@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { realRuntimeProofContract } from "./runtime-demo-profile.mjs";
+import { productionImageRuntimeProofContract } from "./runtime-demo-profile.mjs";
 import {
   ProductionImageTransactionError,
   assertProductionImageTransaction,
@@ -82,7 +82,7 @@ function fixture() {
       schemaVersion: 1,
       version: 2,
       createdAt: "2026-08-31T00:00:00.000Z",
-      ...structuredClone(realRuntimeProofContract),
+      ...structuredClone(productionImageRuntimeProofContract),
     },
     resources: ["workspace", "codex-session", "sqlite", "external-actions"].map(
       (kind) => ({ kind, disposition: "promoted" }),
