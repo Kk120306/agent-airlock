@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -39,12 +47,36 @@ function deliveryRequest() {
   };
 }
 
-async function postDelivery(url, request) {
+async function readIdentity(receiver) {
+  const response = await fetch(receiver.identityUrl);
+  assert.equal(response.status, 200);
+  const identity = await response.json();
+  assert.deepEqual(Object.keys(identity).sort(), [
+    "consumerId",
+    "deliveryMode",
+    "schema",
+    "schemaVersion",
+  ]);
+  assert.equal(
+    identity.schema,
+    "agent-airlock/external-action-consumer-identity",
+  );
+  assert.equal(identity.schemaVersion, 1);
+  assert.equal(identity.deliveryMode, "idempotent-http");
+  assert.match(
+    identity.consumerId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  return identity;
+}
+
+async function postDelivery(url, request, consumerId) {
   return fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "idempotency-key": request.idempotencyKey,
+      "x-agent-airlock-consumer-id": consumerId,
     },
     body: JSON.stringify(request.body),
   });
@@ -60,8 +92,17 @@ test("the ModelArk effect receiver performs one durable HTTP delivery", async ()
     filePath,
   });
   try {
-    const firstResponse = await postDelivery(receiver.url, request);
-    const secondResponse = await postDelivery(receiver.url, request);
+    const identity = await readIdentity(receiver);
+    const firstResponse = await postDelivery(
+      receiver.url,
+      request,
+      identity.consumerId,
+    );
+    const secondResponse = await postDelivery(
+      receiver.url,
+      request,
+      identity.consumerId,
+    );
     assert.equal(firstResponse.status, 200);
     assert.equal(secondResponse.status, 200);
     const first = await firstResponse.json();
@@ -70,6 +111,8 @@ test("the ModelArk effect receiver performs one durable HTTP delivery", async ()
     assert.equal(first.receipt.idempotencyKey, request.idempotencyKey);
     assert.equal(first.receipt.destination, "demo-console");
     const persisted = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(persisted.schemaVersion, 2);
+    assert.equal(persisted.consumerId, identity.consumerId);
     assert.equal(persisted.deliveries.length, 1);
 
     await receiver.close();
@@ -78,7 +121,13 @@ test("the ModelArk effect receiver performs one durable HTTP delivery", async ()
       port: 0,
       filePath,
     });
-    const replayResponse = await postDelivery(receiver.url, request);
+    const restartedIdentity = await readIdentity(receiver);
+    assert.deepEqual(restartedIdentity, identity);
+    const replayResponse = await postDelivery(
+      receiver.url,
+      request,
+      restartedIdentity.consumerId,
+    );
     assert.equal(replayResponse.status, 200);
     assert.deepEqual(await replayResponse.json(), first);
   } finally {
@@ -97,7 +146,12 @@ test("the ModelArk effect receiver rejects a forged idempotency key", async () =
   try {
     const request = deliveryRequest();
     request.idempotencyKey = commitment("forged");
-    const response = await postDelivery(receiver.url, request);
+    const identity = await readIdentity(receiver);
+    const response = await postDelivery(
+      receiver.url,
+      request,
+      identity.consumerId,
+    );
     assert.equal(response.status, 400);
   } finally {
     await receiver.close();
@@ -124,14 +178,23 @@ test("a failed receipt commit is not acknowledged from memory on retry", async (
   });
   try {
     const request = deliveryRequest();
-    const failed = await postDelivery(receiver.url, request);
+    const identity = await readIdentity(receiver);
+    const failed = await postDelivery(
+      receiver.url,
+      request,
+      identity.consumerId,
+    );
     assert.equal(failed.status, 503);
     assert.equal(
       JSON.parse(await readFile(filePath, "utf8")).deliveries.length,
       0,
     );
 
-    const retried = await postDelivery(receiver.url, request);
+    const retried = await postDelivery(
+      receiver.url,
+      request,
+      identity.consumerId,
+    );
     assert.equal(retried.status, 200);
     const accepted = await retried.json();
     assert.equal(accepted.receipt.idempotencyKey, request.idempotencyKey);
@@ -141,6 +204,128 @@ test("a failed receipt commit is not acknowledged from memory on retry", async (
     );
   } finally {
     await receiver.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the ModelArk effect receiver identity is stable for the same store", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "airlock-http-effect-"));
+  const filePath = path.join(root, "deliveries.json");
+  let receiver = await startModelArkEffectReceiver({
+    host: "127.0.0.1",
+    port: 0,
+    filePath,
+  });
+  try {
+    const beforeRestart = await readIdentity(receiver);
+    await receiver.close();
+    receiver = await startModelArkEffectReceiver({
+      host: "127.0.0.1",
+      port: 0,
+      filePath,
+    });
+    const afterRestart = await readIdentity(receiver);
+    assert.deepEqual(afterRestart, beforeRestart);
+    const persisted = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(persisted.schemaVersion, 2);
+    assert.equal(persisted.consumerId, beforeRestart.consumerId);
+  } finally {
+    await receiver.close().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a replaced ModelArk effect receiver store gets a new identity and rejects a stale handshake", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "airlock-http-effect-"));
+  const filePath = path.join(root, "deliveries.json");
+  const request = deliveryRequest();
+  let receiver = await startModelArkEffectReceiver({
+    host: "127.0.0.1",
+    port: 0,
+    filePath,
+  });
+  try {
+    const originalIdentity = await readIdentity(receiver);
+    await receiver.close();
+    await unlink(filePath);
+    receiver = await startModelArkEffectReceiver({
+      host: "127.0.0.1",
+      port: 0,
+      filePath,
+    });
+    const replacementIdentity = await readIdentity(receiver);
+    assert.notEqual(replacementIdentity.consumerId, originalIdentity.consumerId);
+
+    const staleResponse = await postDelivery(
+      receiver.url,
+      request,
+      originalIdentity.consumerId,
+    );
+    assert.equal(staleResponse.status, 409);
+    assert.deepEqual(await staleResponse.json(), {
+      error: "consumer identity conflict",
+    });
+    const persisted = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(persisted.consumerId, replacementIdentity.consumerId);
+    assert.equal(persisted.deliveries.length, 0);
+  } finally {
+    await receiver.close().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a legacy receiver store gains an identity without losing receipts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "airlock-http-effect-"));
+  const filePath = path.join(root, "deliveries.json");
+  const request = deliveryRequest();
+  let receiver = await startModelArkEffectReceiver({
+    host: "127.0.0.1",
+    port: 0,
+    filePath,
+  });
+  try {
+    const originalIdentity = await readIdentity(receiver);
+    const acceptedResponse = await postDelivery(
+      receiver.url,
+      request,
+      originalIdentity.consumerId,
+    );
+    assert.equal(acceptedResponse.status, 200);
+    const accepted = await acceptedResponse.json();
+    await receiver.close();
+
+    const currentDatabase = JSON.parse(await readFile(filePath, "utf8"));
+    await writeFile(
+      filePath,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          deliveries: currentDatabase.deliveries,
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    receiver = await startModelArkEffectReceiver({
+      host: "127.0.0.1",
+      port: 0,
+      filePath,
+    });
+    const migratedIdentity = await readIdentity(receiver);
+    const replayResponse = await postDelivery(
+      receiver.url,
+      request,
+      migratedIdentity.consumerId,
+    );
+    assert.equal(replayResponse.status, 200);
+    assert.deepEqual(await replayResponse.json(), accepted);
+    const migratedDatabase = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(migratedDatabase.schemaVersion, 2);
+    assert.equal(migratedDatabase.consumerId, migratedIdentity.consumerId);
+    assert.deepEqual(migratedDatabase.deliveries, currentDatabase.deliveries);
+  } finally {
+    await receiver.close().catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
 });

@@ -1,14 +1,77 @@
+import {
+  access,
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 import {
   buildCodexArgs,
   buildCodexEnvironment,
+  buildCodexToolBoundaryArgs,
   CodexRunner,
   assertTrustedTokenBudget,
   parseCodexEventLine,
 } from "./codex-runner.js";
 
 describe("Codex runner protocol", () => {
+  it("isolates availability probe artifacts from the persistent Codex template", async () => {
+    const testRoot = await mkdtemp(
+      path.join(tmpdir(), "agent-airlock-codex-runner-test-"),
+    );
+    const codexHome = path.join(testRoot, "codex-home");
+    const probeRecordPath = path.join(testRoot, "probe-home.txt");
+    const codexBin = path.join(testRoot, "fake-codex.mjs");
+    await mkdir(codexHome);
+    await writeFile(path.join(codexHome, "config.toml"), "model = \"test\"\n");
+    await writeFile(
+      codexBin,
+      `#!/usr/bin/env node
+import { mkdir, symlink, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+const codexHome = process.env.CODEX_HOME;
+if (!codexHome) process.exit(2);
+const argDirectory = path.join(codexHome, "tmp", "arg0", "codex-arg0-test");
+await mkdir(argDirectory, { recursive: true });
+await writeFile(path.join(argDirectory, ".lock"), "");
+await symlink("/dev/null", path.join(argDirectory, "applypatch"));
+await symlink("/dev/null", path.join(argDirectory, "apply_patch"));
+await symlink("/dev/null", path.join(argDirectory, "codex-execve-wrapper"));
+await writeFile(${JSON.stringify(probeRecordPath)}, codexHome);
+process.stdout.write("codex-test 1.0.0\\n");
+`,
+      { mode: 0o700 },
+    );
+    await chmod(codexBin, 0o700);
+
+    try {
+      const config = loadConfig({
+        NODE_ENV: "test",
+        CODEX_BIN: codexBin,
+        CODEX_HOME: codexHome,
+        ARK_API_KEY: "test-key",
+        ARK_MODEL: "ep-test",
+      });
+
+      await expect(new CodexRunner(config).isAvailable()).resolves.toBe(true);
+      await expect(readdir(codexHome)).resolves.toEqual(["config.toml"]);
+      const probeCodexHome = await readFile(probeRecordPath, "utf8");
+      await expect(access(probeCodexHome)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(testRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails before process launch for unenforceable read-only provider bindings", async () => {
     const config = loadConfig({
       NODE_ENV: "test",
@@ -55,12 +118,41 @@ describe("Codex runner protocol", () => {
       "--sandbox",
       "workspace-write",
       "--skip-git-repo-check",
+      ...buildCodexToolBoundaryArgs(),
       "-C",
       "/tmp/workspace",
       "--add-dir",
       "/tmp/candidate-outbox",
       "build a calculator",
     ]);
+  });
+
+  it("forces a credential-free non-login environment for model-issued tools", () => {
+    const args = buildCodexToolBoundaryArgs();
+    const serialized = args.join(" ");
+
+    expect(serialized).toContain("allow_login_shell=false");
+    expect(serialized).toContain("shell_environment_policy.inherit=\"all\"");
+    expect(serialized).toContain(
+      "shell_environment_policy.ignore_default_excludes=false",
+    );
+    expect(serialized).toContain("*KEY*");
+    expect(serialized).toContain("*SECRET*");
+    expect(serialized).toContain("*TOKEN*");
+    expect(serialized).toContain("*PASSWORD*");
+    expect(serialized).toContain("*CREDENTIAL*");
+    expect(serialized).toContain("AIRLOCK_OUTBOX_PATH");
+    expect(serialized).toContain("AIRLOCK_REPAIR_REFERENCE_PATH");
+    expect(serialized).toContain("AIRLOCK_MAXIMUM_TOTAL_TOKENS");
+    expect(serialized).toContain("sandbox_workspace_write.network_access=false");
+  });
+
+  it("preserves an explicit Candidate-local resource binding for tools", () => {
+    const serialized = buildCodexToolBoundaryArgs([
+      "AIRLOCK_RESOURCE_POLICY_BUNDLE_PATH",
+    ]).join(" ");
+
+    expect(serialized).toContain("AIRLOCK_RESOURCE_POLICY_BUNDLE_PATH");
   });
 
   it("resumes a stored Codex thread", () => {
@@ -123,6 +215,7 @@ describe("Codex runner protocol", () => {
 
     expect(environment.CODEX_HOME).toBe("/tmp/candidate-session");
     expect(environment.CODEX_HOME).not.toBe(config.codexHome);
+    expect(environment.HOME).toBe("/tmp");
     expect(environment.AIRLOCK_OUTBOX_PATH).toBe(
       "/tmp/candidate-outbox/intents.jsonl",
     );

@@ -18,6 +18,80 @@ afterEach(async () => {
 });
 
 describe("Phase 8 canonical manifest migration", () => {
+  it("materializes the registry once and preserves its bytes across unchanged restarts", async () => {
+    const root = await temporaryRoot();
+    const registryPath = path.join(root, ".resource-registry.json");
+    const empty = new WorkspaceManager(root);
+    await empty.initialize();
+
+    await expect(access(registryPath)).rejects.toThrow();
+    await empty.commitProviderRegistryGeneration([], 0);
+    await expect(access(registryPath)).resolves.toBeUndefined();
+
+    const materialized = JSON.parse(await readFile(registryPath, "utf8")) as {
+      schemaVersion: number;
+      generation: number;
+      providers: unknown[];
+      updatedAt: string;
+    };
+    expect(materialized).toMatchObject({
+      schemaVersion: 1,
+      generation: 0,
+      providers: [],
+    });
+    expect(materialized.updatedAt).not.toBe(new Date(0).toISOString());
+
+    const priorTimestamp = "2000-01-01T00:00:00.000Z";
+    await writeFile(
+      registryPath,
+      JSON.stringify({ ...materialized, updatedAt: priorTimestamp }, null, 2) +
+        "\n",
+      "utf8",
+    );
+    const beforeRestart = await readFile(registryPath, "utf8");
+    const restartedEmpty = new WorkspaceManager(root);
+    await restartedEmpty.initialize();
+    const unchangedGeneration =
+      await restartedEmpty.nextProviderRegistryGeneration([]);
+    await restartedEmpty.commitProviderRegistryGeneration(
+      [],
+      unchangedGeneration,
+    );
+
+    expect(unchangedGeneration).toBe(0);
+    await expect(readFile(registryPath, "utf8")).resolves.toBe(beforeRestart);
+
+    const alpha = providerVersion("provider-a", "alpha", "a".repeat(64));
+    const descriptors = [descriptor(alpha, "1".repeat(64))];
+    const changedGeneration =
+      await restartedEmpty.nextProviderRegistryGeneration(descriptors);
+    await restartedEmpty.commitProviderRegistryGeneration(
+      descriptors,
+      changedGeneration,
+    );
+    const changedBytes = await readFile(registryPath, "utf8");
+    const changed = JSON.parse(changedBytes) as {
+      generation: number;
+      updatedAt: string;
+    };
+
+    expect(changed.generation).toBe(1);
+    expect(Date.parse(changed.updatedAt)).toBeGreaterThan(
+      Date.parse(priorTimestamp),
+    );
+    expect(changedBytes).not.toBe(beforeRestart);
+
+    const restartedPopulated = new WorkspaceManager(
+      root,
+      undefined,
+      undefined,
+      [alpha],
+    );
+    await restartedPopulated.initialize();
+    await restartedPopulated.commitProviderRegistryGeneration(descriptors, 1);
+    await expect(readFile(registryPath, "utf8")).resolves.toBe(changedBytes);
+  });
+
   it("upgrades schema 3 only after verifying its legacy composite fingerprint", async () => {
     const root = await temporaryRoot();
     const agent = fixtureAgent();

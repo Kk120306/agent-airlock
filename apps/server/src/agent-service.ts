@@ -127,7 +127,8 @@ import type {
   UpdateAgentInput,
 } from "./types.js";
 import {
-  ContainerValidationCommandExecutor,
+  createStructuralValidators,
+  createValidationCommandExecutor,
   type ValidationCommandExecutor,
 } from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -248,30 +249,33 @@ export class AgentService {
   private readonly runnerEnforcesTokenBudgets: boolean;
   private transparencyOperation: Promise<void> = Promise.resolve();
   private providerRegistryReady = false;
+  private actionDispatcherReadinessError: string | null = null;
 
   constructor(
     private readonly config: AppConfig,
     private readonly store: JsonStore,
     private readonly workspaces: WorkspaceManager,
     runner: AgentRunner,
-    validationCommandExecutor: ValidationCommandExecutor = new ContainerValidationCommandExecutor(
-      config,
-    ),
+    validationCommandExecutor: ValidationCommandExecutor =
+      createValidationCommandExecutor(config),
     promotionFaultInjector?: PromotionFaultInjector,
     private readonly resourceCoordinator: ResourceCoordinator = new ResourceCoordinator(
       new ResourceRegistry(),
     ),
+    externalActionDispatcher?: ExternalActionDispatcher,
   ) {
     this.runnerEnforcesTokenBudgets =
       runner.tokenBudgetEnforcement === "provider-boundary";
-    this.actionDispatcher = config.externalActionWebhookUrl
-      ? new HttpExternalActionDispatcher(
-          config.externalActionWebhookUrl,
-          path.join(config.dataDirectory, "http-delivery-receipts.json"),
-        )
-      : new MockExternalActionDispatcher(
-          path.join(config.dataDirectory, "mock-deliveries.json"),
-        );
+    this.actionDispatcher =
+      externalActionDispatcher ??
+      (config.externalActionWebhookUrl
+        ? new HttpExternalActionDispatcher(
+            config.externalActionWebhookUrl,
+            path.join(config.dataDirectory, "http-delivery-receipts.json"),
+          )
+        : new MockExternalActionDispatcher(
+            path.join(config.dataDirectory, "mock-deliveries.json"),
+          ));
     this.promotionJournal = new PromotionJournal(
       path.join(config.dataDirectory, "promotion-journal"),
     );
@@ -300,12 +304,17 @@ export class AgentService {
       this.federatedApprovalJournal,
       new WorkspaceFederatedCandidateAdapter(workspaces),
     );
+    const controlPlaneSensitiveValues = [config.arkApiKey, config.authToken];
     this.runner = new AirlockRunner(
       runner,
       workspaces,
-      new OutcomeValidator(validationCommandExecutor),
-      new SqliteResource(),
-      new ExternalActionOutbox(),
+      new OutcomeValidator(
+        validationCommandExecutor,
+        controlPlaneSensitiveValues,
+        createStructuralValidators(config),
+      ),
+      new SqliteResource(controlPlaneSensitiveValues),
+      new ExternalActionOutbox(controlPlaneSensitiveValues),
       this.actionDispatcher,
       this.promotionJournal,
       this.resourceCoordinator,
@@ -317,6 +326,7 @@ export class AgentService {
 
   async initialize(): Promise<void> {
     this.providerRegistryReady = false;
+    this.actionDispatcherReadinessError = null;
     await this.store.initialize();
     await this.sanitizePersistedErrors();
     await this.workspaces.initialize({
@@ -376,11 +386,106 @@ export class AgentService {
     const recoveredRunIds = new Set(
       recovery.recovered.map((item) => item.runId),
     );
+    const runsById = new Map(snapshot.runs.map((run) => [run.id, run]));
+    const enrichPromotionRecoveryFailure = async (
+      run: AgentRun,
+      sourceTransaction: RunTransaction | null,
+      sourceMessage: string,
+      markRecoveredAfterRestart: boolean,
+    ) => {
+      if (!sourceTransaction) {
+        return { message: sourceMessage, transaction: null };
+      }
+      const failedTransaction = structuredClone(sourceTransaction);
+      let message = sourceMessage;
+      try {
+        const canonical =
+          await this.workspaces.readCanonicalForProviderTransition(run.agentId);
+        if (
+          failedTransaction.candidateStateId !== null &&
+          canonical.stateId === failedTransaction.candidateStateId
+        ) {
+          failedTransaction.disposition = "promoted";
+          failedTransaction.quarantineAvailable = false;
+          failedTransaction.canonicalStateIdAfter = canonical.stateId;
+          failedTransaction.canonicalContentHashAfter = canonical.contentHash;
+          if (failedTransaction.sqlite) {
+            failedTransaction.sqlite.after = failedTransaction.sqlite.candidate;
+          }
+          message += " after Canonical State advanced";
+        } else if (
+          canonical.stateId !== failedTransaction.canonicalStateIdBefore ||
+          canonical.contentHash !== failedTransaction.canonicalContentHashBefore
+        ) {
+          message +=
+            "; current Canonical State contradicts the interrupted Promotion";
+        }
+      } catch (error) {
+        message +=
+          "; Canonical State inspection failed closed: " +
+          boundedPersistedError(
+            error,
+            "Canonical State inspection failed closed",
+            this.config,
+          );
+      }
+      failedTransaction.status = "recovery-error";
+      failedTransaction.recovery = {
+        ...failedTransaction.recovery,
+        recoveredAfterRestart: markRecoveredAfterRestart
+          ? true
+          : failedTransaction.recovery.recoveredAfterRestart,
+        recoveryError: message.slice(0, 500),
+      };
+      return { message, transaction: failedTransaction };
+    };
     const recoveryFailures = new Map(
       recovery.failures
         .filter((failure) => failure.runId)
         .map((failure) => [failure.runId as string, failure]),
     );
+    for (const [runId, failure] of recoveryFailures) {
+      const run = runsById.get(runId);
+      if (!run) continue;
+      const enriched = await enrichPromotionRecoveryFailure(
+        run,
+        failure.transaction ?? run.transaction,
+        failure.message,
+        failure.transaction === null,
+      );
+      recoveryFailures.set(runId, {
+        ...failure,
+        agentId: run.agentId,
+        ...enriched,
+      });
+    }
+    for (const run of snapshot.runs) {
+      const transaction = run.transaction;
+      if (
+        (run.status !== "queued" &&
+          run.status !== "running" &&
+          transaction?.status !== "promoting") ||
+        transaction?.status === "recovery-error" ||
+        transaction?.recovery.journalPhase == null ||
+        recoveredRunIds.has(run.id) ||
+        recovery.protectedRunIds.has(run.id) ||
+        recoveryFailures.has(run.id)
+      ) {
+        continue;
+      }
+      const failure = await enrichPromotionRecoveryFailure(
+        run,
+        transaction,
+        "Promotion journal is missing after durable Promotion began",
+        true,
+      );
+      recoveryFailures.set(run.id, {
+        runId: run.id,
+        agentId: run.agentId,
+        message: failure.message,
+        transaction: failure.transaction,
+      });
+    }
     const interrupted = new Map<
       string,
       Awaited<ReturnType<WorkspaceManager["quarantineInterruptedCandidate"]>>
@@ -574,7 +679,11 @@ export class AgentService {
       }
     }
     for (const runId of activeRunIds) {
-      if (recoveredRunIds.has(runId) || recovery.protectedRunIds.has(runId)) {
+      if (
+        recoveredRunIds.has(runId) ||
+        recovery.protectedRunIds.has(runId) ||
+        recoveryFailures.has(runId)
+      ) {
         continue;
       }
       if (
@@ -591,7 +700,15 @@ export class AgentService {
 
     const protectedRunIds = new Set([
       ...recovery.protectedRunIds,
+      ...recoveryFailures.keys(),
       ...activeRunIds,
+      ...snapshot.runs
+        .filter(
+          (run) =>
+            run.transaction?.status === "recovery-error" ||
+            Boolean(run.transaction?.recovery.recoveryError),
+        )
+        .map((run) => run.id),
       ...unresolvedCandidateSetRunIds,
       ...terminalAuthorityFailures.keys(),
       ...[...terminalAuthorityRecoveries.keys()].filter(
@@ -603,7 +720,6 @@ export class AgentService {
       string,
       PortableDecisionAuthorityRecord
     >();
-    const runsById = new Map(snapshot.runs.map((run) => [run.id, run]));
     const startupTime = Date.now();
     const cleanup = await this.workspaces.cleanupExpiredState({
       candidateOlderThan: new Date(
@@ -1022,6 +1138,17 @@ export class AgentService {
       candidateSetRecoveryFailureCount,
       runRecoveryFailureCount,
     );
+    try {
+      this.actionDispatcher.assertOperational();
+    } catch (error) {
+      this.providerRegistryReady = false;
+      this.actionDispatcherReadinessError = boundedPersistedError(
+        error,
+        "External action dispatcher is not operational",
+        this.config,
+      );
+      throw new Error(this.actionDispatcherReadinessError);
+    }
   }
 
   private async transitionProviderRegistryAfterRecovery(
@@ -3857,6 +3984,24 @@ export class AgentService {
   }
 
   async systemInfo(): Promise<Record<string, unknown>> {
+    let runtime = "Codex CLI in application container";
+    if (this.config.demoMode) {
+      runtime = "Deterministic Codex protocol fixture";
+    } else if (
+      this.config.protocolFixtureMode &&
+      this.config.runtimeProvider === "container"
+    ) {
+      runtime =
+        "Real Codex CLI in disposable " +
+        this.config.containerEngine +
+        " Runtime";
+    } else if (this.config.protocolFixtureMode) {
+      runtime =
+        "Real Codex CLI in application container against the local Responses protocol fixture";
+    } else if (this.config.runtimeProvider === "container") {
+      runtime = "Codex CLI in " + this.config.containerEngine + " Runtime";
+    }
+
     return {
       demoMode: this.config.demoMode,
       protocolFixtureMode: this.config.protocolFixtureMode,
@@ -3915,13 +4060,7 @@ export class AgentService {
         this.config.runtimeProvider === "container"
           ? this.config.containerEngine
           : null,
-      runtime: this.config.demoMode
-        ? "Deterministic Codex protocol fixture"
-        : this.config.protocolFixtureMode
-          ? "Real Codex CLI in disposable " + this.config.containerEngine + " Runtime"
-        : this.config.runtimeProvider === "container"
-          ? "Codex CLI in " + this.config.containerEngine + " Runtime"
-          : "Codex CLI in application container",
+      runtime,
     };
   }
 
@@ -5384,6 +5523,13 @@ export class AgentService {
   }
 
   private assertProviderRegistryReady(): void {
+    if (this.actionDispatcherReadinessError) {
+      throw new HttpError(
+        503,
+        "External action dispatcher is not operational: " +
+          this.actionDispatcherReadinessError,
+      );
+    }
     if (!this.providerRegistryReady) {
       throw new HttpError(
         503,
@@ -5505,6 +5651,7 @@ function boundedPersistedError(
   }
   const configuredValues = [
     config.arkApiKey,
+    config.authToken,
     config.arkBaseUrl,
     config.arkModel,
   ]

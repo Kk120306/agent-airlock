@@ -38,7 +38,7 @@ After execution, a versioned Outcome Contract evaluates the complete Candidate w
 A passing Candidate is installed as one immutable version and an atomic canonical manifest makes it accepted reality.
 An invalid Candidate is quarantined with evidence while Canonical State remains unchanged.
 A bounded Repair Run can continue from that retained work with the exact failure evidence, original contract, verified Canonical reference, and a fresh outbox.
-Supported external effects become claimable only after Promotion and carry stable idempotency keys.
+Supported external effects become claimable only after Canonical State advances during Promotion and carry stable idempotency keys.
 
 ## Why it fits Track 1
 
@@ -58,13 +58,25 @@ Signatures remain evidence and never become Promotion authority.
 
 ## End-to-end demo
 
+The recording begins with the selected `Real Runtime Proof` Agent visibly `READY` in the starter-kit Playground.
+The Playground then invokes one real multi-resource task through the production frontend-to-Agent path.
 One action creates exactly three fresh persisted Runs through React, Fastify, `AgentService`, the shared `AgentRunner` boundary, pinned Codex CLI, and a disposable container Runtime.
 The first Run writes `candidate-only` to `protocol-proof.txt`, sets the `demo` inventory row in `.airlock/demo.sqlite` to `candidate-only`, and prepares the deferred `protocol-release-ready` notification.
-Every required Validation passes, all four resources promote together, the Canonical fingerprint advances, and the effect is delivered only after Promotion.
+Every required Validation passes, all four resources promote together, the Canonical fingerprint advances, and only then is the effect delivered during Promotion.
 The second Run writes `unsafe-candidate` to the same file and row and prepares `protocol-unsafe`.
 The required `command:protocol-content` Validation fails, so all four resources are quarantined, zero effects are delivered, and the Canonical fingerprint remains identical.
-The third Run repairs that retained Candidate, restores the required file and SQLite values, uses a fresh outbox, passes every required Validation, promotes all four resources, and delivers `protocol-repair-ready` after Promotion.
+The third Run repairs that retained Candidate, restores the required file and SQLite values, uses a fresh outbox, passes every required Validation, and advances Canonical State before delivering `protocol-repair-ready` during Promotion.
 The exact quarantined-parent to promoted-Repair decision chain then opens in a browser-local verifier that reports zero API calls, validates both signatures, checks the parent digest, and proves the Canonical State handoff.
+The final screen shows the Agent still `READY` with `Continue in Playground` enabled, so the platform remains understandable and controllable after failure and recovery.
+
+### Required live demo map
+
+1. The opening frame identifies the selected runnable Agent, its `READY` lifecycle state, and its versioned Outcome Contract.
+2. The production Playground invokes a real Whole-Agent task through React, Fastify, `AgentService`, and `AgentRunner`.
+3. Real Codex in a disposable container mutates an isolated file, SQLite snapshot, persistent session, and deferred-action outbox.
+4. Airlock displays required Validation results, four-resource dispositions, Canonical fingerprints, effect ordering, Run identifiers, receipts, and signed Repair lineage.
+5. The invalid Candidate is quarantined with zero effects and an unchanged Canonical fingerprint, then a bounded Repair child recovers the retained work.
+6. The closing frame verifies the signed chain locally and shows the Agent still `READY` with the Playground continuation control enabled.
 
 ## Official Track 1 rubric map
 
@@ -85,7 +97,7 @@ The final UI summarizes persisted evidence rather than trusting prompts or Agent
 
 ### Demo and reproducibility - 15%
 
-One command builds the production application and Runtime image, owns isolated state, opens production Chrome, creates exactly three fresh Runs, verifies the signed chain, cleans up owned processes, and enforces a hard 180-second budget.
+One command builds the production application and Runtime image, owns isolated state, opens production Chrome, creates exactly three fresh Runs, verifies the signed chain, cleans up owned processes, and enforces a hard 180-second browser-recording budget.
 The canonical proof requires no credential, wallet, blockchain transaction, or paid inference.
 
 ## Impact
@@ -142,6 +154,15 @@ The same boundary already supports a capability-checked Transactional Resource S
 - Repository screenshots under `docs/assets` are captures of the product itself.
 - No third-party stock image, video, icon pack, audio, or design template is included in the submission.
 
+#### Devpost gallery files
+
+Use these four checked-in product captures for the Devpost gallery:
+
+- `docs/assets/agent-airlock-live-01-overview.jpg` shows the `READY` real-Runtime entry state and complete three-Run safety loop.
+- `docs/assets/agent-airlock-live-02-quarantine.jpg` shows all four resources quarantined, zero delivered effects, and an unchanged Canonical fingerprint.
+- `docs/assets/agent-airlock-live-03-verified-recovery.jpg` shows the promoted Repair and locally verified two-decision recovery chain.
+- `docs/assets/agent-airlock-live-04-zero-upload-verifier.jpg` shows browser verification with zero API calls, zero uploads, two valid signatures, the parent link, and the Canonical State handoff.
+
 ### License
 
 The repository uses the MIT License inherited from the CodeJam starter kit.
@@ -162,7 +183,7 @@ Then run:
 ```bash
 git clone https://github.com/Kk120306/agent-airlock.git
 cd agent-airlock
-npm install
+npm ci
 npm run prove:runtime -- --reset --json
 npm run prove:runtime -- --reset --headed
 ```

@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
 FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 
@@ -22,6 +22,8 @@ WORKDIR /app
 ARG DEBIAN_MIRROR=""
 ARG DEBIAN_SECURITY_MIRROR=""
 
+COPY docker/codex-runtime/package.json docker/codex-runtime/package-lock.json /opt/codex/
+
 RUN if [ -n "$DEBIAN_SECURITY_MIRROR" ]; then \
       find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) \
         -exec sed -i "s|http://deb.debian.org/debian-security|$DEBIAN_SECURITY_MIRROR|g" {} +; \
@@ -32,7 +34,8 @@ RUN if [ -n "$DEBIAN_SECURITY_MIRROR" ]; then \
     fi \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
-    && npm install --global @openai/codex@0.111.0 \
+    && npm ci --prefix /opt/codex --omit=dev --ignore-scripts \
+    && ln -s /opt/codex/node_modules/.bin/codex /usr/local/bin/codex \
     && codex --version \
     && rm -rf /var/lib/apt/lists/*
 

@@ -38,6 +38,7 @@ import {
   assertMatchingRuntimeProofDecisionChainSources,
   assertSafeRuntimeProofResult,
   assertSafeRuntimeProofRoot,
+  assertStoppedRuntimeProofSnapshot,
   buildRuntimeProofResult,
   cleanupAbandonedRuntimeProofSessions,
   cleanupRuntimeProofSessionRoot,
@@ -138,6 +139,11 @@ function makeRunSet() {
           summary: "Promotion started",
         },
         {
+          status: "promoting",
+          at: "2026-08-28T10:00:01.150Z",
+          summary: "Canonical State advanced before external action delivery",
+        },
+        {
           status: "promoted",
           at: "2026-08-28T10:00:01.300Z",
           summary: "Promotion completed",
@@ -235,6 +241,11 @@ function makeRunSet() {
           status: "promoting",
           at: "2026-08-28T10:00:03.100Z",
           summary: "Repair Promotion started",
+        },
+        {
+          status: "promoting",
+          at: "2026-08-28T10:00:03.150Z",
+          summary: "Canonical State advanced before external action delivery",
         },
         {
           status: "promoted",
@@ -728,6 +739,219 @@ test("rejects stale ordinary Runs before invoking Chrome", async () => {
   assert.deepEqual(events, ["closed"]);
 });
 
+test("rejects malformed or duplicate Run IDs before baselining", async (context) => {
+  const cases = [
+    ["missing Run id", (runs) => delete runs[0].id],
+    ["blank Run id", (runs) => (runs[0].id = "")],
+    ["non-string Run id", (runs) => (runs[0].id = 7)],
+    ["duplicate Run id", (runs) => runs.push(clone(runs[0]))],
+  ];
+
+  for (const [name, mutate] of cases) {
+    await context.test(name, async () => {
+      const historicalRun = {
+        ...clone(makeRunSet().promotion),
+        id: "run-candidate-set-historical",
+        candidateSetId: "candidate-set-historical",
+        competitorId: "competitor-historical",
+      };
+      const initialRuns = [historicalRun];
+      mutate(initialRuns);
+      const events = [];
+
+      await expectFailure(
+        runRuntimeProofSession({
+          baseUrl: "http://127.0.0.1:3222",
+          artifactRoot: "/bounded-test-root",
+          readinessDigest,
+          browserDriver: browserFixture(events),
+          fetchImpl: fetchFixture(apiRuns(makeRunSet()), { initialRuns }),
+          verifyChain: async () => verifiedChainReport(),
+          writeArtifacts: async () =>
+            assert.fail("invalid Run IDs cannot publish"),
+        }),
+        "run-set-invalid",
+      );
+
+      assert.deepEqual(events, ["closed"]);
+    });
+  }
+});
+
+test("counts a fresh Candidate Set Run before validating the three ordinary Runs", async () => {
+  const runSet = makeRunSet();
+  const candidateSetRun = {
+    ...clone(runSet.promotion),
+    id: "run-candidate-set-extra",
+    candidateSetId: "candidate-set-extra",
+    competitorId: "competitor-extra",
+    createdAt: "2026-08-28T10:00:04.000Z",
+  };
+  const events = [];
+  let published = false;
+
+  await expectFailure(
+    runRuntimeProofSession({
+      baseUrl: "http://127.0.0.1:3222",
+      artifactRoot: "/bounded-test-root",
+      readinessDigest,
+      browserDriver: browserFixture(events),
+      fetchImpl: fetchFixture([...apiRuns(runSet), candidateSetRun]),
+      verifyChain: async () => verifiedChainReport(),
+      writeArtifacts: async () => {
+        published = true;
+      },
+    }),
+    "run-set-invalid",
+  );
+
+  assert.equal(published, false);
+  assert.deepEqual(events, ["invoked-once", "closed"]);
+});
+
+test("rejects a reclassified historical Candidate Set Run", async () => {
+  const runSet = makeRunSet();
+  const historicalCandidateSetRun = {
+    ...clone(runSet.promotion),
+    candidateSetId: "candidate-set-historical",
+    competitorId: "competitor-historical",
+  };
+  const events = [];
+  let published = false;
+
+  await expectFailure(
+    runRuntimeProofSession({
+      baseUrl: "http://127.0.0.1:3222",
+      artifactRoot: "/bounded-test-root",
+      readinessDigest,
+      browserDriver: browserFixture(events),
+      fetchImpl: fetchFixture(apiRuns(runSet), {
+        initialRuns: [historicalCandidateSetRun],
+      }),
+      verifyChain: async () => verifiedChainReport(),
+      writeArtifacts: async () => {
+        published = true;
+      },
+    }),
+    "run-set-invalid",
+  );
+
+  assert.equal(published, false);
+  assert.deepEqual(events, ["invoked-once", "closed"]);
+});
+
+test("allows unrelated historical Candidate Set Runs beside three fresh ordinary Runs", async () => {
+  const runSet = makeRunSet();
+  const historicalCandidateSetRun = {
+    ...clone(runSet.promotion),
+    id: "run-candidate-set-historical",
+    candidateSetId: "candidate-set-historical",
+    competitorId: "competitor-historical",
+  };
+  const events = [];
+  let published = false;
+  const runs = [historicalCandidateSetRun, ...apiRuns(runSet)];
+
+  const result = await runRuntimeProofSession({
+    baseUrl: "http://127.0.0.1:3222",
+    artifactRoot: "/bounded-test-root",
+    readinessDigest,
+    browserDriver: browserFixture(events),
+    fetchImpl: fetchFixture(runs, {
+      initialRuns: [historicalCandidateSetRun],
+      finalRuns: runs,
+    }),
+    verifyChain: async () => verifiedChainReport(),
+    writeArtifacts: async () => {
+      published = true;
+    },
+    observedAt: () => observedAt,
+  });
+
+  assert.equal(result.outcome, "passed");
+  assert.equal(published, true);
+  assert.deepEqual(events, [
+    "invoked-once",
+    "signed-recovery",
+    "desktop-board-and-mobile-replay",
+    "zero-upload-verifier",
+    "closed",
+  ]);
+});
+
+test("fails closed when a baseline Run disappears or is reused", async (context) => {
+  const runSet = makeRunSet();
+  const proofRuns = apiRuns(runSet);
+  const historicalRun = {
+    ...clone(runSet.promotion),
+    id: "run-candidate-set-historical",
+    candidateSetId: "candidate-set-historical",
+    competitorId: "competitor-historical",
+  };
+
+  await context.test("reclassified ID reuse during polling", async () => {
+    const reusedRun = {
+      ...clone(historicalRun),
+      candidateSetId: null,
+      competitorId: null,
+    };
+    const events = [];
+    let published = false;
+
+    await expectFailure(
+      runRuntimeProofSession({
+        baseUrl: "http://127.0.0.1:3222",
+        artifactRoot: "/bounded-test-root",
+        readinessDigest,
+        browserDriver: browserFixture(events),
+        fetchImpl: fetchFixture([reusedRun, ...proofRuns], {
+          initialRuns: [historicalRun],
+        }),
+        verifyChain: async () => verifiedChainReport(),
+        writeArtifacts: async () => {
+          published = true;
+        },
+      }),
+      "run-set-invalid",
+    );
+
+    assert.equal(published, false);
+    assert.deepEqual(events, ["invoked-once", "closed"]);
+  });
+
+  await context.test("baseline disappearance during final recheck", async () => {
+    const events = [];
+    let published = false;
+
+    await expectFailure(
+      runRuntimeProofSession({
+        baseUrl: "http://127.0.0.1:3222",
+        artifactRoot: "/bounded-test-root",
+        readinessDigest,
+        browserDriver: browserFixture(events),
+        fetchImpl: fetchFixture([historicalRun, ...proofRuns], {
+          initialRuns: [historicalRun],
+          finalRuns: proofRuns,
+        }),
+        verifyChain: async () => verifiedChainReport(),
+        writeArtifacts: async () => {
+          published = true;
+        },
+      }),
+      "run-set-invalid",
+    );
+
+    assert.equal(published, false);
+    assert.deepEqual(events, [
+      "invoked-once",
+      "signed-recovery",
+      "desktop-board-and-mobile-replay",
+      "zero-upload-verifier",
+      "closed",
+    ]);
+  });
+});
+
 test("rejects managed Outcome Contract drift after readiness before invoking Chrome", async () => {
   const events = [];
   const agentContract = outcomeContract();
@@ -814,6 +1038,27 @@ test("Run polling clamps its final wait and preserves the complete proof window"
 
 test("rejects every required Run-set contradiction", async (context) => {
   const contradictions = [
+    [
+      "missing Run id",
+      "run-set-invalid",
+      (runs) => {
+        delete runs[0].id;
+      },
+    ],
+    [
+      "blank Run id",
+      "run-set-invalid",
+      (runs) => {
+        runs[0].id = "";
+      },
+    ],
+    [
+      "non-string Run id",
+      "run-set-invalid",
+      (runs) => {
+        runs[0].id = 7;
+      },
+    ],
     [
       "extra ordinary Run",
       "run-set-invalid",
@@ -990,6 +1235,60 @@ test("rejects every required Run-set contradiction", async (context) => {
       },
     ],
     [
+      "Promotion Canonical-advance evidence is missing",
+      "promotion-invalid",
+      (runs) => {
+        const promotion = runs.find((run) => run.id === "run-promotion");
+        promotion.transaction.events = promotion.transaction.events.filter(
+          (event) =>
+            event.summary !==
+            "Canonical State advanced before external action delivery",
+        );
+      },
+    ],
+    [
+      "Promotion Canonical-advance evidence is duplicated",
+      "promotion-invalid",
+      (runs) => {
+        const promotion = runs.find((run) => run.id === "run-promotion");
+        promotion.transaction.events.push(
+          clone(
+            promotion.transaction.events.find(
+              (event) =>
+                event.summary ===
+                "Canonical State advanced before external action delivery",
+            ),
+          ),
+        );
+      },
+    ],
+    [
+      "Promotion Canonical-advance evidence follows effect delivery",
+      "promotion-invalid",
+      (runs) => {
+        runs
+          .find((run) => run.id === "run-promotion")
+          .transaction.events.find(
+            (event) =>
+              event.summary ===
+              "Canonical State advanced before external action delivery",
+          ).at = "2026-08-28T10:00:01.250Z";
+      },
+    ],
+    [
+      "Promotion Canonical-advance evidence has a malformed timestamp",
+      "promotion-invalid",
+      (runs) => {
+        runs
+          .find((run) => run.id === "run-promotion")
+          .transaction.events.find(
+            (event) =>
+              event.summary ===
+              "Canonical State advanced before external action delivery",
+          ).at = "not-a-timestamp";
+      },
+    ],
+    [
       "Quarantine changes Canonical fingerprint",
       "quarantine-invalid",
       (runs) => {
@@ -1121,6 +1420,102 @@ test("rejects an ID-stable Run projection change after the browser verdict", asy
     "run-set-invalid",
   );
   assert.equal(events.at(-1), "closed");
+});
+
+test("stopped snapshot rejects persisted state created after the live final recheck", async () => {
+  const temporaryProject = await mkdtemp(
+    path.join(os.tmpdir(), "airlock-runtime-stopped-snapshot-"),
+  );
+  const artifactRoot = path.join(
+    temporaryProject,
+    ".local",
+    "runtime-proof",
+  );
+  try {
+    await initializeRuntimeProofRoot({
+      projectRoot: temporaryProject,
+      artifactRoot,
+    });
+    const session = await createRuntimeProofSessionRoot({ artifactRoot });
+    const dataDirectory = path.join(session.sessionRoot, "data");
+    await mkdir(dataDirectory, { mode: 0o755 });
+    const runSet = makeRunSet();
+    const result = buildRuntimeProofResult({
+      observedAt,
+      readinessDigest,
+      runs: runSet,
+      chainDigest: sourceDigest(decisionChainSource(runSet)),
+      leafReceiptDigest,
+    });
+    const persistedAgent = {
+      id: "agent-runtime-proof",
+      name: realRuntimeProofAgentName,
+      canonicalStateId: runSet.repair.transaction.canonicalStateIdAfter,
+      outcomeContract: outcomeContract(),
+    };
+    const database = {
+      version: 10,
+      agents: [persistedAgent],
+      messages: [],
+      runs: apiRuns(runSet),
+      candidateSets: [],
+      assuranceProposals: [],
+      outcomeContractVersions: [],
+    };
+    await writeFile(
+      path.join(dataDirectory, "launchpad.json"),
+      JSON.stringify(database) + "\n",
+      { mode: 0o600 },
+    );
+    await assertStoppedRuntimeProofSnapshot({
+      artifactRoot,
+      sessionRoot: session.sessionRoot,
+      nonce: session.nonce,
+      result,
+    });
+
+    database.agents.push({
+      ...persistedAgent,
+      id: "agent-created-after-final-live-recheck",
+      name: "Unrelated Agent",
+    });
+    await writeFile(
+      path.join(dataDirectory, "launchpad.json"),
+      JSON.stringify(database) + "\n",
+      { mode: 0o600 },
+    );
+    await expectFailure(
+      assertStoppedRuntimeProofSnapshot({
+        artifactRoot,
+        sessionRoot: session.sessionRoot,
+        nonce: session.nonce,
+        result,
+      }),
+      "run-set-invalid",
+    );
+
+    database.agents.pop();
+    database.runs.push({
+      ...clone(runSet.promotion),
+      id: "run-created-after-final-live-recheck",
+    });
+    await writeFile(
+      path.join(dataDirectory, "launchpad.json"),
+      JSON.stringify(database) + "\n",
+      { mode: 0o600 },
+    );
+    await expectFailure(
+      assertStoppedRuntimeProofSnapshot({
+        artifactRoot,
+        sessionRoot: session.sessionRoot,
+        nonce: session.nonce,
+        result,
+      }),
+      "run-set-invalid",
+    );
+  } finally {
+    await rm(temporaryProject, { recursive: true, force: true });
+  }
 });
 
 test("rejects invalid and contradictory signed chains", async (context) => {

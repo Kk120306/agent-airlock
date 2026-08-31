@@ -3,12 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRunTransaction } from "./airlock-runner.js";
+import { createExternalActionDispatcherScope } from "./external-actions.js";
 import { createDefaultOutcomeContract } from "./outcome-contract.js";
 import { PromotionJournal } from "./promotion-journal.js";
 import type { CanonicalStateReference } from "./types.js";
 import type { PromotionPlan } from "./workspace.js";
 
 const temporaryDirectories: string[] = [];
+const externalActionScope = createExternalActionDispatcherScope(
+  "atomic-local-store",
+  "/platform/data/mock-deliveries.json",
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -77,6 +82,7 @@ describe("PromotionJournal", () => {
     const validated = await journal.begin({
       plan,
       transaction,
+      externalActionScope,
       result: {
         output: "secret Runtime output that must not enter the journal",
         threadId: target.codexThreadId,
@@ -85,7 +91,8 @@ describe("PromotionJournal", () => {
     });
 
     expect(validated).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
+      externalActionScope,
       authority: { schemaVersion: 1, kind: "ordinary-run" },
       phase: "validated",
       recoveryResult: {
@@ -128,6 +135,7 @@ describe("PromotionJournal", () => {
         source,
         createDefaultOutcomeContract(),
       ),
+      externalActionScope,
       result: { output: "done", threadId: null, usage: null },
     });
     const filePath = path.join(root, plan.runId + ".json");
@@ -173,6 +181,7 @@ describe("PromotionJournal", () => {
     await journal.begin({
       plan,
       transaction,
+      externalActionScope,
       result: { output: "done", threadId: null, usage: null },
     });
     const filePath = path.join(root, plan.runId + ".json");
@@ -202,6 +211,84 @@ describe("PromotionJournal", () => {
           message: expect.stringContaining("corrupt"),
         },
       ],
+    });
+  });
+
+  it("rejects a current journal whose dispatcher scope is missing or invalid", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-journal-scope-"));
+    temporaryDirectories.push(root);
+    const journal = new PromotionJournal(root);
+    await journal.initialize();
+    await journal.begin({
+      plan,
+      transaction: createRunTransaction(
+        plan.runId,
+        source,
+        createDefaultOutcomeContract(),
+      ),
+      externalActionScope,
+      result: { output: "done", threadId: null, usage: null },
+    });
+    const filePath = path.join(root, plan.runId + ".json");
+    const missing = JSON.parse(await readFile(filePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    delete missing.externalActionScope;
+    await writeFile(filePath, JSON.stringify(missing, null, 2) + "\n", "utf8");
+
+    await expect(journal.read(plan.runId)).rejects.toThrow(
+      /unknown or missing fields/,
+    );
+
+    missing.externalActionScope = {
+      ...externalActionScope,
+      consumerScopeDigest: "sha256:not-a-digest",
+    };
+    await writeFile(filePath, JSON.stringify(missing, null, 2) + "\n", "utf8");
+
+    await expect(journal.read(plan.runId)).rejects.toThrow();
+  });
+
+  it("upgrades an unambiguous legacy journal by binding its dispatcher scope", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "airlock-journal-legacy-scope-"),
+    );
+    temporaryDirectories.push(root);
+    const journal = new PromotionJournal(root);
+    await journal.initialize();
+    await journal.begin({
+      plan,
+      transaction: createRunTransaction(
+        plan.runId,
+        source,
+        createDefaultOutcomeContract(),
+      ),
+      externalActionScope,
+      result: { output: "done", threadId: null, usage: null },
+    });
+    const filePath = path.join(root, plan.runId + ".json");
+    const legacy = JSON.parse(await readFile(filePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    legacy.schemaVersion = 2;
+    delete legacy.externalActionScope;
+    await writeFile(filePath, JSON.stringify(legacy, null, 2) + "\n", "utf8");
+
+    await expect(journal.read(plan.runId)).resolves.toMatchObject({
+      schemaVersion: 2,
+      phase: "validated",
+    });
+    await expect(
+      journal.bindExternalActionScope(plan.runId, externalActionScope),
+    ).resolves.toMatchObject({
+      schemaVersion: 3,
+      externalActionScope,
+    });
+    await expect(journal.read(plan.runId)).resolves.toMatchObject({
+      schemaVersion: 3,
+      externalActionScope,
     });
   });
 });

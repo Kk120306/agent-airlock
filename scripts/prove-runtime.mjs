@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   RUNTIME_PROOF_RECORDING_BUDGET_MS,
   RuntimeProofError,
+  assertStoppedRuntimeProofSnapshot,
   cleanupAbandonedRuntimeProofSessions,
   cleanupRuntimeProofSessionRoot,
   classifyRuntimeProofLauncherFailure,
@@ -93,6 +94,7 @@ let recordingController = null;
 let recordingTimer = null;
 let browserProofSignal = controller.signal;
 let sourceProvenance = null;
+let stoppedSnapshotVerified = false;
 
 async function acquireLease() {
   if (!leasePath) throw new RuntimeProofError("startup-failed");
@@ -239,7 +241,7 @@ async function ensureRuntimeImage(selectedEngine) {
   const buildArguments = {
     nodeImage:
       process.env.CONTAINER_RUNTIME_BASE_IMAGE?.trim() ||
-      "node:22-bookworm-slim",
+      "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5",
     debianMirror: process.env.CONTAINER_APT_MIRROR?.trim() || "",
     securityMirror:
       process.env.CONTAINER_APT_SECURITY_MIRROR?.trim() || "",
@@ -537,6 +539,30 @@ try {
   runtimeCleanupConfirmed = false;
   recordCleanupFailure(error);
 }
+if (
+  !failure &&
+  !cleanupFailure &&
+  pendingArtifacts &&
+  result &&
+  session &&
+  ownedProcessCleanupConfirmed &&
+  runtimeCleanupConfirmed
+) {
+  try {
+    await assertStoppedRuntimeProofSnapshot({
+      artifactRoot,
+      sessionRoot: session.sessionRoot,
+      nonce: session.nonce,
+      result,
+    });
+    stoppedSnapshotVerified = true;
+  } catch (error) {
+    failure =
+      error instanceof RuntimeProofError
+        ? error
+        : new RuntimeProofError("run-set-invalid");
+  }
+}
 if (session && ownedProcessCleanupConfirmed && runtimeCleanupConfirmed) {
   try {
     await cleanupRuntimeProofSessionRoot({
@@ -549,8 +575,11 @@ if (session && ownedProcessCleanupConfirmed && runtimeCleanupConfirmed) {
   }
 }
 failure ??= cleanupFailure;
+if (!failure && pendingArtifacts && result && !stoppedSnapshotVerified) {
+  failure = new RuntimeProofError("run-set-invalid");
+}
 
-if (!failure && pendingArtifacts && result) {
+if (!failure && pendingArtifacts && result && stoppedSnapshotVerified) {
   try {
     progress.emit("publication");
     const publication = await finalizeRuntimeProofPublication({

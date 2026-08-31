@@ -28,24 +28,20 @@ import type {
   TrustPolicyVerificationReport,
 } from "@agent-airlock/portable-promotion-receipt";
 import { api, ApiError, setAuthToken } from "./api";
+import { valueForSelectedAgent } from "./agent-selection-policy";
 import {
-  advancesCanonicalState,
   beginRequestGeneration,
+  deriveExactRecordingRunSet,
   deriveRecordingReplayHydration,
   getPortableProofDisplayState,
-  hasDistinctRepairEffectKey,
   hasExactRecordingDecisionChain,
-  hasExactRecordingEffect,
-  hasExactRecordingResources,
   hasExactFreshRecordingRunIds,
   hasLocallyVerifiedPortableProof,
-  hasRepairRecordingLineage,
-  hasRootRecordingLineage,
-  hasValidTerminalRecordingRun,
   invalidateRequestGeneration,
   isCurrentRequestGeneration,
   isPortableProofActionable,
   parseRecordingReplayRunIds,
+  type ExactRecordingRunSet,
   type RecordingReplayRunIds,
 } from "./recording-outcome-policy";
 import {
@@ -92,7 +88,7 @@ const starterPrompts = [
 
 const protocolFixturePrompts = {
   promote:
-    "Create protocol-proof.txt with candidate-only, set SQLite row demo in .airlock/demo.sqlite to candidate-only, and queue typed effect protocol-release-ready for delivery only after Promotion.",
+    "Create protocol-proof.txt with candidate-only, set SQLite row demo in .airlock/demo.sqlite to candidate-only, and queue typed effect protocol-release-ready for deferred delivery during Promotion after required checks and Canonical State advance.",
   challenge:
     "Attempt the unsafe protocol change for the rejection proof: set protocol-proof.txt and SQLite row demo to unsafe-candidate, then queue typed effect protocol-unsafe. Required Validation must decide whether anything is promoted.",
 } as const;
@@ -207,6 +203,7 @@ type PortableVerifierArtifact =
   | ReceiverCustodyPacket;
 
 type AutomaticProofState = {
+  agentId: string;
   runId: string;
   evidenceRevision: string;
   requestNonce: number;
@@ -372,15 +369,15 @@ function JudgeProofSummary({
           <div>
             <strong>
               {promoted
-                ? "Effect released after Promotion"
+                ? "Effect released during Promotion"
                 : "External effects held back"}
             </strong>
             <small>
               {promoted
-                ? `${deliveredEffects} typed effect${deliveredEffects === 1 ? "" : "s"} delivered only after Canonical State advanced.`
+                ? `${deliveredEffects} typed effect${deliveredEffects === 1 ? "" : "s"} delivered after Canonical State advanced during Promotion.`
                 : terminal
                   ? `${deliveredEffects} effects delivered from this rejected future.`
-                  : "Candidate intents remain deferred until Promotion completes."}
+                  : "Candidate intents remain deferred until required checks pass and Canonical State advances."}
             </small>
           </div>
         </li>
@@ -807,33 +804,7 @@ function ProtocolScenarioGuide({
   );
 }
 
-type RecordingOutcome = {
-  safe: AgentRun & { transaction: RunTransaction };
-  unsafe: AgentRun & { transaction: RunTransaction };
-  repaired: AgentRun & { transaction: RunTransaction };
-  safeRequired: { passed: number; total: number };
-  unsafeRequired: { passed: number; total: number };
-  repairedRequired: { passed: number; total: number };
-};
-
-function requiredValidationResult(transaction: RunTransaction) {
-  const required = transaction.validations.filter(
-    (validation) => validation.required,
-  );
-  return {
-    passed: required.filter((validation) => validation.status === "passed")
-      .length,
-    total: required.length,
-  };
-}
-
-function hasExactProtocolProofChange(transaction: RunTransaction): boolean {
-  return (
-    transaction.changes?.files.filter(
-      (change) => change.path === "protocol-proof.txt",
-    ).length === 1
-  );
-}
+type RecordingOutcome = ExactRecordingRunSet;
 
 function deriveRecordingOutcome(
   runs: AgentRun[],
@@ -866,147 +837,22 @@ function deriveRecordingOutcome(
     return null;
   }
 
-  const repairedCandidate = runs.find((run) => run.id === repairedRunId);
-  if (!repairedCandidate?.transaction) return null;
-  const repaired = repairedCandidate as RecordingOutcome["repaired"];
-
-  const unsafeCandidate = runs.find((run) => run.id === unsafeRunId);
-  if (!unsafeCandidate?.transaction) return null;
-  const unsafe = unsafeCandidate as RecordingOutcome["unsafe"];
-
-  const safeCandidate = runs.find((run) => run.id === safeRunId);
-  if (!safeCandidate?.transaction) return null;
-  const safe = safeCandidate as RecordingOutcome["safe"];
-
-  const safeRequired = requiredValidationResult(safe.transaction);
-  const unsafeRequired = requiredValidationResult(unsafe.transaction);
-  const unsafeFailedRequired = unsafe.transaction.validations.some(
-    (validation) =>
-      validation.name === "command:protocol-content" &&
-      validation.required &&
-      validation.status === "failed",
-  );
-  const repairedRequired = requiredValidationResult(repaired.transaction);
-  const contractIdentity = JSON.stringify(safe.transaction.outcomeContract);
-  const safeSqliteCandidate = safe.transaction.sqlite?.candidate?.rows.find(
-    (row) => row.id === "demo",
-  );
-  const safeSqliteAfter = safe.transaction.sqlite?.after?.rows.find(
-    (row) => row.id === "demo",
-  );
-  const unsafeSqliteCandidate = unsafe.transaction.sqlite?.candidate?.rows.find(
-    (row) => row.id === "demo",
-  );
-  const unsafeSqliteAfter = unsafe.transaction.sqlite?.after?.rows.find(
-    (row) => row.id === "demo",
-  );
-  const repairedSqliteCandidate =
-    repaired.transaction.sqlite?.candidate?.rows.find(
-      (row) => row.id === "demo",
-    );
-  const repairedSqliteAfter = repaired.transaction.sqlite?.after?.rows.find(
-    (row) => row.id === "demo",
-  );
-  const safeCreatedAt = Date.parse(safe.createdAt);
-  const unsafeCreatedAt = Date.parse(unsafe.createdAt);
-  const repairedCreatedAt = Date.parse(repaired.createdAt);
+  const exactRunSet = deriveExactRecordingRunSet({
+    runs,
+    runIds: recordingAttempt.runIds,
+    expectedAgentId: recordingAttempt.agentId,
+    expectedCanonicalStateId: recordingAttempt.canonicalStateId,
+  });
   const coherent =
-    [safe, unsafe, repaired].every(
-      (run) =>
-        run.status === "completed" &&
-        run.candidateSetId === null &&
-        run.competitorId === null,
-    ) &&
-    safe.agentId === recordingAttempt.agentId &&
-    safe.agentId === unsafe.agentId &&
-    safe.agentId === repaired.agentId &&
-    safe.transaction.canonicalStateIdBefore ===
-      recordingAttempt.canonicalStateId &&
-    hasValidTerminalRecordingRun(safe, "promoted") &&
-    hasValidTerminalRecordingRun(unsafe, "quarantined") &&
-    hasValidTerminalRecordingRun(repaired, "promoted") &&
-    [safeCreatedAt, unsafeCreatedAt, repairedCreatedAt].every(
-      Number.isFinite,
-    ) &&
-    safeCreatedAt < unsafeCreatedAt &&
-    unsafeCreatedAt < repairedCreatedAt &&
-    safe.transaction.disposition === "promoted" &&
-    hasRootRecordingLineage(safe) &&
-    advancesCanonicalState(safe.transaction) &&
-    safeRequired.total > 0 &&
-    safeRequired.passed === safeRequired.total &&
-    unsafe.transaction.disposition === "quarantined" &&
-    hasRootRecordingLineage(unsafe) &&
-    unsafeFailedRequired &&
-    repaired.transaction.disposition === "promoted" &&
-    hasRepairRecordingLineage(repaired, unsafe) &&
-    advancesCanonicalState(repaired.transaction) &&
-    repairedRequired.total > 0 &&
-    repairedRequired.passed === repairedRequired.total &&
-    safe.transaction.outcomeContractVersion ===
-      unsafe.transaction.outcomeContractVersion &&
-    safe.transaction.outcomeContractVersion ===
-      repaired.transaction.outcomeContractVersion &&
-    JSON.stringify(unsafe.transaction.outcomeContract) === contractIdentity &&
-    JSON.stringify(repaired.transaction.outcomeContract) === contractIdentity &&
-    hasExactRecordingResources(safe.transaction, "promoted") &&
-    hasExactRecordingResources(unsafe.transaction, "quarantined") &&
-    hasExactRecordingResources(repaired.transaction, "promoted") &&
-    hasExactProtocolProofChange(safe.transaction) &&
-    hasExactProtocolProofChange(unsafe.transaction) &&
-    safe.transaction.canonicalStateIdAfter ===
-      unsafe.transaction.canonicalStateIdBefore &&
-    safe.transaction.canonicalContentHashAfter ===
-      unsafe.transaction.canonicalContentHashBefore &&
-    unsafe.transaction.canonicalStateIdAfter ===
-      unsafe.transaction.canonicalStateIdBefore &&
-    unsafe.transaction.canonicalContentHashAfter ===
-      unsafe.transaction.canonicalContentHashBefore &&
-    unsafe.transaction.canonicalStateIdAfter ===
-      repaired.transaction.canonicalStateIdBefore &&
-    unsafe.transaction.canonicalContentHashAfter ===
-      repaired.transaction.canonicalContentHashBefore &&
-    hasExactRecordingEffect(safe.transaction, {
-      id: "protocol-release-ready",
-      type: "demo.notification.requested",
-      status: "delivered",
-      deliveredCount: 1,
-    }) &&
-    safe.transaction.recovery.journalPhase === "completed" &&
-    safeSqliteCandidate?.value === "candidate-only" &&
-    safeSqliteAfter?.value === "candidate-only" &&
-    hasExactRecordingEffect(unsafe.transaction, {
-      id: "protocol-unsafe",
-      type: "demo.notification.requested",
-      status: "rejected",
-      deliveredCount: 0,
-    }) &&
-    unsafeSqliteCandidate?.value === "unsafe-candidate" &&
-    unsafeSqliteAfter?.value === "candidate-only" &&
-    hasExactRecordingEffect(repaired.transaction, {
-      id: "protocol-repair-ready",
-      type: "demo.notification.requested",
-      status: "delivered",
-      deliveredCount: 1,
-    }) &&
-    repaired.transaction.recovery.journalPhase === "completed" &&
-    repairedSqliteCandidate?.value === "candidate-only" &&
-    repairedSqliteAfter?.value === "candidate-only" &&
-    hasDistinctRepairEffectKey(
-      safe.transaction,
-      unsafe.transaction,
-      repaired.transaction,
-    ) &&
+    exactRunSet !== null &&
     hasExactRecordingDecisionChain(
       automaticProof.artifact,
-      unsafe,
-      repaired,
+      exactRunSet.unsafe,
+      exactRunSet.repaired,
       automaticProof.leafReceiptDigest,
     );
 
-  return coherent
-    ? { safe, unsafe, repaired, safeRequired, unsafeRequired, repairedRequired }
-    : null;
+  return coherent ? exactRunSet : null;
 }
 
 function RecordingOutcomeBrief({
@@ -1096,7 +942,9 @@ function RecordingOutcomeBrief({
                 {outcome.safeRequired.passed}/{outcome.safeRequired.total}{" "}
                 required
               </strong>
-              <span>every required check passed before Promotion</span>
+              <span>
+                Workspace · Codex session · SQLite · outbox promoted
+              </span>
             </li>
             <li data-evidence="exact">
               <strong>
@@ -1110,7 +958,9 @@ function RecordingOutcomeBrief({
             </li>
             <li data-evidence="exact">
               <strong>{safeEffect?.type}</strong>
-              <span>{safeEffect?.id} delivered only after Promotion</span>
+              <span>
+                {safeEffect?.id} delivered in Promotion after required checks
+              </span>
             </li>
           </ul>
           <div
@@ -1139,8 +989,8 @@ function RecordingOutcomeBrief({
             <li data-evidence="exact">
               <strong>{failedRequiredValidation?.name}</strong>
               <span>
-                decisive required Validation failed ·{" "}
-                {unsafeTransaction.resources.length}/4 quarantined
+                {unsafeTransaction.resources.length}/4 quarantined · workspace ·
+                session · SQLite · outbox
               </span>
             </li>
             <li data-evidence="exact">
@@ -1194,7 +1044,9 @@ function RecordingOutcomeBrief({
                 effect · {outcome.repairedRequired.passed}/
                 {outcome.repairedRequired.total} required
               </strong>
-              <span>fresh child passed every check before Promotion</span>
+              <span>
+                Workspace · Codex session · SQLite · fresh outbox promoted
+              </span>
             </li>
             <li data-evidence="exact">
               <strong>
@@ -1209,7 +1061,9 @@ function RecordingOutcomeBrief({
             </li>
             <li data-evidence="exact">
               <strong>{repairedEffect?.type}</strong>
-              <span>{repairedEffect?.id} delivered with a fresh key</span>
+              <span>
+                {repairedEffect?.id} delivered in Promotion with a fresh key
+              </span>
             </li>
           </ul>
           <div
@@ -1239,7 +1093,9 @@ function RecordingOutcomeBrief({
             <strong>Verified</strong>
           </header>
           <div className="recording-independent-proof-copy">
-            <h2>Independent signatures verify integrity and lineage.</h2>
+            <h2>
+              Browser verification confirms signed integrity and lineage.
+            </h2>
             <p>
               They prove what the included key signed, not who authorized
               Promotion.
@@ -1382,7 +1238,7 @@ function LiveModelArkGuide({
             </strong>
             <small>
               {preflightBound
-                ? "The Promotion Receipt binds fresh generated-output preflight facts and the model identifier commitment to four promoted resources and one post-Promotion effect. Independent packet verification completes in the proof command."
+                ? "The Promotion Receipt binds fresh generated-output preflight facts and the model identifier commitment to four promoted resources and one effect delivered during Promotion after required checks. Independent packet verification completes in the proof command."
                 : "The isolated Candidate advanced Canonical State, but this view cannot attest that Run to the live provider without its required execution-profile evidence."}
             </small>
           </div>
@@ -2559,7 +2415,7 @@ function ReceiptVerifier({
         <div className="verifier-boundary" role="note">
           <span>LOCAL ONLY</span>
           <strong>
-            0 API calls · 0 uploads
+            This verification: 0 API calls · 0 uploads
             {chainReport?.valid
               ? ` · ${chainReport.packets.length} signed decisions linked`
               : ""}
@@ -5504,7 +5360,8 @@ export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
-  selectedIdRef.current = selectedId;
+  const agentSelectionGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [showReceiptVerifier, setShowReceiptVerifier] = useState(false);
@@ -5514,7 +5371,7 @@ export default function App() {
     setShowReceiptVerifier(false);
     setVerifierArtifact(null);
   }, []);
-  const [automaticProof, setAutomaticProof] =
+  const [automaticProofState, setAutomaticProof] =
     useState<AutomaticProofState | null>(null);
   const [recordingAttempt, setRecordingAttempt] =
     useState<RecordingAttempt | null>(null);
@@ -5522,12 +5379,13 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [prompt, setPrompt] = useState("");
-  const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [activeRunState, setActiveRun] = useState<AgentRun | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [runsLoadedAgentId, setRunsLoadedAgentId] = useState<string | null>(
-    null,
-  );
-  const [activeCandidateSet, setActiveCandidateSet] =
+  const [runsLookup, setRunsLookup] = useState<{
+    agentId: string;
+    status: "loading" | "loaded" | "failed";
+  } | null>(null);
+  const [activeCandidateSetState, setActiveCandidateSet] =
     useState<CandidateSet | null>(null);
   const [assuranceProposals, setAssuranceProposals] = useState<
     AssuranceProposal[]
@@ -5547,23 +5405,67 @@ export default function App() {
   const [airlockActionBusy, setAirlockActionBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectAgentId = useCallback((nextAgentId: string | null) => {
+    if (selectedIdRef.current === nextAgentId) return;
+    selectedIdRef.current = nextAgentId;
+    invalidateRequestGeneration(agentSelectionGenerationRef);
+    setSelectedId(nextAgentId);
+    setError(null);
+    setBusy(false);
+    setAirlockActionBusy(false);
+    setShowSettings(false);
+    setShowExplore(false);
+    setShowFederation(false);
+    setShowAssurance(false);
+    setPrompt("");
+    setMessages([]);
+    setRuns([]);
+    setRunsLookup(
+      nextAgentId
+        ? { agentId: nextAgentId, status: "loading" }
+        : null,
+    );
+    setActiveRun(null);
+    setActiveCandidateSet(null);
+    setAssuranceProposals([]);
+    setContractVersions([]);
+    setAutomaticProof(null);
+    setRecordingAttempt(null);
+  }, []);
+  const isCurrentAgentSelection = useCallback(
+    (agentId: string, generation: number) =>
+      mountedRef.current &&
+      selectedIdRef.current === agentId &&
+      isCurrentRequestGeneration(agentSelectionGenerationRef, generation),
+    [],
+  );
   const requestAutomaticProof = useCallback(
-    (targetRun: AgentRun) => {
+    (targetRun: AgentRun, preserveError = false) => {
       if (selectedIdRef.current !== targetRun.agentId) return false;
       const runId = targetRun.id;
       const evidenceRevision = portableEvidenceRevision(targetRun);
       if (evidenceRevision === null) return false;
-      setError(null);
-      setAutomaticProof((current) => ({
-        runId,
-        evidenceRevision,
-        requestNonce:
+      if (!preserveError) setError(null);
+      setAutomaticProof((current) => {
+        if (
           current?.runId === runId &&
-          current.evidenceRevision === evidenceRevision
-            ? current.requestNonce + 1
-            : 1,
-        status: "requested",
-      }));
+          current.evidenceRevision === evidenceRevision &&
+          current.status === "requested"
+        ) {
+          return current;
+        }
+        return {
+          agentId: targetRun.agentId,
+          runId,
+          evidenceRevision,
+          requestNonce:
+            current?.runId === runId &&
+            current.evidenceRevision === evidenceRevision
+              ? current.requestNonce + 1
+              : 1,
+          status: "requested",
+        };
+      });
       return true;
     },
     [],
@@ -5581,14 +5483,27 @@ export default function App() {
   const [recordingDismissed, setRecordingDismissed] = useState(false);
   const messageEnd = useRef<HTMLDivElement>(null);
   const recordingPlaygroundHeadingRef = useRef<HTMLHeadingElement>(null);
-  const mountedRef = useRef(true);
-  const pollingRunIds = useRef(new Set<string>());
-  const pollingCandidateSetIds = useRef(new Set<string>());
+  const recordingReplayFailureHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pollingRuns = useRef(
+    new Map<string, Promise<AgentRun | null>>(),
+  );
+  const pollingCandidateSets = useRef(
+    new Map<string, Promise<void>>(),
+  );
   const recordingReplayRequestRef = useRef<string | null>(null);
 
   const selected = useMemo(
     () => agents.find((agent) => agent.id === selectedId) ?? null,
     [agents, selectedId],
+  );
+  const activeRun = valueForSelectedAgent(selectedId, activeRunState);
+  const activeCandidateSet = valueForSelectedAgent(
+    selectedId,
+    activeCandidateSetState,
+  );
+  const automaticProof = valueForSelectedAgent(
+    selectedId,
+    automaticProofState,
   );
   const recordingRequested =
     new URLSearchParams(window.location.search).get("recording") === "1";
@@ -5600,6 +5515,13 @@ export default function App() {
     recordingRequested &&
     !recordingDismissed &&
     system?.protocolFixtureMode === true;
+  const recordingReplayHydration = useMemo(
+    () =>
+      recordingMode && selected
+        ? deriveRecordingReplayHydration(runs, recordingReplaySelection)
+        : null,
+    [recordingMode, recordingReplaySelection, runs, selected],
+  );
   const recordingOutcome = useMemo(
     () =>
       recordingMode
@@ -5612,11 +5534,23 @@ export default function App() {
     Boolean(recordingAttempt?.runIds) &&
     automaticProof?.status === "verified" &&
     recordingOutcome === null;
+  const recordingReplayLookupSettled = selected
+    ? runsLookup?.agentId === selected.id && runsLookup.status !== "loading"
+    : authRequired === false;
+  const recordingReplayLookupFailed = selected
+    ? runsLookup?.agentId === selected.id && runsLookup.status === "failed"
+    : false;
+  const recordingReplayFailure =
+    recordingMode &&
+    recordingReplaySelection.kind !== "absent" &&
+    (recordingReplaySelection.kind === "invalid" ||
+      recordingReplayLookupFailed ||
+      (recordingReplayLookupSettled && recordingReplayHydration === null));
   const recordingStartGuard =
     recordingMode &&
     recordingReplaySelection.kind === "absent" &&
     recordingAttempt === null
-      ? runsLoadedAgentId !== selected?.id
+      ? runsLookup?.agentId !== selected?.id || runsLookup?.status !== "loaded"
         ? {
             kind: "checking" as const,
             message:
@@ -5671,22 +5605,46 @@ export default function App() {
     activeRun.transaction?.disposition === "quarantined" &&
     activeRun.transaction.quarantineAvailable;
 
-  const refreshAgents = useCallback(async () => {
+  const refreshAgents = useCallback(async (selectFallback = true) => {
     const { agents: next } = await api.listAgents();
+    if (!mountedRef.current) return;
     setAgents(next);
-    setSelectedId((current) =>
+    if (!selectFallback) return;
+    const current = selectedIdRef.current;
+    selectAgentId(
       current && next.some((agent) => agent.id === current)
         ? current
         : (next[0]?.id ?? null),
     );
-  }, []);
+  }, [selectAgentId]);
 
-  const refreshMessages = useCallback(async (agentId: string) => {
-    const result = await api.messages(agentId);
-    if (mountedRef.current && selectedIdRef.current === agentId) {
-      setMessages(result.messages);
-    }
-  }, []);
+  const refreshMessages = useCallback(
+    async (agentId: string, selectionGeneration: number) => {
+      const result = await api.messages(agentId);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setMessages(result.messages);
+      }
+    },
+    [isCurrentAgentSelection],
+  );
+
+  const refreshSelectedRunState = useCallback(
+    async (agentId: string) => {
+      if (selectedIdRef.current !== agentId) return;
+      const selectionGeneration = agentSelectionGenerationRef.current;
+      const [messageResult, runResult] = await Promise.all([
+        api.messages(agentId),
+        api.runs(agentId),
+      ]);
+      if (!isCurrentAgentSelection(agentId, selectionGeneration)) return;
+      setMessages(messageResult.messages);
+      setRuns(runResult.runs);
+      setActiveRun(
+        runResult.runs.find((run) => !run.candidateSetId) ?? null,
+      );
+    },
+    [isCurrentAgentSelection],
+  );
 
   const bootstrap = useCallback(async () => {
     await Promise.all([refreshAgents(), api.system().then(setSystem)]);
@@ -5715,7 +5673,10 @@ export default function App() {
 
   useEffect(() => {
     recordingReplayRequestRef.current = null;
-    setRunsLoadedAgentId(null);
+    const selectionGeneration = agentSelectionGenerationRef.current;
+    setRunsLookup(
+      selectedId ? { agentId: selectedId, status: "loading" } : null,
+    );
     setAutomaticProof(null);
     setRecordingAttempt(null);
     setActiveRun(null);
@@ -5724,80 +5685,101 @@ export default function App() {
     setShowFederation(false);
     setShowAssurance(false);
     setShowSettings(false);
+    setMessages([]);
+    setRuns([]);
+    setAssuranceProposals([]);
+    setContractVersions([]);
     if (!selectedId) {
-      setMessages([]);
-      setRuns([]);
-      setAssuranceProposals([]);
-      setContractVersions([]);
       return;
     }
-    void Promise.all([
-      refreshMessages(selectedId),
-      api.runs(selectedId),
-      api.candidateSets(selectedId),
-      api.assuranceProposals(selectedId),
-      api.outcomeContractVersions(selectedId),
-    ])
-      .then(
-        ([, result, candidateSetsResult, assuranceResult, versionsResult]) => {
-          if (selectedIdRef.current !== selectedId) return;
-          const latest = result.runs.find((run) => !run.candidateSetId) ?? null;
-          setRuns(result.runs);
-          setRunsLoadedAgentId(selectedId);
-          setActiveRun(latest);
-          const latestCandidateSet =
-            candidateSetsResult.candidateSets[0] ?? null;
-          setActiveCandidateSet(latestCandidateSet);
-          setAssuranceProposals(assuranceResult.proposals);
-          setContractVersions(versionsResult.versions);
-          if (latest && ["queued", "running"].includes(latest.status)) {
-            void pollRun(latest.id, selectedId).catch((reason) =>
-              setError(
-                reason instanceof Error ? reason.message : String(reason),
-              ),
-            );
-          }
-          if (
-            latestCandidateSet &&
-            !["completed", "stale", "recovery-error"].includes(
-              latestCandidateSet.phase,
-            )
-          ) {
-            void pollCandidateSet(latestCandidateSet.id, selectedId).catch(
-              (reason) =>
-                setError(
-                  reason instanceof Error ? reason.message : String(reason),
-                ),
-            );
-          }
-        },
-      )
-      .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : String(reason)),
-      );
-  }, [refreshMessages, selectedId]);
+    const reportLookupFailure = (reason: unknown) => {
+      if (!isCurrentAgentSelection(selectedId, selectionGeneration)) return;
+      setError(reason instanceof Error ? reason.message : String(reason));
+    };
+    void refreshMessages(selectedId, selectionGeneration).catch(
+      reportLookupFailure,
+    );
+    void api
+      .runs(selectedId)
+      .then((result) => {
+        if (!isCurrentAgentSelection(selectedId, selectionGeneration)) return;
+        const latest =
+          result.runs.find((run) => !run.candidateSetId) ?? null;
+        setRuns(result.runs);
+        setActiveRun(latest);
+        setRunsLookup({ agentId: selectedId, status: "loaded" });
+        if (latest && ["queued", "running"].includes(latest.status)) {
+          void pollRun(
+            latest.id,
+            selectedId,
+            selectionGeneration,
+          ).catch(reportLookupFailure);
+        }
+      })
+      .catch((reason) => {
+        if (!isCurrentAgentSelection(selectedId, selectionGeneration)) return;
+        setRunsLookup({ agentId: selectedId, status: "failed" });
+        reportLookupFailure(reason);
+      });
+    void api
+      .candidateSets(selectedId)
+      .then((result) => {
+        if (!isCurrentAgentSelection(selectedId, selectionGeneration)) return;
+        const latestCandidateSet = result.candidateSets[0] ?? null;
+        setActiveCandidateSet(latestCandidateSet);
+        if (
+          latestCandidateSet &&
+          !["completed", "stale", "recovery-error"].includes(
+            latestCandidateSet.phase,
+          )
+        ) {
+          void pollCandidateSet(
+            latestCandidateSet.id,
+            selectedId,
+            selectionGeneration,
+          ).catch(reportLookupFailure);
+        }
+      })
+      .catch(reportLookupFailure);
+    void api
+      .assuranceProposals(selectedId)
+      .then((result) => {
+        if (!isCurrentAgentSelection(selectedId, selectionGeneration)) return;
+        setAssuranceProposals(result.proposals);
+      })
+      .catch(reportLookupFailure);
+    void api
+      .outcomeContractVersions(selectedId)
+      .then((result) => {
+        if (!isCurrentAgentSelection(selectedId, selectionGeneration)) return;
+        setContractVersions(result.versions);
+      })
+      .catch(reportLookupFailure);
+  }, [isCurrentAgentSelection, refreshMessages, selectedId]);
 
   useEffect(() => {
     if (
       !recordingMode ||
       system?.protocolFixtureMode !== true ||
-      !selected
+      !selected ||
+      recordingReplayFailure
     ) {
       return;
     }
-    const hydration = deriveRecordingReplayHydration(
-      runs,
-      recordingReplaySelection,
-    );
+    const hydration = recordingReplayHydration;
     if (!hydration || hydration.agentId !== selected.id) return;
+    const evidenceRevision = portableEvidenceRevision(hydration.repairedRun);
+    if (evidenceRevision === null) return;
 
     const replayIdentity = [
       hydration.agentId,
       hydration.runIds.safeRunId,
       hydration.runIds.unsafeRunId,
       hydration.runIds.repairedRunId,
+      evidenceRevision,
     ].join(":");
     if (recordingReplayRequestRef.current === replayIdentity) return;
+    if (!requestAutomaticProof(hydration.repairedRun, true)) return;
     recordingReplayRequestRef.current = replayIdentity;
     setRecordingAttempt({
       agentId: hydration.agentId,
@@ -5806,15 +5788,21 @@ export default function App() {
       runIds: hydration.runIds,
     });
     setActiveRun(hydration.repairedRun);
-    requestAutomaticProof(hydration.repairedRun);
   }, [
     recordingMode,
-    recordingReplaySelection,
+    recordingReplayFailure,
+    recordingReplayHydration,
     requestAutomaticProof,
-    runs,
     selected,
     system?.protocolFixtureMode,
   ]);
+
+  useEffect(() => {
+    if (!recordingReplayFailure) return;
+    window.requestAnimationFrame(() =>
+      recordingReplayFailureHeadingRef.current?.focus(),
+    );
+  }, [authRequired, recordingMode, recordingReplayFailure]);
 
   useEffect(() => {
     if (selected) {
@@ -5850,6 +5838,7 @@ export default function App() {
       current.evidenceRevision === evidenceRevision
         ? current
         : {
+            agentId: activeRun.agentId,
             runId: activeRun.id,
             evidenceRevision,
             requestNonce: 1,
@@ -5869,57 +5858,85 @@ export default function App() {
 
   const createAgent = async (event: React.FormEvent) => {
     event.preventDefault();
+    const selectedAgentId = selectedIdRef.current;
+    const selectionGeneration = agentSelectionGenerationRef.current;
+    const creationIsCurrent = () =>
+      mountedRef.current &&
+      selectedIdRef.current === selectedAgentId &&
+      isCurrentRequestGeneration(
+        agentSelectionGenerationRef,
+        selectionGeneration,
+      );
     setBusy(true);
     setError(null);
     try {
       const { agent } = await api.createAgent(form);
-      await refreshAgents();
-      setSelectedId(agent.id);
+      await refreshAgents(false);
+      if (!creationIsCurrent()) return;
+      selectAgentId(agent.id);
       setShowCreate(false);
       setForm(emptyForm);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (creationIsCurrent()) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setBusy(false);
+      if (creationIsCurrent()) setBusy(false);
     }
   };
 
   const saveAgent = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setBusy(true);
     setError(null);
     try {
-      await api.updateAgent(selected.id, form);
+      await api.updateAgent(agentId, form);
       await refreshAgents();
-      setShowSettings(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setShowSettings(false);
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setBusy(false);
+      }
     }
   };
 
   const toggleAgent = async () => {
     if (!selected) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setBusy(true);
     setError(null);
     try {
       if (selected.status === "stopped") {
-        await api.startAgent(selected.id);
+        await api.startAgent(agentId);
       } else {
-        await api.stopAgent(selected.id);
+        await api.stopAgent(agentId);
       }
       await refreshAgents();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setBusy(false);
+      }
     }
   };
 
   const deleteAgent = async () => {
     if (!selected) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     if (
       !window.confirm(
         "Delete " + selected.name + "? Its workspace will be archived.",
@@ -5930,52 +5947,84 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      await api.deleteAgent(selected.id);
+      await api.deleteAgent(agentId);
       await refreshAgents();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setBusy(false);
+      }
     }
   };
 
   const pollRun = async (
     runId: string,
     agentId: string,
+    selectionGeneration: number,
   ): Promise<AgentRun | null> => {
-    if (pollingRunIds.current.has(runId)) return null;
-    pollingRunIds.current.add(runId);
-    try {
+    const existing = pollingRuns.current.get(runId);
+    if (existing) {
+      return existing.catch((reason) => {
+        if (!isCurrentAgentSelection(agentId, selectionGeneration)) {
+          throw reason;
+        }
+        return pollRun(runId, agentId, selectionGeneration);
+      });
+    }
+    const polling = (async () => {
       while (mountedRef.current) {
         await new Promise((resolve) => window.setTimeout(resolve, 900));
         if (!mountedRef.current) return null;
         const result = await api.run(runId);
-        if (selectedIdRef.current === agentId) setActiveRun(result.run);
+        if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+          setActiveRun(result.run);
+        }
         if (!["queued", "running"].includes(result.run.status)) {
-          const [, , runResult] = await Promise.all([
-            refreshMessages(agentId),
+          await Promise.all([
             refreshAgents(),
-            api.runs(agentId),
+            refreshSelectedRunState(agentId),
           ]);
-          if (selectedIdRef.current === agentId) setRuns(runResult.runs);
           return result.run;
         }
       }
       return null;
-    } finally {
-      pollingRunIds.current.delete(runId);
-    }
+    })();
+    const tracked = polling.finally(() => {
+      if (pollingRuns.current.get(runId) === tracked) {
+        pollingRuns.current.delete(runId);
+      }
+    });
+    pollingRuns.current.set(runId, tracked);
+    return tracked;
   };
 
-  const pollCandidateSet = async (candidateSetId: string, agentId: string) => {
-    if (pollingCandidateSetIds.current.has(candidateSetId)) return;
-    pollingCandidateSetIds.current.add(candidateSetId);
-    try {
+  const pollCandidateSet = async (
+    candidateSetId: string,
+    agentId: string,
+    selectionGeneration: number,
+  ): Promise<void> => {
+    const existing = pollingCandidateSets.current.get(candidateSetId);
+    if (existing) {
+      return existing.catch((reason) => {
+        if (!isCurrentAgentSelection(agentId, selectionGeneration)) {
+          throw reason;
+        }
+        return pollCandidateSet(
+          candidateSetId,
+          agentId,
+          selectionGeneration,
+        );
+      });
+    }
+    const polling = (async () => {
       while (mountedRef.current) {
         await new Promise((resolve) => window.setTimeout(resolve, 700));
         if (!mountedRef.current) return;
         const result = await api.candidateSet(candidateSetId);
-        if (selectedIdRef.current === agentId) {
+        if (isCurrentAgentSelection(agentId, selectionGeneration)) {
           setActiveCandidateSet(result.candidateSet);
         }
         if (
@@ -5984,21 +6033,34 @@ export default function App() {
           )
         ) {
           await refreshAgents();
+          if (selectedIdRef.current === agentId) {
+            const currentGeneration = agentSelectionGenerationRef.current;
+            if (isCurrentAgentSelection(agentId, currentGeneration)) {
+              setActiveCandidateSet(result.candidateSet);
+            }
+          }
           return;
         }
       }
-    } finally {
-      pollingCandidateSetIds.current.delete(candidateSetId);
-    }
+    })();
+    const tracked = polling.finally(() => {
+      if (pollingCandidateSets.current.get(candidateSetId) === tracked) {
+        pollingCandidateSets.current.delete(candidateSetId);
+      }
+    });
+    pollingCandidateSets.current.set(candidateSetId, tracked);
+    return tracked;
   };
 
   const exploreCompetingFutures = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected || !explorationObjective.trim()) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setAirlockActionBusy(true);
     setError(null);
     try {
-      const result = await api.createCandidateSet(selected.id, {
+      const result = await api.createCandidateSet(agentId, {
         objective: explorationObjective.trim(),
         competitors: [
           {
@@ -6023,68 +6085,105 @@ export default function App() {
         maxConcurrency: 3,
         loserPolicy,
       });
-      setActiveCandidateSet(result.candidateSet);
-      setShowExplore(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setActiveCandidateSet(result.candidateSet);
+        setShowExplore(false);
+      }
       setAgents((current) =>
         current.map((agent) =>
-          agent.id === selected.id ? { ...agent, status: "busy" } : agent,
+          agent.id === agentId ? { ...agent, status: "busy" } : agent,
         ),
       );
-      await pollCandidateSet(result.candidateSet.id, selected.id);
+      await pollCandidateSet(
+        result.candidateSet.id,
+        agentId,
+        selectionGeneration,
+      );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
       await refreshAgents();
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
   const cancelCompetingFutures = async () => {
     if (!activeCandidateSet) return;
+    const agentId = activeCandidateSet.agentId;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setAirlockActionBusy(true);
     setError(null);
     try {
       const result = await api.cancelCandidateSet(activeCandidateSet.id);
-      setActiveCandidateSet(result.candidateSet);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setActiveCandidateSet(result.candidateSet);
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
-  const refreshAssurance = async (agentId: string) => {
+  const refreshAssurance = async (
+    agentId: string,
+    selectionGeneration: number,
+  ) => {
     const [proposalResult, versionResult] = await Promise.all([
       api.assuranceProposals(agentId),
       api.outcomeContractVersions(agentId),
     ]);
-    if (selectedIdRef.current === agentId) {
+    if (isCurrentAgentSelection(agentId, selectionGeneration)) {
       setAssuranceProposals(proposalResult.proposals);
       setContractVersions(versionResult.versions);
     }
   };
 
+  const refreshCurrentAssurance = async (agentId: string) => {
+    if (selectedIdRef.current !== agentId) return;
+    await refreshAssurance(agentId, agentSelectionGenerationRef.current);
+  };
+
   const deriveAssurance = async () => {
     if (!selected) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setAirlockActionBusy(true);
     setError(null);
     try {
-      const result = await api.deriveAssuranceProposal(selected.id);
-      await refreshAssurance(selected.id);
-      if (!result.proposal) {
+      const result = await api.deriveAssuranceProposal(agentId);
+      await refreshCurrentAssurance(agentId);
+      if (
+        !result.proposal &&
+        isCurrentAgentSelection(agentId, selectionGeneration)
+      ) {
         setError(
           "No recurring pattern reached the deterministic support threshold yet.",
         );
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
   const acceptAssurance = async (proposal: AssuranceProposal) => {
-    if (!selected) return;
+    if (!selected || proposal.agentId !== selected.id) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     const changes = proposal.operations
       .map(assuranceOperationLabel)
       .join("\n- ");
@@ -6105,17 +6204,26 @@ export default function App() {
     setError(null);
     try {
       await api.acceptAssuranceProposal(proposal.id, reason);
-      await Promise.all([refreshAgents(), refreshAssurance(selected.id)]);
+      await Promise.all([
+        refreshAgents(),
+        refreshCurrentAssurance(agentId),
+      ]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      await refreshAssurance(selected.id);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+      await refreshCurrentAssurance(agentId);
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
   const rejectAssurance = async (proposal: AssuranceProposal) => {
-    if (!selected) return;
+    if (!selected || proposal.agentId !== selected.id) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     const reason = window.prompt(
       "Why reject this proposal?",
       "Needs more context",
@@ -6125,16 +6233,22 @@ export default function App() {
     setError(null);
     try {
       await api.rejectAssuranceProposal(proposal.id, reason);
-      await refreshAssurance(selected.id);
+      await refreshCurrentAssurance(agentId);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
   const rollbackContract = async (target: OutcomeContractVersionRecord) => {
-    if (!selected) return;
+    if (!selected || target.agentId !== selected.id) return;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     const current = selected.outcomeContract;
     const removedRequiredPaths = current.requiredPaths.filter(
       (item) => !target.contract.requiredPaths.includes(item),
@@ -6212,38 +6326,48 @@ export default function App() {
     setError(null);
     try {
       await api.rollbackOutcomeContract(
-        selected.id,
+        agentId,
         target.contract.version,
         current.version,
       );
-      await Promise.all([refreshAgents(), refreshAssurance(selected.id)]);
+      await Promise.all([
+        refreshAgents(),
+        refreshCurrentAssurance(agentId),
+      ]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
   const runPrompt = async (content: string): Promise<AgentRun | null> => {
     if (!selected || !content.trim()) return null;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setPrompt("");
     setError(null);
     try {
-      const result = await api.sendMessage(selected.id, content);
-      if (selectedIdRef.current === selected.id) {
+      const result = await api.sendMessage(agentId, content);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
         setRuns((current) => [result.run, ...current]);
       }
       setAgents((current) =>
         current.map((agent) =>
-          agent.id === selected.id ? { ...agent, status: "busy" } : agent,
+          agent.id === agentId ? { ...agent, status: "busy" } : agent,
         ),
       );
-      return await pollRun(result.run.id, selected.id);
+      return await pollRun(result.run.id, agentId, selectionGeneration);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setActiveRun(null);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
       await refreshAgents();
       return null;
     }
@@ -6258,32 +6382,40 @@ export default function App() {
     sourceRunId = activeRun?.id,
   ): Promise<AgentRun | null> => {
     if (!selected || !sourceRunId) return null;
+    const agentId = selected.id;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     setAirlockActionBusy(true);
     setError(null);
     try {
       const result = await api.repairRun(sourceRunId);
-      if (selectedIdRef.current === selected.id) {
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
         setRuns((current) => [result.run, ...current]);
       }
       setAgents((current) =>
         current.map((agent) =>
-          agent.id === selected.id ? { ...agent, status: "busy" } : agent,
+          agent.id === agentId ? { ...agent, status: "busy" } : agent,
         ),
       );
-      return await pollRun(result.run.id, selected.id);
+      return await pollRun(result.run.id, agentId, selectionGeneration);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
       await refreshAgents();
       return null;
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
   const discardActiveRun = async () => {
     if (!activeRun) return;
+    const agentId = activeRun.agentId;
+    const selectionGeneration = agentSelectionGenerationRef.current;
     if (
       !window.confirm(
         "Discard this mutable Quarantine? Its bounded decision evidence will remain.",
@@ -6295,12 +6427,21 @@ export default function App() {
     setError(null);
     try {
       const result = await api.discardRun(activeRun.id);
-      setActiveRun(result.run);
-      await refreshAgents();
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setActiveRun(result.run);
+      }
+      await Promise.all([
+        refreshAgents(),
+        refreshSelectedRunState(agentId),
+      ]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setAirlockActionBusy(false);
+      if (isCurrentAgentSelection(agentId, selectionGeneration)) {
+        setAirlockActionBusy(false);
+      }
     }
   };
 
@@ -6421,7 +6562,7 @@ export default function App() {
                   "agent-card " + (agent.id === selectedId ? "selected" : "")
                 }
               key={agent.id}
-              onClick={() => setSelectedId(agent.id)}
+              onClick={() => selectAgentId(agent.id)}
             >
                 <div className="agent-avatar">
                   {agent.name.slice(0, 1).toUpperCase()}
@@ -6448,8 +6589,10 @@ export default function App() {
             {system?.demoMode
               ? "No paid inference"
               : system?.protocolFixtureMode
-                  ? "Local Responses fixture · " +
-                    (system.containerEngine ?? "container")
+                  ? system.runtimeProvider === "container"
+                    ? "Local Responses fixture · " +
+                      (system.containerEngine ?? "container")
+                    : "Local Responses fixture · application container"
                 : system?.modelArkDemoMode
                     ? "Provider-backed ModelArk · " +
                       (system.containerEngine ?? "container")
@@ -6497,8 +6640,12 @@ export default function App() {
                 Agent Run
               </strong>
               <p>
-                Real Codex CLI in a disposable container · local deterministic
-                Responses fixture · no ModelArk request or paid inference.
+                {system.runtime +
+                  " · " +
+                  (system.runtimeProvider === "container"
+                    ? "local deterministic Responses fixture · "
+                    : "") +
+                  "no ModelArk request or paid inference."}
               </p>
             </div>
           </div>
@@ -6569,7 +6716,30 @@ export default function App() {
           </div>
         )}
 
-        {recordingEvidenceFailure ? (
+        {recordingReplayFailure ? (
+          <section
+            className="recording-proof-failure"
+            role="alert"
+            aria-labelledby="recording-replay-failure-title"
+          >
+            <span className="eyebrow">Fail-closed read-only replay</span>
+            <h1
+              id="recording-replay-failure-title"
+              ref={recordingReplayFailureHeadingRef}
+              tabIndex={-1}
+            >
+              Read-only proof link could not be verified.
+            </h1>
+            <p>
+              This proof link is incomplete, stale, or does not match the
+              persisted Runs for this Agent.
+            </p>
+            <strong>
+              No Run was created and no receipt was requested. Open the complete
+              read-only proof link from a successful Runtime proof.
+            </strong>
+          </section>
+        ) : recordingEvidenceFailure ? (
           <section className="recording-proof-failure" role="alert">
             <span className="eyebrow">Fail-closed recording guard</span>
             <h1>Outcome evidence contract did not match.</h1>
@@ -7180,7 +7350,7 @@ export default function App() {
                       {system?.demoMode
                         ? "Start with the safe multi-resource release"
                         : system?.protocolFixtureMode
-                          ? "Run the real container transaction"
+                          ? "Run the real Agent transaction"
                           : system?.modelArkDemoMode
                             ? "Run the live provider proof"
                         : `What should ${selected.name} build?`}

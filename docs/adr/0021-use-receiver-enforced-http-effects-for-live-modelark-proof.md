@@ -25,14 +25,19 @@ The request will carry the stable Run-scoped idempotency key in both the bounded
 The receiver will recompute the payload and idempotency commitments, atomically persist one bounded receipt, and return the same receipt for an exact replay.
 An idempotency-key conflict or contradictory receipt will fail closed.
 
-The control plane will persist only bounded receipt evidence and will retry the same key during Promotion recovery.
+Each supported consumer will own a non-secret random identifier persisted atomically with its receipt database.
+The control plane will commit a digest of the delivery mode, consumer identifier, and logical destination into the Promotion journal before physical state movement.
+The managed HTTP receiver will expose its identifier through a bounded read-only endpoint, and every delivery will present the expected identifier so a receiver rollover between discovery and acceptance fails closed.
+Recovery will compare the committed consumer scope with the active dispatcher before delivery and will not replay into a replacement receipt database even when its URL or local path is unchanged.
+The control plane will persist only bounded receipt and consumer-scope evidence and will retry the same key during Promotion recovery.
 The one-command live proof will refuse success unless the active system profile declares receiver-enforced HTTP delivery and `/api/effects` returns the exact matching HTTP receipt for the promoted Run.
 
 ## Consequences
 
 The live proof now exercises a real HTTP side effect without giving the untrusted Agent authority to choose a network destination.
 An interruption after receiver acceptance but before local journal advancement converges by replaying the same key and receiving the original receipt.
-The receiver stores no message body, provider credential, model identifier, or endpoint identifier.
+An interruption may replay only into the same durable consumer scope, while a replaced scope leaves Canonical State intact and records a fail-closed recovery error without a second delivery attempt.
+The receiver stores no message body, provider credential, model identifier, or endpoint identifier, and its consumer identifier is intentionally non-secret.
 
 The guarantee is at-least-once HTTP transport to an idempotent consumer with one accepted effect identity.
 Agent Airlock does not claim distributed exactly-once delivery for arbitrary third-party services.
@@ -58,4 +63,3 @@ Rejected because credentials and provider availability add no value to the trans
 ### Publish the effect on a public blockchain
 
 Rejected because chain publication is unnecessary for Track 1, adds cost and latency, and cannot authorize Promotion.
-

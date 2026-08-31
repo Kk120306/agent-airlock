@@ -10,6 +10,7 @@ import {
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentService } from "./agent-service.js";
 import type { AirlockRunner } from "./airlock-runner.js";
@@ -173,6 +174,44 @@ describe("Agent lifecycle", () => {
     expect(info).not.toHaveProperty("arkModel");
     expect(JSON.stringify(info)).not.toContain("ep-test");
     expect(JSON.stringify(info)).not.toContain("test-key");
+  });
+
+  it("reports the exact Runtime boundary for both real-Codex fixture profiles", async () => {
+    const fixtureIdentity = {
+      AIRLOCK_PROTOCOL_FIXTURE_MODE: "true",
+      CODEX_BIN: "codex",
+      ARK_API_KEY: "deterministic-protocol-fixture",
+      ARK_MODEL: "protocol-fixture",
+    } as const;
+    const containerRuntime = await makeService(new FakeRunner(), undefined, {
+      ...fixtureIdentity,
+      HOST: "127.0.0.1",
+      ARK_BASE_URL: "http://host.docker.internal:43994/v1",
+      RUNTIME_PROVIDER: "container",
+    });
+    const productImageRuntime = await makeService(
+      new FakeRunner(),
+      undefined,
+      {
+        ...fixtureIdentity,
+        HOST: "0.0.0.0",
+        APP_AUTH_TOKEN: "phase11-container-verification-token",
+        ARK_BASE_URL: "http://127.0.0.1:43991/v1",
+        RUNTIME_PROVIDER: "local-process",
+      },
+    );
+
+    await expect(containerRuntime.systemInfo()).resolves.toMatchObject({
+      inferenceMode: "local-responses-protocol-fixture",
+      runtimeProvider: "container",
+      runtime: "Real Codex CLI in disposable docker Runtime",
+    });
+    await expect(productImageRuntime.systemInfo()).resolves.toMatchObject({
+      inferenceMode: "local-responses-protocol-fixture",
+      runtimeProvider: "local-process",
+      runtime:
+        "Real Codex CLI in application container against the local Responses protocol fixture",
+    });
   });
 
   it("creates, updates, stops, starts and deletes an Agent", async () => {
@@ -533,6 +572,65 @@ describe("Agent lifecycle", () => {
     expect(JSON.stringify(service.getAgent(agent.id))).not.toMatch(
       /3003612015|req-secret-123/,
     );
+  });
+
+  it("fails closed before persisting or displaying sensitive Runtime output", async () => {
+    const sensitiveValue = "runtime-output-control-plane-value";
+    const service = await makeService(
+      {
+        run: async (request) => {
+          await persistFixtureSession(request, "sensitive-output-thread");
+          return {
+            output: sensitiveValue,
+            threadId: "sensitive-output-thread",
+            usage: null,
+          };
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      },
+      undefined,
+      { ARK_API_KEY: sensitiveValue },
+    );
+    const agent = await service.createAgent({ name: "Sensitive output" });
+    const { run } = await service.sendMessage(agent.id, "run the Candidate");
+
+    await expect.poll(() => service.getRun(run.id).status).toBe("failed");
+    const serialized = JSON.stringify({
+      run: service.getRun(run.id),
+      agent: service.getAgent(agent.id),
+    });
+
+    expect(serialized).toContain(
+      "Runtime output contained a control-plane sensitive value",
+    );
+    expect(serialized).not.toContain(sensitiveValue);
+  });
+
+  it("redacts the configured control-plane auth token from Runtime errors", async () => {
+    const sensitiveValue = "configured-auth-token-123456789";
+    const service = await makeService(
+      {
+        run: async () => {
+          throw new Error("transport detail " + sensitiveValue);
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      },
+      undefined,
+      { APP_AUTH_TOKEN: sensitiveValue },
+    );
+    const agent = await service.createAgent({ name: "Sensitive error" });
+    const { run } = await service.sendMessage(agent.id, "run the Candidate");
+
+    await expect.poll(() => service.getRun(run.id).status).toBe("failed");
+    const serialized = JSON.stringify({
+      run: service.getRun(run.id),
+      agent: service.getAgent(agent.id),
+    });
+
+    expect(serialized).toContain("transport detail [REDACTED]");
+    expect(serialized).not.toContain(sensitiveValue);
   });
 
   it("redacts a ModelArk endpoint identifier from persisted Runtime errors and HTTP projections", async () => {
@@ -907,6 +1005,74 @@ describe("Agent lifecycle", () => {
       );
     },
   );
+
+  it("promotes the product-image fixture through truthful structural Validation", async () => {
+    const service = await makeService(
+      {
+        run: async (request) => {
+          const threadId = request.threadId ?? "product-fixture-thread";
+          await persistFixtureSession(request, threadId);
+          await writeFile(
+            path.join(request.workspacePath, "protocol-proof.txt"),
+            "candidate-only\n",
+          );
+          const database = new DatabaseSync(
+            path.join(request.workspacePath, ".airlock", "demo.sqlite"),
+          );
+          database
+            .prepare("UPDATE inventory SET value = ?, updated_at = ? WHERE id = ?")
+            .run("candidate-only", "2026-08-28T00:00:00.000Z", "demo");
+          database.close();
+          return {
+            output: "Product-image fixture Candidate complete",
+            threadId,
+            usage: null,
+          };
+        },
+        cancel: async () => false,
+        isAvailable: async () => true,
+      },
+      undefined,
+      {
+        HOST: "0.0.0.0",
+        APP_AUTH_TOKEN: "phase11-container-verification-token",
+        AIRLOCK_PROTOCOL_FIXTURE_MODE: "true",
+        RUNTIME_PROVIDER: "local-process",
+        CONTAINER_ENGINE: "missing-inside-product-image",
+        CODEX_BIN: "codex",
+        ARK_API_KEY: "deterministic-protocol-fixture",
+        ARK_MODEL: "protocol-fixture",
+        ARK_BASE_URL: "http://127.0.0.1:43991/v1",
+      },
+    );
+    const agent = await service.createAgent({ name: "Product fixture command" });
+    await service.updateOutcomeContract(agent.id, {
+      requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
+      protectedPaths: ["AGENTS.md"],
+      maxChangedFiles: 4,
+      maxAddedBytes: 65_536,
+      secretPatterns: [],
+      validationCommands: [],
+    });
+
+    const { run } = await service.sendMessage(
+      agent.id,
+      "Apply the production image boundary proof through isolated Candidate State.",
+    );
+    await waitForRunStatus(service, run.id, "completed");
+    const completed = service.getRun(run.id);
+
+    expect(completed.transaction).toMatchObject({ disposition: "promoted" });
+    expect(completed.transaction?.validations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "protocol-fixture-content",
+          required: true,
+          status: "passed",
+        }),
+      ]),
+    );
+  });
 
   it.each([
     {

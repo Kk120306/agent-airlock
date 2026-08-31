@@ -13,13 +13,17 @@ import {
 import path from "node:path";
 import { ASSURANCE_SECRET_CATALOG } from "./assurance.js";
 import { SQLITE_RELATIVE_PATH } from "./sqlite-resource.js";
+import { SensitiveLiteralFilter } from "./sensitive-literals.js";
 import type {
   OutcomeContract,
   ValidationEvidence,
   WorkspaceChange,
   WorkspaceChangeSummary,
 } from "./types.js";
-import type { ValidationCommandExecutor } from "./validation-command-runner.js";
+import type {
+  StructuralValidator,
+  ValidationCommandExecutor,
+} from "./validation-command-runner.js";
 
 const MAX_INVENTORY_ENTRIES = 10_000;
 const MAX_EVIDENCE_CHANGES = 200;
@@ -61,7 +65,19 @@ const requiredEvidence = (
 });
 
 export class OutcomeValidator {
-  constructor(private readonly commandExecutor: ValidationCommandExecutor) {}
+  private readonly sensitiveLiterals: SensitiveLiteralFilter;
+
+  constructor(
+    private readonly commandExecutor: ValidationCommandExecutor,
+    sensitiveValues: readonly string[] = [],
+    private readonly structuralValidators: readonly StructuralValidator[] = [],
+  ) {
+    this.sensitiveLiterals = new SensitiveLiteralFilter(sensitiveValues);
+  }
+
+  containsControlPlaneSensitiveValue(value: string | Buffer): boolean {
+    return this.sensitiveLiterals.contains(value);
+  }
 
   async validate(
     canonicalWorkspacePath: string,
@@ -220,6 +236,24 @@ export class OutcomeValidator {
       );
     }
 
+    for (const validator of this.structuralValidators) {
+      const structuralStarted = Date.now();
+      try {
+        validations.push(
+          await validator.validate(candidateWorkspacePath, runId),
+        );
+      } catch {
+        validations.push(
+          requiredEvidence(
+            validator.name,
+            "error",
+            "Trusted structural Validation could not complete safely",
+            structuralStarted,
+          ),
+        );
+      }
+    }
+
     for (const command of contract.validationCommands) {
       const commandStarted = Date.now();
       let validationRoot: string | null = null;
@@ -237,13 +271,19 @@ export class OutcomeValidator {
           command,
           runId,
         );
+        const containsSensitiveValue =
+          this.sensitiveLiterals.contains(result.output);
         const status: ValidationEvidence["status"] =
-          result.timedOut || result.outputExceeded
+          containsSensitiveValue
+            ? "failed"
+            : result.timedOut || result.outputExceeded
             ? "error"
             : result.exitCode === 0
               ? "passed"
               : "failed";
-        const summary = result.timedOut
+        const summary = containsSensitiveValue
+          ? "Validation command output contained a control-plane sensitive value"
+          : result.timedOut
           ? "Validation command timed out"
           : result.outputExceeded
             ? "Validation command exceeded the output limit"
@@ -258,7 +298,10 @@ export class OutcomeValidator {
           durationMs: Math.max(result.durationMs, Date.now() - commandStarted),
           output:
             truncateUtf8(
-              redactEvidence(result.output, contract),
+              redactEvidence(
+                this.sensitiveLiterals.redact(result.output),
+                contract,
+              ),
               MAX_PERSISTED_COMMAND_OUTPUT_BYTES,
             ) || null,
         });
@@ -302,6 +345,11 @@ export class OutcomeValidator {
         continue;
       }
       const content = await readFile(path.join(candidateWorkspacePath, relativePath), "utf8");
+      if (this.sensitiveLiterals.contains(content)) {
+        findings.push(
+          relativePath + " contained a control-plane sensitive value",
+        );
+      }
       for (const secretPattern of contract.secretPatterns) {
         const expression = new RegExp(secretPattern.pattern, "gi");
         if (expression.test(content)) {

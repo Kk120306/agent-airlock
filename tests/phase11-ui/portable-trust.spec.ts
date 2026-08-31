@@ -171,6 +171,49 @@ const system: SystemInfo = {
   runtime: "Production bundle Portable Trust contract",
 };
 
+test("discloses the product-image Runtime without claiming a disposable container", async ({
+  page,
+}) => {
+  const requests: Array<Record<string, unknown>> = [];
+  await serveProductionBundle(
+    page,
+    requests,
+    undefined,
+    undefined,
+    {
+      ...system,
+      protocolFixtureMode: true,
+      inferenceMode: "local-responses-protocol-fixture",
+      arkConfigured: true,
+      runtimeProvider: "local-process",
+      containerEngine: null,
+      runtime:
+        "Real Codex CLI in application container against the local Responses protocol fixture",
+    },
+    { runs: [] },
+  );
+  await page.goto(`${portableTrustOrigin}/`);
+
+  const protocolBanner = page.getByText("TRACK 1 · AGENT LAUNCHPAD", {
+    exact: true,
+  }).locator("..");
+  await expect(protocolBanner).toContainText(
+    "Real Codex CLI in application container against the local Responses protocol fixture",
+  );
+  await expect(protocolBanner).not.toContainText("disposable container");
+  await expect(
+    page.getByText("Local Responses fixture · application container", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Run the real Agent transaction" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Run the real container transaction" }),
+  ).toHaveCount(0);
+});
+
 test("exports a private-by-default receipt and explains the proof boundary", async ({
   page,
 }) => {
@@ -694,9 +737,9 @@ test("presents the live ModelArk judge path as provider-backed and falsifiable",
   const liveProof = page.getByRole("region", { name: "Judge proof summary" });
   await expect(liveProof.getByText("4/4 resources promoted", { exact: true }))
     .toBeVisible();
-  await expect(liveProof.getByText("Effect released after Promotion", { exact: true }))
+  await expect(liveProof.getByText("Effect released during Promotion", { exact: true }))
     .toBeVisible();
-  await expect(liveProof.getByText("1 typed effect delivered only after Canonical State advanced."))
+  await expect(liveProof.getByText("1 typed effect delivered after Canonical State advanced during Promotion."))
     .toBeVisible();
 
   await guide.getByRole("button", { name: /Run another live Candidate/ }).click();
@@ -1073,6 +1116,232 @@ test("stops an in-flight safety loop when the operator switches Agents", async (
     .toHaveCount(0);
 });
 
+test("ignores an older Agent request after switching away and back", async ({
+  page,
+}) => {
+  const secondAgent: Agent = {
+    ...agent,
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "Second guardian",
+    workspacePath: "/bounded/second-workspace",
+    canonicalStateId: "second-state",
+    codexThreadId: "thread-second",
+  };
+  const existingRun = structuredClone(run);
+  existingRun.id = "run-existing-agent-a";
+  existingRun.transaction!.id = "transaction-existing-agent-a";
+  existingRun.transaction!.lineage = {
+    ...existingRun.transaction!.lineage,
+    rootRunId: existingRun.id,
+  };
+  let releaseMessage!: () => void;
+  const messageGate = new Promise<void>((resolve) => {
+    releaseMessage = resolve;
+  });
+  const requests: Array<Record<string, unknown>> = [];
+  await serveProductionBundle(
+    page,
+    requests,
+    { current: existingRun },
+    undefined,
+    system,
+    {
+      agents: [agent, secondAgent],
+      runs: [existingRun],
+      runsByAgentId: {
+        [agent.id]: [existingRun],
+        [secondAgent.id]: [],
+      },
+      messageGate,
+      messageFailure: "The older Agent request failed after selection changed.",
+    },
+  );
+  await page.goto(`${portableTrustOrigin}/`);
+  await expect(
+    page.getByRole("article", { name: "Agent Airlock evidence" }),
+  ).toBeVisible();
+
+  await page.locator("form.composer textarea").fill("Start a delayed Run.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect.poll(() => requests.length).toBe(1);
+  await page.getByRole("button", { name: /Second guardian/ }).click();
+  await expect(
+    page.getByRole("article", { name: "Agent Airlock evidence" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /Portable guardian/ }).click();
+  await expect(
+    page.getByRole("article", { name: "Agent Airlock evidence" }),
+  ).toBeVisible();
+
+  const delayedResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === `/api/agents/${agent.id}/messages`,
+  );
+  releaseMessage();
+  await delayedResponse;
+  await expect(
+    page.getByRole("article", { name: "Agent Airlock evidence" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("The older Agent request failed after selection changed.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+});
+
+test("does not steal selection when Agent creation finishes in the background", async ({
+  page,
+}) => {
+  const secondAgent: Agent = {
+    ...agent,
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "Second guardian",
+    workspacePath: "/bounded/second-workspace",
+    canonicalStateId: "second-state",
+    codexThreadId: "thread-second",
+  };
+  const createdAgent: Agent = {
+    ...agent,
+    id: "33333333-3333-4333-8333-333333333333",
+    name: "Background builder",
+    workspacePath: "/bounded/background-workspace",
+    canonicalStateId: "background-state",
+    codexThreadId: null,
+  };
+  let releaseCreation!: () => void;
+  const createAgentGate = new Promise<void>((resolve) => {
+    releaseCreation = resolve;
+  });
+  const requests: Array<Record<string, unknown>> = [];
+  await serveProductionBundle(
+    page,
+    requests,
+    { current: run },
+    undefined,
+    system,
+    {
+      agents: [agent, secondAgent],
+      runsByAgentId: {
+        [agent.id]: [run],
+        [secondAgent.id]: [],
+        [createdAgent.id]: [],
+      },
+      createAgentGate,
+      createdAgent,
+    },
+  );
+  await page.goto(`${portableTrustOrigin}/`);
+  await page.getByRole("button", { name: "Create Agent" }).click();
+  const createForm = page.locator("form.modal");
+  await createForm.getByLabel("Name").fill(createdAgent.name);
+  await createForm.getByRole("button", { name: "Create Agent" }).click();
+  await expect.poll(() => requests.length).toBe(1);
+
+  await createForm.getByRole("button", { name: "Cancel" }).click();
+  const secondAgentButton = page.getByRole("button", {
+    name: /Second guardian/,
+  });
+  await secondAgentButton.click();
+  await expect(secondAgentButton).toHaveClass(/selected/);
+
+  const delayedResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/agents",
+  );
+  releaseCreation();
+  await delayedResponse;
+  await expect(secondAgentButton).toHaveClass(/selected/);
+  await expect(
+    page.getByRole("heading", { name: secondAgent.name, exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Background builder/ }),
+  ).toBeVisible();
+});
+
+test("takes over polling when an older Agent poll fails after switching away and back", async ({
+  page,
+}) => {
+  const runningRun = structuredClone(run);
+  runningRun.id = "run-poll-takeover";
+  runningRun.status = "running";
+  runningRun.output = null;
+  runningRun.transaction = null;
+  runningRun.completedAt = null;
+  const completedRun = structuredClone(run);
+  completedRun.id = runningRun.id;
+  completedRun.transaction!.id = "transaction-poll-takeover";
+  completedRun.transaction!.lineage = {
+    ...completedRun.transaction!.lineage,
+    rootRunId: completedRun.id,
+  };
+  const busyAgent: Agent = { ...agent, status: "busy" };
+  const secondAgent: Agent = {
+    ...agent,
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "Second guardian",
+    workspacePath: "/bounded/second-workspace",
+    canonicalStateId: "second-state",
+    codexThreadId: "thread-second",
+  };
+  const runPollAttempts = { count: 0 };
+  let releaseFirstPoll!: () => void;
+  const runPollGate = new Promise<void>((resolve) => {
+    releaseFirstPoll = resolve;
+  });
+  await serveProductionBundle(
+    page,
+    [],
+    { current: runningRun },
+    undefined,
+    system,
+    {
+      agents: [busyAgent, secondAgent],
+      runsByAgentId: {
+        [agent.id]: [runningRun],
+        [secondAgent.id]: [],
+      },
+      runPollAttempts,
+      runPollGate,
+      runPollResponses: [
+        { status: 503, error: "Transient Run lookup failure." },
+        { status: 200, run: completedRun },
+      ],
+    },
+  );
+  await page.goto(`${portableTrustOrigin}/`);
+  await expect.poll(() => runPollAttempts.count).toBe(1);
+
+  await page.getByRole("button", { name: /Second guardian/ }).click();
+  await page.getByRole("button", { name: /Portable guardian/ }).click();
+  await expect(
+    page.locator("article.message-assistant.thinking"),
+  ).toBeVisible();
+
+  const failedPoll = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === `/api/runs/${runningRun.id}` &&
+      response.status() === 503,
+  );
+  releaseFirstPoll();
+  await failedPoll;
+
+  await expect.poll(() => runPollAttempts.count).toBe(2);
+  const header = page.locator("header.agent-header");
+  await expect(header.getByText("ready", { exact: true })).toBeVisible();
+  const evidence = page.getByRole("article", {
+    name: "Agent Airlock evidence",
+  });
+  await expect(evidence.getByRole("heading", { name: "Promoted" })).toBeVisible();
+  await expect(page.locator("article.message-assistant.thinking")).toHaveCount(0);
+  await expect(
+    page.getByText("Transient Run lookup failure.", { exact: true }),
+  ).toHaveCount(0);
+});
+
 test("ignores a delayed receipt response after the Run decision changes", async ({
   page,
 }) => {
@@ -1137,6 +1406,17 @@ async function serveProductionBundle(
     runs?: AgentRun[];
     agents?: Agent[];
     runsByAgentId?: Record<string, AgentRun[]>;
+    createAgentGate?: Promise<void>;
+    createdAgent?: Agent;
+    messageGate?: Promise<void>;
+    messageFailure?: string;
+    runPollAttempts?: { count: number };
+    runPollGate?: Promise<void>;
+    runPollResponses?: Array<{
+      status: number;
+      run?: AgentRun;
+      error?: string;
+    }>;
     portableReceiptFailures?: { remaining: number };
     portableReceiptTransform?: (
       exported: PortableReceiptExport,
@@ -1144,6 +1424,11 @@ async function serveProductionBundle(
   } = {},
 ): Promise<void> {
   const origin = options.origin ?? portableTrustOrigin;
+  let servedAgents = options.agents;
+  let servedRunsByAgentId = options.runsByAgentId
+    ? { ...options.runsByAgentId }
+    : undefined;
+  const runPollResponses = [...(options.runPollResponses ?? [])];
   await page.route(`${origin}/**`, async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/") {
@@ -1157,6 +1442,65 @@ async function serveProductionBundle(
       await route.fulfill({ path: path.join(webDist, url.pathname) });
       return;
     }
+    const runPollId = url.pathname.match(/^\/api\/runs\/([^/]+)$/)?.[1];
+    if (
+      route.request().method() === "GET" &&
+      runPollId &&
+      runPollResponses.length > 0
+    ) {
+      if (options.runPollAttempts) options.runPollAttempts.count += 1;
+      if (options.runPollAttempts?.count === 1) await options.runPollGate;
+      const response = runPollResponses.shift()!;
+      if (!response.run) {
+        await route.fulfill({
+          status: response.status,
+          contentType: "application/json",
+          body: JSON.stringify({ error: response.error ?? "Run lookup failed." }),
+        });
+        return;
+      }
+      runState.current = response.run;
+      servedRunsByAgentId = {
+        ...(servedRunsByAgentId ?? {}),
+        [response.run.agentId]: [response.run],
+      };
+      servedAgents = (servedAgents ?? [agent]).map((candidate) =>
+        candidate.id === response.run!.agentId
+          ? {
+              ...candidate,
+              status: ["queued", "running"].includes(response.run!.status)
+                ? "busy"
+                : "ready",
+            }
+          : candidate,
+      );
+      await route.fulfill({
+        status: response.status,
+        contentType: "application/json",
+        body: JSON.stringify({ run: response.run }),
+      });
+      return;
+    }
+    if (
+      route.request().method() === "POST" &&
+      url.pathname === "/api/agents" &&
+      options.createdAgent
+    ) {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      await options.createAgentGate;
+      servedAgents = [
+        ...(servedAgents ?? [agent]).filter(
+          (candidate) => candidate.id !== options.createdAgent!.id,
+        ),
+        options.createdAgent,
+      ];
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ agent: options.createdAgent }),
+      });
+      return;
+    }
     if (
       route.request().method() === "POST" &&
       url.pathname.endsWith("/messages")
@@ -1166,6 +1510,15 @@ async function serveProductionBundle(
         url.pathname.match(/^\/api\/agents\/([^/]+)\/messages$/)?.[1] ??
         agent.id;
       requests.push(body);
+      await options.messageGate;
+      if (options.messageFailure) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: options.messageFailure }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 202,
         contentType: "application/json",
@@ -1264,8 +1617,8 @@ async function serveProductionBundle(
       runState.current,
       systemState,
       options.runs,
-      options.agents,
-      options.runsByAgentId,
+      servedAgents,
+      servedRunsByAgentId,
     );
     if (response) {
       await route.fulfill({

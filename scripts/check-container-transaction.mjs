@@ -4,6 +4,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
 } from "node:fs/promises";
@@ -21,6 +22,8 @@ const serverEntry = path.join(repoRoot, "apps/server/dist/index.js");
 const testRoot = path.join(repoRoot, ".local", "container-tests");
 const requestTimeoutMs = 20_000;
 const runTimeoutMs = 45_000;
+const providerCredential = "deterministic-protocol-fixture";
+const controlPlaneAuthToken = "deterministic-auth-token-1234567890";
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -82,6 +85,7 @@ async function requestJson(baseUrl, pathname, options = {}) {
       ...options,
       headers: {
         ...(options.body ? { "content-type": "application/json" } : {}),
+        authorization: `Bearer ${controlPlaneAuthToken}`,
         ...options.headers,
       },
       signal: controller.signal,
@@ -130,6 +134,29 @@ async function stopChild(child) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
+async function assertTreeExcludesLiterals(root, literals) {
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const content = await readFile(entryPath);
+      for (const literal of literals) {
+        invariant(
+          !content.includes(Buffer.from(literal)),
+          `Control-plane credential persisted in ${path.relative(root, entryPath)}`,
+        );
+      }
+    }
+  }
+}
+
 function startControlPlane(environment) {
   return spawn(process.execPath, [serverEntry], {
     cwd: repoRoot,
@@ -158,7 +185,8 @@ async function main() {
     APP_DATA_DIR: path.join(root, "data"),
     AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
     CODEX_HOME: path.join(root, "codex-home"),
-    ARK_API_KEY: "deterministic-protocol-fixture",
+    APP_AUTH_TOKEN: controlPlaneAuthToken,
+    ARK_API_KEY: providerCredential,
     ARK_MODEL: "protocol-fixture",
     ARK_BASE_URL: `http://${fixtureHostname}:${fixturePort}/v1`,
     RUNTIME_PROVIDER: "container",
@@ -212,7 +240,7 @@ async function main() {
         requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
         protectedPaths: ["AGENTS.md"],
         maxChangedFiles: 4,
-        maxAddedBytes: 4_096,
+        maxAddedBytes: 16_384,
         secretPatterns: [],
         validationCommands: [
           {
@@ -233,7 +261,13 @@ async function main() {
     invariant(firstRun.status === "completed", "The first real Run did not complete");
     invariant(
       firstRun.transaction?.disposition === "promoted",
-      "The first real Candidate was not promoted",
+      "The first real Candidate was not promoted: " +
+        JSON.stringify({
+          status: firstRun.status,
+          disposition: firstRun.transaction?.disposition,
+          validations: firstRun.transaction?.validations,
+          error: firstRun.error,
+        }),
     );
     invariant(
       firstRun.transaction.validations.every(
@@ -323,6 +357,82 @@ async function main() {
       "The resumed Run did not advance Canonical State",
     );
 
+    const credentialAgent = await requestJson(baseUrl, "/api/agents", {
+      method: "POST",
+      headers: { authorization: `Bearer ${controlPlaneAuthToken}` },
+      body: JSON.stringify({
+        name: "Runtime Credential Boundary",
+        instructions:
+          "Prove that Runtime tools cannot observe control-plane credentials.",
+      }),
+    });
+    const credentialAgentId = credentialAgent.agent.id;
+    await requestJson(
+      baseUrl,
+      `/api/agents/${credentialAgentId}/outcome-contract`,
+      {
+        method: "PUT",
+        headers: { authorization: `Bearer ${controlPlaneAuthToken}` },
+        body: JSON.stringify({
+          requiredPaths: ["AGENTS.md", "credential-probe.txt"],
+          protectedPaths: ["AGENTS.md"],
+          maxChangedFiles: 2,
+          maxAddedBytes: 1_024,
+          secretPatterns: [],
+          validationCommands: [
+            {
+              name: "credential-unavailable",
+              command:
+                'test "$(cat credential-probe.txt)" = credential-unavailable',
+              required: true,
+              timeoutMs: 10_000,
+            },
+          ],
+        }),
+      },
+    );
+    const credentialAdmission = await requestJson(
+      baseUrl,
+      `/api/agents/${credentialAgentId}/messages`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${controlPlaneAuthToken}` },
+        body: JSON.stringify({
+          content: "Run the Runtime credential isolation proof.",
+        }),
+      },
+    );
+    const credentialRun = await waitForRun(baseUrl, credentialAdmission.run.id);
+    invariant(
+      credentialRun.status === "completed",
+      "The Runtime credential isolation Run did not complete",
+    );
+    invariant(
+      credentialRun.transaction?.disposition === "promoted",
+      "The credential-isolated Candidate was not promoted: " +
+        JSON.stringify({
+          disposition: credentialRun.transaction?.disposition,
+          validations: credentialRun.transaction?.validations,
+        }),
+    );
+    const credentialAfter = await requestJson(
+      baseUrl,
+      `/api/agents/${credentialAgentId}`,
+    );
+    invariant(
+      (
+        await readFile(
+          path.join(credentialAfter.agent.workspacePath, "credential-probe.txt"),
+          "utf8",
+        )
+      ) === "credential-unavailable\n",
+      "Runtime tool execution observed a control-plane credential",
+    );
+    await assertTreeExcludesLiterals(root, [
+      providerCredential,
+      controlPlaneAuthToken,
+    ]);
+
     console.log("Real HTTP-to-container transaction passed");
     console.log("CodeJam HTTP request created an isolated Candidate State");
     console.log("Pinned Codex executed a two-turn Responses tool call in the Runtime");
@@ -330,6 +440,7 @@ async function main() {
     console.log("Only the validated Candidate replaced Canonical State");
     console.log("A signed receipt verified independently without server trust");
     console.log("Restart preserved state and resumed the accepted Codex thread");
+    console.log("Runtime tools and persisted state excluded control-plane credentials");
   } finally {
     await stopChild(app);
     await stopChild(fixture);

@@ -8,8 +8,18 @@ import { runTrustedGit } from "./trusted-git-exec.mjs";
 const gitObjectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
 
 export const requiredSubmissionArtifacts = Object.freeze([
+  ".dockerignore",
   "package.json",
   "package-lock.json",
+  "tsconfig.base.json",
+  ".env.example",
+  ".github/workflows/release-proof.yml",
+  "Dockerfile",
+  "Dockerfile.runtime",
+  "docker-compose.yml",
+  "docker/codex-runtime/package.json",
+  "docker/codex-runtime/package-lock.json",
+  "playwright.container-browser.config.ts",
   "apps/server/package.json",
   "apps/web/package.json",
   "packages/http-object-resource/package.json",
@@ -21,26 +31,84 @@ export const requiredSubmissionArtifacts = Object.freeze([
   "docs/demo/JUDGE_CHECKLIST.md",
   "docs/product/PRD.md",
   "docs/product/OUTCOME_ROADMAP.md",
+  "docs/DEPLOYMENT.md",
+  "deploy/volcengine/main.tf",
   "docs/demo/three-minute-demo.md",
   "docs/demo/architecture-one-page.md",
   "docs/demo/agent-airlock-one-page.mmd",
   "docs/demo/agent-airlock-one-page.png",
   "docs/demo/submission-assets.json",
+  "docs/assets/agent-airlock-live-01-overview.jpg",
+  "docs/assets/agent-airlock-live-02-quarantine.jpg",
+  "docs/assets/agent-airlock-live-03-verified-recovery.jpg",
+  "docs/assets/agent-airlock-live-04-zero-upload-verifier.jpg",
   "scripts/modelark-claim-policy.mjs",
+  "scripts/modelark-demo-profile.mjs",
   "scripts/release-audit.mjs",
+  "scripts/release-compose-policy.mjs",
+  "scripts/release-compose-policy.test.mjs",
+  "scripts/release-execution-policy.mjs",
+  "scripts/release-execution-policy.test.mjs",
+  "scripts/release-image-policy.mjs",
+  "scripts/release-index-policy.mjs",
   "scripts/release-lockfile-policy.mjs",
+  "scripts/release-lockfile-policy.test.mjs",
   "scripts/release-quality-policy.mjs",
+  "scripts/release-quality-policy.test.mjs",
   "scripts/release-secret-policy.mjs",
   "scripts/runtime-proof-capsule-binding.mjs",
   "scripts/runtime-proof-runner.mjs",
+  "scripts/runtime-proof-runner.test.mjs",
+  "scripts/prove-runtime.mjs",
+  "scripts/bootstrap-local.sh",
+  "scripts/start-local-poc.sh",
+  "scripts/deploy-existing-ecs.sh",
+  "scripts/check-phase-eleven-docker.sh",
+  "scripts/check-phase-thirteen.mjs",
+  "scripts/production-build-context.mjs",
+  "scripts/production-build-context.test.mjs",
+  "scripts/check-container-transaction.mjs",
+  "scripts/check-production-image-browser.mjs",
+  "scripts/check-production-image-browser.test.mjs",
+  "scripts/check-production-image-transaction.mjs",
+  "scripts/check-production-image-transaction.test.mjs",
+  "scripts/container-browser-fixture-startup.mjs",
+  "scripts/container-browser-fixture-startup.test.mjs",
+  "scripts/demo-outcome-contract.mjs",
+  "scripts/judge-readiness.mjs",
+  "scripts/production-image-verifier.mjs",
+  "scripts/production-image-verifier.test.mjs",
+  "scripts/production-image-persistence-verifier.mjs",
+  "scripts/production-image-persistence-verifier.test.mjs",
+  "scripts/production-image-provenance.mjs",
+  "scripts/production-image-provenance.test.mjs",
+  "scripts/production-gate-cleanup.test.mjs",
   "scripts/submission-artifact-binding.mjs",
   "scripts/submission-audit.mjs",
   "scripts/trusted-git-exec.mjs",
+  "scripts/run-container-browser-fixture.mjs",
+  "scripts/runtime-demo-profile.mjs",
+  "scripts/runtime-proof-terminal.mjs",
+  "scripts/runtime-source-provenance.mjs",
+  "scripts/runtime-source-provenance.test.mjs",
+  "tests/container-browser/global-teardown.ts",
+  "tests/container-browser/real-container.spec.ts",
+  "tests/fixtures/responses-protocol-server.mjs",
 ]);
 
 export const requiredSubmissionArtifactModes = Object.freeze(
   Object.fromEntries(
-    requiredSubmissionArtifacts.map((artifactPath) => [artifactPath, "100644"]),
+    requiredSubmissionArtifacts.map((artifactPath) => [
+      artifactPath,
+      [
+        "scripts/bootstrap-local.sh",
+        "scripts/start-local-poc.sh",
+        "scripts/deploy-existing-ecs.sh",
+        "scripts/check-phase-eleven-docker.sh",
+      ].includes(artifactPath)
+        ? "100755"
+        : "100644",
+    ]),
   ),
 );
 
@@ -243,14 +311,14 @@ function parseGitTree(bytes) {
   return entries;
 }
 
-export async function inspectCommittedSubmissionArtifacts({
-  root,
-  exec,
-} = {}) {
+export async function inspectCommittedSubmissionArtifacts({ root, exec } = {}) {
   if (typeof root !== "string" || root.length === 0) {
     return result(false, "invalid-root", "A repository root is required");
   }
-  if (new Set(requiredSubmissionArtifacts).size !== requiredSubmissionArtifacts.length) {
+  if (
+    new Set(requiredSubmissionArtifacts).size !==
+    requiredSubmissionArtifacts.length
+  ) {
     return result(
       false,
       "invalid-artifact-policy",
@@ -275,11 +343,7 @@ export async function inspectCommittedSubmissionArtifacts({
       throw new Error("Git returned an invalid HEAD object ID");
     }
   } catch (error) {
-    return result(
-      false,
-      "git-revision-inspection-failed",
-      errorDetail(error),
-    );
+    return result(false, "git-revision-inspection-failed", errorDetail(error));
   }
 
   const workingFiles = new Map();
@@ -301,11 +365,7 @@ export async function inspectCommittedSubmissionArtifacts({
     );
     tree = parseGitTree(stdoutBuffer(treeResult));
   } catch (error) {
-    return result(
-      false,
-      "git-tree-inspection-failed",
-      errorDetail(error),
-    );
+    return result(false, "git-tree-inspection-failed", errorDetail(error));
   }
 
   const verified = [];
@@ -410,11 +470,7 @@ export async function inspectCommittedSubmissionArtifacts({
       );
     }
   } catch (error) {
-    return result(
-      false,
-      "git-revision-recheck-failed",
-      errorDetail(error),
-    );
+    return result(false, "git-revision-recheck-failed", errorDetail(error));
   }
   const artifactSetDigest = sha256(
     Buffer.from(JSON.stringify(verified), "utf8"),

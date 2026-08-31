@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, writeCodexConfig } from "./config.js";
 
 function commitment(value: string): string {
   return "sha256:" + createHash("sha256").update(value).digest("hex");
@@ -26,6 +29,20 @@ const protocolFixtureEnvironment = {
   ARK_API_KEY: "deterministic-protocol-fixture",
   ARK_MODEL: "protocol-fixture",
   ARK_BASE_URL: "http://host.docker.internal:43994/v1",
+} as const;
+
+const productImageProtocolFixtureEnvironment = {
+  NODE_ENV: "production",
+  HOST: "0.0.0.0",
+  APP_AUTH_TOKEN: "phase11-container-verification-token",
+  AIRLOCK_DEMO_MODE: "false",
+  AIRLOCK_PROTOCOL_FIXTURE_MODE: "true",
+  AIRLOCK_MODELARK_DEMO_MODE: "false",
+  RUNTIME_PROVIDER: "local-process",
+  CODEX_BIN: "codex",
+  ARK_API_KEY: "deterministic-protocol-fixture",
+  ARK_MODEL: "protocol-fixture",
+  ARK_BASE_URL: "http://127.0.0.1:43991/v1",
 } as const;
 
 const liveModelArkModel = "ep-live-model";
@@ -75,6 +92,34 @@ describe("deterministic demo configuration", () => {
   });
 });
 
+describe("Codex tool boundary configuration", () => {
+  it("writes a credential-filtered non-login shell policy without persisting the key", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-codex-config-"));
+    const configuredKey = "private-key-that-must-not-enter-config";
+    try {
+      const config = loadConfig({
+        NODE_ENV: "test",
+        CODEX_HOME: root,
+        ARK_API_KEY: configuredKey,
+        ARK_MODEL: "ep-test",
+      });
+      await writeCodexConfig(config);
+      const generated = await readFile(path.join(root, "config.toml"), "utf8");
+
+      expect(generated).toContain("allow_login_shell = false");
+      expect(generated).toContain("[shell_environment_policy]");
+      expect(generated).toContain("ignore_default_excludes = false");
+      expect(generated).toContain('"*CREDENTIAL*"');
+      expect(generated).toContain('"AIRLOCK_OUTBOX_PATH"');
+      expect(generated).toContain("[sandbox_workspace_write]");
+      expect(generated).toContain("network_access = false");
+      expect(generated).not.toContain(configuredKey);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("real Codex protocol fixture configuration", () => {
   it("accepts only the complete loopback container profile", () => {
     const config = loadConfig(protocolFixtureEnvironment);
@@ -91,6 +136,89 @@ describe("real Codex protocol fixture configuration", () => {
     ).toBe(true);
   });
 
+  it("accepts the exact authenticated product-image profile", () => {
+    const config = loadConfig(productImageProtocolFixtureEnvironment);
+
+    expect(config).toMatchObject({
+      host: "0.0.0.0",
+      authToken: "phase11-container-verification-token",
+      arkBaseUrl: "http://127.0.0.1:43991/v1",
+      runtimeProvider: "local-process",
+      codexBin: "codex",
+      protocolFixtureMode: true,
+      demoMode: false,
+      modelArkDemoMode: false,
+    });
+  });
+
+  it.each([
+    [
+      "loopback app host mixed with the product-image profile",
+      { HOST: "127.0.0.1" },
+    ],
+    [
+      "container Runtime mixed with the product-image profile",
+      { RUNTIME_PROVIDER: "container" },
+    ],
+    [
+      "container gateway mixed with the product-image profile",
+      { ARK_BASE_URL: "http://host.docker.internal:43991/v1" },
+    ],
+    [
+      "external inference URL",
+      { ARK_BASE_URL: "https://ark.example.com/v1" },
+    ],
+    [
+      "localhost inference alias",
+      { ARK_BASE_URL: "http://localhost:43991/v1" },
+    ],
+    [
+      "inference URL without an explicit port",
+      { ARK_BASE_URL: "http://127.0.0.1/v1" },
+    ],
+    [
+      "alternate loopback fixture port",
+      { ARK_BASE_URL: "http://127.0.0.1:43992/v1" },
+    ],
+    ["wrong fixture path", { ARK_BASE_URL: "http://127.0.0.1:43991/v2" }],
+    [
+      "fixture path with a trailing slash",
+      { ARK_BASE_URL: "http://127.0.0.1:43991/v1/" },
+    ],
+    [
+      "fixture URL query",
+      { ARK_BASE_URL: "http://127.0.0.1:43991/v1?claim=modelark" },
+    ],
+    ["fixture Codex binary", { CODEX_BIN: "/tmp/fake-codex.mjs" }],
+    ["non-fixture key", { ARK_API_KEY: "organizer-key" }],
+    ["non-fixture model", { ARK_MODEL: "ep-live-model" }],
+  ])("rejects a product-image %s", (_name, override) => {
+    expect(() =>
+      loadConfig({ ...productImageProtocolFixtureEnvironment, ...override }),
+    ).toThrow(/real-Codex protocol fixture profile/);
+  });
+
+  it.each([undefined, "short-token"])(
+    "requires a strong bearer token for the product-image profile (%s)",
+    (authToken) => {
+      expect(() =>
+        loadConfig({
+          ...productImageProtocolFixtureEnvironment,
+          APP_AUTH_TOKEN: authToken,
+        }),
+      ).toThrow(/APP_AUTH_TOKEN/);
+    },
+  );
+
+  it("cannot make a ModelArk claim from the product-image fixture", () => {
+    expect(() =>
+      loadConfig({
+        ...productImageProtocolFixtureEnvironment,
+        AIRLOCK_MODELARK_DEMO_MODE: "true",
+      }),
+    ).toThrow(/mutually exclusive/);
+  });
+
   it.each([
     ["remote app host", { HOST: "0.0.0.0" }],
     ["external inference URL", { ARK_BASE_URL: "https://ark.example.com/v1" }],
@@ -102,7 +230,7 @@ describe("real Codex protocol fixture configuration", () => {
   ])("rejects a %s", (_name, override) => {
     expect(() =>
       loadConfig({ ...protocolFixtureEnvironment, ...override }),
-    ).toThrow(/loopback-only real-Codex protocol fixture profile/);
+    ).toThrow(/exact real-Codex protocol fixture profile/);
   });
 
   it("cannot be combined with the fake deterministic demo", () => {

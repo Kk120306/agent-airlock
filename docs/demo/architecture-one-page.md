@@ -41,7 +41,7 @@ flowchart TB
             direction LR
             Promote["Durable Promotion journal<br/>atomic manifest advance"]
             Canonical["Canonical State<br/>accepted reality"]
-            Effect["Typed external effect<br/>only after Promotion"]
+            Effect["Typed external effect<br/>after Canonical advance"]
             Promote --> Canonical --> Effect
         end
         subgraph FailLane["FAIL"]

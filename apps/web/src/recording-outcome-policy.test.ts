@@ -6,6 +6,7 @@ import type {
   ReceiptDigest,
 } from "@agent-airlock/portable-promotion-receipt";
 import type { AgentRun, RunTransaction } from "./types";
+import { valueForSelectedAgent } from "./agent-selection-policy";
 import {
   advancesCanonicalState,
   beginRequestGeneration,
@@ -30,9 +31,49 @@ import {
 
 type TerminalRecordingRun = AgentRun & { transaction: RunTransaction };
 
+describe("selected Agent state isolation", () => {
+  const agentARun = { agentId: "agent-a", id: "run-a" };
+  const agentACandidateSet = { agentId: "agent-a", id: "set-a" };
+
+  it("hides Run and Candidate Set state as soon as selection changes", () => {
+    expect(valueForSelectedAgent("agent-a", agentARun)).toBe(agentARun);
+    expect(valueForSelectedAgent("agent-a", agentACandidateSet)).toBe(
+      agentACandidateSet,
+    );
+    expect(valueForSelectedAgent("agent-b", agentARun)).toBeNull();
+    expect(
+      valueForSelectedAgent("agent-b", agentACandidateSet),
+    ).toBeNull();
+    expect(valueForSelectedAgent(null, agentARun)).toBeNull();
+    expect(valueForSelectedAgent(null, agentACandidateSet)).toBeNull();
+  });
+});
+
 const beforeHash = "sha256:" + "1".repeat(64);
 const afterHash = "sha256:" + "2".repeat(64);
 const repairedHash = "sha256:" + "3".repeat(64);
+const recordingProtocolValidationCommand = [
+  'test "$(cat protocol-proof.txt)" = candidate-only',
+  "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"candidate-only\") process.exit(1);'",
+].join(" && ");
+const recordingOutcomeContract = {
+  schemaVersion: 1,
+  version: 1,
+  requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
+  protectedPaths: ["AGENTS.md"],
+  maxChangedFiles: 4,
+  maxAddedBytes: 65_536,
+  secretPatterns: [],
+  validationCommands: [
+    {
+      name: "protocol-content",
+      command: recordingProtocolValidationCommand,
+      required: true,
+      timeoutMs: 10_000,
+    },
+  ],
+  createdAt: "2026-08-27T00:00:00.000Z",
+} as RunTransaction["outcomeContract"];
 
 function digest(character: string): ReceiptDigest {
   return `sha256:${character.repeat(64)}`;
@@ -44,17 +85,23 @@ function recordingTransaction({
   effectStatus = "delivered",
   effectKey = "effect-key",
   deliveredAt = "2026-08-28T00:00:01.000Z",
+  includePromotionEvents = effectStatus === "delivered",
 }: {
   disposition?: "promoted" | "quarantined";
   effectId?: string;
   effectStatus?: "delivered" | "rejected";
   effectKey?: string;
   deliveredAt?: string | null;
+  includePromotionEvents?: boolean;
 } = {}): RunTransaction {
+  const candidateValue =
+    disposition === "quarantined" ? "unsafe-candidate" : "candidate-only";
   return {
     id: "run-safe",
     status: disposition,
     disposition,
+    outcomeContractVersion: 1,
+    outcomeContract: recordingOutcomeContract,
     canonicalStateIdBefore: "state-before",
     canonicalStateIdAfter:
       disposition === "promoted" ? "state-after" : "state-before",
@@ -62,34 +109,107 @@ function recordingTransaction({
     canonicalContentHashAfter:
       disposition === "promoted" ? afterHash : beforeHash,
     resources: resources(disposition),
+    changes: {
+      files: [
+        {
+          path: "protocol-proof.txt",
+          kind: "added",
+          addedBytes: 14,
+        },
+      ],
+      totalChangedFiles: 1,
+      totalAddedBytes: 14,
+      truncated: false,
+    },
+    validations: [
+      {
+        name: "command:protocol-content",
+        status: disposition === "quarantined" ? "failed" : "passed",
+        required: true,
+        summary: "Protocol content checked",
+        durationMs: 1,
+        output: null,
+      },
+    ],
+    sqlite: {
+      databasePath: ".airlock/demo.sqlite",
+      integrity: "passed",
+      before: null,
+      candidate: {
+        contentHash: digest("6"),
+        rowCount: 1,
+        rows: [
+          {
+            id: "demo",
+            value: candidateValue,
+            updatedAt: "2026-08-28T00:00:00.000Z",
+          },
+        ],
+      },
+      after: {
+        contentHash: disposition === "quarantined" ? afterHash : repairedHash,
+        rowCount: 1,
+        rows: [
+          {
+            id: "demo",
+            value: "candidate-only",
+            updatedAt: "2026-08-28T00:00:02.000Z",
+          },
+        ],
+      },
+    },
     externalActions: {
+      outboxPath: ".airlock/external-actions.jsonl",
       intents: [
         {
           id: effectId,
+          type: "demo.notification.requested",
+          destination: "demo://protocol-proof",
+          subject: effectId,
           idempotencyKey: effectKey,
           status: effectStatus,
           deliveredAt,
         },
       ],
       deliveredCount: effectStatus === "delivered" ? 1 : 0,
+      bypassDisclosure: "No mutable external channel was available.",
     },
-    events: [
-      {
-        status: "promoting",
-        at: "2026-08-28T00:00:00.000Z",
-        summary: "Promoting",
-      },
-      {
-        status: "promoted",
-        at: "2026-08-28T00:00:02.000Z",
-        summary: "Promoted",
-      },
-    ],
+    events: includePromotionEvents
+      ? [
+          {
+            status: "promoting",
+            at: "2026-08-28T00:00:00.000Z",
+            summary: "Promoting",
+          },
+          {
+            status: "promoting",
+            at: "2026-08-28T00:00:00.500Z",
+            summary:
+              "Canonical State advanced before external action delivery",
+          },
+          {
+            status: "promoted",
+            at: "2026-08-28T00:00:02.000Z",
+            summary: "Promoted",
+          },
+        ]
+      : [
+          {
+            status: "quarantined",
+            at: "2026-08-28T00:00:02.000Z",
+            summary: "Quarantined",
+          },
+        ],
     lineage: {
       rootRunId: "run-safe",
       parentRunId: null,
       depth: 0,
       maxDepth: 2,
+    },
+    recovery: {
+      journalPhase: disposition === "promoted" ? "completed" : null,
+      recoveredAfterRestart: false,
+      recoveryError: null,
     },
   } as RunTransaction;
 }
@@ -116,8 +236,32 @@ function recordingRun({
     competitorId,
     createdAt,
     status: "completed",
-    transaction,
+    transaction: { ...transaction, id },
   } as TerminalRecordingRun;
+}
+
+function withRecordingReceipt(
+  run: TerminalRecordingRun,
+): TerminalRecordingRun {
+  const transaction = run.transaction;
+  return {
+    ...run,
+    transaction: {
+      ...transaction,
+      promotionReceipt: {
+        runTransactionId: transaction.id,
+        disposition: transaction.disposition!,
+        outcomeContractVersion: transaction.outcomeContractVersion,
+        canonicalStateIdBefore: transaction.canonicalStateIdBefore,
+        canonicalStateIdAfter: transaction.canonicalStateIdAfter!,
+        canonicalContentHashBefore: transaction.canonicalContentHashBefore,
+        canonicalContentHashAfter: transaction.canonicalContentHashAfter!,
+        validationEvidenceHash: digest("a"),
+        lineage: { ...transaction.lineage },
+        createdAt: run.createdAt,
+      },
+    },
+  };
 }
 
 function recordingReplayRuns(): {
@@ -163,6 +307,18 @@ function recordingReplayRuns(): {
       canonicalStateIdAfter: "state-repaired",
       canonicalContentHashBefore: afterHash,
       canonicalContentHashAfter: repairedHash,
+      changes: {
+        files: [
+          {
+            path: ".airlock/demo.sqlite",
+            kind: "modified",
+            addedBytes: 0,
+          },
+        ],
+        totalChangedFiles: 1,
+        totalAddedBytes: 0,
+        truncated: false,
+      },
       lineage: {
         rootRunId: "run-unsafe",
         parentRunId: "run-unsafe",
@@ -171,7 +327,11 @@ function recordingReplayRuns(): {
       },
     },
   });
-  return { safe, unsafe, repaired };
+  return {
+    safe: withRecordingReceipt(safe),
+    unsafe: withRecordingReceipt(unsafe),
+    repaired: withRecordingReceipt(repaired),
+  };
 }
 
 function recordingReceipt(
@@ -685,11 +845,20 @@ describe("recording outcome fail-closed policy", () => {
     expect(hydration?.repairedRun).toBe(repaired);
   });
 
-  it("rejects extra ordinary Runs and an incoherent replay lineage", () => {
+  it("rejects unknown Runs, extra ordinary Runs, and incoherent replay lineage", () => {
     const { safe, unsafe, repaired } = recordingReplayRuns();
     const selection = parseRecordingReplayRunIds(
       "?recordingSafeRunId=run-safe&recordingUnsafeRunId=run-unsafe&recordingRepairRunId=run-repair",
     );
+    const unknownSelection = parseRecordingReplayRunIds(
+      "?recordingSafeRunId=unknown-safe&recordingUnsafeRunId=unknown-unsafe&recordingRepairRunId=unknown-repair",
+    );
+    expect(
+      deriveRecordingReplayHydration(
+        [repaired, unsafe, safe],
+        unknownSelection,
+      ),
+    ).toBeNull();
     expect(
       deriveRecordingReplayHydration(
         [
@@ -720,6 +889,158 @@ describe("recording outcome fail-closed policy", () => {
         selection,
       ),
     ).toBeNull();
+  });
+
+  it("rejects replay Runs without exact export receipt evidence", () => {
+    const replay = recordingReplayRuns();
+    const selection = parseRecordingReplayRunIds(
+      "?recordingSafeRunId=run-safe&recordingUnsafeRunId=run-unsafe&recordingRepairRunId=run-repair",
+    );
+
+    for (const missing of ["safe", "unsafe", "repaired"] as const) {
+      const runs = [replay.repaired, replay.unsafe, replay.safe].map((run) =>
+        run === replay[missing]
+          ? {
+              ...run,
+              transaction: { ...run.transaction, promotionReceipt: null },
+            }
+          : run,
+      );
+      expect(deriveRecordingReplayHydration(runs, selection)).toBeNull();
+    }
+  });
+
+  it("rejects exact-fact replay drift before portable receipt export", () => {
+    const selection = parseRecordingReplayRunIds(
+      "?recordingSafeRunId=run-safe&recordingUnsafeRunId=run-unsafe&recordingRepairRunId=run-repair",
+    );
+    const mutations: Array<
+      [string, (replay: ReturnType<typeof recordingReplayRuns>) => void]
+    > = [
+      ["safe required Validation", (replay) => {
+        replay.safe.transaction.validations[0]!.status = "failed";
+      }],
+      ["safe named protocol Validation", (replay) => {
+        replay.safe.transaction.validations[0]!.name = "command:other";
+      }],
+      ["unsafe decisive Validation", (replay) => {
+        replay.unsafe.transaction.validations[0]!.name = "command:other";
+      }],
+      ["missing Repair protocol Validation", (replay) => {
+        replay.repaired.transaction.validations = [];
+      }],
+      ["renamed Repair protocol Validation", (replay) => {
+        replay.repaired.transaction.validations[0]!.name = "command:other";
+      }],
+      ["non-required Repair protocol Validation", (replay) => {
+        replay.repaired.transaction.validations[0]!.required = false;
+      }],
+      ["failed Repair protocol Validation", (replay) => {
+        replay.repaired.transaction.validations[0]!.status = "failed";
+      }],
+      ["Outcome Contract content", (replay) => {
+        replay.repaired.transaction.outcomeContract = {
+          ...replay.repaired.transaction.outcomeContract,
+          maxChangedFiles:
+            replay.repaired.transaction.outcomeContract.maxChangedFiles + 1,
+        };
+      }],
+      ["coherent Outcome Contract policy drift", (replay) => {
+        for (const run of [replay.safe, replay.unsafe, replay.repaired]) {
+          run.transaction.outcomeContract = {
+            ...run.transaction.outcomeContract,
+            maxChangedFiles: 5,
+          };
+        }
+      }],
+      ["Outcome Contract object version drift", (replay) => {
+        for (const run of [replay.safe, replay.unsafe, replay.repaired]) {
+          run.transaction.outcomeContract = {
+            ...run.transaction.outcomeContract,
+            version: 2,
+          };
+        }
+      }],
+      ["Outcome Contract shape drift", (replay) => {
+        for (const run of [replay.safe, replay.unsafe, replay.repaired]) {
+          run.transaction.outcomeContract = {
+            ...run.transaction.outcomeContract,
+            unexpectedPolicyField: true,
+          } as RunTransaction["outcomeContract"];
+        }
+      }],
+      ["resource set", (replay) => {
+        replay.unsafe.transaction.resources.pop();
+      }],
+      ["safe protocol change", (replay) => {
+        replay.safe.transaction.changes!.files[0]!.path = "other.txt";
+      }],
+      ["SQLite Candidate value", (replay) => {
+        replay.unsafe.transaction.sqlite!.candidate!.rows[0]!.value =
+          "candidate-only";
+      }],
+      ["Promotion journal", (replay) => {
+        replay.repaired.transaction.recovery.journalPhase = null;
+      }],
+      ["effect identity", (replay) => {
+        replay.safe.transaction.externalActions.intents[0]!.id =
+          "protocol-other";
+      }],
+      ["effect delivery timing", (replay) => {
+        replay.safe.transaction.externalActions.intents[0]!.deliveredAt =
+          "2026-08-27T23:59:59.000Z";
+      }],
+      ["missing Canonical advance timing evidence", (replay) => {
+        replay.safe.transaction.events = replay.safe.transaction.events.filter(
+          (event) =>
+            event.summary !==
+            "Canonical State advanced before external action delivery",
+        );
+      }],
+      ["duplicate Canonical advance timing evidence", (replay) => {
+        const canonicalAdvance = replay.safe.transaction.events.find(
+          (event) =>
+            event.summary ===
+            "Canonical State advanced before external action delivery",
+        );
+        replay.safe.transaction.events.push(structuredClone(canonicalAdvance!));
+      }],
+      ["malformed Canonical advance timestamp", (replay) => {
+        const canonicalAdvance = replay.safe.transaction.events.find(
+          (event) =>
+            event.summary ===
+            "Canonical State advanced before external action delivery",
+        );
+        canonicalAdvance!.at = "not-a-timestamp";
+      }],
+      ["effect delivered before Canonical advance", (replay) => {
+        const canonicalAdvance = replay.safe.transaction.events.find(
+          (event) =>
+            event.summary ===
+            "Canonical State advanced before external action delivery",
+        );
+        canonicalAdvance!.at = "2026-08-28T00:00:01.500Z";
+      }],
+      ["Repair effect key", (replay) => {
+        replay.repaired.transaction.externalActions.intents[0]!.idempotencyKey =
+          replay.safe.transaction.externalActions.intents[0]!.idempotencyKey;
+      }],
+      ["Run chronology", (replay) => {
+        replay.repaired.createdAt = replay.unsafe.createdAt;
+      }],
+    ];
+
+    for (const [name, mutate] of mutations) {
+      const replay = structuredClone(recordingReplayRuns());
+      mutate(replay);
+      expect(
+        deriveRecordingReplayHydration(
+          [replay.repaired, replay.unsafe, replay.safe],
+          selection,
+        ),
+        name,
+      ).toBeNull();
+    }
   });
 
   it("accepts exactly one expected resource of the required disposition", () => {
@@ -950,7 +1271,7 @@ describe("recording outcome fail-closed policy", () => {
     ).toBe(false);
   });
 
-  it("requires exactly one promoting and promoted event in effect order", () => {
+  it("requires exact Promotion-start, Canonical-advance, and terminal timing evidence", () => {
     const valid = recordingTransaction();
     const expectation = {
       id: "protocol-release-ready",
@@ -1002,6 +1323,7 @@ describe("recording outcome fail-closed policy", () => {
       effectStatus: "rejected",
       effectKey: "rejected-key",
       deliveredAt: null,
+      includePromotionEvents: true,
     });
     const expectation = {
       id: "protocol-unsafe",

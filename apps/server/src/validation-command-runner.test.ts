@@ -1,12 +1,23 @@
-import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 import {
   buildValidationContainerArgs,
   ContainerValidationCommandExecutor,
+  createStructuralValidators,
+  createValidationCommandExecutor,
+  ProductImageFixtureStructuralValidator,
 } from "./validation-command-runner.js";
 import type { ValidationCommand } from "./types.js";
 
@@ -29,6 +40,27 @@ const command: ValidationCommand = {
   required: true,
   timeoutMs: 1_000,
 };
+
+async function makeProductFixtureValidationWorkspace(runId: string): Promise<{
+  root: string;
+  workspace: string;
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), "airlock-product-validation-"));
+  temporaryDirectories.push(root);
+  const candidateRoot = path.join(root, ".candidates", runId);
+  const workspace = path.join(candidateRoot, "workspace");
+  await mkdir(path.join(workspace, ".airlock"), { recursive: true });
+  await writeFile(path.join(workspace, "protocol-proof.txt"), "candidate-only\n");
+  const database = new DatabaseSync(path.join(workspace, ".airlock", "demo.sqlite"));
+  database.exec(
+    "CREATE TABLE inventory (id TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)",
+  );
+  database
+    .prepare("INSERT INTO inventory (id, value, updated_at) VALUES (?, ?, ?)")
+    .run("demo", "candidate-only", "2026-08-28T00:00:00.000Z");
+  database.close();
+  return { root, workspace };
+}
 
 describe("Validation command container", () => {
   it("mounts only a run-owned validation workspace with no credentials", () => {
@@ -143,4 +175,112 @@ describe("Validation command container", () => {
     },
     20_000,
   );
+});
+
+describe("Product-image fixture Validation command", () => {
+  it("selects an explicit structural validator only for the product fixture", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "airlock-validation-profile-"));
+    temporaryDirectories.push(root);
+    const base = {
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "workspaces"),
+      CODEX_HOME: path.join(root, "codex"),
+      AIRLOCK_PROTOCOL_FIXTURE_MODE: "true",
+      CODEX_BIN: "codex",
+      ARK_API_KEY: "deterministic-protocol-fixture",
+      ARK_MODEL: "protocol-fixture",
+    } as const;
+    const productConfig = loadConfig({
+      ...base,
+      HOST: "0.0.0.0",
+      APP_AUTH_TOKEN: "phase11-container-verification-token",
+      ARK_BASE_URL: "http://127.0.0.1:43991/v1",
+      RUNTIME_PROVIDER: "local-process",
+      CONTAINER_ENGINE: "missing-inside-product-image",
+    });
+    const containerConfig = loadConfig({
+      ...base,
+      HOST: "127.0.0.1",
+      ARK_BASE_URL: "http://host.docker.internal:43991/v1",
+      RUNTIME_PROVIDER: "container",
+    });
+    const defaultConfig = loadConfig({
+      NODE_ENV: "test",
+      APP_DATA_DIR: path.join(root, "default-data"),
+      AGENT_WORKSPACE_ROOT: path.join(root, "default-workspaces"),
+      CODEX_HOME: path.join(root, "default-codex"),
+    });
+
+    expect(createValidationCommandExecutor(productConfig)).toBeInstanceOf(
+      ContainerValidationCommandExecutor,
+    );
+    for (const mutation of [
+      { protocolFixtureMode: false },
+      { runtimeProvider: "container" as const },
+    ]) {
+      expect(createStructuralValidators({ ...productConfig, ...mutation })).toEqual([]);
+    }
+    expect(createStructuralValidators(productConfig)[0]).toBeInstanceOf(
+      ProductImageFixtureStructuralValidator,
+    );
+    expect(createStructuralValidators(containerConfig)).toEqual([]);
+    expect(createStructuralValidators(defaultConfig)).toEqual([]);
+    expect(createValidationCommandExecutor(containerConfig)).toBeInstanceOf(
+      ContainerValidationCommandExecutor,
+    );
+    expect(createValidationCommandExecutor(defaultConfig)).toBeInstanceOf(
+      ContainerValidationCommandExecutor,
+    );
+  });
+
+  it("passes the exact file and SQLite structural assertions on Candidate State", async () => {
+    const runId = "run-product-proof";
+    const { root, workspace } =
+      await makeProductFixtureValidationWorkspace(runId);
+    const validator = new ProductImageFixtureStructuralValidator(root);
+
+    await expect(
+      validator.validate(workspace, runId),
+    ).resolves.toMatchObject({
+      name: "protocol-fixture-content",
+      status: "passed",
+      required: true,
+    });
+  });
+
+  it("fails changed proof content and changed SQLite content", async () => {
+    const runId = "run-product-mutation";
+    const { root, workspace } =
+      await makeProductFixtureValidationWorkspace(runId);
+    const validator = new ProductImageFixtureStructuralValidator(root);
+    const proofPath = path.join(workspace, "protocol-proof.txt");
+    const databasePath = path.join(workspace, ".airlock", "demo.sqlite");
+
+    await writeFile(proofPath, "not-candidate-only\n");
+    await expect(
+      validator.validate(workspace, runId),
+    ).resolves.toMatchObject({ status: "failed" });
+    await writeFile(proofPath, "candidate-only\n");
+    const database = new DatabaseSync(databasePath);
+    database
+      .prepare("UPDATE inventory SET value = ? WHERE id = ?")
+      .run("not-candidate-only", "demo");
+    database.close();
+    await expect(
+      validator.validate(workspace, runId),
+    ).resolves.toMatchObject({ status: "failed" });
+  });
+
+  it("rejects a workspace outside Run-owned Candidate State", async () => {
+    const runId = "run-product-path";
+    const { root } = await makeProductFixtureValidationWorkspace(runId);
+    const canonicalWorkspace = path.join(root, "canonical", "workspace");
+    await mkdir(canonicalWorkspace, { recursive: true });
+    const validator = new ProductImageFixtureStructuralValidator(root);
+
+    await expect(
+      validator.validate(canonicalWorkspace, runId),
+    ).rejects.toThrow("requires Candidate State");
+  });
 });

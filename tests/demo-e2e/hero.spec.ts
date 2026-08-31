@@ -291,7 +291,7 @@ test("the free judge demo proves promotion, quarantine, repair, and continuity",
   ).toBeVisible();
   await expect(
     verifier.getByText(
-      "0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
+      "This verification: 0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
       { exact: true },
     ),
   ).toBeVisible();

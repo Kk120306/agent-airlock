@@ -33,7 +33,7 @@ flowchart LR
     RC --> CS
     RC -->|Candidate-only derived binding| HTTP
     AR --> VE["Outcome Validator"]
-    AR --> ED["Post-Promotion effect dispatcher"]
+    AR --> ED["Post-Canonical-advance effect dispatcher"]
     ED --> MS["Atomic mock-delivery store"]
     ED --> HR["Live-only idempotent HTTP receiver"]
     VE --> VC["Constrained validation container"]
@@ -268,9 +268,14 @@ The dispatcher verifies the new canonical state, claims the supported effect by 
 The canonical deterministic proof uses the atomic local mock consumer.
 Duplicate and concurrent dispatch attempts create one local mock effect and return the same receipt.
 This exactly-once claim does not extend beyond the atomic mock consumer.
+The mock receipt database owns a non-secret durable consumer identifier, and replacing that database creates a different idempotency domain even when its filesystem path is unchanged.
 
 The managed live ModelArk profile maps only the logical `demo-console` destination to a control-plane-selected loopback HTTP receiver.
 The receiver recomputes the payload and idempotency commitments, persists one receipt atomically, and returns the original receipt for an exact replay.
+The receiver persists a non-secret durable consumer identifier with its receipts and exposes that identifier through a bounded read-only identity endpoint.
+Before physical state movement, the control plane commits a digest of the delivery mode, consumer identifier, and logical destination into the Promotion journal.
+Each HTTP delivery presents the expected consumer identifier, so receiver replacement between identity discovery and delivery fails closed instead of replaying into a new idempotency domain.
+Recovery compares the journal commitment with the active dispatcher before delivery and refuses to continue when the consumer identity, delivery mode, or logical destination changed.
 The live proof runner requires the matching HTTP receipt before it records conformance success.
 This profile proves at-least-once HTTP transport to an idempotent consumer with one accepted effect identity, not distributed exactly-once delivery to arbitrary providers.
 ADR 0021 records the live-only HTTP boundary.
@@ -288,6 +293,7 @@ Phase 6 persists Promotion journal position, recovered-after-restart evidence, a
 Phase 8 persists provider resource records, Capability Claims, immutable source and installed versions, Validation evidence, Quarantine handles, dispositions, and bounded lifecycle events.
 Phase 9 persists exact Candidate Set source and contract snapshots, per-competitor Run links, seals, bounded criterion inputs, deterministic scorecards, one-winner or no-winner Selection Decisions, and loser cleanup progress.
 Promotion journal schema 2 additionally persists the exact Candidate Set winner authority, including decision and seal digests, and startup validates it before physical recovery.
+Promotion journal schema 3 additionally binds the durable external-action consumer scope before physical state movement, while ambiguous legacy journals that may already have dispatched an effect fail closed.
 Phase 10 persists versioned Assurance evidence, deterministic monotonic proposals, historical simulation results, explicit operator decisions, and append-only Outcome Contract history.
 Phase 11 derives Portable Promotion Envelopes from complete versioned durable evidence and requires a separate append-only Decision Authority record captured before terminal control-plane metadata.
 Phase 11 also persists one immutable provider-cleanup completion fact after Discard authority and successful provider cleanup but before local Candidate or Quarantine removal.
@@ -408,7 +414,7 @@ The recording coordinator must:
 6. Generate and locally verify the signed two-decision chain for the quarantined parent and promoted Repair.
 7. Pass that exact artifact to the existing zero-upload verifier without reconstructing or weakening it in the browser.
 8. Gate the same required controls and verdicts at a separate 390 CSS pixel viewport.
-9. Close the owned browser, launcher, Runtime containers, and proof session, then persist the signed chain at its immutable digest-derived path, atomically replace the owner-only safe capsule that names that exact chain, and release proof ownership.
+9. Close the owned browser, launcher, and Runtime containers, verify the stopped physical snapshot, remove the owned proof session, then persist the signed chain at its immutable digest-derived path, atomically replace the owner-only safe capsule that names that exact chain, and release proof ownership.
 
 The safe capsule is a bounded non-authoritative index.
 It may contain the three fresh Run identifiers, closed gate results, final verdict, chain digest, and relative chain filename.
@@ -476,7 +482,7 @@ Each Run Transaction records:
 - Resulting canonical version for promoted Runs.
 - Independent workspace and Agent-memory fingerprints with one shared terminal disposition.
 - SQLite before, candidate, and final semantic snapshots.
-- Typed intent identities, idempotency keys, statuses, and bounded post-Promotion delivery receipts.
+- Typed intent identities, idempotency keys, statuses, and bounded receipts for deliveries after Canonical State advances.
 - Root Run identifier, parent Run identifier, repair depth, configured depth bound, and mutable Quarantine availability.
 - Monotonic Promotion journal phase, recovered-after-restart status, and bounded fail-closed recovery error.
 - Provider identity, Capability Claim, immutable source and target references, fingerprint transition, bounded Validation evidence, Quarantine handle, disposition, and lifecycle events.

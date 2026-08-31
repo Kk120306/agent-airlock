@@ -3,7 +3,7 @@
 **TikTok TechJam 2026 selected track:** Track 1 - Agent Launchpad: Design and Build Lightweight Agent Middleware.
 
 Agent Airlock is transactional execution middleware built inside the CodeJam Agent Launchpad starter kit.
-Every Agent task runs against isolated Candidate State, and only an outcome that satisfies its versioned Outcome Contract may become Canonical State.
+Every Run Transaction executes against isolated Candidate State, and only an outcome that satisfies its versioned Outcome Contract may become Canonical State.
 Rejected work remains inspectable and can be repaired without contaminating accepted files, Agent memory, SQLite data, or supported external actions.
 
 The submission delivers one reusable platform capability for every Agent Run: isolate, validate, promote, quarantine, and repair persistent Agent state at the shared `AgentRunner` boundary.
@@ -11,12 +11,37 @@ The official Track 1 scoring lens is 40% end-to-end middleware behavior, 25% tec
 
 > Agents may explore many futures, but only validated futures become reality.
 
-Selected middleware direction: transactional Agent state safety and failure recovery across every Agent, rather than a custom behavior for one demo Agent.
+The judge quickstart requires Node.js 22+, npm 10+, installed Google Chrome, and a running Docker-compatible engine.
 
-Start with the [ready-to-paste Devpost submission](docs/demo/DEVPOST_SUBMISSION.md), [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), and [static one-page architecture](docs/demo/agent-airlock-one-page.png).
-The [architecture notes and Mermaid source](docs/demo/architecture-one-page.md) explain that judging asset in detail.
-Then read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), [complete architecture](docs/architecture/agent-airlock.md), [Phase 0-2 plan](.omx/plans/phases-0-2-execution.md), [Phase 3-4 plan](.omx/plans/phases-3-4-execution.md), [Phase 5-7 plan](.omx/plans/phases-5-7-execution.md), and [Phase 8-11 plan](.omx/plans/phases-8-11-execution.md) before extending Airlock.
-Unresolved product and architecture decisions are coordinated through the [Agent Airlock Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1).
+## Judge quickstart
+
+| Question | Answer |
+| --- | --- |
+| What is it? | Transactional state middleware for persistent AI Agents. |
+| Where is it integrated? | The shared `AgentRunner` boundary inside the required CodeJam starter kit. |
+| What is protected? | Workspace files, the persistent Codex session, SQLite data, and supported external-action intents. |
+| What happens on failure? | The entire Candidate is quarantined, Canonical State stays unchanged, and a bounded Repair Run may continue from retained work. |
+| What is real in the canonical proof? | React, Fastify, `AgentService`, `AgentRunner`, the pinned Codex CLI, a disposable container, resource mutations, Validation, Promotion, Quarantine, Repair, persistence, and signed verification. |
+| What is deterministic? | Only remote Responses inference is replaced by a local protocol fixture so judging does not depend on quota, credentials, or provider availability. |
+| What does it cost to reproduce? | Nothing beyond the local machine and an installed Docker-compatible engine. |
+
+Run the complete production-browser proof:
+
+```bash
+git clone https://github.com/Kk120306/agent-airlock.git
+cd agent-airlock
+npm ci
+npm run prove:runtime -- --reset --headed
+```
+
+The command succeeds only after one valid Promotion, one rejected Candidate that leaves Canonical State unchanged, one promoted Repair, and independent verification of the exact signed decision chain.
+The terminal result `Real Runtime proof: PASSED` is the operator-facing completion signal for a successful proof, while the persisted Run, Promotion, and signed-chain evidence supports the underlying claims.
+
+[![Agent Airlock one-page architecture](docs/demo/agent-airlock-one-page.png)](docs/demo/architecture-one-page.md)
+
+For the judging story, start with the [submission brief and rubric map](docs/demo/SUBMISSION_BRIEF.md), [three-minute narration](docs/demo/three-minute-demo.md), [judge checklist](docs/demo/JUDGE_CHECKLIST.md), and [one-page architecture notes](docs/demo/architecture-one-page.md).
+For implementation detail, read the [product requirements](docs/product/PRD.md), [outcome roadmap](docs/product/OUTCOME_ROADMAP.md), and [complete architecture](docs/architecture/agent-airlock.md).
+The [Wayfinder map](https://github.com/Kk120306/agent-airlock/issues/1) tracks unresolved product and architecture decisions.
 
 Before submitting, run the zero-network handoff audit:
 
@@ -24,7 +49,7 @@ Before submitting, run the zero-network handoff audit:
 npm run audit:submission
 ```
 
-It independently checks the Track 1 copy, architecture source and PNG integrity, current immutable Runtime proof pair, source-control handoff, public video placeholder, and the honest boundary between the canonical fixture proof and optional ModelArk conformance.
+It independently checks the Track 1 copy, architecture source and PNG integrity, required immutable Runtime proof pair, source-control handoff, public video placeholder, and the honest boundary between the canonical fixture proof and optional ModelArk conformance.
 It also reruns `npm run check` and `npm run audit:release` inside the final handoff, so `CORE READY` cannot outlive a failing test, build, link, secret, or release-policy gate.
 It reads only whether ModelArk fields are configured, never prints their values, and makes zero provider requests.
 After the exact pushed revision and final video open signed out, copy the report's `sourceRevision` and rerun `npm run audit:submission -- --confirm-public-revision=EXACT_GIT_SHA --confirm-video-public`, replacing `EXACT_GIT_SHA` with that complete object ID.
@@ -36,7 +61,7 @@ The canonical judge recording uses production React and Fastify, the actual pinn
 Only the Responses provider is deterministic and local, so the proof requires no ModelArk credential, provider capacity, wallet, blockchain, or paid inference.
 
 ```bash
-npm install
+npm ci
 npm run prove:runtime -- --reset --json
 ```
 
@@ -48,8 +73,8 @@ npm run prove:runtime -- --reset --headed
 
 Use `npm run prove:runtime -- --reset --headed --json` when the visible recording pass also needs the bounded machine-readable proof capsule on stdout.
 
-The settled release candidate passed `npm run prove:runtime -- --reset --json` and `npm run audit:release`.
-Run the headed command once immediately before capture, and treat its terminal `Real Runtime proof: PASSED` result as the authority for that recording.
+Before release, require `npm run prove:runtime -- --reset --json` and `npm run audit:release` to pass on the clean final candidate.
+Run the headed command once immediately before capture, and use its terminal `Real Runtime proof: PASSED` result as the operator-facing completion signal for that recording.
 Use `npm run demo:runtime -- --reset` at <http://127.0.0.1:3200> when a persistent stage-by-stage rehearsal is more useful than the bounded canonical proof.
 The first proof command warms and verifies the exact application and Runtime image before screen capture.
 During the headed pass, do not click, scroll, switch tabs, or close Chrome.
@@ -77,6 +102,20 @@ Startup, browser, Run, disposition, evidence, viewport, timeout, and interruptio
 The core recording does not add or depend on federation, receiver custody, blockchain publication, Competing Futures, Adaptive Assurance, new decision authority, or live provider capacity.
 Existing signatures remain evidence rather than Promotion authority or proof of organizational trust.
 See the [three-minute narration](docs/demo/three-minute-demo.md) and [judge checklist](docs/demo/JUDGE_CHECKLIST.md) before recording.
+
+## Canonical live proof gallery
+
+These four product captures show the observable checkpoints in the canonical real-Runtime proof.
+
+| Real Runtime entry | Rejected future |
+| --- | --- |
+| ![Real Runtime Proof ready to run the complete transactional safety loop](docs/assets/agent-airlock-live-01-overview.jpg) | ![Completed safety loop showing the unsafe future quarantined](docs/assets/agent-airlock-live-02-quarantine.jpg) |
+| **1. Ready:** selected `Real Runtime Proof` Agent in `READY`, with the disposable real Codex Runtime and three-Run safety loop visible | **2. Quarantined:** rejected Run with `4/4 resources quarantined`, `0 effects delivered`, and an unchanged Canonical fingerprint |
+
+| Verified Repair | Independent verifier |
+| --- | --- |
+| ![Completed safety loop exposing the verified recovery decision chain](docs/assets/agent-airlock-live-03-verified-recovery.jpg) | ![Independent browser verifier showing a valid zero-upload decision chain](docs/assets/agent-airlock-live-04-zero-upload-verifier.jpg) |
+| **3. Recovered:** promoted Repair with a verified two-decision chain and the zero-upload verifier action visible | **4. Verified locally:** browser verification reporting `0 API calls`, `0 uploads`, `2/2 valid` signatures, a passing parent-receipt link, and an exact Canonical State handoff |
 
 ## Deterministic no-container fallback
 
@@ -112,6 +151,12 @@ Run `npm run demo:runtime` without `--reset` to inspect restart persistence.
 > This is a single-user proof of concept, not a production multi-tenant sandbox.
 > Do not use production data or credentials.
 > See [SECURITY.md](SECURITY.md).
+
+<details>
+<summary><strong>Advanced capability demos and protocol gates</strong></summary>
+
+These extensions demonstrate how the same transactional boundary grows beyond the canonical Track 1 proof.
+They are not required for the three-minute recording.
 
 ## Phase 8 provider extension demo
 
@@ -241,13 +286,17 @@ npm run check:phase11
 
 These commands require no ModelArk key, paid inference, provider purchase, wallet, RPC, or public blockchain.
 
+</details>
+
 ## Deterministic fallback screenshots
 
-### Four-step judge path
+These captures show the no-container deterministic fixture fallback, not the canonical real-Runtime proof gallery above.
+
+### Fallback four-step judge path
 
 ![Agent Airlock deterministic demo showing its free local disclosure and four-step judge path](docs/assets/airlock-demo-desktop.jpg)
 
-### Mobile evidence
+### Fallback mobile evidence
 
 ![Agent Airlock demo at a 390-pixel mobile viewport](docs/assets/airlock-demo-mobile.jpg)
 
@@ -300,6 +349,9 @@ Run `npm run test:container-transaction` when a container engine is available.
 This zero-cost production-server proof drives the pinned real Codex CLI through the CodeJam HTTP seam, real Candidate workspace, isolated Validation container, Promotion journal, signed receipt, restart, and resumed accepted session.
 It uses a local Responses fixture and therefore proves the integration path, not live ModelArk availability or model quality.
 Run `npm run test:container-browser` for the corresponding real Chrome-to-Codex container Promotion proof.
+
+<details>
+<summary><strong>Optional credentialed ModelArk conformance path</strong></summary>
 
 ## Credentialed ModelArk browser SOP
 
@@ -425,7 +477,7 @@ In the guided Web UI:
 1. Select `Run live Candidate`.
 2. Watch the Candidate create the exact artifact, update SQLite, and submit one deferred action before the required state Validation completes.
 3. Confirm that `execution-profile` attests the live ModelArk Responses profile through a model identifier commitment rather than embedding the raw identifier.
-4. Confirm that workspace, Codex session, SQLite, and outbox all show `promoted`, the database value is `modelark-live`, and exactly one `modelark-live-ready` effect is delivered through the receiver-enforced HTTP path after Promotion.
+4. Confirm that workspace, Codex session, SQLite, and outbox all show `promoted`, the database value is `modelark-live`, and exactly one `modelark-live-ready` effect is delivered through the receiver-enforced HTTP path after Canonical State advances during Promotion.
 5. Confirm that the canonical fingerprint advances only for this complete promoted result.
 6. Select `Generate and verify proof` to verify the signed decision locally and selectively disclose the safe execution-profile leaf when requested.
 
@@ -443,13 +495,12 @@ In the generic `npm run poc` Web UI:
    Create a TypeScript hello-world CLI, add a test, and run it.
    ```
 
-The Agent can write files, run commands, and continue the same Codex session in
-later messages.
+The Agent can write files, run commands, and continue the same Codex session in later messages.
 
 ### 5. Stop and resume
 
-Press `Ctrl+C` in the startup terminal. The script removes temporary Runtime
-containers but keeps Agent workspaces and conversations.
+Press `Ctrl+C` in the startup terminal.
+The script removes temporary Runtime containers but keeps Agent workspaces and conversations.
 
 - macOS state: `~/.volc-agent-launchpad/`
 - Linux state: `.local/`
@@ -470,8 +521,9 @@ npm run poc
 
 Colima uses `CONTAINER_ENGINE=docker` because it exposes the Docker CLI.
 
-For a clean Linux host, follow the
-[rootless Podman setup](docs/LOCAL_POC.md#rootless-podman-on-linux).
+For a clean Linux host, follow the [rootless Podman setup](docs/LOCAL_POC.md#rootless-podman-on-linux).
+
+</details>
 
 ## Docker Compose
 
@@ -480,6 +532,10 @@ Create and edit the configuration:
 ```bash
 ./scripts/bootstrap-local.sh
 ```
+
+The bootstrap records the current non-root host UID:GID as `CONTAINER_USER` unless `.env` already contains an explicit override.
+Docker Compose runs the image as that identity so the host-owned `data`, `workspaces`, and `codex-home` bind mounts remain writable across restarts on Linux and macOS.
+The bootstrap fails closed for a root host identity or a root `CONTAINER_USER` override.
 
 Required values in `.env`:
 
@@ -495,7 +551,10 @@ Start the application:
 docker compose up --build
 ```
 
-Open <http://localhost:3000>. Stop it without deleting Agent data:
+Open <http://localhost:3000>.
+Compose publishes only on `127.0.0.1` by default.
+Set `PUBLIC_BIND_ADDRESS=0.0.0.0` explicitly only when you intend to expose the authenticated service beyond the host and have secured the surrounding network.
+Stop it without deleting Agent data:
 
 ```bash
 docker compose down
@@ -504,16 +563,24 @@ docker compose down
 ## Development
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npm install --global @openai/codex@0.111.0
+```
+
+Set `ARK_API_KEY` and `ARK_MODEL` in `.env`, then start both development servers:
+
+```bash
 npm run dev
 ```
+
+The development command loads the repository-root `.env` before starting the API and Web UI.
+The checked-in example binds direct development to loopback and uses repository-local state paths.
 
 - Web UI: <http://localhost:5173>
 - API: <http://localhost:3000>
 
-Use local paths in `.env` when running outside Docker:
+The local path defaults in `.env` are:
 
 ```dotenv
 APP_DATA_DIR=.data
@@ -526,6 +593,9 @@ CODEX_HOME=codex-home
 - [Existing Linux ECS with Docker](docs/DEPLOYMENT.md#existing-linux-ecs)
 - [Complete Volcengine environment with Terraform](docs/DEPLOYMENT.md#terraform-deployment)
 - [Local Docker, Colima, and Podman details](docs/LOCAL_POC.md)
+
+The ECS and Terraform paths are optional rebuild-only reference POCs.
+They are outside the judged release boundary and do not consume or verify the retained exact-tested production image archive.
 
 The existing-ECS script deploys from the current source tree:
 
@@ -578,7 +648,7 @@ flowchart LR
     API --> Airlock["Agent Airlock"]
     Airlock --> Journal["Durable Promotion journal"]
     Airlock --> Store["Candidate and Canonical workspace, session, and SQLite"]
-    Airlock --> Effects["Deferred post-Promotion mock effects"]
+    Airlock --> Effects["Deferred effects after Canonical advance"]
     Airlock --> Registry["Capability-checked Resource Registry"]
     Airlock --> Receipt["Portable receipt signer"]
     Receipt --> Verifier["Offline verifier"]
@@ -602,8 +672,7 @@ The first turn uses `codex exec`; later turns resume the stored Codex thread.
 Deleting an Agent archives its workspace under `workspaces/.deleted/` with a credential-free lifecycle evidence tombstone.
 Deletion is refused while Promotion recovery or retained Quarantine remains unresolved.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension
-boundaries.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and extension boundaries.
 
 ## Validation
 

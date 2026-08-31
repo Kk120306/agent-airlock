@@ -364,7 +364,7 @@ try {
   console.log("Inference: provider-backed ModelArk Responses API.");
   console.log("Runtime: real Codex CLI in a disposable container.");
   console.log(
-    "Effects: real loopback HTTP delivery with receiver-enforced idempotency after Promotion.",
+    "Effects: real loopback HTTP delivery with receiver-enforced idempotency after Canonical State advances during Promotion.",
   );
   console.log("Judge action: Run live Candidate.");
   console.log(

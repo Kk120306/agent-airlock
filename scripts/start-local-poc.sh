@@ -5,11 +5,24 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
 runtime_image="${CONTAINER_RUNTIME_IMAGE:-volc-agent-runtime:local}"
-runtime_base_image="${CONTAINER_RUNTIME_BASE_IMAGE:-node:22-bookworm-slim}"
+runtime_base_image="${CONTAINER_RUNTIME_BASE_IMAGE:-node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5}"
 runtime_apt_mirror="${CONTAINER_APT_MIRROR:-}"
 runtime_apt_security_mirror="${CONTAINER_APT_SECURITY_MIRROR:-}"
 runtime_apt_packages="${CONTAINER_RUNTIME_APT_PACKAGES:-ca-certificates git ripgrep}"
 codex_sandbox_mode="${CODEX_SANDBOX_MODE:-workspace-write}"
+host_uid="$(id -u)"
+host_gid="$(id -g)"
+
+if [[ "$host_uid" == "0" || "$host_gid" == "0" ]]; then
+  printf '[local-poc] Local Runtime startup requires a non-root host UID and GID.\n' >&2
+  exit 2
+fi
+
+container_user="${CONTAINER_USER:-$host_uid:$host_gid}"
+if [[ ! "$container_user" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]]; then
+  printf '[local-poc] CONTAINER_USER must be a non-root numeric UID:GID.\n' >&2
+  exit 2
+fi
 
 log() {
   printf '[local-poc] %s\n' "$*" >&2
@@ -145,7 +158,7 @@ export RUNTIME_INSTANCE_ID="${RUNTIME_INSTANCE_ID:-local-$(id -u)-$(printf '%s' 
 
 mkdir -p "$APP_DATA_DIR" "$AGENT_WORKSPACE_ROOT" "$CODEX_HOME"
 log "Persistent state: $local_state_root"
-export CONTAINER_USER="${CONTAINER_USER:-$(id -u):$(id -g)}"
+export CONTAINER_USER="$container_user"
 
 log "Building $runtime_image from Dockerfile.runtime (base: $runtime_base_image)."
 "$engine" build \

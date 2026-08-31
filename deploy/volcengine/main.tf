@@ -32,6 +32,7 @@ locals {
     "NODE_ENV=production",
     "HOST=0.0.0.0",
     "PORT=3000",
+    "PUBLIC_BIND_ADDRESS=0.0.0.0",
     "PUBLIC_PORT=80",
     "LOG_LEVEL=info",
     "APP_AUTH_TOKEN=${var.app_auth_token}",

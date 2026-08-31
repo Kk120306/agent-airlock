@@ -788,13 +788,16 @@ export class WorkspaceManager {
     descriptors: readonly ProviderRegistryDescriptor[],
     generation: number,
   ): Promise<void> {
+    const registryPath = this.providerRegistryStatePath();
+    const registryWasMaterialized = await fileExists(registryPath);
     const normalized = normalizeProviderRegistryDescriptors(descriptors);
     const current = await this.readProviderRegistryState();
     this.assertAdditiveRegistryDescriptors(current.providers, normalized);
-    const expectedGeneration = sameProviderRegistryDescriptors(
+    const descriptorsUnchanged = sameProviderRegistryDescriptors(
       current.providers,
       normalized,
-    )
+    );
+    const expectedGeneration = descriptorsUnchanged
       ? current.generation
       : current.generation + 1;
     if (generation !== expectedGeneration) {
@@ -802,7 +805,8 @@ export class WorkspaceManager {
         "Resource Provider registry generation changed concurrently",
       );
     }
-    await this.writeJsonAtomically(this.providerRegistryStatePath(), {
+    if (registryWasMaterialized && descriptorsUnchanged) return;
+    await this.writeJsonAtomically(registryPath, {
       schemaVersion: 1,
       generation,
       providers: normalized,

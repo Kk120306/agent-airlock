@@ -13,6 +13,7 @@ import type {
   ExternalActionIntentEvidence,
   ValidationEvidence,
 } from "./types.js";
+import { SensitiveLiteralFilter } from "./sensitive-literals.js";
 
 const MAX_OUTBOX_BYTES = 64 * 1024;
 const MAX_INTENTS = 10;
@@ -57,6 +58,12 @@ export type ExternalActionDeliveryMode =
   | "atomic-local-store"
   | "idempotent-http";
 
+export interface ExternalActionDispatcherScope {
+  schemaVersion: 1;
+  deliveryMode: ExternalActionDeliveryMode;
+  consumerScopeDigest: string;
+}
+
 export interface ExternalActionDeliveryReceipt {
   idempotencyKey: string;
   runId: string;
@@ -73,7 +80,9 @@ export type MockDeliveryReceipt = ExternalActionDeliveryReceipt;
 
 export interface ExternalActionDispatcher {
   readonly deliveryMode: ExternalActionDeliveryMode;
+  readonly scope: ExternalActionDispatcherScope;
   initialize(): Promise<void>;
+  assertOperational(): void;
   dispatch(
     runId: string,
     intents: ParsedExternalActionIntent[],
@@ -82,7 +91,14 @@ export interface ExternalActionDispatcher {
 }
 
 interface DeliveryDatabase {
-  version: 1;
+  version: 2;
+  consumerId: string;
+  deliveries: ExternalActionDeliveryReceipt[];
+}
+
+interface ParsedDeliveryDatabase {
+  version: 1 | 2;
+  consumerId: string | null;
   deliveries: ExternalActionDeliveryReceipt[];
 }
 
@@ -120,6 +136,23 @@ const deliveryReceiptSchema = z
   })
   .strict();
 
+const externalActionDispatcherScopeSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    deliveryMode: z.enum(["atomic-local-store", "idempotent-http"]),
+    consumerScopeDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  })
+  .strict();
+
+const externalActionConsumerIdentityResponseSchema = z
+  .object({
+    schema: z.literal("agent-airlock/external-action-consumer-identity"),
+    schemaVersion: z.literal(1),
+    deliveryMode: z.literal("idempotent-http"),
+    consumerId: z.string().uuid(),
+  })
+  .strict();
+
 const MAXIMUM_DELIVERY_RESPONSE_BYTES = 16 * 1024;
 
 const exists = async (target: string): Promise<boolean> => {
@@ -135,19 +168,34 @@ function parseDeliveryDatabase(
   value: unknown,
   expectedMode: ExternalActionDeliveryMode,
   allowLegacyMode: boolean,
-): DeliveryDatabase {
+): ParsedDeliveryDatabase {
   if (
     value === null ||
     typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).sort().join("\0") !== "deliveries\0version"
+    Array.isArray(value)
   ) {
     throw new Error("Unsupported delivery receipt store format");
   }
-  const candidate = value as { version?: unknown; deliveries?: unknown };
-  if (candidate.version !== 1 || !Array.isArray(candidate.deliveries)) {
+  const candidate = value as {
+    version?: unknown;
+    consumerId?: unknown;
+    deliveries?: unknown;
+  };
+  const expectedKeys =
+    candidate.version === 1
+      ? "deliveries\0version"
+      : "consumerId\0deliveries\0version";
+  if (
+    (candidate.version !== 1 && candidate.version !== 2) ||
+    Object.keys(value).sort().join("\0") !== expectedKeys ||
+    !Array.isArray(candidate.deliveries)
+  ) {
     throw new Error("Unsupported delivery receipt store format");
   }
+  const consumerId =
+    candidate.version === 2
+      ? z.string().uuid().parse(candidate.consumerId)
+      : null;
   const deliveries = candidate.deliveries.map((raw) => {
     const normalized =
       allowLegacyMode &&
@@ -169,11 +217,55 @@ function parseDeliveryDatabase(
   ) {
     throw new Error("Delivery receipt store contains duplicate evidence");
   }
-  return { version: 1, deliveries };
+  if (
+    new Set(
+      deliveries.map(
+        (delivery) => delivery.runId + "\0" + delivery.intentId,
+      ),
+    ).size !== deliveries.length
+  ) {
+    throw new Error("Delivery receipt store contains duplicate action evidence");
+  }
+  return { version: candidate.version, consumerId, deliveries };
 }
 
 const hash = (value: string) =>
   "sha256:" + createHash("sha256").update(value).digest("hex");
+
+export function createExternalActionDispatcherScope(
+  deliveryMode: ExternalActionDeliveryMode,
+  consumerIdentity: string,
+): ExternalActionDispatcherScope {
+  return {
+    schemaVersion: 1,
+    deliveryMode,
+    consumerScopeDigest: hash(
+      [
+        "agent-airlock/external-action-consumer-scope",
+        "1",
+        deliveryMode,
+        consumerIdentity,
+      ].join("\0"),
+    ),
+  };
+}
+
+export function parseExternalActionDispatcherScope(
+  value: unknown,
+): ExternalActionDispatcherScope {
+  return externalActionDispatcherScopeSchema.parse(value);
+}
+
+export function externalActionDispatcherScopesEqual(
+  left: ExternalActionDispatcherScope,
+  right: ExternalActionDispatcherScope,
+): boolean {
+  return (
+    left.schemaVersion === right.schemaVersion &&
+    left.deliveryMode === right.deliveryMode &&
+    left.consumerScopeDigest === right.consumerScopeDigest
+  );
+}
 
 const boundedError = (error: unknown): string => {
   const detail =
@@ -185,7 +277,47 @@ const boundedError = (error: unknown): string => {
   return detail.slice(0, 240);
 };
 
+function assertReceiptMatchesIntent(
+  receipt: ExternalActionDeliveryReceipt,
+  deliveryMode: ExternalActionDeliveryMode,
+  runId: string,
+  intent: ParsedExternalActionIntent,
+): void {
+  if (
+    receipt.idempotencyKey !== intent.idempotencyKey ||
+    receipt.deliveryMode !== deliveryMode ||
+    receipt.runId !== runId ||
+    receipt.intentId !== intent.id ||
+    receipt.type !== intent.type ||
+    receipt.destination !== intent.payload.destination ||
+    receipt.subject !== intent.payload.subject ||
+    receipt.payloadHash !== intent.payloadHash
+  ) {
+    throw new Error(
+      "Stored external action delivery receipt contains contradictory evidence",
+    );
+  }
+}
+
+function findReceiptForIntent(
+  deliveries: ExternalActionDeliveryReceipt[],
+  runId: string,
+  intent: ParsedExternalActionIntent,
+): ExternalActionDeliveryReceipt | undefined {
+  return deliveries.find(
+    (delivery) =>
+      delivery.idempotencyKey === intent.idempotencyKey ||
+      (delivery.runId === runId && delivery.intentId === intent.id),
+  );
+}
+
 export class ExternalActionOutbox {
+  private readonly sensitiveLiterals: SensitiveLiteralFilter;
+
+  constructor(sensitiveValues: readonly string[] = []) {
+    this.sensitiveLiterals = new SensitiveLiteralFilter(sensitiveValues);
+  }
+
   async validate(
     outboxPath: string,
     runId: string,
@@ -242,6 +374,9 @@ export class ExternalActionOutbox {
     if (content.byteLength > MAX_OUTBOX_BYTES) {
       throw new Error("outbox exceeds the 64 KiB limit");
     }
+    if (this.sensitiveLiterals.contains(content)) {
+      throw new Error("outbox contained a control-plane sensitive value");
+    }
     const text = content.toString("utf8");
     const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
     if (lines.length > MAX_INTENTS) {
@@ -276,17 +411,43 @@ export class ExternalActionOutbox {
 
 export class MockExternalActionDispatcher implements ExternalActionDispatcher {
   readonly deliveryMode = "atomic-local-store" as const;
+  private scopeValue: ExternalActionDispatcherScope | null = null;
+  private consumerId: string | null = null;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly filePath: string) {}
 
+  get scope(): ExternalActionDispatcherScope {
+    if (!this.scopeValue) {
+      throw new Error("External action dispatcher is not initialized");
+    }
+    return structuredClone(this.scopeValue);
+  }
+
   async initialize(): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     if (!(await exists(this.filePath))) {
-      await this.persist({ version: 1, deliveries: [] });
+      const database: DeliveryDatabase = {
+        version: 2,
+        consumerId: randomUUID(),
+        deliveries: [],
+      };
+      await this.persist(database);
+      this.bindConsumer(database.consumerId);
     } else {
-      await this.read();
+      const persisted = await this.readPersisted();
+      const database: DeliveryDatabase = {
+        version: 2,
+        consumerId: persisted.consumerId ?? randomUUID(),
+        deliveries: persisted.deliveries,
+      };
+      if (persisted.version === 1) await this.persist(database);
+      this.bindConsumer(database.consumerId);
     }
+  }
+
+  assertOperational(): void {
+    this.requireConsumerId();
   }
 
   async dispatch(
@@ -297,10 +458,20 @@ export class MockExternalActionDispatcher implements ExternalActionDispatcher {
     const operation = this.queue.then(async () => {
       const database = await this.read();
       receipts = intents.map((intent) => {
-        const existing = database.deliveries.find(
-          (delivery) => delivery.idempotencyKey === intent.idempotencyKey,
+        const existing = findReceiptForIntent(
+          database.deliveries,
+          runId,
+          intent,
         );
-        if (existing) return existing;
+        if (existing) {
+          assertReceiptMatchesIntent(
+            existing,
+            this.deliveryMode,
+            runId,
+            intent,
+          );
+          return existing;
+        }
         const receipt: MockDeliveryReceipt = {
           idempotencyKey: intent.idempotencyKey,
           runId,
@@ -328,11 +499,37 @@ export class MockExternalActionDispatcher implements ExternalActionDispatcher {
   }
 
   private async read(): Promise<DeliveryDatabase> {
+    const database = await this.readPersisted();
+    if (
+      database.version !== 2 ||
+      database.consumerId !== this.requireConsumerId()
+    ) {
+      throw new Error("External action consumer identity changed");
+    }
+    return database as DeliveryDatabase;
+  }
+
+  private async readPersisted(): Promise<ParsedDeliveryDatabase> {
     return parseDeliveryDatabase(
       JSON.parse(await readFile(this.filePath, "utf8")),
       this.deliveryMode,
       true,
     );
+  }
+
+  private bindConsumer(consumerId: string): void {
+    this.consumerId = consumerId;
+    this.scopeValue = createExternalActionDispatcherScope(
+      this.deliveryMode,
+      consumerId,
+    );
+  }
+
+  private requireConsumerId(): string {
+    if (!this.consumerId) {
+      throw new Error("External action dispatcher is not initialized");
+    }
+    return this.consumerId;
   }
 
   private async persist(database: DeliveryDatabase): Promise<void> {
@@ -349,6 +546,9 @@ export class HttpExternalActionDispatcher
   implements ExternalActionDispatcher
 {
   readonly deliveryMode = "idempotent-http" as const;
+  private scopeValue: ExternalActionDispatcherScope | null = null;
+  private consumerId: string | null = null;
+  private operationalError: string | null = null;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -358,12 +558,52 @@ export class HttpExternalActionDispatcher
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  get scope(): ExternalActionDispatcherScope {
+    if (!this.scopeValue) {
+      throw new Error("External action dispatcher is not initialized");
+    }
+    return structuredClone(this.scopeValue);
+  }
+
   async initialize(): Promise<void> {
+    this.consumerId = null;
+    this.scopeValue = null;
+    this.operationalError =
+      "External action dispatcher initialization did not complete";
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    if (!(await exists(this.filePath))) {
-      await this.persist({ version: 1, deliveries: [] });
-    } else {
-      await this.read();
+    const persisted = (await exists(this.filePath))
+      ? await this.readPersisted()
+      : null;
+    const consumerId = await this.fetchConsumerIdentity();
+    this.consumerId = consumerId;
+    this.scopeValue = createExternalActionDispatcherScope(
+      this.deliveryMode,
+      consumerId + "\0" + this.allowedDestination,
+    );
+    if (
+      persisted?.version === 2 &&
+      persisted.consumerId !== consumerId
+    ) {
+      this.operationalError =
+        "Trusted external action receiver identity does not match the local receipt store";
+      return;
+    }
+    if (!persisted || persisted.version === 1) {
+      await this.persist({
+        version: 2,
+        consumerId,
+        deliveries: persisted?.deliveries ?? [],
+      });
+    }
+    this.operationalError = null;
+  }
+
+  assertOperational(): void {
+    if (!this.consumerId || !this.scopeValue) {
+      throw new Error("External action dispatcher is not initialized");
+    }
+    if (this.operationalError) {
+      throw new Error(this.operationalError);
     }
   }
 
@@ -371,14 +611,23 @@ export class HttpExternalActionDispatcher
     runId: string,
     intents: ParsedExternalActionIntent[],
   ): Promise<ExternalActionDeliveryReceipt[]> {
+    this.assertOperational();
     let receipts: ExternalActionDeliveryReceipt[] = [];
     const operation = this.queue.then(async () => {
       const database = await this.read();
       for (const intent of intents) {
-        const existing = database.deliveries.find(
-          (delivery) => delivery.idempotencyKey === intent.idempotencyKey,
+        const existing = findReceiptForIntent(
+          database.deliveries,
+          runId,
+          intent,
         );
         if (existing) {
+          assertReceiptMatchesIntent(
+            existing,
+            this.deliveryMode,
+            runId,
+            intent,
+          );
           receipts.push(existing);
           continue;
         }
@@ -399,6 +648,7 @@ export class HttpExternalActionDispatcher
   }
 
   async list(): Promise<ExternalActionDeliveryReceipt[]> {
+    this.assertOperational();
     await this.queue;
     return structuredClone((await this.read()).deliveries);
   }
@@ -415,6 +665,7 @@ export class HttpExternalActionDispatcher
         headers: {
           "content-type": "application/json",
           "idempotency-key": intent.idempotencyKey,
+          "x-agent-airlock-consumer-id": this.requireConsumerId(),
         },
         body: JSON.stringify({
           schema: "agent-airlock/external-action-delivery-request",
@@ -469,11 +720,70 @@ export class HttpExternalActionDispatcher
   }
 
   private async read(): Promise<DeliveryDatabase> {
+    const database = await this.readPersisted();
+    if (
+      database.version !== 2 ||
+      database.consumerId !== this.requireConsumerId()
+    ) {
+      throw new Error("External action consumer identity changed");
+    }
+    return database as DeliveryDatabase;
+  }
+
+  private async readPersisted(): Promise<ParsedDeliveryDatabase> {
     return parseDeliveryDatabase(
       JSON.parse(await readFile(this.filePath, "utf8")),
       this.deliveryMode,
       false,
     );
+  }
+
+  private async fetchConsumerIdentity(): Promise<string> {
+    const identityEndpoint = new URL(this.endpoint);
+    identityEndpoint.pathname = identityEndpoint.pathname.replace(/\/$/, "") +
+      "/identity";
+    identityEndpoint.search = "";
+    identityEndpoint.hash = "";
+    let response: Response;
+    try {
+      response = await this.fetchImpl(identityEndpoint, {
+        method: "GET",
+        redirect: "error",
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch {
+      throw new Error("Trusted external action receiver identity is unavailable");
+    }
+    if (!response.ok) {
+      throw new Error(
+        "Trusted external action receiver identity request failed with HTTP " +
+          response.status,
+      );
+    }
+    const source = await readBoundedResponse(response);
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(source);
+    } catch {
+      throw new Error(
+        "Trusted external action receiver identity returned invalid JSON",
+      );
+    }
+    const parsed = externalActionConsumerIdentityResponseSchema.safeParse(decoded);
+    if (!parsed.success) {
+      throw new Error(
+        "Trusted external action receiver returned invalid consumer identity",
+      );
+    }
+    return parsed.data.consumerId;
+  }
+
+  private requireConsumerId(): string {
+    if (!this.consumerId) {
+      throw new Error("External action dispatcher is not initialized");
+    }
+    return this.consumerId;
   }
 
   private async persist(database: DeliveryDatabase): Promise<void> {

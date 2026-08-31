@@ -20,6 +20,8 @@ Let the automated runner control both actions, and use the visible state transit
 
 > Agent Airlock is reusable transactional middleware for every CodeJam Agent.
 >
+> The selected Real Runtime Proof Agent is READY in the starter-kit Playground.
+>
 > Real Codex runs in an isolated Candidate inside a disposable container.
 >
 > Only the trusted control plane can promote validated state.
@@ -28,7 +30,7 @@ Let the automated runner control both actions, and use the visible state transit
 
 ### While the three Runs execute
 
-> One action now proves success, harmless rejection, and recovery through the same platform path.
+> From this Playground, one real multi-resource task now proves success, harmless rejection, and recovery through the same frontend-to-Agent path.
 >
 > The first Run asks Codex to write candidate-only to protocol-proof.txt, set the demo inventory row in .airlock/demo.sqlite to candidate-only, and prepare the protocol-release-ready notification in the deferred outbox.
 >
@@ -50,7 +52,7 @@ Let the automated runner control both actions, and use the visible state transit
 >
 > It received the exact failure evidence, a verified Canonical reference, the original Outcome Contract, and a fresh outbox.
 >
-> It restored protocol-proof.txt and the SQLite row to candidate-only, passed every required Validation, promoted all four resources, and delivered the fresh protocol-repair-ready effect only after Promotion.
+> It restored protocol-proof.txt and the SQLite row to candidate-only, passed every required Validation, promoted all four resources, and delivered the fresh protocol-repair-ready effect only after Canonical State advanced during Promotion.
 
 ### Zero-upload verifier
 
@@ -61,6 +63,8 @@ Let the automated runner control both actions, and use the visible state transit
 > That proves artifact integrity and lineage, not Runtime correctness, signer identity, or policy sufficiency.
 >
 > The next step is hardened network egress behind the same Outcome Contract.
+>
+> The Agent remains READY, and the operator can continue in the Playground.
 >
 > Only validated futures become reality.
 
@@ -78,7 +82,7 @@ The canonical proof builds the application and Runtime image before Chrome opens
 Warm those caches and verify the exact flow before starting screen capture:
 
 ```bash
-npm install
+npm ci
 npm run prove:runtime -- --reset --json
 ```
 
@@ -95,7 +99,7 @@ Do not click, scroll, switch tabs, or close Chrome during the canonical pass.
 The runner owns both proof actions, the viewport, presentation timing, verifier transition, and browser shutdown.
 Stop capture only after Chrome closes and the terminal prints `Real Runtime proof: PASSED`.
 
-The settled release candidate passed `npm run prove:runtime -- --reset --json` and `npm run audit:release`.
+Before release, require `npm run prove:runtime -- --reset --json` and `npm run audit:release` to pass on the clean final candidate.
 Run the headed command once immediately before capture, and require its terminal `Real Runtime proof: PASSED` result for the submitted recording.
 It uses deadline-aware presentation pacing under a hard 180-second recording budget.
 A successful headed proof preserves the complete 15-second opening, 85-second desktop Outcome Brief, and 25-second desktop verifier dwells plus a 5-second browser-close reserve.
@@ -138,7 +142,7 @@ Run completion may take up to 35 seconds, and the Outcome Brief appears immediat
 ### Outcome Brief, first 20 seconds - Promote one coherent future
 
 On the completed Outcome Brief, show the first fresh Run as `Promotion` only after every required Validation passes.
-Point to the visible passed-Validation count, four promoted resources, advanced Canonical fingerprint, and exactly one post-Promotion effect.
+Point to the visible passed-Validation count, four promoted resources, advanced Canonical fingerprint, and exactly one effect delivered after Canonical State advanced during Promotion.
 Explain that the persisted transaction evidence also records the accepted SQLite value and ordered Promotion journal without crowding the compact recording brief.
 
 ### Outcome Brief, next 20 seconds - Quarantine the invalid future
@@ -156,7 +160,7 @@ Show every required Validation pass, all four resources promote together, and on
 ### Outcome Brief, final 25 seconds - Read the trust proof
 
 The Outcome Brief must name the three fresh Run identifiers and summarize only persisted facts.
-Show the valid Promotion, harmless rejection, promoted Repair, Canonical fingerprint transitions, four-resource dispositions, post-Promotion effects, and locally verified signed lineage.
+Show the valid Promotion, harmless rejection, promoted Repair, Canonical fingerprint transitions, four-resource dispositions, effects delivered after Canonical State advanced during Promotion, and locally verified signed lineage.
 Require the final verdict to remain unavailable until Airlock verifies the two-decision chain from quarantined parent to promoted repair child.
 
 The runner keeps the completed Outcome Brief visible for 85 seconds in total.
@@ -180,7 +184,7 @@ The runner then closes Chrome automatically and retains at least 15 seconds of r
 - The first Run promotes workspace, Codex session, SQLite, and outbox together.
 - The second Run quarantines all four resources and leaves Canonical State unchanged.
 - The third Run repairs retained work through bounded lineage and a fresh outbox.
-- Supported effects dispatch only after the matching Promotion.
+- Supported effects dispatch only after required checks pass and Canonical State advances during the matching Promotion.
 - The Outcome Brief is derived from persisted Run and verification evidence.
 - A signed two-decision chain proves the rejected parent, promoted Repair, and Canonical State handoff.
 - The browser-local verifier checks that chain with zero uploads and zero API calls.
