@@ -14,6 +14,53 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+const codexToolEnvironmentNames = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+  "NO_COLOR",
+  "SHELL",
+  "USER",
+  "LOGNAME",
+  "AIRLOCK_OUTBOX_PATH",
+  "AIRLOCK_REPAIR_REFERENCE_PATH",
+  "AIRLOCK_MAXIMUM_TOTAL_TOKENS",
+];
+const codexToolEnvironmentSecretPatterns = [
+  "*KEY*",
+  "*SECRET*",
+  "*TOKEN*",
+  "*PASSWORD*",
+  "*CREDENTIAL*",
+];
+
+export function buildCodexToolBoundaryArgs(
+  resourceEnvironmentNames: string[] = [],
+): string[] {
+  return [
+    "-c",
+    "allow_login_shell=false",
+    "-c",
+    'shell_environment_policy.inherit="all"',
+    "-c",
+    "shell_environment_policy.ignore_default_excludes=false",
+    "-c",
+    "shell_environment_policy.exclude=" +
+      JSON.stringify(codexToolEnvironmentSecretPatterns),
+    "-c",
+    "shell_environment_policy.include_only=" +
+      JSON.stringify([
+        ...codexToolEnvironmentNames,
+        ...resourceEnvironmentNames,
+      ]),
+    "-c",
+    "sandbox_workspace_write.network_access=false",
+  ];
+}
+
 export function buildCodexEnvironment(
   config: AppConfig,
   codexHomePath: string,
@@ -24,7 +71,6 @@ export function buildCodexEnvironment(
 ): NodeJS.ProcessEnv {
   const inheritedNames = [
     "PATH",
-    "HOME",
     "TMPDIR",
     "LANG",
     "LC_ALL",
@@ -39,6 +85,7 @@ export function buildCodexEnvironment(
   const environment: NodeJS.ProcessEnv = {
     CODEX_HOME: codexHomePath,
     ARK_API_KEY: config.arkApiKey,
+    HOME: "/tmp",
     NO_COLOR: "1",
     ...(outboxPath ? { AIRLOCK_OUTBOX_PATH: outboxPath } : {}),
     ...(repairReferencePath
@@ -82,6 +129,11 @@ export function buildCodexArgs(
     "--sandbox",
     sandboxMode,
     "--skip-git-repo-check",
+    ...buildCodexToolBoundaryArgs(
+      request.resourceBindings?.map((binding) =>
+        resourceEnvironmentName(binding.providerId),
+      ),
+    ),
     "-C",
     workspacePath,
     "--add-dir",

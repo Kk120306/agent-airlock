@@ -195,7 +195,7 @@ Airlock proves that its contract is a middleware abstraction for Agent effects, 
 
 - Add one SQLite Transactional Resource inside Candidate State.
 - Add typed External Action Intents through a platform-controlled outbox.
-- Assign stable idempotency keys and deliver intents only after promotion.
+- Assign stable idempotency keys and deliver intents only after required checks pass and Canonical State advances during Promotion.
 - Show file, database, and action changes in one Run Transaction summary.
 
 **Exit gate**
@@ -319,7 +319,7 @@ Agent Airlock becomes a coherent hackathon submission that directly addresses al
 - The four-step guide stages the complete Promotion, Quarantine, Repair, and continuity story through real backend behavior.
 - The dedicated production Chrome path completed in 6.3 seconds and asserted the 390-pixel viewport without document overflow.
 - Launcher integration proves port conflicts, reset, graceful stop, restart persistence, and deterministic seeding.
-- `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required file-and-database Validation, four-resource Promotion, one post-Promotion effect, and explicit local Responses fixture disclosure.
+- `npm run demo:runtime -- --reset` productizes the real pinned-Codex container path as an interactive no-cost proof with a required file-and-database Validation, four-resource Promotion, one effect delivered after Canonical State advances during Promotion and before terminal `promoted`, and explicit local Responses fixture disclosure.
 - Its guided controls run a valid Candidate, a deliberately invalid Candidate, and a bounded Repair Run through that same real Runtime.
 - A single `Run complete safety loop` action sequences those three real Runtime decisions, exposes its current stage, fails closed instead of attempting Repair after an unexpected disposition, and automatically generates and locally verifies the signed Repair decision chain.
 - Its completion state is evidence-gated: the final signed-recovery verdict is withheld until both signatures, the parent link, and every Canonical State handoff verify locally, while export failure remains explicit and retryable.
@@ -821,7 +821,7 @@ A reviewer can run one bounded command that drives the production browser throug
 **Build**
 
 - Orchestrate the existing mandatory provider preflight, managed launcher, production Chrome control, persisted Run evidence, private packet capture, and offline verifier without adding another inference path.
-- Require the exact artifact, SQLite state, four-resource Promotion, one post-Promotion effect, bound execution profile, and signed packet before returning success.
+- Require the exact artifact, SQLite state, four-resource Promotion, one effect delivered after Canonical State advances during Promotion and before terminal `promoted`, bound execution profile, and signed packet before returning success.
 - Emit one credential-free non-authoritative result capsule that points to the signed packet by relative filename.
 - Classify provider unavailability, startup failure, browser failure, Quarantine, failed Run, bounded timeouts, invalid evidence, and interruption without persisting raw child output.
 - Close every browser and process owned by the runner on success, failure, timeout, or signal.
@@ -859,7 +859,7 @@ A reviewer can run one provider-independent headed command, select one primary a
 - Present one primary `Prove this release is safe` action that starts exactly three fresh Runs after proof start.
 - Require the ordered dispositions valid Promotion, destructive Quarantine, and promoted Repair from the retained Quarantine.
 - Derive one Outcome Brief from persisted Run authority and verified artifacts rather than prompts, Runtime narration, or browser-local staging.
-- Show the three Run identifiers, required Validation outcomes, four-resource dispositions, Canonical fingerprint transitions, post-Promotion effects, and bounded Repair lineage.
+- Show the three Run identifiers, required Validation outcomes, four-resource dispositions, Canonical fingerprint transitions, effects delivered after Canonical State advances during Promotion and before terminal `promoted`, and bounded Repair lineage.
 - Withhold the final verdict until the quarantined parent and promoted Repair verify as one signed two-decision chain with an intact Canonical State handoff.
 - Pass that exact chain directly into the existing zero-upload verifier, arm a deny-all HTTP and WebSocket boundary before its first opening, retain it through browser close, and expose `0 API calls` plus `2 signed decisions linked`.
 - Install the signed chain at an owner-only content-addressed path, then atomically replace one bounded credential-free safe capsule that names that exact chain while retaining the proof lease through the commit.

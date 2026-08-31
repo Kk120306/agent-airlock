@@ -43,9 +43,9 @@ const canonicalArchitectureWidth = 1904;
 const canonicalArchitectureHeight = 858;
 const approvedArchitectureRender = Object.freeze({
   sourceDigest:
-    "sha256:fbabea34da31ad942ef3af11d3301e35bc0d0ae6be4649294ed2305c21e3623c",
+    "sha256:56ade9b4818c2cdb444fd6007df1661c4c56b96365092b4a468e7bd9dc7b569f",
   imageDigest:
-    "sha256:c5c42260c84a2d975e97d870575e031a588b9586c3df384720bb25e1fc90f384",
+    "sha256:db905656a5b31aba4045c69358c9469a2350d861c3ec978db65aa32f67951ee7",
 });
 const exactPublicRepositoryLine =
   "- Public code repository: [github.com/Kk120306/agent-airlock](https://github.com/Kk120306/agent-airlock)";

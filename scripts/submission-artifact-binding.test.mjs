@@ -16,15 +16,99 @@ import { promisify } from "node:util";
 
 import {
   inspectCommittedSubmissionArtifacts,
+  requiredSubmissionArtifactModes,
   requiredSubmissionArtifacts,
 } from "./submission-artifact-binding.mjs";
-import {
-  runTrustedGit,
-  trustedGitExecutable,
-} from "./trusted-git-exec.mjs";
+import { runTrustedGit, trustedGitExecutable } from "./trusted-git-exec.mjs";
 
 const objectId = "a".repeat(40);
 const execFile = promisify(execFileCallback);
+const requiredJudgeGalleryAssets = [
+  "docs/assets/agent-airlock-live-01-overview.jpg",
+  "docs/assets/agent-airlock-live-02-quarantine.jpg",
+  "docs/assets/agent-airlock-live-03-verified-recovery.jpg",
+  "docs/assets/agent-airlock-live-04-zero-upload-verifier.jpg",
+];
+const requiredProductionImageInputs = [
+  ".dockerignore",
+  "Dockerfile",
+  "Dockerfile.runtime",
+  "docker-compose.yml",
+  "docker/codex-runtime/package-lock.json",
+  "docker/codex-runtime/package.json",
+  "package-lock.json",
+  "package.json",
+  "tsconfig.base.json",
+];
+const requiredProductionReleaseArtifacts = [
+  ...requiredProductionImageInputs,
+  ".github/workflows/release-proof.yml",
+  "playwright.container-browser.config.ts",
+  "scripts/check-phase-eleven-docker.sh",
+  "scripts/check-phase-thirteen.mjs",
+  "scripts/production-build-context.mjs",
+  "scripts/production-build-context.test.mjs",
+  "scripts/check-container-transaction.mjs",
+  "scripts/check-production-image-browser.mjs",
+  "scripts/check-production-image-browser.test.mjs",
+  "scripts/check-production-image-transaction.mjs",
+  "scripts/check-production-image-transaction.test.mjs",
+  "scripts/production-gate-cleanup.test.mjs",
+  "scripts/production-image-persistence-verifier.mjs",
+  "scripts/production-image-persistence-verifier.test.mjs",
+  "scripts/production-image-provenance.mjs",
+  "scripts/production-image-provenance.test.mjs",
+  "scripts/production-image-verifier.mjs",
+  "scripts/production-image-verifier.test.mjs",
+  "scripts/release-compose-policy.mjs",
+  "scripts/release-compose-policy.test.mjs",
+  "scripts/release-execution-policy.mjs",
+  "scripts/release-execution-policy.test.mjs",
+  "scripts/release-lockfile-policy.test.mjs",
+  "scripts/release-quality-policy.test.mjs",
+  "scripts/run-container-browser-fixture.mjs",
+  "tests/container-browser/global-teardown.ts",
+  "tests/container-browser/real-container.spec.ts",
+  "tests/fixtures/responses-protocol-server.mjs",
+];
+
+test("binds every judge-facing gallery asset", () => {
+  for (const artifactPath of requiredJudgeGalleryAssets) {
+    assert.equal(requiredSubmissionArtifacts.includes(artifactPath), true);
+  }
+});
+
+test("binds every production release proof dependency", () => {
+  for (const artifactPath of requiredProductionReleaseArtifacts) {
+    assert.equal(
+      requiredSubmissionArtifacts.includes(artifactPath),
+      true,
+      artifactPath,
+    );
+  }
+});
+
+test("rejects every missing direct production image input", async (context) => {
+  for (const inputPath of requiredProductionImageInputs) {
+    await context.test(inputPath, async () => {
+      const value = await fixture();
+      try {
+        const inspected = await inspectCommittedSubmissionArtifacts({
+          root: value.root,
+          exec: gitStub(value.committed, { missing: inputPath }),
+        });
+        assert.equal(inspected.valid, false);
+        assert.equal(inspected.reason, "artifact-not-committed");
+        assert.match(
+          inspected.detail,
+          new RegExp(inputPath.replaceAll(".", "\\.")),
+        );
+      } finally {
+        await rm(value.root, { recursive: true, force: true });
+      }
+    });
+  }
+});
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "airlock-artifacts-"));
@@ -73,7 +157,7 @@ function gitStub(
         .filter((artifactPath) => artifactPath !== missing)
         .map(
           (artifactPath) =>
-            `${mode[artifactPath] ?? "100644"} ${type[artifactPath] ?? "blob"} ${objectId}\t${artifactPath}\0`,
+            `${mode[artifactPath] ?? requiredSubmissionArtifactModes[artifactPath]} ${type[artifactPath] ?? "blob"} ${objectId}\t${artifactPath}\0`,
         )
         .join("");
       return { stdout: Buffer.from(records) };
@@ -214,7 +298,10 @@ test("ignores global templates and prevents checkout hooks", async () => {
       cwd: vulnerableClone,
       env: hostileEnvironment,
     });
-    assert.equal(await readFile(path.join(vulnerableClone, "tracked.txt"), "utf8"), "hooked\n");
+    assert.equal(
+      await readFile(path.join(vulnerableClone, "tracked.txt"), "utf8"),
+      "hooked\n",
+    );
 
     await runTrustedGit(
       ["clone", "--quiet", "--no-checkout", source, trustedClone],
@@ -243,7 +330,11 @@ test("rejects working bytes that only match a Git replacement commit", async (t)
   t.after(() => rm(root, { recursive: true, force: true }));
   await systemGit(root, ["init", "--quiet"]);
   await systemGit(root, ["config", "user.name", "Agent Airlock Test"]);
-  await systemGit(root, ["config", "user.email", "airlock-test@example.invalid"]);
+  await systemGit(root, [
+    "config",
+    "user.email",
+    "airlock-test@example.invalid",
+  ]);
   await systemGit(root, ["add", "--all"]);
   await systemGit(root, ["commit", "--quiet", "-m", "source A"]);
   const { stdout: revisionAOutput } = await systemGit(root, [
@@ -312,7 +403,10 @@ test("rejects symbolic links and non-regular working artifacts", async (t) => {
   t.after(() => rm(linkedFixture.root, { recursive: true, force: true }));
   const linkedPath = path.join(linkedFixture.root, "README.md");
   await unlink(linkedPath);
-  await writeFile(path.join(linkedFixture.root, "linked-target.md"), "target\n");
+  await writeFile(
+    path.join(linkedFixture.root, "linked-target.md"),
+    "target\n",
+  );
   await symlink("linked-target.md", linkedPath);
 
   const linked = await inspectCommittedSubmissionArtifacts({

@@ -42,6 +42,8 @@ const EXPECTED_RESOURCE_KINDS = [
   "sqlite",
   "workspace",
 ];
+const CANONICAL_ADVANCE_EVIDENCE_SUMMARY =
+  "Canonical State advanced before external action delivery";
 const DEFAULT_RUN_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
 export const RUNTIME_PROOF_RECORDING_BUDGET_MS = 180_000;
@@ -49,6 +51,7 @@ export const RUNTIME_PROOF_RUN_POLLING_BUDGET_MS = 35_000;
 export const RUNTIME_PROOF_PRESENTATION_TAIL_RESERVE_MS = 5_000;
 const MAXIMUM_CHAIN_BYTES = 4_194_304;
 const MAXIMUM_RESULT_BYTES = 262_144;
+const MAXIMUM_RUNTIME_DATABASE_BYTES = 4_194_304;
 export const RUNTIME_PROOF_PRESENTATION_DWELL_MS = Object.freeze({
   "opening-cta": 15_000,
   "desktop-outcome-brief": 85_000,
@@ -115,7 +118,7 @@ const FAILURE_MESSAGES = Object.freeze({
   "run-set-invalid":
     "The browser did not create exactly one promoted root, one quarantined root, and one promoted Repair child.",
   "promotion-invalid":
-    "The promoted root does not prove the expected four-resource acceptance and post-Promotion effect.",
+    "The promoted root does not prove the expected four-resource acceptance and effect delivery during Promotion after required checks.",
   "quarantine-invalid":
     "The rejected root does not prove four-resource Quarantine, unchanged Canonical State, and zero effects.",
   "repair-invalid":
@@ -462,9 +465,51 @@ export function runtimeProofCapsuleFile(resultBytes) {
   );
 }
 
-function ordinaryRuns(runs) {
+function runtimeRuns(runs) {
   if (!Array.isArray(runs)) throw new RuntimeProofError("run-set-invalid");
-  return runs.filter(
+  const runIds = new Set();
+  for (const run of runs) {
+    if (!safeIdentifier(run?.id) || runIds.has(run.id)) {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+    runIds.add(run.id);
+  }
+  return runs;
+}
+
+function runtimeRunIdentity(run) {
+  return {
+    id: run.id,
+    agentId: run.agentId,
+    candidateSetId: run.candidateSetId,
+    competitorId: run.competitorId,
+    createdAt: run.createdAt,
+  };
+}
+
+function runtimeRunBaseline(runs) {
+  return new Map(
+    runtimeRuns(runs).map((run) => [run.id, runtimeRunIdentity(run)]),
+  );
+}
+
+function freshRuntimeRuns(runs, baseline) {
+  const current = runtimeRuns(runs);
+  const currentById = new Map(current.map((run) => [run.id, run]));
+  for (const [runId, identity] of baseline) {
+    const currentRun = currentById.get(runId);
+    if (
+      !currentRun ||
+      !isDeepStrictEqual(runtimeRunIdentity(currentRun), identity)
+    ) {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+  }
+  return current.filter((run) => !baseline.has(run.id));
+}
+
+function ordinaryRuns(runs) {
+  return runtimeRuns(runs).filter(
     (run) => run?.candidateSetId === null && run?.competitorId === null,
   );
 }
@@ -608,24 +653,40 @@ function hasExactResources(transaction, disposition) {
 function exactEffect(transaction, { id, type, status, deliveredCount }) {
   const effects = transaction?.externalActions;
   const intent = effects?.intents?.[0];
-  const promoting = transaction?.events?.filter(
-    (event) => event?.status === "promoting",
+  const promotionStarted = transaction?.events?.filter(
+    (event) =>
+      event?.status === "promoting" &&
+      event?.summary !== CANONICAL_ADVANCE_EVIDENCE_SUMMARY,
+  );
+  const canonicalAdvanced = transaction?.events?.filter(
+    (event) =>
+      event?.status === "promoting" &&
+      event?.summary === CANONICAL_ADVANCE_EVIDENCE_SUMMARY,
   );
   const promoted = transaction?.events?.filter(
     (event) => event?.status === "promoted",
   );
   const deliveredAt = Date.parse(intent?.deliveredAt ?? "");
-  const promotingAt = Date.parse(promoting?.[0]?.at ?? "");
+  const promotionStartedAt = Date.parse(promotionStarted?.[0]?.at ?? "");
+  const canonicalAdvancedAt = Date.parse(canonicalAdvanced?.[0]?.at ?? "");
   const promotedAt = Date.parse(promoted?.[0]?.at ?? "");
   const deliveryChronologyValid =
     status === "delivered"
-      ? promoting?.length === 1 &&
+      ? promotionStarted?.length === 1 &&
+        canonicalAdvanced?.length === 1 &&
         promoted?.length === 1 &&
-        [deliveredAt, promotingAt, promotedAt].every(Number.isFinite) &&
-        promotingAt <= deliveredAt &&
+        [
+          promotionStartedAt,
+          canonicalAdvancedAt,
+          deliveredAt,
+          promotedAt,
+        ].every(Number.isFinite) &&
+        promotionStartedAt <= canonicalAdvancedAt &&
+        canonicalAdvancedAt <= deliveredAt &&
         deliveredAt <= promotedAt
       : intent?.deliveredAt === null &&
-        promoting?.length === 0 &&
+        promotionStarted?.length === 0 &&
+        canonicalAdvanced?.length === 0 &&
         promoted?.length === 0;
   return (
     effects?.deliveredCount === deliveredCount &&
@@ -724,8 +785,11 @@ function commonTerminalRun(run, disposition) {
 }
 
 export function verifyRuntimeProofRuns({ agent, runs }) {
-  const ordinary = ordinaryRuns(runs);
-  if (ordinary.length !== 3) throw new RuntimeProofError("run-set-invalid");
+  const fresh = runtimeRuns(runs);
+  const ordinary = ordinaryRuns(fresh);
+  if (fresh.length !== 3 || ordinary.length !== 3) {
+    throw new RuntimeProofError("run-set-invalid");
+  }
   if (
     new Set(ordinary.map((run) => run?.id)).size !== 3 ||
     ordinary.some((run) => run?.agentId !== agent?.id)
@@ -871,7 +935,7 @@ export function verifyRuntimeProofRuns({ agent, runs }) {
 async function waitForExactRunSet({
   baseUrl,
   agent,
-  initialRunIds,
+  initialRunBaseline,
   fetchImpl,
   now,
   pollIntervalMs,
@@ -894,9 +958,7 @@ async function waitForExactRunSet({
       signal,
       "run-failed",
     );
-    const created = ordinaryRuns(payload?.runs).filter(
-      (run) => !initialRunIds.has(run?.id),
-    );
+    const created = freshRuntimeRuns(payload?.runs, initialRunBaseline);
     if (created.length > 3) throw new RuntimeProofError("run-set-invalid");
     if (
       created.some(
@@ -928,7 +990,7 @@ async function waitForExactRunSet({
 async function recheckExactRunSet({
   baseUrl,
   agent,
-  initialRunIds,
+  initialRunBaseline,
   expectedRuns,
   fetchImpl,
   signal,
@@ -940,9 +1002,7 @@ async function recheckExactRunSet({
     signal,
     "run-set-invalid",
   );
-  const created = ordinaryRuns(payload?.runs).filter(
-    (run) => !initialRunIds.has(run?.id),
-  );
+  const created = freshRuntimeRuns(payload?.runs, initialRunBaseline);
   const verified = verifyRuntimeProofRuns({ agent, runs: created });
   for (const name of ["promotion", "quarantine", "repair"]) {
     if (
@@ -2499,15 +2559,17 @@ function runtimeProofRecordingExpectation(runs) {
     promotion: {
       runId: runIds.safeRunId,
       summary: `${promotion.transaction.resources.length}/4 resources · ${promotionValidations.passed}/${promotionValidations.total} required`,
+      resourceDisposition:
+        "Workspace · Codex session · SQLite · outbox promoted",
       fingerprintTransition: `Canonical ${recordingHashPrefix(promotion.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(promotion.transaction.canonicalContentHashAfter)}`,
       fileAndSqlite: `File protocol-proof.txt · SQLite demo = ${promotionSqliteRow?.value}`,
       effectType: promotionEffect?.type,
-      effectDelivery: `${promotionEffect?.id} delivered only after Promotion`,
+      effectDelivery: `${promotionEffect?.id} delivered in Promotion after required checks`,
     },
     quarantine: {
       runId: runIds.unsafeRunId,
       failedValidation: failedRequiredValidation?.name,
-      summary: `decisive required Validation failed · ${quarantine.transaction.resources.length}/4 quarantined`,
+      resourceDisposition: `${quarantine.transaction.resources.length}/4 quarantined · workspace · session · SQLite · outbox`,
       fingerprintAndEffects: `${recordingHashPrefix(quarantine.transaction.canonicalContentHashBefore)} = ${recordingHashPrefix(quarantine.transaction.canonicalContentHashAfter)} · ${quarantine.transaction.externalActions.deliveredCount} effects`,
       fileAndSqlite: `File protocol-proof.txt · SQLite demo = ${quarantineSqliteRow?.value}`,
       rejection: `${quarantine.transaction.sqlite?.databasePath} + ${quarantineEffect?.id} ${quarantineEffect?.status}`,
@@ -2515,11 +2577,13 @@ function runtimeProofRecordingExpectation(runs) {
     repair: {
       runId: runIds.repairedRunId,
       summary: `${repair.transaction.resources.length}/4 + ${repair.transaction.externalActions.deliveredCount} fresh effect · ${repairValidations.passed}/${repairValidations.total} required`,
+      resourceDisposition:
+        "Workspace · Codex session · SQLite · fresh outbox promoted",
       fingerprintTransition: `Canonical ${recordingHashPrefix(repair.transaction.canonicalContentHashBefore)} → ${recordingHashPrefix(repair.transaction.canonicalContentHashAfter)}`,
       validationAndSqlite: `Validation command:protocol-content · SQLite demo = ${repairSqliteRow?.value}`,
       parentAndDepth: `repaired from parent ${repair.transaction.lineage.parentRunId.slice(0, 8)} · depth ${repair.transaction.lineage.depth}`,
       effectType: repairEffect?.type,
-      effectDelivery: `${repairEffect?.id} delivered with a fresh key`,
+      effectDelivery: `${repairEffect?.id} delivered in Promotion with a fresh key`,
     },
   };
 }
@@ -2705,6 +2769,10 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
     await expectExactVisibleText(promoted, expectation.promotion.summary),
     await expectExactVisibleText(
       promoted,
+      expectation.promotion.resourceDisposition,
+    ),
+    await expectExactVisibleText(
+      promoted,
       expectation.promotion.fingerprintTransition,
     ),
     await expectExactVisibleText(promoted, expectation.promotion.fileAndSqlite),
@@ -2721,7 +2789,10 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
       quarantined,
       expectation.quarantine.failedValidation,
     ),
-    await expectExactVisibleText(quarantined, expectation.quarantine.summary),
+    await expectExactVisibleText(
+      quarantined,
+      expectation.quarantine.resourceDisposition,
+    ),
     await expectExactVisibleText(
       quarantined,
       expectation.quarantine.fingerprintAndEffects,
@@ -2736,6 +2807,10 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
   recordingFields.push(
     await expectExactVisibleText(repaired, "Promotion"),
     await expectExactVisibleText(repaired, expectation.repair.summary),
+    await expectExactVisibleText(
+      repaired,
+      expectation.repair.resourceDisposition,
+    ),
     await expectExactVisibleText(
       repaired,
       expectation.repair.fingerprintTransition,
@@ -2753,7 +2828,7 @@ async function assertDynamicRecordingBoard({ page, runs, viewport }) {
     await expectExactVisibleText(verified, "Verified"),
     await expectExactVisibleText(
       verified,
-      "Independent signatures verify integrity and lineage.",
+      "Browser verification confirms signed integrity and lineage.",
     ),
     await expectExactVisibleText(verified, "2/2"),
     await expectExactVisibleText(
@@ -3358,16 +3433,17 @@ export async function runRuntimeProofSession({
       signal,
       "startup-failed",
     );
-    const initialOrdinary = ordinaryRuns(initialPayload?.runs);
+    const initialRuns = runtimeRuns(initialPayload?.runs);
+    const initialOrdinary = ordinaryRuns(initialRuns);
     if (initialOrdinary.length !== 0)
       throw new RuntimeProofError("stale-state");
-    const initialRunIds = new Set(initialOrdinary.map((run) => run.id));
+    const initialRunBaseline = runtimeRunBaseline(initialRuns);
 
     await browserDriver.invokeCompleteSafetyLoop();
     const runs = await waitForExactRunSet({
       baseUrl,
       agent,
-      initialRunIds,
+      initialRunBaseline,
       fetchImpl,
       now,
       pollIntervalMs,
@@ -3383,7 +3459,7 @@ export async function runRuntimeProofSession({
     const finalRuns = await recheckExactRunSet({
       baseUrl,
       agent,
-      initialRunIds,
+      initialRunBaseline,
       expectedRuns: runs,
       fetchImpl,
       signal,
@@ -3728,6 +3804,172 @@ export async function cleanupAbandonedRuntimeProofSessions({
     }
     throw new RuntimeProofError("cleanup-failed");
   } finally {
+    await closeDirectoryAnchor(sessionsAnchor);
+    await closeDirectoryAnchor(rootAnchor);
+  }
+}
+
+export async function assertStoppedRuntimeProofSnapshot({
+  artifactRoot,
+  sessionRoot,
+  nonce,
+  result,
+  artifactIo = runRuntimeProofArtifactWorker,
+  fsImpl = { chmod, lstat, open, realpath },
+}) {
+  assertSafeRuntimeProofResult(result);
+  const root = path.resolve(artifactRoot);
+  const sessionsRoot = path.join(root, "sessions");
+  const resolvedSessionRoot = path.resolve(sessionRoot);
+  if (
+    path.dirname(resolvedSessionRoot) !== sessionsRoot ||
+    !isStrictDescendant(sessionsRoot, resolvedSessionRoot)
+  ) {
+    throw new RuntimeProofError("artifact-write-failed");
+  }
+
+  let rootAnchor = null;
+  let sessionsAnchor = null;
+  let sessionAnchor = null;
+  let dataAnchor = null;
+  try {
+    rootAnchor = await openOwnerOnlyDirectory(root, {}, fsImpl);
+    const rootMarker = await readOwnerOnlyPhysicalFile(
+      path.join(root, RUNTIME_PROOF_ROOT_MARKER),
+      {
+        maximumBytes: MAXIMUM_RESULT_BYTES,
+        parentAnchor: rootAnchor,
+      },
+      fsImpl,
+      artifactIo,
+    );
+    if (
+      rootMarker === null ||
+      !rootMarker.equals(Buffer.from(ROOT_MARKER_CONTENT, "utf8"))
+    ) {
+      throw new RuntimeProofError("artifact-write-failed");
+    }
+    sessionsAnchor = await openOwnerOnlyDirectory(
+      sessionsRoot,
+      { realParentDirectory: rootAnchor.realDirectory },
+      fsImpl,
+    );
+    sessionAnchor = await openOwnerOnlyDirectory(
+      resolvedSessionRoot,
+      { realParentDirectory: sessionsAnchor.realDirectory },
+      fsImpl,
+    );
+    const markerBytes = await readOwnerOnlyPhysicalFile(
+      path.join(resolvedSessionRoot, RUNTIME_PROOF_SESSION_MARKER),
+      {
+        maximumBytes: MAXIMUM_RESULT_BYTES,
+        parentAnchor: sessionAnchor,
+      },
+      fsImpl,
+      artifactIo,
+    );
+    if (markerBytes === null) {
+      throw new RuntimeProofError("artifact-write-failed");
+    }
+    const marker = parseRuntimeProofSessionMarker(
+      markerBytes,
+      path.basename(resolvedSessionRoot),
+    );
+    if (marker.nonce !== nonce || marker.ownerPid !== process.pid) {
+      throw new RuntimeProofError("artifact-write-failed");
+    }
+
+    const dataDirectory = path.join(resolvedSessionRoot, "data");
+    await assertDirectoryAnchor(sessionAnchor, fsImpl);
+    const dataStatus = await fsImpl.lstat(dataDirectory);
+    const realDataDirectory = await fsImpl.realpath(dataDirectory);
+    if (
+      !dataStatus.isDirectory() ||
+      dataStatus.isSymbolicLink() ||
+      !ownedByCurrentUser(dataStatus) ||
+      (dataStatus.mode & 0o022) !== 0 ||
+      path.dirname(realDataDirectory) !== sessionAnchor.realDirectory
+    ) {
+      throw new RuntimeProofError("artifact-write-failed");
+    }
+    await fsImpl.chmod(dataDirectory, 0o700);
+    dataAnchor = await openOwnerOnlyDirectory(
+      dataDirectory,
+      { realParentDirectory: sessionAnchor.realDirectory },
+      fsImpl,
+    );
+    await assertDirectoryAnchor(sessionAnchor, fsImpl);
+    const databaseBytes = await readOwnerOnlyPhysicalFile(
+      path.join(dataDirectory, "launchpad.json"),
+      {
+        maximumBytes: MAXIMUM_RUNTIME_DATABASE_BYTES,
+        parentAnchor: dataAnchor,
+      },
+      fsImpl,
+      artifactIo,
+    );
+    if (databaseBytes === null) {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+    let database;
+    try {
+      database = JSON.parse(databaseBytes.toString("utf8"));
+    } catch {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+    if (
+      !exactKeys(database, [
+        "agents",
+        "assuranceProposals",
+        "candidateSets",
+        "messages",
+        "outcomeContractVersions",
+        "runs",
+        "version",
+      ]) ||
+      database.version !== 10 ||
+      !Array.isArray(database.agents) ||
+      database.agents.length !== 1 ||
+      !Array.isArray(database.runs)
+    ) {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+    let persistedAgent;
+    try {
+      persistedAgent = uniqueRuntimeProofAgent(database.agents);
+    } catch {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+    if (
+      persistedAgent.canonicalStateId !==
+      result.runs.repair.canonicalStateIdAfter
+    ) {
+      throw new RuntimeProofError("run-set-invalid");
+    }
+    const verified = verifyRuntimeProofRuns({
+      agent: {
+        ...persistedAgent,
+        canonicalStateId: result.runs.promotion.canonicalStateIdBefore,
+      },
+      runs: database.runs,
+    });
+    for (const name of ["promotion", "quarantine", "repair"]) {
+      if (!isDeepStrictEqual(capsuleRun(verified[name]), result.runs[name])) {
+        throw new RuntimeProofError("run-set-invalid");
+      }
+    }
+    await assertDirectoryAnchor(dataAnchor, fsImpl);
+    await assertDirectoryAnchor(sessionAnchor, fsImpl);
+    await assertDirectoryAnchor(sessionsAnchor, fsImpl);
+    await assertDirectoryAnchor(rootAnchor, fsImpl);
+    return verified;
+  } catch (error) {
+    throw error instanceof RuntimeProofError
+      ? error
+      : new RuntimeProofError("artifact-write-failed");
+  } finally {
+    await closeDirectoryAnchor(dataAnchor);
+    await closeDirectoryAnchor(sessionAnchor);
     await closeDirectoryAnchor(sessionsAnchor);
     await closeDirectoryAnchor(rootAnchor);
   }

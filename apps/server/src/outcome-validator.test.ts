@@ -151,6 +151,66 @@ describe("OutcomeValidator", () => {
     expect(JSON.stringify(result)).not.toContain("super-secret-value-12345");
   });
 
+  it("rejects an exact control-plane value without relying on a contract regex", async () => {
+    const { canonical, candidate } = await makeWorkspaces();
+    const sensitiveValue = "raw-provider-value-without-a-name";
+    await writeFile(path.join(candidate, "opaque.txt"), sensitiveValue + "\n");
+    const contract = createDefaultOutcomeContract();
+    contract.secretPatterns = [];
+    const validator = new OutcomeValidator(
+      new FixtureExecutor(() => passingResult(sensitiveValue + "\n")),
+      [sensitiveValue],
+    );
+
+    const result = await validator.validate(
+      canonical,
+      candidate,
+      contract,
+      "run-sensitive-literal",
+    );
+    const secretEvidence = result.validations.find(
+      (validation) => validation.name === "secret-patterns",
+    );
+
+    expect(secretEvidence).toMatchObject({
+      status: "failed",
+      summary:
+        "Secret-pattern findings: opaque.txt contained a control-plane sensitive value",
+    });
+    expect(JSON.stringify(result)).not.toContain(sensitiveValue);
+  });
+
+  it("fails and redacts command evidence containing a control-plane value", async () => {
+    const { canonical, candidate } = await makeWorkspaces();
+    const sensitiveValue = "raw-auth-value-without-a-name";
+    const contract = createDefaultOutcomeContract();
+    contract.validationCommands = [
+      { name: "probe", command: "probe", required: true, timeoutMs: 1_000 },
+    ];
+    const validator = new OutcomeValidator(
+      new FixtureExecutor(() => passingResult("prefix " + sensitiveValue)),
+      [sensitiveValue],
+    );
+
+    const result = await validator.validate(
+      canonical,
+      candidate,
+      contract,
+      "run-sensitive-command",
+    );
+    const evidence = result.validations.find(
+      (validation) => validation.name === "command:probe",
+    );
+
+    expect(evidence).toMatchObject({
+      status: "failed",
+      summary:
+        "Validation command output contained a control-plane sensitive value",
+      output: "prefix [REDACTED]",
+    });
+    expect(JSON.stringify(evidence)).not.toContain(sensitiveValue);
+  });
+
   it("records a bounded optional trusted-catalog secret observation", async () => {
     const { canonical, candidate } = await makeWorkspaces();
     await writeFile(

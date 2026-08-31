@@ -5,6 +5,8 @@ const port = Number(process.env.AIRLOCK_PROTOCOL_FIXTURE_PORT ?? "43991");
 const maximumRequestBytes = 2 * 1024 * 1024;
 let responseSequence = 0;
 const toolCallModes = new Map();
+const processEnvironmentProbe =
+  "for candidate_environ in /proc/[0-9]*/environ; do if [ -r \"$candidate_environ\" ] && tr '\\000' '\\n' < \"$candidate_environ\" 2>/dev/null | grep -Eq '^(ARK_API_KEY|APP_AUTH_TOKEN)='; then exit 45; fi; done";
 
 function eventStream(events) {
   return events
@@ -38,6 +40,29 @@ function sendEvents(response, events) {
 }
 
 function wholeAgentCommand(mode) {
+  if (mode === "credential") {
+    return [
+      "credential_status=credential-unavailable;",
+      'if [ -n "${ARK_API_KEY:-}" ] || [ -n "${APP_AUTH_TOKEN:-}" ]; then',
+      "  credential_status=credential-env-visible;",
+      "else",
+      "  for candidate_environ in /proc/[0-9]*/environ; do",
+      "    if [ -r \"$candidate_environ\" ] && tr '\\000' '\\n' < \"$candidate_environ\" 2>/dev/null | grep -Eq '^(ARK_API_KEY|APP_AUTH_TOKEN)='; then credential_status=credential-process-visible; break; fi;",
+      "  done;",
+      "fi;",
+      "printf '%s\\n' \"$credential_status\" > credential-probe.txt",
+    ].join(" ");
+  }
+  const boundaryPrelude =
+    mode === "product-boundary"
+      ? [
+          "if env | cut -d= -f1 | grep -Eiq '(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)'; then exit 41; fi",
+          processEnvironmentProbe,
+          "if printf 'runtime-write-escaped\\n' > /app/data/.production-gate-sandbox-sentinel 2>/dev/null; then exit 42; fi",
+          "if printf 'runtime-write-escaped\\n' > /app/workspaces/.production-gate-sandbox-sentinel 2>/dev/null; then exit 43; fi",
+          "node -e \"fetch('http://127.0.0.1:43991/health').then(() => process.exit(1), () => process.exit(0))\"",
+        ]
+      : [];
   const proofValue = mode === "unsafe" ? "unsafe-candidate" : "candidate-only";
   const databaseValue = mode === "unsafe" ? "unsafe-candidate" : "candidate-only";
   const timestamp =
@@ -79,6 +104,7 @@ function wholeAgentCommand(mode) {
     "database.close();",
   ].join(" ");
   return [
+    ...boundaryPrelude,
     "printf " + JSON.stringify(proofValue + "\\n") + " > protocol-proof.txt",
     "node --no-warnings --experimental-sqlite --input-type=module -e " +
       JSON.stringify(databaseScript),
@@ -139,7 +165,11 @@ const server = createServer(async (request, response) => {
     ? toolCallId !== null
       ? toolCallModes.get(toolCallId) ?? "safe"
       : "safe"
-    : /Agent Airlock Repair Run for quarantined transaction/i.test(currentUserText)
+    : /production image boundary proof/i.test(currentUserText)
+      ? "product-boundary"
+      : /Runtime credential isolation proof/i.test(currentUserText)
+      ? "credential"
+      : /Agent Airlock Repair Run for quarantined transaction/i.test(currentUserText)
       ? "repair"
       : /unsafe protocol change|rejection proof/i.test(currentUserText)
         ? "unsafe"
@@ -161,7 +191,9 @@ const server = createServer(async (request, response) => {
           {
             type: "output_text",
             text:
-              mode === "unsafe"
+              mode === "credential"
+                ? "Protocol fixture completed the Runtime credential isolation proof."
+                : mode === "unsafe"
                 ? "Protocol fixture completed the deliberately invalid Candidate edit."
                 : mode === "repair"
                   ? "Protocol fixture repaired the retained Candidate from bounded failure evidence."

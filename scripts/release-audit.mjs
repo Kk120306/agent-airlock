@@ -2,6 +2,14 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { approvedModelArkBoundaryDocuments } from "./modelark-claim-policy.mjs";
 import { releaseLockfileDependencyFindings } from "./release-lockfile-policy.mjs";
+import { releaseFileInventory } from "./release-index-policy.mjs";
+import { inspectJudgeGalleryJpeg } from "./release-image-policy.mjs";
+import { approvedLocalComposeIdentityPolicy } from "./release-compose-policy.mjs";
+import {
+  approvedReleaseExecutionPolicy,
+  approvedStoppedRuntimePublicationPolicy,
+  releaseExecutionDependencyPaths,
+} from "./release-execution-policy.mjs";
 import {
   approvedReleaseQualityPipeline,
   requiredReleaseWorkspaceScripts,
@@ -10,22 +18,86 @@ import {
   highConfidenceReachableGitObjectFindings,
   highConfidenceSecretFindings,
 } from "./release-secret-policy.mjs";
+import {
+  ProductionImageVerificationError,
+  verifyProductionImageHttp,
+} from "./production-image-verifier.mjs";
 import { runTrustedGit } from "./trusted-git-exec.mjs";
 
 const projectRoot = path.resolve(".");
-const { stdout } = await runTrustedGit(
-  ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-  {
+const [cachedInventory, scannedInventory] = await Promise.all([
+  runTrustedGit(["ls-files", "-z", "--cached"], {
     cwd: projectRoot,
     encoding: "buffer",
     maxBuffer: 20 * 1024 * 1024,
-  },
-);
-const trackedFiles = stdout
-  .toString("utf8")
-  .split("\0")
-  .filter(Boolean);
+  }),
+  runTrustedGit(
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    {
+      cwd: projectRoot,
+      encoding: "buffer",
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  ),
+]);
+const { cachedFiles, cachedFileSet, scannedFiles } = releaseFileInventory({
+  cachedOutput: cachedInventory.stdout,
+  scannedOutput: scannedInventory.stdout,
+});
 const failures = [];
+
+const validProductionImageDocument =
+  '<!doctype html><html><head><title>Agent Airlock</title></head><body><div id="root"></div><script type="module" src="/assets/index-release.js"></script></body></html>';
+const validProductionImageScript = "x".repeat(100_000);
+
+function productionImageResponse(body, contentType, status = 200) {
+  return new Response(body, {
+    status,
+    headers: { "content-type": contentType },
+  });
+}
+
+function productionImageFixtureFetch({
+  health = { ok: true, service: "volc-agent-launchpad" },
+  healthStatus = 200,
+  healthType = "application/json; charset=utf-8",
+  document = validProductionImageDocument,
+  documentStatus = 200,
+  documentType = "text/html; charset=utf-8",
+  script = validProductionImageScript,
+  scriptStatus = 200,
+  scriptType = "text/javascript; charset=utf-8",
+} = {}) {
+  return async (url) => {
+    const pathname = new URL(url).pathname;
+    if (pathname === "/api/health") {
+      return productionImageResponse(
+        JSON.stringify(health),
+        healthType,
+        healthStatus,
+      );
+    }
+    if (pathname === "/") {
+      return productionImageResponse(document, documentType, documentStatus);
+    }
+    if (pathname === "/assets/index-release.js") {
+      return productionImageResponse(script, scriptType, scriptStatus);
+    }
+    return productionImageResponse("not found", "text/plain", 404);
+  };
+}
+
+async function productionImageVerifierRejects(options) {
+  try {
+    await verifyProductionImageHttp({
+      origin: "http://127.0.0.1:3000",
+      fetchImpl: productionImageFixtureFetch(options),
+    });
+    return false;
+  } catch (error) {
+    return error instanceof ProductionImageVerificationError;
+  }
+}
 
 const modelArkStatusFiles = [
   "README.md",
@@ -37,7 +109,7 @@ const modelArkStatusFiles = [
   "docs/product/OUTCOME_ROADMAP.md",
   "docs/product/PRD.md",
 ];
-for (const file of trackedFiles) {
+for (const file of scannedFiles) {
   if (/^\.env(?:\.|$)/.test(path.basename(file)) && file !== ".env.example") {
     failures.push("Tracked environment file: " + file);
   }
@@ -47,14 +119,16 @@ for (const file of trackedFiles) {
 }
 
 try {
-  for (const secretName of highConfidenceReachableGitObjectFindings(projectRoot)) {
+  for (const secretName of highConfidenceReachableGitObjectFindings(
+    projectRoot,
+  )) {
     failures.push(secretName + " in Git history");
   }
 } catch {
   failures.push("Git history scan was incomplete or unsafe");
 }
 
-for (const file of trackedFiles) {
+for (const file of scannedFiles) {
   let content;
   try {
     content = await readFile(path.join(projectRoot, file), "utf8");
@@ -69,7 +143,9 @@ for (const file of trackedFiles) {
   }
 }
 
-for (const markdownFile of trackedFiles.filter((file) => file.endsWith(".md"))) {
+for (const markdownFile of scannedFiles.filter((file) =>
+  file.endsWith(".md"),
+)) {
   const content = await readFile(path.join(projectRoot, markdownFile), "utf8");
   const linkPattern = /!?\[[^\]]*\]\(([^)]+)\)/g;
   for (const match of content.matchAll(linkPattern)) {
@@ -86,18 +162,24 @@ for (const markdownFile of trackedFiles.filter((file) => file.endsWith(".md"))) 
     ) {
       continue;
     }
-    const resolved = path.resolve(projectRoot, path.dirname(markdownFile), target);
+    const resolved = path.resolve(
+      projectRoot,
+      path.dirname(markdownFile),
+      target,
+    );
     try {
       await access(resolved);
     } catch {
-      failures.push("Broken Markdown target in " + markdownFile + ": " + target);
+      failures.push(
+        "Broken Markdown target in " + markdownFile + ": " + target,
+      );
     }
   }
 }
 
 const modelArkStatusDocuments = [];
 for (const statusFile of modelArkStatusFiles) {
-  if (!trackedFiles.includes(statusFile)) {
+  if (!cachedFileSet.has(statusFile)) {
     failures.push("Missing ModelArk status document: " + statusFile);
     continue;
   }
@@ -112,7 +194,33 @@ if (!approvedModelArkBoundaryDocuments(modelArkStatusDocuments)) {
 
 const readme = await readFile(path.join(projectRoot, "README.md"), "utf8");
 if (!readme.includes("must be rerun at judging time")) {
-  failures.push("README must disclose that live ModelArk conformance is rerun at judging time");
+  failures.push(
+    "README must disclose that live ModelArk conformance is rerun at judging time",
+  );
+}
+const requiredJudgeGalleryAssets = [
+  "docs/assets/agent-airlock-live-01-overview.jpg",
+  "docs/assets/agent-airlock-live-02-quarantine.jpg",
+  "docs/assets/agent-airlock-live-03-verified-recovery.jpg",
+  "docs/assets/agent-airlock-live-04-zero-upload-verifier.jpg",
+];
+for (const galleryAsset of requiredJudgeGalleryAssets) {
+  if (!cachedFileSet.has(galleryAsset)) {
+    failures.push("Missing tracked judge gallery asset: " + galleryAsset);
+  }
+  if (!readme.includes(galleryAsset)) {
+    failures.push("README is missing judge gallery asset: " + galleryAsset);
+  }
+  try {
+    const galleryBytes = await readFile(path.join(projectRoot, galleryAsset));
+    if (inspectJudgeGalleryJpeg(galleryBytes) === null) {
+      failures.push(
+        "Judge gallery asset is not a bounded nontrivial JPEG: " + galleryAsset,
+      );
+    }
+  } catch {
+    failures.push("Judge gallery asset could not be read: " + galleryAsset);
+  }
 }
 
 const recordingReleaseDocuments = {
@@ -213,7 +321,9 @@ if (
     "audit:submission must remain the credential-safe zero-network submission handoff",
   );
 }
-for (const [scriptName, command] of Object.entries(requiredRuntimeProofScripts)) {
+for (const [scriptName, command] of Object.entries(
+  requiredRuntimeProofScripts,
+)) {
   if (packageManifest.scripts?.[scriptName] !== command) {
     failures.push(`${scriptName} must remain exactly: ${command}`);
   }
@@ -232,26 +342,82 @@ for (const requiredSubmissionAuditFile of [
   "scripts/release-quality-policy.test.mjs",
   "scripts/release-secret-policy.mjs",
   "scripts/release-secret-policy.test.mjs",
+  "scripts/release-compose-policy.mjs",
+  "scripts/release-compose-policy.test.mjs",
+  "scripts/release-execution-policy.mjs",
+  "scripts/release-execution-policy.test.mjs",
+  "scripts/release-index-policy.mjs",
+  "scripts/release-image-policy.mjs",
+  "scripts/production-build-context.mjs",
+  "scripts/production-build-context.test.mjs",
+  "scripts/production-image-verifier.mjs",
+  "scripts/production-image-verifier.test.mjs",
+  "scripts/check-production-image-browser.mjs",
+  "scripts/check-production-image-browser.test.mjs",
+  "scripts/check-production-image-transaction.mjs",
+  "scripts/check-production-image-transaction.test.mjs",
+  "scripts/production-image-persistence-verifier.mjs",
+  "scripts/production-image-persistence-verifier.test.mjs",
+  "scripts/production-image-provenance.mjs",
+  "scripts/production-image-provenance.test.mjs",
+  "scripts/production-gate-cleanup.test.mjs",
   "scripts/submission-artifact-binding.mjs",
   "scripts/submission-artifact-binding.test.mjs",
   "scripts/submission-audit.mjs",
   "scripts/submission-audit.test.mjs",
   "scripts/trusted-git-exec.mjs",
 ]) {
-  if (!trackedFiles.includes(requiredSubmissionAuditFile)) {
+  if (!cachedFileSet.has(requiredSubmissionAuditFile)) {
     failures.push(
-      "Missing tracked submission handoff gate: " +
-        requiredSubmissionAuditFile,
+      "Missing tracked submission handoff gate: " + requiredSubmissionAuditFile,
     );
   }
-  if (
-    !hasExactSyntaxCheck(requiredSubmissionAuditFile)
-  ) {
+  if (!hasExactSyntaxCheck(requiredSubmissionAuditFile)) {
     failures.push(
       "check:scripts is missing submission handoff coverage: " +
         requiredSubmissionAuditFile,
     );
   }
+}
+for (const requiredTrackedReleaseBoundary of [
+  ".github/workflows/release-proof.yml",
+  "Dockerfile",
+  "Dockerfile.runtime",
+  "docker-compose.yml",
+  "scripts/bootstrap-local.sh",
+  "scripts/start-local-poc.sh",
+  "scripts/deploy-existing-ecs.sh",
+  "scripts/check-phase-eleven-docker.sh",
+  "deploy/volcengine/main.tf",
+  "docs/DEPLOYMENT.md",
+]) {
+  if (!cachedFileSet.has(requiredTrackedReleaseBoundary)) {
+    failures.push(
+      "Missing tracked production release boundary: " +
+        requiredTrackedReleaseBoundary,
+    );
+  }
+}
+for (const releaseExecutionDependencyPath of releaseExecutionDependencyPaths) {
+  if (!cachedFileSet.has(releaseExecutionDependencyPath)) {
+    failures.push(
+      "Missing tracked production execution dependency: " +
+        releaseExecutionDependencyPath,
+    );
+  }
+}
+if (
+  !scriptCheckCommands.includes("bash -n scripts/check-phase-eleven-docker.sh")
+) {
+  failures.push(
+    "check:scripts must syntax-check the shipped production-image Compose gate",
+  );
+}
+if (!cachedFileSet.has("scripts/release-index-policy.mjs")) {
+  failures.push("Missing tracked release index provenance gate");
+}
+if (!cachedFileSet.has("scripts/release-image-policy.mjs")) {
+  failures.push("Missing tracked judge gallery validation gate");
 }
 for (const requiredRuntimeProofCheck of [
   "scripts/runtime-proof-artifact-worker.mjs",
@@ -262,9 +428,7 @@ for (const requiredRuntimeProofCheck of [
   "scripts/runtime-proof-terminal.mjs",
   "scripts/resolve-runtime-proof-artifacts.mjs",
 ]) {
-  if (
-    !hasExactSyntaxCheck(requiredRuntimeProofCheck)
-  ) {
+  if (!hasExactSyntaxCheck(requiredRuntimeProofCheck)) {
     failures.push(
       "check:scripts is missing Runtime proof coverage: " +
         requiredRuntimeProofCheck,
@@ -272,7 +436,9 @@ for (const requiredRuntimeProofCheck of [
   }
 }
 const scriptTestCommandOffset =
-  typeof scriptChecks === "string" ? scriptChecks.lastIndexOf("&& node --test ") : -1;
+  typeof scriptChecks === "string"
+    ? scriptChecks.lastIndexOf("&& node --test ")
+    : -1;
 const scriptTestCommand =
   scriptTestCommandOffset === -1
     ? ""
@@ -283,6 +449,32 @@ if (
 ) {
   failures.push(
     "check:scripts must syntax-check and execute the Runtime proof artifact worker test",
+  );
+}
+for (const requiredProductionGateTest of [
+  "scripts/production-build-context.test.mjs",
+  "scripts/production-image-verifier.test.mjs",
+  "scripts/check-production-image-browser.test.mjs",
+  "scripts/check-production-image-transaction.test.mjs",
+  "scripts/production-image-persistence-verifier.test.mjs",
+  "scripts/production-image-provenance.test.mjs",
+  "scripts/release-compose-policy.test.mjs",
+  "scripts/release-execution-policy.test.mjs",
+  "scripts/production-gate-cleanup.test.mjs",
+]) {
+  if (!scriptTestCommand.includes(requiredProductionGateTest)) {
+    failures.push(
+      "check:scripts must execute the release-critical mutation test: " +
+        requiredProductionGateTest,
+    );
+  }
+}
+if (
+  !hasExactSyntaxCheck("scripts/check-production-image-browser.test.mjs") ||
+  !scriptTestCommand.includes("scripts/check-production-image-browser.test.mjs")
+) {
+  failures.push(
+    "check:scripts must syntax-check and execute the production image browser mutation test",
   );
 }
 if (
@@ -317,6 +509,37 @@ const releaseWorkflow = await readFile(
   path.join(projectRoot, ".github/workflows/release-proof.yml"),
   "utf8",
 );
+const composePolicyApproved = approvedLocalComposeIdentityPolicy({
+  bootstrapSource: await readFile(
+    path.join(projectRoot, "scripts/bootstrap-local.sh"),
+    "utf8",
+  ),
+  composeSource: await readFile(
+    path.join(projectRoot, "docker-compose.yml"),
+    "utf8",
+  ),
+  deploymentDocumentSource: await readFile(
+    path.join(projectRoot, "docs/DEPLOYMENT.md"),
+    "utf8",
+  ),
+  deploymentSource: await readFile(
+    path.join(projectRoot, "scripts/deploy-existing-ecs.sh"),
+    "utf8",
+  ),
+  productGateSource: await readFile(
+    path.join(projectRoot, "scripts/check-phase-eleven-docker.sh"),
+    "utf8",
+  ),
+  terraformSource: await readFile(
+    path.join(projectRoot, "deploy/volcengine/main.tf"),
+    "utf8",
+  ),
+});
+if (!composePolicyApproved) {
+  failures.push(
+    "Shipped Compose, bootstrap, product gate, and public deployment identity policy is not approved",
+  );
+}
 if (!releaseWorkflow.includes("npm run test:phase12:real")) {
   failures.push("Hosted Release proof is missing: npm run test:phase12:real");
 }
@@ -325,11 +548,19 @@ const runtimeProofJobOffset = releaseWorkflow.indexOf(runtimeProofJobMarker);
 const runtimeProofJob =
   runtimeProofJobOffset === -1
     ? ""
-    : releaseWorkflow.slice(runtimeProofJobOffset + runtimeProofJobMarker.length);
+    : releaseWorkflow.slice(
+        runtimeProofJobOffset + runtimeProofJobMarker.length,
+      );
 if (!runtimeProofJob) {
   failures.push("Hosted Release proof is missing the real-runtime-proof job");
 }
 for (const requiredRuntimeProofStep of [
+  "LAUNCHPAD_ENV_FILE=.env.example docker compose config --quiet",
+  "bash scripts/check-phase-eleven-docker.sh",
+  "PRODUCTION_IMAGE_ARTIFACT_DIRECTORY: ${{ runner.temp }}/agent-airlock-production-image",
+  "name: agent-airlock-production-image",
+  "agent-airlock-production-image/agent-airlock-production-image.tar",
+  "agent-airlock-production-image/agent-airlock-production-image-provenance.json",
   "npm run check:phase13:runtime",
   "npm run prove:runtime -- --reset --json",
   "node scripts/resolve-runtime-proof-artifacts.mjs --github-output",
@@ -350,6 +581,126 @@ for (const requiredRuntimeProofStep of [
     failures.push(
       "Hosted real Runtime proof is missing a required gate or artifact: " +
         requiredRuntimeProofStep,
+    );
+  }
+}
+const productionImageGate = await readFile(
+  path.join(projectRoot, "scripts/check-phase-eleven-docker.sh"),
+  "utf8",
+);
+const proveRuntimeSource = await readFile(
+  path.join(projectRoot, "scripts/prove-runtime.mjs"),
+  "utf8",
+);
+const runtimeProofTestSource = await readFile(
+  path.join(projectRoot, "scripts/runtime-proof-runner.test.mjs"),
+  "utf8",
+);
+const releaseExecutionDependencySources = Object.fromEntries(
+  await Promise.all(
+    releaseExecutionDependencyPaths.map(async (dependencyPath) => [
+      dependencyPath,
+      await readFile(path.join(projectRoot, dependencyPath), "utf8"),
+    ]),
+  ),
+);
+if (
+  !approvedReleaseExecutionPolicy({
+    dependencySources: releaseExecutionDependencySources,
+    productGateSource: productionImageGate,
+    workflowSource: releaseWorkflow,
+  })
+) {
+  failures.push(
+    "Hosted workflow and shipped production-image gate do not preserve the approved executable lifecycle",
+  );
+}
+if (
+  !approvedStoppedRuntimePublicationPolicy({
+    proveRuntimeSource,
+    runtimeProofTestSource,
+  })
+) {
+  failures.push(
+    "Runtime proof publication is not bound to the stopped physical snapshot boundary",
+  );
+}
+for (const requiredProductionImageGate of [
+  'node scripts/production-image-verifier.mjs --origin "$ORIGIN"',
+  'node scripts/check-production-image-browser.mjs --origin "$ORIGIN"',
+]) {
+  if (!productionImageGate.includes(requiredProductionImageGate)) {
+    failures.push(
+      "Production image gate is missing an executable semantic check: " +
+        requiredProductionImageGate,
+    );
+  }
+}
+try {
+  const accepted = await verifyProductionImageHttp({
+    origin: "http://127.0.0.1:3000",
+    fetchImpl: productionImageFixtureFetch(),
+  });
+  if (
+    accepted.healthService !== "volc-agent-launchpad" ||
+    accepted.scriptPath !== "/assets/index-release.js" ||
+    accepted.scriptBytes !== 100_000
+  ) {
+    failures.push(
+      "Production image verifier did not preserve its accepted response contract",
+    );
+  }
+} catch {
+  failures.push(
+    "Production image verifier rejected the exact accepted response contract",
+  );
+}
+for (const [name, mutation] of [
+  ["failed health", { healthStatus: 503 }],
+  ["wrong health service", { health: { ok: true, service: "other" } }],
+  ["non-JSON health", { healthType: "text/plain" }],
+  ["failed document", { documentStatus: 503 }],
+  ["non-HTML document", { documentType: "text/plain" }],
+  [
+    "wrong title",
+    {
+      document: validProductionImageDocument.replace("Agent Airlock", "Other"),
+    },
+  ],
+  [
+    "missing React mount point",
+    {
+      document: validProductionImageDocument.replace(
+        '<div id="root"></div>',
+        "",
+      ),
+    },
+  ],
+  [
+    "cross-origin application script",
+    {
+      document: validProductionImageDocument.replace(
+        "/assets/index-release.js",
+        "https://example.com/assets/index-release.js",
+      ),
+    },
+  ],
+  [
+    "non-module application script",
+    {
+      document: validProductionImageDocument.replace(
+        'type="module"',
+        'type="text/javascript"',
+      ),
+    },
+  ],
+  ["failed application script", { scriptStatus: 503 }],
+  ["non-JavaScript application script", { scriptType: "text/plain" }],
+  ["truncated application script", { script: "x".repeat(99_999) }],
+]) {
+  if (!(await productionImageVerifierRejects(mutation))) {
+    failures.push(
+      "Production image verifier accepted a weakened response: " + name,
     );
   }
 }
@@ -375,7 +726,7 @@ if (
     "Hosted real Runtime proof must record before uploading verified artifacts and retain failure evidence last",
   );
 }
-if (!trackedFiles.includes("scripts/check-phase-thirteen.mjs")) {
+if (!cachedFileSet.has("scripts/check-phase-thirteen.mjs")) {
   failures.push("Missing tracked Phase 13 combined Runtime proof");
 }
 for (const runtimeProofFile of [
@@ -387,7 +738,7 @@ for (const runtimeProofFile of [
   "scripts/runtime-proof-runner.mjs",
   "scripts/runtime-proof-runner.test.mjs",
 ]) {
-  if (!trackedFiles.includes(runtimeProofFile)) {
+  if (!cachedFileSet.has(runtimeProofFile)) {
     failures.push(
       "Missing tracked recording-grade Runtime proof: " + runtimeProofFile,
     );
@@ -397,7 +748,7 @@ for (const recordingOutcomeFile of [
   "apps/web/src/recording-outcome-policy.ts",
   "apps/web/src/recording-outcome-policy.test.ts",
 ]) {
-  if (!trackedFiles.includes(recordingOutcomeFile)) {
+  if (!cachedFileSet.has(recordingOutcomeFile)) {
     failures.push(
       "Missing tracked recording Outcome Brief policy: " + recordingOutcomeFile,
     );
@@ -442,7 +793,9 @@ for (const requiredCommitReconciliationMarker of [
   'case "reconcile-replace":',
   "fsyncSync(DIRECTORY_DESCRIPTOR);",
 ]) {
-  if (!runtimeProofArtifactWorker.includes(requiredCommitReconciliationMarker)) {
+  if (
+    !runtimeProofArtifactWorker.includes(requiredCommitReconciliationMarker)
+  ) {
     failures.push(
       "Runtime proof pointer commit is missing exact outcome reconciliation: " +
         requiredCommitReconciliationMarker,
@@ -522,7 +875,9 @@ for (const requiredArtifactWorkerRegression of [
   "concurrent recovery of one interrupted hard link is idempotent",
   "install-immutable rejects an ambiguous interrupted hard-link set",
 ]) {
-  if (!runtimeProofArtifactWorkerTest.includes(requiredArtifactWorkerRegression)) {
+  if (
+    !runtimeProofArtifactWorkerTest.includes(requiredArtifactWorkerRegression)
+  ) {
     failures.push(
       "Runtime proof artifact worker regression is missing: " +
         requiredArtifactWorkerRegression,
@@ -708,7 +1063,9 @@ for (const requiredAbandonedCleanupRegression of [
   }
 }
 if (
-  !runtimeProofCli.includes("cleanupAbandonedRuntimeProofSessions({ artifactRoot })") ||
+  !runtimeProofCli.includes(
+    "cleanupAbandonedRuntimeProofSessions({ artifactRoot })",
+  ) ||
   runtimeProofCli.includes("rm(candidate, { recursive: true")
 ) {
   failures.push(
@@ -739,8 +1096,9 @@ for (const requiredCliDeadlineMarker of [
   }
 }
 if (
-  runtimeProofCli.indexOf("if (recordingTimer !== null) clearTimeout(recordingTimer);") <
-  runtimeProofCli.indexOf("await finalizeRuntimeProofPublication({")
+  runtimeProofCli.indexOf(
+    "if (recordingTimer !== null) clearTimeout(recordingTimer);",
+  ) < runtimeProofCli.indexOf("await finalizeRuntimeProofPublication({")
 ) {
   failures.push(
     "Recording deadline timer must remain armed through final publication",
@@ -757,9 +1115,9 @@ for (const requiredDeadlineRegression of [
   }
 }
 for (const requiredVisibleRecordingMarker of [
-  'data-recording-run-id={outcome.safe.id}',
-  'data-recording-run-id={outcome.unsafe.id}',
-  'data-recording-run-id={outcome.repaired.id}',
+  "data-recording-run-id={outcome.safe.id}",
+  "data-recording-run-id={outcome.unsafe.id}",
+  "data-recording-run-id={outcome.repaired.id}",
   "data-recording-parent-id={",
   'aria-label="Verified chain summary"',
   'data-recording-proof="signatures"',
@@ -815,7 +1173,9 @@ if (
   !runtimeProofRunner.includes("ensureCapsuleDirectory") ||
   !runtimeProofRunner.includes("readExistingImmutableChain") ||
   !runtimeProofRunner.includes("assertExistingChainDirectory") ||
-  !runtimeProofTerminal.includes("export async function stopRuntimeProofChild") ||
+  !runtimeProofTerminal.includes(
+    "export async function stopRuntimeProofChild",
+  ) ||
   !runtimeProofTerminal.includes(
     "export function waitForRuntimeProofChildOutcome",
   ) ||
@@ -827,14 +1187,18 @@ if (
 }
 const fixtureShutdownSource = containerBrowserFixture.slice(
   containerBrowserFixture.indexOf("async function shutdown("),
-  containerBrowserFixture.indexOf('for (const signal of ["SIGINT", "SIGTERM"])'),
+  containerBrowserFixture.indexOf(
+    'for (const signal of ["SIGINT", "SIGTERM"])',
+  ),
 );
 if (
   !fixtureShutdownSource.includes("!configuredProofSessionRoot") ||
   fixtureShutdownSource.includes(
     "rm(configuredProofSessionRoot, { recursive: true, force: true })",
   ) ||
-  fixtureShutdownSource.includes("rm(proofRoot, { recursive: true, force: true })")
+  fixtureShutdownSource.includes(
+    "rm(proofRoot, { recursive: true, force: true })",
+  )
 ) {
   failures.push(
     "The inner container fixture must never delete a managed Runtime proof session owned by its launcher",
@@ -856,7 +1220,9 @@ for (const requiredProof of [
   "Reviewed context ",
 ]) {
   if (!federationUiProof.includes(requiredProof)) {
-    failures.push("Federation operator continuity proof is missing: " + requiredProof);
+    failures.push(
+      "Federation operator continuity proof is missing: " + requiredProof,
+    );
   }
 }
 const federationRealProof = await readFile(
@@ -868,7 +1234,9 @@ if (
   !federationRealProof.includes("Federated approval inbox") ||
   !federationRealProof.includes("Pending Admission review") ||
   !federationRealProof.includes("No predicted metadata blocker") ||
-  !federationRealProof.includes("Approval never bypasses receiver Validation") ||
+  !federationRealProof.includes(
+    "Approval never bypasses receiver Validation",
+  ) ||
   !federationRealProof.includes("Decision bound to this exact review") ||
   !federationRealProof.includes("Reviewed context sha256:")
 ) {
@@ -890,7 +1258,9 @@ for (const requiredProof of [
   "decisionContextDigest,",
 ]) {
   if (!federationHttpProof.includes(requiredProof)) {
-    failures.push("Receiver metadata preflight proof is missing: " + requiredProof);
+    failures.push(
+      "Receiver metadata preflight proof is missing: " + requiredProof,
+    );
   }
 }
 const federationApprovalProof = await readFile(
@@ -900,21 +1270,27 @@ const federationApprovalProof = await readFile(
 for (const requiredProof of [
   "recovers a legacy decision without inventing reviewed-context evidence",
   "silently changed",
-  'schemaVersion: 2,',
+  "schemaVersion: 2,",
   "decisionContextDigest",
 ]) {
   if (!federationApprovalProof.includes(requiredProof)) {
-    failures.push("Durable reviewed-context proof is missing: " + requiredProof);
+    failures.push(
+      "Durable reviewed-context proof is missing: " + requiredProof,
+    );
   }
 }
 
 if (failures.length > 0) {
-  console.error("Release audit failed:\n" + failures.map((item) => "- " + item).join("\n"));
+  console.error(
+    "Release audit failed:\n" + failures.map((item) => "- " + item).join("\n"),
+  );
   process.exit(1);
 }
 
 console.log(
   "Release audit passed: " +
-    trackedFiles.length +
-    " release files, no high-confidence secrets in files or Git history, conflicts, or broken relative Markdown targets.",
+    cachedFiles.length +
+    " cached release files and " +
+    scannedFiles.length +
+    " scanned candidate files, no high-confidence secrets in files or Git history, conflicts, or broken relative Markdown targets.",
 );

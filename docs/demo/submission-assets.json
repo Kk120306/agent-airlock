@@ -4,13 +4,13 @@
   "architecture": {
     "source": {
       "file": "docs/demo/agent-airlock-one-page.mmd",
-      "bytes": 2926,
-      "sha256": "sha256:fbabea34da31ad942ef3af11d3301e35bc0d0ae6be4649294ed2305c21e3623c"
+      "bytes": 2929,
+      "sha256": "sha256:56ade9b4818c2cdb444fd6007df1661c4c56b96365092b4a468e7bd9dc7b569f"
     },
     "image": {
       "file": "docs/demo/agent-airlock-one-page.png",
-      "bytes": 122862,
-      "sha256": "sha256:c5c42260c84a2d975e97d870575e031a588b9586c3df384720bb25e1fc90f384",
+      "bytes": 141264,
+      "sha256": "sha256:db905656a5b31aba4045c69358c9469a2350d861c3ec978db65aa32f67951ee7",
       "width": 1904,
       "height": 858
     }

@@ -8,7 +8,7 @@ export const releaseDependencySections = Object.freeze([
 ]);
 
 export const reviewedReleaseLockfileDigest =
-  "sha256:e47b2bc0cd9376cba8b36b0751d32c559eb370bd0d499dfe65e468afae6912de";
+  "sha256:e5f77a2e8cabdbff873ce5e7ce27ebedd67511efe91b75ba49ada7c06b312f22";
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -49,7 +49,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(
     page.getByText(
-      "Real Codex CLI in a disposable container · local deterministic Responses fixture · no ModelArk request or paid inference.",
+      "Real Codex CLI in disposable docker Runtime · local deterministic Responses fixture · no ModelArk request or paid inference.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -136,9 +136,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(judgeProof.getByText("4/4 resources promoted", { exact: true }))
     .toBeVisible();
   await expect(
-    judgeProof.getByText("Effect released after Promotion", { exact: true }),
+    judgeProof.getByText("Effect released during Promotion", { exact: true }),
   ).toBeVisible();
-  await expect(judgeProof.getByText("1 typed effect delivered only after Canonical State advanced."))
+  await expect(judgeProof.getByText("1 typed effect delivered after Canonical State advanced during Promotion."))
     .toBeVisible();
   const judgeProofItems = judgeProof.locator("li");
   await expect(judgeProofItems).toHaveCount(4);
@@ -242,6 +242,16 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   );
   expect(rejectedParent).toBeDefined();
 
+  let automaticRecoveryProofRequests = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      /\/api\/runs\/[^/]+\/portable-receipt$/.test(request.url())
+    ) {
+      automaticRecoveryProofRequests += 1;
+    }
+  });
+
   await pairedProof.getByRole("button", { name: /Repair retained Candidate/ }).click();
   await expect(
     page.getByText(
@@ -275,9 +285,9 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .toBeVisible();
   await expect(repairedProof.getByText("4/4 resources promoted", { exact: true }))
     .toBeVisible();
-  await expect(repairedProof.getByText("Effect released after Promotion", { exact: true }))
+  await expect(repairedProof.getByText("Effect released during Promotion", { exact: true }))
     .toBeVisible();
-  await expect(repairedProof.getByText("1 typed effect delivered only after Canonical State advanced."))
+  await expect(repairedProof.getByText("1 typed effect delivered after Canonical State advanced during Promotion."))
     .toBeVisible();
   await expect(
     pairedProof.getByText("Rejected future safely repaired", { exact: true }),
@@ -295,6 +305,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   await expect(
     pairedProof.getByText("Signed recovery verified", { exact: true }),
   ).toBeVisible();
+  expect(automaticRecoveryProofRequests).toBe(1);
   await expect(
     repairedEvidence.getByRole("button", {
       name: "Download verified decision chain",
@@ -346,7 +357,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   });
   await expect(
     verifier.getByText(
-      "0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
+      "This verification: 0 API calls · 0 uploads · 2 signed decisions linked · 16 MB custody / 4 MB other proofs",
       { exact: true },
     ),
   ).toBeVisible();
@@ -839,7 +850,13 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(
     promotedOutcome.getByText(
-      "protocol-release-ready delivered only after Promotion",
+      "protocol-release-ready delivered in Promotion after required checks",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    promotedOutcome.getByText(
+      "Workspace · Codex session · SQLite · outbox promoted",
       { exact: true },
     ),
   ).toBeVisible();
@@ -851,7 +868,7 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(
     quarantinedOutcome.getByText(
-      "decisive required Validation failed · 4/4 quarantined",
+      "4/4 quarantined · workspace · session · SQLite · outbox",
       { exact: true },
     ),
   ).toBeVisible();
@@ -890,15 +907,22 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   ).toBeVisible();
   await expect(
     repairedOutcome.getByText(
-      "protocol-repair-ready delivered with a fresh key",
+      "protocol-repair-ready delivered in Promotion with a fresh key",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    repairedOutcome.getByText(
+      "Workspace · Codex session · SQLite · fresh outbox promoted",
       { exact: true },
     ),
   ).toBeVisible();
   const verifiedOutcome = outcomeBrief.locator('article[data-outcome="verified"]');
   await expect(
-    verifiedOutcome.getByText("Independent signatures verify integrity and lineage.", {
-      exact: true,
-    }),
+    verifiedOutcome.getByText(
+      "Browser verification confirms signed integrity and lineage.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(verifiedOutcome.getByText("2/2", { exact: true })).toBeVisible();
   await expect(
@@ -1018,12 +1042,20 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
   expect(repairedReplayRun).toBeDefined();
 
   let mobileReceiptRequests = 0;
+  let mobileRunCreationRequests = 0;
   mobilePage.on("request", (browserRequest) => {
+    const requestPath = new URL(browserRequest.url()).pathname;
     if (
       browserRequest.method() === "POST" &&
-      new URL(browserRequest.url()).pathname.endsWith("/portable-receipt")
+      requestPath.endsWith("/portable-receipt")
     ) {
       mobileReceiptRequests += 1;
+    }
+    if (
+      browserRequest.method() === "POST" &&
+      requestPath === `/api/agents/${automatedAgent.agent.id}/runs`
+    ) {
+      mobileRunCreationRequests += 1;
     }
   });
   const mobileReceiptResponsePromise = mobilePage.waitForResponse(
@@ -1095,6 +1127,34 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     .getByRole("button", { name: "Close receipt verifier" })
     .click();
 
+  const candidateSetRoute = `**/api/agents/${automatedAgent.agent.id}/candidate-sets`;
+  const rejectCandidateSetLookup = (route: Route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "Candidate Set lookup intentionally unavailable.",
+      }),
+    });
+  await mobilePage.route(candidateSetRoute, rejectCandidateSetLookup);
+  const siblingFailureReceiptResponse = mobilePage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname.endsWith("/portable-receipt") &&
+      response.ok(),
+  );
+  await mobilePage.goto(replayUrl.toString());
+  await siblingFailureReceiptResponse;
+  await expect(
+    mobilePage.getByRole("region", { name: "Verified Outcome Brief" }),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(mobilePage.locator(".error-banner")).toContainText(
+    "Candidate Set lookup intentionally unavailable.",
+  );
+  expect(mobileReceiptRequests).toBe(2);
+  expect(mobileRunCreationRequests).toBe(0);
+  await mobilePage.unroute(candidateSetRoute, rejectCandidateSetLookup);
+
   expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
   await expect(outcomeBrief).toBeVisible();
   expect(
@@ -1124,24 +1184,176 @@ test("the browser proves real Codex Promotion, Quarantine, and Repair against on
     ),
   ).toBeVisible();
 
+  const expectReplayLinkFailure = async (failedReplayUrl: URL) => {
+    const receiptRequestsBeforeNavigation = mobileReceiptRequests;
+    const runCreationRequestsBeforeNavigation = mobileRunCreationRequests;
+    await mobilePage.goto(failedReplayUrl.toString());
+    const replayFailure = mobilePage.locator(
+      '.recording-proof-failure[role="alert"]',
+    );
+    const replayFailureHeading = replayFailure.getByRole("heading", {
+      name: "Read-only proof link could not be verified.",
+    });
+    await expect(replayFailureHeading).toBeVisible();
+    await expect(replayFailureHeading).toBeFocused();
+    await expect(replayFailure).toContainText(
+      "This proof link is incomplete, stale, or does not match the persisted Runs for this Agent.",
+    );
+    await expect(replayFailure).toContainText(
+      "No Run was created and no receipt was requested.",
+    );
+    await expect(
+      mobilePage.getByRole("region", { name: "Verified Outcome Brief" }),
+    ).toHaveCount(0);
+    await expect(
+      mobilePage.getByRole("button", { name: "Loading read-only proof" }),
+    ).toHaveCount(0);
+    const replayFailureBox = await replayFailure.boundingBox();
+    expect(replayFailureBox).not.toBeNull();
+    expect(replayFailureBox!.x).toBeGreaterThanOrEqual(0);
+    expect(replayFailureBox!.x + replayFailureBox!.width)
+      .toBeLessThanOrEqual(390);
+    expect(
+      await mobilePage.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(390);
+    expect(mobileReceiptRequests).toBe(receiptRequestsBeforeNavigation);
+    expect(mobileRunCreationRequests).toBe(runCreationRequestsBeforeNavigation);
+  };
+
+  const runsRoute = `**/api/agents/${automatedAgent.agent.id}/runs`;
+  const omitRepairReceipt = async (route: Route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as {
+      runs: Array<{
+        id: string;
+        transaction?: { promotionReceipt?: unknown };
+      }>;
+    };
+    const repaired = payload.runs.find(
+      (run) => run.id === repairedReplayRun!.id,
+    );
+    expect(repaired?.transaction).toBeDefined();
+    delete repaired!.transaction!.promotionReceipt;
+    await route.fulfill({ response, json: payload });
+  };
+  await mobilePage.route(runsRoute, omitRepairReceipt);
+  await expectReplayLinkFailure(replayUrl);
+  await mobilePage.unroute(runsRoute, omitRepairReceipt);
+
+  const mutateReleaseEffect = async (route: Route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as {
+      runs: Array<{
+        id: string;
+        transaction?: {
+          externalActions?: { intents?: Array<{ id?: string }> };
+        };
+      }>;
+    };
+    const safe = payload.runs.find((run) => run.id === safeReplayRun!.id);
+    const releaseIntent = safe?.transaction?.externalActions?.intents?.[0];
+    expect(releaseIntent).toBeDefined();
+    releaseIntent!.id = "protocol-release-drifted";
+    await route.fulfill({ response, json: payload });
+  };
+  await mobilePage.route(runsRoute, mutateReleaseEffect);
+  await expectReplayLinkFailure(replayUrl);
+  await mobilePage.unroute(runsRoute, mutateReleaseEffect);
+
+  const omitCanonicalAdvanceEvent = async (route: Route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as {
+      runs: Array<{
+        id: string;
+        transaction?: {
+          events?: Array<{ summary?: string }>;
+        };
+      }>;
+    };
+    const safe = payload.runs.find((run) => run.id === safeReplayRun!.id);
+    expect(safe?.transaction?.events).toBeDefined();
+    safe!.transaction!.events = safe!.transaction!.events!.filter(
+      (event) =>
+        event.summary !==
+        "Canonical State advanced before external action delivery",
+    );
+    await route.fulfill({ response, json: payload });
+  };
+  await mobilePage.route(runsRoute, omitCanonicalAdvanceEvent);
+  await expectReplayLinkFailure(replayUrl);
+  await mobilePage.unroute(runsRoute, omitCanonicalAdvanceEvent);
+
+  const mutateEveryOutcomeContract = async (route: Route) => {
+    const response = await route.fetch();
+    const payload = (await response.json()) as {
+      runs: Array<{
+        transaction?: {
+          outcomeContract?: { maxChangedFiles?: number };
+        };
+      }>;
+    };
+    expect(payload.runs).toHaveLength(3);
+    for (const run of payload.runs) {
+      const contract = run.transaction?.outcomeContract;
+      expect(contract).toBeDefined();
+      contract!.maxChangedFiles = 5;
+    }
+    await route.fulfill({ response, json: payload });
+  };
+  await mobilePage.route(runsRoute, mutateEveryOutcomeContract);
+  await expectReplayLinkFailure(replayUrl);
+  await mobilePage.unroute(runsRoute, mutateEveryOutcomeContract);
+
+  const partialReplayUrl = new URL(replayUrl);
+  partialReplayUrl.searchParams.delete("recordingRepairRunId");
+  await expectReplayLinkFailure(partialReplayUrl);
+
   const malformedReplayUrl = new URL(replayUrl);
-  malformedReplayUrl.searchParams.delete("recordingRepairRunId");
-  await mobilePage.goto(malformedReplayUrl.toString());
-  await expect(
-    mobilePage.getByRole("region", { name: "Verified Outcome Brief" }),
-  ).toHaveCount(0);
-  await expect(
-    mobilePage.getByRole("button", { name: "Loading read-only proof" }),
-  ).toBeDisabled();
-  await mobilePage.waitForTimeout(250);
-  expect(mobileReceiptRequests).toBe(1);
+  malformedReplayUrl.searchParams.set("recordingSafeRunId", "run safe");
+  await expectReplayLinkFailure(malformedReplayUrl);
+
+  const duplicateReplayUrl = new URL(replayUrl);
+  duplicateReplayUrl.searchParams.append(
+    "recordingSafeRunId",
+    safeReplayRun!.id,
+  );
+  await expectReplayLinkFailure(duplicateReplayUrl);
+
+  const unknownReplayUrl = new URL(replayUrl);
+  unknownReplayUrl.searchParams.set("recordingSafeRunId", "unknown-safe-run");
+  unknownReplayUrl.searchParams.set(
+    "recordingUnsafeRunId",
+    "unknown-unsafe-run",
+  );
+  unknownReplayUrl.searchParams.set(
+    "recordingRepairRunId",
+    "unknown-repair-run",
+  );
+  await expectReplayLinkFailure(unknownReplayUrl);
+
+  const incoherentReplayUrl = new URL(replayUrl);
+  incoherentReplayUrl.searchParams.set(
+    "recordingSafeRunId",
+    unsafeReplayRun!.id,
+  );
+  incoherentReplayUrl.searchParams.set(
+    "recordingUnsafeRunId",
+    safeReplayRun!.id,
+  );
+  await expectReplayLinkFailure(incoherentReplayUrl);
+
+  expect(mobileReceiptRequests).toBe(2);
+  expect(mobileRunCreationRequests).toBe(0);
   const replayRunResponse = await request.get(
     `/api/agents/${automatedAgent.agent.id}/runs`,
   );
   const replayRunPayload = (await replayRunResponse.json()) as {
-    runs: unknown[];
+    runs: Array<{ id: string }>;
   };
   expect(replayRunPayload.runs).toHaveLength(3);
+  expect(replayRunPayload.runs.map((run) => run.id).sort()).toEqual(
+    [safeReplayRun!.id, unsafeReplayRun!.id, repairedReplayRun!.id].sort(),
+  );
   await mobileContext.close();
 
   let replayedReceiptRequests = 0;

@@ -13,6 +13,7 @@ import {
 import path from "node:path";
 import { ASSURANCE_SECRET_CATALOG } from "./assurance.js";
 import { SQLITE_RELATIVE_PATH } from "./sqlite-resource.js";
+import { SensitiveLiteralFilter } from "./sensitive-literals.js";
 import type {
   OutcomeContract,
   ValidationEvidence,
@@ -61,7 +62,18 @@ const requiredEvidence = (
 });
 
 export class OutcomeValidator {
-  constructor(private readonly commandExecutor: ValidationCommandExecutor) {}
+  private readonly sensitiveLiterals: SensitiveLiteralFilter;
+
+  constructor(
+    private readonly commandExecutor: ValidationCommandExecutor,
+    sensitiveValues: readonly string[] = [],
+  ) {
+    this.sensitiveLiterals = new SensitiveLiteralFilter(sensitiveValues);
+  }
+
+  containsControlPlaneSensitiveValue(value: string | Buffer): boolean {
+    return this.sensitiveLiterals.contains(value);
+  }
 
   async validate(
     canonicalWorkspacePath: string,
@@ -237,13 +249,19 @@ export class OutcomeValidator {
           command,
           runId,
         );
+        const containsSensitiveValue =
+          this.sensitiveLiterals.contains(result.output);
         const status: ValidationEvidence["status"] =
-          result.timedOut || result.outputExceeded
+          containsSensitiveValue
+            ? "failed"
+            : result.timedOut || result.outputExceeded
             ? "error"
             : result.exitCode === 0
               ? "passed"
               : "failed";
-        const summary = result.timedOut
+        const summary = containsSensitiveValue
+          ? "Validation command output contained a control-plane sensitive value"
+          : result.timedOut
           ? "Validation command timed out"
           : result.outputExceeded
             ? "Validation command exceeded the output limit"
@@ -258,7 +276,10 @@ export class OutcomeValidator {
           durationMs: Math.max(result.durationMs, Date.now() - commandStarted),
           output:
             truncateUtf8(
-              redactEvidence(result.output, contract),
+              redactEvidence(
+                this.sensitiveLiterals.redact(result.output),
+                contract,
+              ),
               MAX_PERSISTED_COMMAND_OUTPUT_BYTES,
             ) || null,
         });
@@ -302,6 +323,11 @@ export class OutcomeValidator {
         continue;
       }
       const content = await readFile(path.join(candidateWorkspacePath, relativePath), "utf8");
+      if (this.sensitiveLiterals.contains(content)) {
+        findings.push(
+          relativePath + " contained a control-plane sensitive value",
+        );
+      }
       for (const secretPattern of contract.secretPatterns) {
         const expression = new RegExp(secretPattern.pattern, "gi");
         if (expression.test(content)) {

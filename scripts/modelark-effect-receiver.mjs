@@ -12,10 +12,13 @@ import {
 import path from "node:path";
 
 const deliveryPath = "/v1/effects/demo-console";
+const identityPath = deliveryPath + "/identity";
 const healthPath = "/health";
 const maximumRequestBytes = 16 * 1024;
 const safeIdentifierPattern = /^[A-Za-z0-9._-]{1,64}$/;
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/;
+const uuidV4Pattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function commitment(value) {
   return "sha256:" + createHash("sha256").update(value).digest("hex");
@@ -183,6 +186,7 @@ export async function startModelArkEffectReceiver({
     );
   }
   let database;
+  let databaseNeedsCommit = false;
   if (await exists(filePath)) {
     const status = await lstat(filePath);
     if (
@@ -195,11 +199,16 @@ export async function startModelArkEffectReceiver({
       throw new Error("ModelArk effect receiver store is not a regular file");
     }
     database = JSON.parse(await readFile(filePath, "utf8"));
-    if (
-      !hasExactKeys(database, ["schemaVersion", "deliveries"]) ||
-      database.schemaVersion !== 1 ||
-      !Array.isArray(database.deliveries)
-    ) {
+    const isLegacyDatabase =
+      hasExactKeys(database, ["schemaVersion", "deliveries"]) &&
+      database.schemaVersion === 1 &&
+      Array.isArray(database.deliveries);
+    const isCurrentDatabase =
+      hasExactKeys(database, ["schemaVersion", "consumerId", "deliveries"]) &&
+      database.schemaVersion === 2 &&
+      uuidV4Pattern.test(database.consumerId ?? "") &&
+      Array.isArray(database.deliveries);
+    if (!isLegacyDatabase && !isCurrentDatabase) {
       throw new Error("ModelArk effect receiver store is malformed");
     }
     const keys = new Set();
@@ -210,8 +219,21 @@ export async function startModelArkEffectReceiver({
       }
       keys.add(receipt.idempotencyKey);
     }
+    if (isLegacyDatabase) {
+      database = {
+        schemaVersion: 2,
+        consumerId: randomUUID(),
+        deliveries: database.deliveries,
+      };
+      databaseNeedsCommit = true;
+    }
   } else {
-    database = { schemaVersion: 1, deliveries: [] };
+    database = {
+      schemaVersion: 2,
+      consumerId: randomUUID(),
+      deliveries: [],
+    };
+    databaseNeedsCommit = true;
   }
 
   let queue = Promise.resolve();
@@ -236,7 +258,7 @@ export async function startModelArkEffectReceiver({
       throw error;
     }
   }
-  if (!(await exists(filePath))) await persist(database);
+  if (databaseNeedsCommit) await persist(database);
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -247,8 +269,23 @@ export async function startModelArkEffectReceiver({
         });
         return;
       }
+      if (request.method === "GET" && request.url === identityPath) {
+        sendJson(response, 200, {
+          schema: "agent-airlock/external-action-consumer-identity",
+          schemaVersion: 1,
+          deliveryMode: "idempotent-http",
+          consumerId: database.consumerId,
+        });
+        return;
+      }
       if (request.method !== "POST" || request.url !== deliveryPath) {
         sendJson(response, 404, { error: "not found" });
+        return;
+      }
+      if (
+        request.headers["x-agent-airlock-consumer-id"] !== database.consumerId
+      ) {
+        sendJson(response, 409, { error: "consumer identity conflict" });
         return;
       }
       const idempotencyKey = request.headers["idempotency-key"];
@@ -291,7 +328,8 @@ export async function startModelArkEffectReceiver({
           deliveredAt: new Date().toISOString(),
         };
         const nextDatabase = {
-          schemaVersion: 1,
+          schemaVersion: 2,
+          consumerId: database.consumerId,
           deliveries: [...database.deliveries, receipt],
         };
         await persist(nextDatabase);
@@ -349,6 +387,7 @@ export async function startModelArkEffectReceiver({
 
   return {
     url: `http://${host}:${address.port}${deliveryPath}`,
+    identityUrl: `http://${host}:${address.port}${identityPath}`,
     async close() {
       await queue;
       await new Promise((resolve, reject) => {

@@ -2,21 +2,21 @@ import { createHash } from "node:crypto";
 
 const approvedModelArkBoundaryDigests = Object.freeze({
   "README.md":
-    "sha256:b7f8ab61b36c41c457af896a0c55e490e57638a72dd6926c2c21b798e7261ddb",
+    "sha256:8784f42ca16951fe93e968bb7046a61e5b315110252595948169797fb6f9b41d",
   "docs/demo/DEVPOST_SUBMISSION.md":
-    "sha256:1d2a4b0422d6996f01b08ead90ac04dcfbce34fe0d736ecbf272b26f7f2f0a9a",
+    "sha256:7b868460633f40e508f39acacd9c3d089783d8255459a3e178f95e9da2f231e0",
   "docs/demo/SUBMISSION_BRIEF.md":
-    "sha256:daec5fb307470eac5948ca71d7dd3d5e946c0360f02067c02bff64a329acdaf2",
+    "sha256:aa54f584fe0dfd004fb075ce4731420144d04086aed0c30bf0b0a8d6878e6494",
   "docs/demo/JUDGE_CHECKLIST.md":
-    "sha256:787b18c8733a4b4ba94e55091fb4d7699d0e05564d8675cb9a77861c858171cc",
+    "sha256:c6c3730b0814ca1980216d8d3b6ac99b5ee66024d3e9824f9a6ea8099e93db73",
   "docs/product/PRD.md":
-    "sha256:1ac0e2b29f8d18f6caf51c6eb1d1be7559c86f3aeeba844624280e2b7884465d",
+    "sha256:d3047a6a9fef24406adb0c39fee7cc26588e10cf33fee08c40d9e9e6afcd59af",
   "docs/product/OUTCOME_ROADMAP.md":
-    "sha256:5f29c2d611df068123119ef04974641e35eb9d294b9903a63c7ed847d7cfc3a9",
+    "sha256:268f7a76ce8ec97b8a9992d211115050d49adcc849b74680b85be00a8495d8a7",
   "docs/demo/three-minute-demo.md":
-    "sha256:4167aee46e267b2e73ac4561f8d1175344f3cfa5072a753957962efaf69dfc28",
+    "sha256:4538a4cdcaf44b57d545005cd30ef587773f68a5f2573c7a5fdbef712434ced9",
   "docs/demo/architecture-one-page.md":
-    "sha256:a39246e8dbc4e1fff74b4f1cb8d0992d73a2cd27db3d321d99a9f7dcc1b23e70",
+    "sha256:644627912a45d563a7217ee8ed377c6c64bdc436d8cbec58a7e8e971d6d19d6c",
 });
 
 export const MODELARK_BOUNDARY_FILES = Object.freeze(

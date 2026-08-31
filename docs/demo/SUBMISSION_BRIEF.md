@@ -23,7 +23,7 @@ The trusted control plane validates the complete Candidate against a versioned O
 - Promotion installs one immutable version and atomically advances the Canonical State manifest.
 - Quarantine retains the rejected future as evidence while Canonical State remains byte-for-byte unchanged.
 - Repair starts a bounded child from the retained work, exact Canonical State, the original contract, and a fresh empty outbox.
-- Supported external effects dispatch only after Promotion and use stable idempotency keys.
+- Supported external effects dispatch only after Canonical State advances during Promotion and use stable idempotency keys.
 
 This is not another database and it is not a multi-Agent messaging layer.
 Candidate versions are temporary alternate futures, while the canonical manifest is the single accepted reality.
@@ -49,7 +49,7 @@ Airlock is therefore built inside the intended CodeJam seams, not beside the sta
 Warm the exact production path before recording:
 
 ```bash
-npm install
+npm ci
 npm run prove:runtime -- --reset --json
 ```
 
@@ -66,9 +66,9 @@ The React UI, Fastify API, `AgentService`, `AgentRunner`, pinned Codex CLI, disp
 
 The one-action story is:
 
-1. A valid Candidate writes `candidate-only` to `protocol-proof.txt`, sets the `demo` inventory row in `.airlock/demo.sqlite` to `candidate-only`, records a deferred notification, promotes all four resources, and releases exactly one supported effect after Promotion.
+1. A valid Candidate writes `candidate-only` to `protocol-proof.txt`, sets the `demo` inventory row in `.airlock/demo.sqlite` to `candidate-only`, records a deferred notification, promotes all four resources, and releases exactly one supported effect after Canonical State advances during Promotion.
 2. An invalid multi-resource Candidate writes `unsafe-candidate` to the same file and row, fails the required `command:protocol-content` Validation, quarantines all four resources, releases no effect, and leaves the Canonical fingerprint unchanged.
-3. A Repair child reuses the retained useful work and exact failure evidence through bounded lineage, restores the required file and SQLite values, uses a fresh outbox, passes Validation, promotes all four resources, and releases one fresh effect after Promotion.
+3. A Repair child reuses the retained useful work and exact failure evidence through bounded lineage, restores the required file and SQLite values, uses a fresh outbox, passes Validation, promotes all four resources, and releases one fresh effect after Canonical State advances during Promotion.
 4. The same signed two-decision chain opens in a browser-local verifier that reports zero API calls and validates both signatures, the parent link, and the Canonical State handoff.
 
 The command returns success only after the fresh Run set, dispositions, effects, evidence, desktop frame, mobile replay, and offline proof all agree.
@@ -87,11 +87,11 @@ The command returns success only after the fresh Run set, dispositions, effects,
 The strongest claim is not that an Agent said it succeeded.
 The strongest claim is that independently derived persisted evidence agrees on what became reality.
 
-- A promoted Run shows four promoted resources, passed required Validations, an advanced Canonical fingerprint, and effect delivery after Promotion.
+- A promoted Run shows four promoted resources, passed required Validations, an advanced Canonical fingerprint, and effect delivery after Canonical State advances during Promotion.
 - A quarantined Run shows four quarantined resources, a decisive failed Validation, identical before and after Canonical fingerprints, and zero released effects.
 - A repaired Run names its retained parent and proves the exact Canonical handoff through a locally verified signed decision chain.
 - The zero-upload verifier consumes the exported chain without trusting the running Airlock server or making a network request.
-- `npm run check` exercises the full repository gate, and the hosted release workflow reruns quality, production-browser, and real CodeJam Runtime proof jobs.
+- `npm run check` exercises the base repository quality gate, while the hosted release workflow separately runs blocking quality, production-browser, and real CodeJam Runtime proof jobs.
 
 ## Honest ModelArk boundary
 
@@ -104,7 +104,7 @@ npm run prove:modelark -- --reset --headed
 That command requires an activated Responses-compatible model, valid Ark credentials, a region-matching base URL, and available Free Credits Only Mode capacity.
 It performs a fresh provider preflight before any live-proof UI may start, never disables free-only protection, never falls back to paid inference, and fails closed on provider unavailability.
 The launcher cannot verify account billing settings, so the operator must keep Free Credits Only Mode enabled for every configured model.
-A successful Run must create the exact file and SQLite result, promote all four resources, release one typed effect through the durable loopback HTTP receiver after Promotion, capture a signed credential-free packet, and verify that packet offline.
+A successful Run must create the exact file and SQLite result, promote all four resources, release one typed effect through the durable loopback HTTP receiver after Canonical State advances during Promotion, capture a signed credential-free packet, and verify that packet offline.
 The proof runner verifies the exact receiver receipt for that Run before recording success.
 
 The deterministic core recording does not claim live ModelArk inference or model quality.

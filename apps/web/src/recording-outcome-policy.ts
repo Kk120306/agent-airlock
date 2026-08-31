@@ -6,8 +6,40 @@ import type { AgentRun, RunTransaction } from "./types";
 
 const safeIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/;
+const recordingOutcomeContractKeys = [
+  "createdAt",
+  "maxAddedBytes",
+  "maxChangedFiles",
+  "protectedPaths",
+  "requiredPaths",
+  "schemaVersion",
+  "secretPatterns",
+  "validationCommands",
+  "version",
+] as const;
+const recordingValidationCommandKeys = [
+  "command",
+  "name",
+  "required",
+  "timeoutMs",
+] as const;
+const recordingProtocolValidationCommand = [
+  'test "$(cat protocol-proof.txt)" = candidate-only',
+  "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"candidate-only\") process.exit(1);'",
+].join(" && ");
+const canonicalAdvanceEventSummary =
+  "Canonical State advanced before external action delivery";
 
 type TerminalRecordingRun = AgentRun & { transaction: RunTransaction };
+
+export type ExactRecordingRunSet = {
+  safe: TerminalRecordingRun;
+  unsafe: TerminalRecordingRun;
+  repaired: TerminalRecordingRun;
+  safeRequired: { passed: number; total: number };
+  unsafeRequired: { passed: number; total: number };
+  repairedRequired: { passed: number; total: number };
+};
 
 export type RecordingReplayRunIds = {
   safeRunId: string;
@@ -117,6 +149,7 @@ export function hasExactRecordingResources(
   disposition: "promoted" | "quarantined",
 ): boolean {
   return (
+    Array.isArray(transaction.resources) &&
     transaction.resources.length === recordingResourceKinds.length &&
     recordingResourceKinds.every(
       (kind) =>
@@ -159,11 +192,40 @@ export function hasValidTerminalRecordingRun(
   );
 }
 
-export function hasRootRecordingLineage(run: TerminalRecordingRun): boolean {
+function hasExactRecordingReceipt(
+  run: TerminalRecordingRun,
+  disposition: "promoted" | "quarantined",
+): boolean {
+  const transaction = run.transaction;
+  const receipt = transaction.promotionReceipt;
+  if (!receipt || !receipt.lineage || !transaction.lineage) return false;
   return (
-    run.transaction.lineage.rootRunId === run.id &&
-    run.transaction.lineage.parentRunId === null &&
-    run.transaction.lineage.depth === 0
+    transaction.id === run.id &&
+    Number.isSafeInteger(transaction.outcomeContractVersion) &&
+    transaction.outcomeContractVersion > 0 &&
+    receipt.runTransactionId === transaction.id &&
+    receipt.disposition === disposition &&
+    receipt.outcomeContractVersion === transaction.outcomeContractVersion &&
+    receipt.canonicalStateIdBefore === transaction.canonicalStateIdBefore &&
+    receipt.canonicalStateIdAfter === transaction.canonicalStateIdAfter &&
+    receipt.canonicalContentHashBefore ===
+      transaction.canonicalContentHashBefore &&
+    receipt.canonicalContentHashAfter === transaction.canonicalContentHashAfter &&
+    sha256Pattern.test(receipt.validationEvidenceHash) &&
+    receipt.lineage.rootRunId === transaction.lineage.rootRunId &&
+    receipt.lineage.parentRunId === transaction.lineage.parentRunId &&
+    receipt.lineage.depth === transaction.lineage.depth &&
+    receipt.lineage.maxDepth === transaction.lineage.maxDepth &&
+    Number.isFinite(Date.parse(receipt.createdAt))
+  );
+}
+
+export function hasRootRecordingLineage(run: TerminalRecordingRun): boolean {
+  const lineage = run.transaction.lineage;
+  return (
+    lineage?.rootRunId === run.id &&
+    lineage.parentRunId === null &&
+    lineage.depth === 0
   );
 }
 
@@ -171,10 +233,11 @@ export function hasRepairRecordingLineage(
   repair: TerminalRecordingRun,
   rejectedParent: TerminalRecordingRun,
 ): boolean {
+  const lineage = repair.transaction.lineage;
   return (
-    repair.transaction.lineage.rootRunId === rejectedParent.id &&
-    repair.transaction.lineage.parentRunId === rejectedParent.id &&
-    repair.transaction.lineage.depth === 1
+    lineage?.rootRunId === rejectedParent.id &&
+    lineage.parentRunId === rejectedParent.id &&
+    lineage.depth === 1
   );
 }
 
@@ -283,7 +346,10 @@ export function hasExactRecordingEffect(
   transaction: RunTransaction,
   expectation: RecordingEffectExpectation,
 ): boolean {
-  const intents = transaction.externalActions.intents;
+  const intents = transaction.externalActions?.intents;
+  if (!Array.isArray(intents) || !Array.isArray(transaction.events)) {
+    return false;
+  }
   const intent = intents[0];
   if (
     transaction.externalActions.deliveredCount !== expectation.deliveredCount ||
@@ -308,17 +374,34 @@ export function hasExactRecordingEffect(
   const promoting = transaction.events.filter(
     (event) => event.status === "promoting",
   );
+  const canonicalAdvance = promoting.filter(
+    (event) => event.summary === canonicalAdvanceEventSummary,
+  );
+  const promotionStarted = promoting.filter(
+    (event) => event.summary !== canonicalAdvanceEventSummary,
+  );
   const promoted = transaction.events.filter(
     (event) => event.status === "promoted",
   );
-  if (promoting.length !== 1 || promoted.length !== 1) return false;
+  if (
+    promoting.length !== 2 ||
+    promotionStarted.length !== 1 ||
+    canonicalAdvance.length !== 1 ||
+    promoted.length !== 1
+  ) {
+    return false;
+  }
 
-  const promotingAt = Date.parse(promoting[0]!.at);
+  const promotingAt = Date.parse(promotionStarted[0]!.at);
+  const canonicalAdvanceAt = Date.parse(canonicalAdvance[0]!.at);
   const deliveredAt = Date.parse(intent.deliveredAt ?? "");
   const promotedAt = Date.parse(promoted[0]!.at);
   return (
-    [promotingAt, deliveredAt, promotedAt].every(Number.isFinite) &&
-    promotingAt <= deliveredAt &&
+    [promotingAt, canonicalAdvanceAt, deliveredAt, promotedAt].every(
+      Number.isFinite,
+    ) &&
+    promotingAt <= canonicalAdvanceAt &&
+    canonicalAdvanceAt <= deliveredAt &&
     deliveredAt <= promotedAt
   );
 }
@@ -328,9 +411,10 @@ export function hasDistinctRepairEffectKey(
   rejected: RunTransaction,
   repair: RunTransaction,
 ): boolean {
-  const promotionKey = promotion.externalActions.intents[0]?.idempotencyKey;
-  const rejectedKey = rejected.externalActions.intents[0]?.idempotencyKey;
-  const repairKey = repair.externalActions.intents[0]?.idempotencyKey;
+  const promotionKey =
+    promotion.externalActions?.intents?.[0]?.idempotencyKey;
+  const rejectedKey = rejected.externalActions?.intents?.[0]?.idempotencyKey;
+  const repairKey = repair.externalActions?.intents?.[0]?.idempotencyKey;
   return (
     isSafeRecordingIdentifier(promotionKey) &&
     isSafeRecordingIdentifier(rejectedKey) &&
@@ -353,6 +437,264 @@ export function hasExactFreshRecordingRunIds(
     freshRunIds.length === expected.size &&
     freshRunIds.every((runId) => expected.has(runId))
   );
+}
+
+function requiredValidationResult(
+  transaction: RunTransaction,
+): { passed: number; total: number } | null {
+  if (!Array.isArray(transaction.validations)) return null;
+  const required = transaction.validations.filter(
+    (validation) => validation?.required === true,
+  );
+  return {
+    passed: required.filter((validation) => validation.status === "passed")
+      .length,
+    total: required.length,
+  };
+}
+
+function hasExactObjectKeys(
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  return (
+    actualKeys.length === sortedExpectedKeys.length &&
+    actualKeys.every((key, index) => key === sortedExpectedKeys[index])
+  );
+}
+
+function hasExactRecordingOutcomeContract(
+  transaction: RunTransaction,
+): boolean {
+  const contract: unknown = transaction.outcomeContract;
+  if (
+    !hasExactObjectKeys(contract, recordingOutcomeContractKeys) ||
+    contract.schemaVersion !== 1 ||
+    !Number.isSafeInteger(contract.version) ||
+    contract.version !== transaction.outcomeContractVersion ||
+    typeof contract.createdAt !== "string" ||
+    contract.createdAt.length !== 24 ||
+    !Number.isFinite(Date.parse(contract.createdAt)) ||
+    new Date(contract.createdAt).toISOString() !== contract.createdAt ||
+    !Array.isArray(contract.requiredPaths) ||
+    contract.requiredPaths.length !== 2 ||
+    contract.requiredPaths[0] !== "AGENTS.md" ||
+    contract.requiredPaths[1] !== "protocol-proof.txt" ||
+    !Array.isArray(contract.protectedPaths) ||
+    contract.protectedPaths.length !== 1 ||
+    contract.protectedPaths[0] !== "AGENTS.md" ||
+    contract.maxChangedFiles !== 4 ||
+    contract.maxAddedBytes !== 65_536 ||
+    !Array.isArray(contract.secretPatterns) ||
+    contract.secretPatterns.length !== 0 ||
+    !Array.isArray(contract.validationCommands) ||
+    contract.validationCommands.length !== 1
+  ) {
+    return false;
+  }
+
+  const command = contract.validationCommands[0];
+  return (
+    hasExactObjectKeys(command, recordingValidationCommandKeys) &&
+    command.name === "protocol-content" &&
+    command.command === recordingProtocolValidationCommand &&
+    command.required === true &&
+    command.timeoutMs === 10_000
+  );
+}
+
+function hasExactProtocolProofChange(transaction: RunTransaction): boolean {
+  const files = transaction.changes?.files;
+  return (
+    Array.isArray(files) &&
+    files.filter((change) => change?.path === "protocol-proof.txt").length === 1
+  );
+}
+
+function hasExactRequiredProtocolValidation(
+  transaction: RunTransaction,
+  status: "passed" | "failed",
+): boolean {
+  if (!Array.isArray(transaction.validations)) return false;
+  const matching = transaction.validations.filter(
+    (validation) => validation?.name === "command:protocol-content",
+  );
+  return (
+    matching.length === 1 &&
+    matching[0]?.required === true &&
+    matching[0]?.status === status
+  );
+}
+
+export function deriveExactRecordingRunSet({
+  runs,
+  runIds,
+  expectedAgentId,
+  expectedCanonicalStateId,
+}: {
+  runs: AgentRun[];
+  runIds: RecordingReplayRunIds;
+  expectedAgentId?: string;
+  expectedCanonicalStateId?: string;
+}): ExactRecordingRunSet | null {
+  const expectedRunIds = new Set([
+    runIds.safeRunId,
+    runIds.unsafeRunId,
+    runIds.repairedRunId,
+  ]);
+  if (expectedRunIds.size !== 3) return null;
+
+  const selectedRuns = runs.filter((run) => expectedRunIds.has(run.id));
+  if (selectedRuns.length !== expectedRunIds.size) return null;
+  const safeCandidate = selectedRuns.find((run) => run.id === runIds.safeRunId);
+  const unsafeCandidate = selectedRuns.find(
+    (run) => run.id === runIds.unsafeRunId,
+  );
+  const repairedCandidate = selectedRuns.find(
+    (run) => run.id === runIds.repairedRunId,
+  );
+  if (
+    !safeCandidate?.transaction ||
+    !unsafeCandidate?.transaction ||
+    !repairedCandidate?.transaction
+  ) {
+    return null;
+  }
+
+  const safe = safeCandidate as TerminalRecordingRun;
+  const unsafe = unsafeCandidate as TerminalRecordingRun;
+  const repaired = repairedCandidate as TerminalRecordingRun;
+  const safeRequired = requiredValidationResult(safe.transaction);
+  const unsafeRequired = requiredValidationResult(unsafe.transaction);
+  const repairedRequired = requiredValidationResult(repaired.transaction);
+  if (!safeRequired || !unsafeRequired || !repairedRequired) return null;
+
+  const contractIdentity = JSON.stringify(safe.transaction.outcomeContract);
+
+  const safeSqliteCandidate = safe.transaction.sqlite?.candidate?.rows?.find(
+    (row) => row?.id === "demo",
+  );
+  const safeSqliteAfter = safe.transaction.sqlite?.after?.rows?.find(
+    (row) => row?.id === "demo",
+  );
+  const unsafeSqliteCandidate = unsafe.transaction.sqlite?.candidate?.rows?.find(
+    (row) => row?.id === "demo",
+  );
+  const unsafeSqliteAfter = unsafe.transaction.sqlite?.after?.rows?.find(
+    (row) => row?.id === "demo",
+  );
+  const repairedSqliteCandidate =
+    repaired.transaction.sqlite?.candidate?.rows?.find(
+      (row) => row?.id === "demo",
+    );
+  const repairedSqliteAfter = repaired.transaction.sqlite?.after?.rows?.find(
+    (row) => row?.id === "demo",
+  );
+  const safeCreatedAt = Date.parse(safe.createdAt);
+  const unsafeCreatedAt = Date.parse(unsafe.createdAt);
+  const repairedCreatedAt = Date.parse(repaired.createdAt);
+
+  const exact =
+    [safe, unsafe, repaired].every(
+      (run) =>
+        run.status === "completed" &&
+        run.candidateSetId === null &&
+        run.competitorId === null,
+    ) &&
+    (expectedAgentId === undefined || safe.agentId === expectedAgentId) &&
+    safe.agentId === unsafe.agentId &&
+    safe.agentId === repaired.agentId &&
+    (expectedCanonicalStateId === undefined ||
+      safe.transaction.canonicalStateIdBefore === expectedCanonicalStateId) &&
+    hasValidTerminalRecordingRun(safe, "promoted") &&
+    hasValidTerminalRecordingRun(unsafe, "quarantined") &&
+    hasValidTerminalRecordingRun(repaired, "promoted") &&
+    hasExactRecordingReceipt(safe, "promoted") &&
+    hasExactRecordingReceipt(unsafe, "quarantined") &&
+    hasExactRecordingReceipt(repaired, "promoted") &&
+    hasExactRecordingOutcomeContract(safe.transaction) &&
+    hasExactRecordingOutcomeContract(unsafe.transaction) &&
+    hasExactRecordingOutcomeContract(repaired.transaction) &&
+    [safeCreatedAt, unsafeCreatedAt, repairedCreatedAt].every(
+      Number.isFinite,
+    ) &&
+    safeCreatedAt < unsafeCreatedAt &&
+    unsafeCreatedAt < repairedCreatedAt &&
+    hasRootRecordingLineage(safe) &&
+    advancesCanonicalState(safe.transaction) &&
+    safeRequired.total > 0 &&
+    safeRequired.passed === safeRequired.total &&
+    hasExactRequiredProtocolValidation(safe.transaction, "passed") &&
+    hasRootRecordingLineage(unsafe) &&
+    hasExactRequiredProtocolValidation(unsafe.transaction, "failed") &&
+    hasRepairRecordingLineage(repaired, unsafe) &&
+    advancesCanonicalState(repaired.transaction) &&
+    repairedRequired.total > 0 &&
+    repairedRequired.passed === repairedRequired.total &&
+    hasExactRequiredProtocolValidation(repaired.transaction, "passed") &&
+    safe.transaction.outcomeContractVersion ===
+      unsafe.transaction.outcomeContractVersion &&
+    safe.transaction.outcomeContractVersion ===
+      repaired.transaction.outcomeContractVersion &&
+    JSON.stringify(unsafe.transaction.outcomeContract) === contractIdentity &&
+    JSON.stringify(repaired.transaction.outcomeContract) === contractIdentity &&
+    hasExactRecordingResources(safe.transaction, "promoted") &&
+    hasExactRecordingResources(unsafe.transaction, "quarantined") &&
+    hasExactRecordingResources(repaired.transaction, "promoted") &&
+    hasExactProtocolProofChange(safe.transaction) &&
+    hasExactProtocolProofChange(unsafe.transaction) &&
+    safe.transaction.canonicalStateIdAfter ===
+      unsafe.transaction.canonicalStateIdBefore &&
+    safe.transaction.canonicalContentHashAfter ===
+      unsafe.transaction.canonicalContentHashBefore &&
+    unsafe.transaction.canonicalStateIdAfter ===
+      unsafe.transaction.canonicalStateIdBefore &&
+    unsafe.transaction.canonicalContentHashAfter ===
+      unsafe.transaction.canonicalContentHashBefore &&
+    unsafe.transaction.canonicalStateIdAfter ===
+      repaired.transaction.canonicalStateIdBefore &&
+    unsafe.transaction.canonicalContentHashAfter ===
+      repaired.transaction.canonicalContentHashBefore &&
+    hasExactRecordingEffect(safe.transaction, {
+      id: "protocol-release-ready",
+      type: "demo.notification.requested",
+      status: "delivered",
+      deliveredCount: 1,
+    }) &&
+    safe.transaction.recovery?.journalPhase === "completed" &&
+    safeSqliteCandidate?.value === "candidate-only" &&
+    safeSqliteAfter?.value === "candidate-only" &&
+    hasExactRecordingEffect(unsafe.transaction, {
+      id: "protocol-unsafe",
+      type: "demo.notification.requested",
+      status: "rejected",
+      deliveredCount: 0,
+    }) &&
+    unsafeSqliteCandidate?.value === "unsafe-candidate" &&
+    unsafeSqliteAfter?.value === "candidate-only" &&
+    hasExactRecordingEffect(repaired.transaction, {
+      id: "protocol-repair-ready",
+      type: "demo.notification.requested",
+      status: "delivered",
+      deliveredCount: 1,
+    }) &&
+    repaired.transaction.recovery?.journalPhase === "completed" &&
+    repairedSqliteCandidate?.value === "candidate-only" &&
+    repairedSqliteAfter?.value === "candidate-only" &&
+    hasDistinctRepairEffectKey(
+      safe.transaction,
+      unsafe.transaction,
+      repaired.transaction,
+    );
+
+  return exact
+    ? { safe, unsafe, repaired, safeRequired, unsafeRequired, repairedRequired }
+    : null;
 }
 
 export function parseRecordingReplayRunIds(
@@ -414,62 +756,19 @@ export function deriveRecordingReplayHydration(
     return null;
   }
 
-  const safeCandidate = selectedRuns.find((run) => run.id === safeRunId);
-  const unsafeCandidate = selectedRuns.find((run) => run.id === unsafeRunId);
-  const repairedCandidate = selectedRuns.find(
-    (run) => run.id === repairedRunId,
-  );
-  if (
-    !safeCandidate?.transaction ||
-    !unsafeCandidate?.transaction ||
-    !repairedCandidate?.transaction
-  ) {
-    return null;
-  }
-
-  const safe = safeCandidate as TerminalRecordingRun;
-  const unsafe = unsafeCandidate as TerminalRecordingRun;
-  const repaired = repairedCandidate as TerminalRecordingRun;
-  const safeCreatedAt = Date.parse(safe.createdAt);
-  const unsafeCreatedAt = Date.parse(unsafe.createdAt);
-  const repairedCreatedAt = Date.parse(repaired.createdAt);
-  const coherent =
-    hasValidTerminalRecordingRun(safe, "promoted") &&
-    hasValidTerminalRecordingRun(unsafe, "quarantined") &&
-    hasValidTerminalRecordingRun(repaired, "promoted") &&
-    safe.agentId === unsafe.agentId &&
-    safe.agentId === repaired.agentId &&
-    hasRootRecordingLineage(safe) &&
-    hasRootRecordingLineage(unsafe) &&
-    hasRepairRecordingLineage(repaired, unsafe) &&
-    advancesCanonicalState(safe.transaction) &&
-    advancesCanonicalState(repaired.transaction) &&
-    safe.transaction.canonicalStateIdAfter ===
-      unsafe.transaction.canonicalStateIdBefore &&
-    safe.transaction.canonicalContentHashAfter ===
-      unsafe.transaction.canonicalContentHashBefore &&
-    unsafe.transaction.canonicalStateIdAfter ===
-      unsafe.transaction.canonicalStateIdBefore &&
-    unsafe.transaction.canonicalContentHashAfter ===
-      unsafe.transaction.canonicalContentHashBefore &&
-    unsafe.transaction.canonicalStateIdAfter ===
-      repaired.transaction.canonicalStateIdBefore &&
-    unsafe.transaction.canonicalContentHashAfter ===
-      repaired.transaction.canonicalContentHashBefore &&
-    [safeCreatedAt, unsafeCreatedAt, repairedCreatedAt].every(
-      Number.isFinite,
-    ) &&
-    safeCreatedAt < unsafeCreatedAt &&
-    unsafeCreatedAt < repairedCreatedAt;
-  if (!coherent) return null;
+  const exactRunSet = deriveExactRecordingRunSet({
+    runs: selectedRuns,
+    runIds: selection.runIds,
+  });
+  if (!exactRunSet) return null;
 
   return {
-    agentId: safe.agentId,
+    agentId: exactRunSet.safe.agentId,
     baselineRunIds: runs
       .filter((run) => !expectedRunIds.has(run.id))
       .map((run) => run.id),
-    canonicalStateId: safe.transaction.canonicalStateIdBefore,
-    repairedRun: repaired,
+    canonicalStateId: exactRunSet.safe.transaction.canonicalStateIdBefore,
+    repairedRun: exactRunSet.repaired,
     runIds: selection.runIds,
   };
 }

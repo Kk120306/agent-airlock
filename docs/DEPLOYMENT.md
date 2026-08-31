@@ -15,8 +15,8 @@ Recommended host:
 - 2 vCPU, 4 GiB memory, and a 40 GiB system disk
 - Docker Engine 24+ and the Docker Compose plugin
 
-The procedure was verified from a clean veLinux 2 host with Docker Engine
-29.6.2 and Compose 5.3.1. Debian 10 is unsupported.
+The base host setup was previously verified from a clean veLinux 2 host with Docker Engine 29.6.2 and Compose 5.3.1; reverify this revised POC deployment path on the final target host.
+Debian 10 is unsupported.
 
 ### Install Docker
 
@@ -27,7 +27,8 @@ sudo apt-get update
 sudo apt-get install -y ca-certificates curl gnupg git openssl
 ```
 
-Select the Docker repository. veLinux 2 uses Debian 12 Bookworm:
+Select the Docker repository.
+veLinux 2 uses Debian 12 Bookworm:
 
 ```bash
 . /etc/os-release
@@ -47,8 +48,7 @@ case "$ID" in
 esac
 ```
 
-Download the signing key and compare its full fingerprint with the official
-[Docker installation guide](https://docs.docker.com/engine/install/):
+Download the signing key and compare its full fingerprint with the official [Docker installation guide](https://docs.docker.com/engine/install/):
 
 ```bash
 curl -fsSL "https://download.docker.com/linux/$DOCKER_DISTRO/gpg" \
@@ -79,14 +79,14 @@ docker compose version
 docker run --rm hello-world
 ```
 
-Do not replace an existing engine on a host with important containers. Use a
-dedicated ECS instance for this POC.
+Do not replace an existing engine on a host with important containers.
+Use a dedicated ECS instance for this POC.
 
 ### Deploy
 
 ```bash
-git clone https://github.com/your-org/volc-agent-launchpad.git
-cd volc-agent-launchpad
+git clone https://github.com/Kk120306/agent-airlock.git
+cd agent-airlock
 cp .env.example .env.production
 openssl rand -hex 32
 ```
@@ -94,11 +94,19 @@ openssl rand -hex 32
 Set these values in `.env.production`:
 
 ```dotenv
+PUBLIC_BIND_ADDRESS=0.0.0.0
 PUBLIC_PORT=80
 ARK_API_KEY=your-ark-api-key
 ARK_MODEL=ep-your-endpoint-id
 APP_AUTH_TOKEN=the-random-token-generated-above
 ```
+
+The deployment script fails closed unless this public-host override is explicit.
+Restrict ingress to the event network, use a strong `APP_AUTH_TOKEN`, and add HTTPS before sending that token across an untrusted network.
+These optional POC deployment paths rebuild from checked-out source and do not consume or verify the CI-retained production image archive.
+They are outside the judged release boundary, which must be proven on the final revision through the retained exact image archive and its fresh-runner verification.
+The source-built application container keeps its root filesystem read-only and requires Codex `workspace-write` Landlock isolation.
+The deployment script verifies that sandbox before starting a new application container and fails when the host kernel or container runtime cannot enforce it, because unrestricted local-process execution would expose mutable Canonical State.
 
 Deploy:
 
@@ -134,8 +142,7 @@ docker compose --env-file .env.production down
 
 ## Terraform deployment
 
-Terraform uses `volcenginecc` to create a VPC, subnet, security group, ECS
-instance, EIP, and cloud-init configuration.
+Terraform uses `volcenginecc` to create a VPC, subnet, security group, ECS instance, EIP, and cloud-init configuration.
 
 Requirements:
 
@@ -153,9 +160,8 @@ cp deploy/volcengine/terraform.tfvars.example \
   deploy/volcengine/terraform.tfvars
 ```
 
-Set `ARK_API_KEY` and `ARK_MODEL` in `.env.production`. Set the region, zone,
-image, instance type, key pair, allowed CIDRs, and repository URL in
-`terraform.tfvars`.
+Set `ARK_API_KEY`, `ARK_MODEL`, and `PUBLIC_BIND_ADDRESS=0.0.0.0` in `.env.production`.
+Set the region, zone, image, instance type, key pair, allowed CIDRs, and repository URL in `terraform.tfvars`.
 
 Provide account credentials only through the current shell:
 
@@ -165,8 +171,8 @@ export VOLCENGINE_SECRET_KEY=your-secret-key
 ./scripts/deploy-volcengine.sh
 ```
 
-After Terraform prints `app_url`, allow 5 to 10 minutes for cloud-init and the
-Docker build. Inspect progress with:
+After Terraform prints `app_url`, allow 5 to 10 minutes for cloud-init and the Docker build.
+Inspect progress with:
 
 ```bash
 ssh root@your-ecs-public-ip
@@ -181,14 +187,13 @@ terraform -chdir=deploy/volcengine destroy
 ```
 
 > [!CAUTION]
-> Destroying the stack removes the ECS instance, system disk, and Agent
-> workspaces. Back up required code first.
+> Destroying the stack removes the ECS instance, system disk, and Agent workspaces.
+> Back up required code first.
 
 ## Secret handling
 
-- Ark keys configure model access; Volcengine account AK/SK configures
-  Terraform. Never pass account AK/SK to an Agent Runtime.
-- `.env.production`, `terraform.tfvars`, and Terraform state must not be
-  committed.
-- The POC stores the Ark key in Terraform user data and state. Production
-  deployments require managed secrets and an encrypted remote state backend.
+- Ark keys configure model access; Volcengine account AK/SK configures Terraform.
+  Never pass account AK/SK to an Agent Runtime.
+- `.env.production`, `terraform.tfvars`, and Terraform state must not be committed.
+- The POC stores the Ark key in Terraform user data and state.
+  Production deployments require managed secrets and an encrypted remote state backend.

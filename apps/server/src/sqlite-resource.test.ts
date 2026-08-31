@@ -71,6 +71,28 @@ describe("SQLite transactional resource", () => {
     expect(invalid.evidence.summary).toContain("allowlist");
   });
 
+  it("rejects an exact control-plane value in row data", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "airlock-sqlite-"));
+    temporaryDirectories.push(workspace);
+    const sensitiveValue = "raw-provider-value-in-sqlite";
+    const resource = new SqliteResource([sensitiveValue]);
+    await resource.seed(workspace);
+    const database = new DatabaseSync(resource.pathFor(workspace));
+    database
+      .prepare("UPDATE inventory SET value = ? WHERE id = ?")
+      .run(sensitiveValue, "demo");
+    database.close();
+
+    const validation = await resource.validate(workspace);
+
+    expect(validation.evidence).toMatchObject({
+      status: "failed",
+      summary:
+        "SQLite validation failed: inventory row data contained a control-plane sensitive value",
+    });
+    expect(JSON.stringify(validation)).not.toContain(sensitiveValue);
+  });
+
   it("rejects a symbolic-link database", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "airlock-sqlite-"));
     const external = await mkdtemp(path.join(tmpdir(), "airlock-sqlite-external-"));

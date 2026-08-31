@@ -459,7 +459,7 @@ try {
     console.log("Cost: no ModelArk request or paid inference.");
     console.log("Proof 1: Run passing Candidate.");
     console.log(
-      "Expected: exact file and database Validation passes, all four resources promote, and one deferred effect delivers after Promotion.",
+      "Expected: exact file and database Validation passes, all four resources promote, and one deferred effect delivers after Canonical State advances during Promotion.",
     );
     console.log("Proof 2: Run failing Candidate.");
     console.log(

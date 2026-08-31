@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import {
   buildCodexArgs,
   buildCodexEnvironment,
+  buildCodexToolBoundaryArgs,
   CodexRunner,
   assertTrustedTokenBudget,
   parseCodexEventLine,
@@ -55,12 +56,41 @@ describe("Codex runner protocol", () => {
       "--sandbox",
       "workspace-write",
       "--skip-git-repo-check",
+      ...buildCodexToolBoundaryArgs(),
       "-C",
       "/tmp/workspace",
       "--add-dir",
       "/tmp/candidate-outbox",
       "build a calculator",
     ]);
+  });
+
+  it("forces a credential-free non-login environment for model-issued tools", () => {
+    const args = buildCodexToolBoundaryArgs();
+    const serialized = args.join(" ");
+
+    expect(serialized).toContain("allow_login_shell=false");
+    expect(serialized).toContain("shell_environment_policy.inherit=\"all\"");
+    expect(serialized).toContain(
+      "shell_environment_policy.ignore_default_excludes=false",
+    );
+    expect(serialized).toContain("*KEY*");
+    expect(serialized).toContain("*SECRET*");
+    expect(serialized).toContain("*TOKEN*");
+    expect(serialized).toContain("*PASSWORD*");
+    expect(serialized).toContain("*CREDENTIAL*");
+    expect(serialized).toContain("AIRLOCK_OUTBOX_PATH");
+    expect(serialized).toContain("AIRLOCK_REPAIR_REFERENCE_PATH");
+    expect(serialized).toContain("AIRLOCK_MAXIMUM_TOTAL_TOKENS");
+    expect(serialized).toContain("sandbox_workspace_write.network_access=false");
+  });
+
+  it("preserves an explicit Candidate-local resource binding for tools", () => {
+    const serialized = buildCodexToolBoundaryArgs([
+      "AIRLOCK_RESOURCE_POLICY_BUNDLE_PATH",
+    ]).join(" ");
+
+    expect(serialized).toContain("AIRLOCK_RESOURCE_POLICY_BUNDLE_PATH");
   });
 
   it("resumes a stored Codex thread", () => {
@@ -123,6 +153,7 @@ describe("Codex runner protocol", () => {
 
     expect(environment.CODEX_HOME).toBe("/tmp/candidate-session");
     expect(environment.CODEX_HOME).not.toBe(config.codexHome);
+    expect(environment.HOME).toBe("/tmp");
     expect(environment.AIRLOCK_OUTBOX_PATH).toBe(
       "/tmp/candidate-outbox/intents.jsonl",
     );

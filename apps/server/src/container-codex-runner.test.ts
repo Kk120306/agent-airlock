@@ -56,6 +56,9 @@ describe("Container Codex runner", () => {
     expect(args).not.toContain("type=bind,src=/tmp/codex-home,dst=/codex-home");
     expect(args).toContain("501:20");
     expect(args).toContain("workspace-write");
+    expect(args).toContain("allow_login_shell=false");
+    expect(args).toContain("shell_environment_policy.ignore_default_excludes=false");
+    expect(args).toContain("sandbox_workspace_write.network_access=false");
     expect(args).toContain("/workspace");
     expect(args).toContain("/airlock-outbox");
     expect(args).toContain(

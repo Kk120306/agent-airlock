@@ -1,0 +1,8 @@
+{
+  "name": "agent-airlock-codex-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@openai/codex": "0.111.0"
+  }
+}

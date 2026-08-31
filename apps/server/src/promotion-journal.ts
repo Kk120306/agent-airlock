@@ -13,6 +13,11 @@ import {
   type ResourcePromotionPlan,
   type ResourceVersionReference,
 } from "@agent-airlock/transactional-resource-sdk";
+import {
+  externalActionDispatcherScopesEqual,
+  parseExternalActionDispatcherScope,
+  type ExternalActionDispatcherScope,
+} from "./external-actions.js";
 import type {
   CanonicalStateReference,
   PromotionJournalPhase,
@@ -35,8 +40,7 @@ const maximumProviderEvents = 256;
 const recoveryOutput =
   "Agent Airlock recovered this approved Promotion after a server restart. The original Runtime response was not duplicated into the Promotion journal.";
 
-export interface PromotionJournalRecord {
-  schemaVersion: 2;
+interface PromotionJournalFields {
   runId: string;
   agentId: string;
   authority: PromotionAuthority;
@@ -48,6 +52,15 @@ export interface PromotionJournalRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export type PromotionJournalRecord =
+  | (PromotionJournalFields & {
+      schemaVersion: 2;
+    })
+  | (PromotionJournalFields & {
+      schemaVersion: 3;
+      externalActionScope: ExternalActionDispatcherScope;
+    });
 
 export type PromotionAuthority =
   | {
@@ -109,6 +122,7 @@ export class PromotionJournal {
     transaction: RunTransaction;
     result: RunnerResult;
     authority?: PromotionAuthority;
+    externalActionScope: ExternalActionDispatcherScope;
   }): Promise<PromotionJournalRecord> {
     this.assertIdentifier(input.plan.runId, "Run");
     let result!: PromotionJournalRecord;
@@ -130,9 +144,12 @@ export class PromotionJournal {
         recoveryError: null,
       };
       const record: PromotionJournalRecord = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         runId: input.plan.runId,
         agentId: input.plan.agentId,
+        externalActionScope: parseExternalActionDispatcherScope(
+          input.externalActionScope,
+        ),
         authority: structuredClone(
           input.authority ?? { schemaVersion: 1, kind: "ordinary-run" },
         ),
@@ -265,6 +282,43 @@ export class PromotionJournal {
     return result;
   }
 
+  async bindExternalActionScope(
+    runId: string,
+    scope: ExternalActionDispatcherScope,
+  ): Promise<PromotionJournalRecord> {
+    let result!: PromotionJournalRecord;
+    const operation = this.queue.then(async () => {
+      const current = await this.read(runId);
+      const acceptedScope = parseExternalActionDispatcherScope(scope);
+      if (current.schemaVersion === 3) {
+        if (
+          !externalActionDispatcherScopesEqual(
+            current.externalActionScope,
+            acceptedScope,
+          )
+        ) {
+          throw new Error(
+            "Promotion journal external-action consumer scope is immutable",
+          );
+        }
+        result = structuredClone(current);
+        return;
+      }
+      const next: PromotionJournalRecord = {
+        ...current,
+        schemaVersion: 3,
+        externalActionScope: acceptedScope,
+        updatedAt: new Date().toISOString(),
+      };
+      this.validateRecord(next);
+      await this.persist(next);
+      result = structuredClone(next);
+    });
+    this.queue = operation.catch(() => undefined);
+    await operation;
+    return result;
+  }
+
   async read(runId: string): Promise<PromotionJournalRecord> {
     this.assertIdentifier(runId, "Run");
     const raw = await readFile(this.filePath(runId), "utf8");
@@ -313,26 +367,44 @@ export class PromotionJournal {
     if (!value || typeof value !== "object") {
       throw new Error("Promotion journal must be an object");
     }
-    const record = value as PromotionJournalRecord;
+    const schemaVersion = (value as { schemaVersion?: unknown }).schemaVersion;
+    if (schemaVersion !== 2 && schemaVersion !== 3) {
+      throw new Error("Promotion journal identity or schema is invalid");
+    }
     assertExactKeys(
-      record,
-      [
-        "schemaVersion",
-        "runId",
-        "agentId",
-        "authority",
-        "phase",
-        "plan",
-        "targetCanonical",
-        "transaction",
-        "recoveryResult",
-        "createdAt",
-        "updatedAt",
-      ],
+      value,
+      schemaVersion === 3
+        ? [
+            "schemaVersion",
+            "runId",
+            "agentId",
+            "externalActionScope",
+            "authority",
+            "phase",
+            "plan",
+            "targetCanonical",
+            "transaction",
+            "recoveryResult",
+            "createdAt",
+            "updatedAt",
+          ]
+        : [
+            "schemaVersion",
+            "runId",
+            "agentId",
+            "authority",
+            "phase",
+            "plan",
+            "targetCanonical",
+            "transaction",
+            "recoveryResult",
+            "createdAt",
+            "updatedAt",
+          ],
       "Promotion journal",
     );
+    const record = value as PromotionJournalRecord;
     if (
-      record.schemaVersion !== 2 ||
       !safeIdentifierPattern.test(record.runId) ||
       !safeIdentifierPattern.test(record.agentId) ||
       !phaseOrder.includes(record.phase) ||
@@ -349,6 +421,9 @@ export class PromotionJournal {
       typeof record.updatedAt !== "string"
     ) {
       throw new Error("Promotion journal identity or schema is invalid");
+    }
+    if (record.schemaVersion === 3) {
+      parseExternalActionDispatcherScope(record.externalActionScope);
     }
     validatePromotionAuthority(record);
     const phaseIndex = phaseOrder.indexOf(record.phase);

@@ -22,7 +22,7 @@ The canonical proof uses loopback ports 3222 and 43996 and fails closed when ano
 Warm the application and Runtime image before recording:
 
 ```bash
-npm install
+npm ci
 npm run prove:runtime -- --reset --json
 ```
 
@@ -38,7 +38,7 @@ The runner owns both browser actions and closes Chrome automatically.
 Do not click, scroll, switch tabs, or close Chrome during the canonical pass.
 Stop capture after Chrome closes and the terminal prints `Real Runtime proof: PASSED`.
 
-The settled release candidate passed `npm run prove:runtime -- --reset --json` and `npm run audit:release`.
+Before release, require `npm run prove:runtime -- --reset --json` and `npm run audit:release` to pass on the clean final candidate.
 Run the headed command once immediately before capture, and require its terminal `Real Runtime proof: PASSED` result for the submitted recording.
 For a persistent stage-by-stage rehearsal, start the same product path manually:
 
@@ -55,7 +55,7 @@ Do not select it during the canonical headed recording.
 The runner invokes it exactly once after the 15-second opening and requires exactly three fresh Runs after proof start: one valid Promotion, one invalid multi-resource Candidate that is quarantined, and one promoted Repair from the retained Quarantine.
 Use `npm run demo:runtime -- --reset` when rehearsing the human-click path.
 Do not accept evidence from a prior run, browser-local fixture state, prompt text, or Runtime narration.
-The Outcome Brief must derive its claims from persisted Run evidence and show the three Run identifiers, four-resource dispositions, Canonical fingerprint transitions, failed and passed Validations, post-Promotion effects, and Repair lineage.
+The Outcome Brief must derive its claims from persisted Run evidence and show the three Run identifiers, four-resource dispositions, Canonical fingerprint transitions, failed and passed Validations, effects delivered after Canonical State advances during Promotion, and Repair lineage.
 The final success verdict must remain unavailable until the quarantined parent and promoted Repair form a locally verified signed two-decision chain.
 After the complete 85-second Outcome Brief dwell, the runner automatically selects `Inspect in zero-upload verifier` and keeps it visible for 25 seconds.
 Do not select that control yourself during the canonical headed recording.
@@ -86,7 +86,7 @@ The command cannot inherit the generic preflight-skip escape hatch.
 It must complete a credential-safe live Responses request before it can start the application or display `LIVE MODELARK PROOF`.
 The runner opens production Chrome and invokes the existing `Run live Candidate` control.
 The seeded Outcome Contract requires the exact `modelark-proof.txt` content and SQLite value, so the provider response cannot prove success by narration alone.
-Show the required `execution-profile` Validation, its model identifier commitment, the required state Validation, four promoted resources, one receiver-enforced HTTP `modelark-live-ready` effect after Promotion, the Canonical State fingerprint transition, and the locally verified signed decision.
+Show the required `execution-profile` Validation, its model identifier commitment, the required state Validation, four promoted resources, one receiver-enforced HTTP `modelark-live-ready` effect delivered after Canonical State advances during Promotion, the Canonical State fingerprint transition, and the locally verified signed decision.
 Explain that the execution profile is a trusted Airlock control-plane attestation committed by the signed receipt, not an independent BytePlus signature.
 After the live Promotion, show that the launcher reports a captured signed conformance packet, then run `npm run verify:modelark-evidence` in a separate terminal.
 Explain that the offline command verifies historical signed evidence and does not claim that ModelArk is currently available.
@@ -97,34 +97,34 @@ If live interaction must remain manual, use `npm run demo:modelark -- --reset` a
 | Category | Weight | Live evidence | Automated evidence |
 | --- | ---: | --- | --- |
 | End-to-end middleware behavior | 40% | One action invokes real Codex for exactly three fresh Runs that promote a valid future, quarantine an invalid multi-resource future, and repair the retained failure across four Candidate resources. | The Phase 22 recording gate must prove the exact fresh-Run sequence through production Chrome, while `npm run test:container-browser` and `npm run test:container-transaction` retain the underlying Runtime, restart, and continuity evidence. |
-| Technical design and integration | 25% | The one-page architecture identifies the untrusted Runtime, trusted Airlock decision boundary, versioned Outcome Contract, monotonic journal, atomic canonical manifest, bounded Repair lineage, and post-Promotion dispatcher. | Server tests exercise the `AgentRunner`, `WorkspaceManager`, journal, validator, outbox, JSON store, HTTP API, and startup reconciliation seams. |
+| Technical design and integration | 25% | The one-page architecture identifies the untrusted Runtime, trusted Airlock decision boundary, versioned Outcome Contract, monotonic journal, atomic canonical manifest, bounded Repair lineage, and post-Canonical-advance dispatcher. | Server tests exercise the `AgentRunner`, `WorkspaceManager`, journal, validator, outbox, JSON store, HTTP API, and startup reconciliation seams. |
 | Verification and robustness | 20% | The Outcome Brief proves harmless rejection, bounded Repair, effect ordering, and a signed two-decision chain before opening the same artifact in a zero-upload verifier. | Existing transactional and Portable Trust gates remain required, and Phase 22 must add safe-capsule, chain, viewport, fresh-Run, failure-class, and cleanup coverage. |
 | Demo and reproducibility | 15% | One command opens the 1280 by 720 recording, one action runs the complete story, and a separate read-only replay proves the result at 390 by 844. | The Phase 22 runner must enforce the hard 180-second budget and fail closed on startup, browser, Run, replay, evidence, viewport, timeout, and interruption faults without overwriting the last successful immutable artifact pair. |
 
 ## Acceptance checklist
 
-- [x] On the exact submission revision, `npm run prove:runtime -- --reset --headed` finishes under the hard 180-second recording budget, keeps production Chrome at 1280 by 720, and exposes one primary `Prove this release is safe` action.
+- [ ] On the exact submission revision, `npm run prove:runtime -- --reset --headed` finishes under the hard 180-second recording budget, keeps production Chrome at 1280 by 720, and exposes one primary `Prove this release is safe` action.
 - [x] The UI visibly says `TRACK 1 · AGENT LAUNCHPAD`, identifies the reusable AgentRunner middleware and local deterministic Responses fixture, and makes no ModelArk or paid-inference claim.
 - [x] One action creates exactly three fresh Runs after proof start and never reuses old evidence.
-- [x] Run 1 ends in `Promoted`, `Journal completed`, four promoted resources, and one delivered effect after Promotion.
-- [x] Run 1 writes `candidate-only` to `protocol-proof.txt`, sets the `demo` row in `.airlock/demo.sqlite` to `candidate-only`, and defers `protocol-release-ready` until Promotion.
+- [x] Run 1 ends in `Promoted`, `Journal completed`, four promoted resources, and one effect delivered after Canonical State advances during Promotion.
+- [x] Run 1 writes `candidate-only` to `protocol-proof.txt`, sets the `demo` row in `.airlock/demo.sqlite` to `candidate-only`, and defers `protocol-release-ready` until Canonical State advances during Promotion.
 - [x] Run 2 ends in `Quarantined`, identifies `command:protocol-content` as the decisive required Validation failure, and shows identical before and after Canonical fingerprints.
 - [x] The rejected SQLite value and unsafe notification do not reach accepted state.
-- [x] Run 3 restores the exact file and SQLite values, ends in a promoted child with bounded parent lineage, dispatches the fresh `protocol-repair-ready` effect after Promotion, and promotes four resources.
+- [x] Run 3 restores the exact file and SQLite values, ends in a promoted child with bounded parent lineage, dispatches the fresh `protocol-repair-ready` effect after Canonical State advances during Promotion, and promotes four resources.
 - [x] The evidence-derived Outcome Brief names all three fresh Run identifiers and does not rely on Runtime narration or staged frontend state.
 - [x] The final verdict appears only after the signed two-decision chain verifies both signatures, parent linkage, and Canonical State handoff.
 - [x] `Inspect in zero-upload verifier` reports `2 signed decisions linked` while a deny-all HTTP and WebSocket boundary proves zero API calls or uploads from before the first verifier opening through browser close.
 - [x] The successful runner installs an owner-only content-addressed immutable result capsule and signed chain, then atomically commits mutable `real-runtime-proof.latest.json` only as a convenience pointer while proof ownership remains held.
-- [x] The hosted release resolver validates the latest pointer and uploads only the exact immutable capsule and chain it identifies.
+- [ ] The hosted release resolver validates the latest pointer and uploads only the exact immutable capsule and chain it identifies.
 - [x] Every failure class returns nonzero, closes owned processes, persists no false success, and preserves the last successful artifact pair.
 - [x] Existing proof leases and legacy publication locks fail closed without stale-path deletion, while a post-rename ownership cleanup warning cannot revoke the committed valid pair.
 - [x] Reset cleanup removes only descriptor-anchored, marker-matching sessions whose recorded owner is no longer alive.
 - [x] While the desktop browser remains at 1280 by 720, a separate headless 390 by 844 read-only replay creates no Run and independently regenerates the same signed chain and zero-upload verifier evidence without horizontal overflow or hidden actions.
 - [x] The [three-minute narration](three-minute-demo.md), [static one-page architecture](agent-airlock-one-page.png), and [architecture notes](architecture-one-page.md) use the same state names and guarantees as the product.
-- [x] `npm run check:phase7` passes from a clean clone.
-- [x] `npm run check:phase11:protocol` and `npm run test:phase11:ui` pass without ModelArk credentials, a wallet, RPC, or funds.
-- [x] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
-- [x] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
+- [ ] `npm run check:phase7` passes from a clean clone.
+- [ ] `npm run check:phase11:protocol` and `npm run test:phase11:ui` pass without ModelArk credentials, a wallet, RPC, or funds.
+- [ ] `npm run test:container-transaction` passes with Docker, Colima, or Podman and no ModelArk credential.
+- [ ] `npm run test:container-browser` passes and shows the promoted real-Codex result plus required command Validation in Chrome.
 - [x] `npm run demo:runtime -- --reset` remains available as the persistent manual inspection and rehearsal path.
 - [x] The launcher reports `7/7` credential-safe readiness checks, and `npm run demo:readiness` reproduces the same local evidence digest without returning provider values.
 - [x] `Run complete safety loop` executes the three real-Runtime stages in order, stops immediately if an expected disposition is not produced, and automatically verifies the signed Repair lineage.
@@ -137,10 +137,10 @@ If live interaction must remain manual, use `npm run demo:modelark -- --reset` a
 - [ ] While Free Credits Only Mode has capacity, `npm run prove:modelark -- --reset --headed` completes one fresh provider-backed Run and publishes a signed credential-free packet that verifies offline.
 
 That final live Run must show `LIVE MODELARK PROOF`, fresh generated-output preflight evidence, one seeded Agent, and one exact `Run live Candidate` action.
-It must create the exact artifact, update SQLite, submit one typed intent, pass the required state and execution-profile Validations, promote all four resources, deliver exactly one effect after Promotion, and export a locally verified signed decision.
+It must create the exact artifact, update SQLite, submit one typed intent, pass the required state and execution-profile Validations, promote all four resources, deliver exactly one effect after Canonical State advances during Promotion, and export a locally verified signed decision.
 
-The Phase 22 checklist passed from fresh canonical headed, headless, and JSON evidence on this release candidate.
-The single unchecked item is the optional provider-backed ModelArk conformance rerun, which requires external free capacity at judging time.
+Confirm the release-dependent checklist items only after fresh canonical headed, headless, JSON, clean-clone, and hosted evidence agree on the exact submission revision.
+The optional provider-backed ModelArk conformance rerun also requires external free capacity at judging time.
 
 ## Falsifiable claims
 

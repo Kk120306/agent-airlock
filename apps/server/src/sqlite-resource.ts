@@ -7,6 +7,7 @@ import type {
   SqliteSnapshot,
   ValidationEvidence,
 } from "./types.js";
+import { SensitiveLiteralFilter } from "./sensitive-literals.js";
 
 export const SQLITE_RELATIVE_PATH = ".airlock/demo.sqlite" as const;
 
@@ -23,6 +24,12 @@ export interface SqliteValidationResult {
 const bytes = (value: string) => Buffer.byteLength(value, "utf8");
 
 export class SqliteResource {
+  private readonly sensitiveLiterals: SensitiveLiteralFilter;
+
+  constructor(sensitiveValues: readonly string[] = []) {
+    this.sensitiveLiterals = new SensitiveLiteralFilter(sensitiveValues);
+  }
+
   pathFor(workspacePath: string): string {
     return path.join(workspacePath, SQLITE_RELATIVE_PATH);
   }
@@ -58,6 +65,9 @@ export class SqliteResource {
     try {
       const snapshot = await this.inspect(workspacePath);
       const normalizedRows = JSON.stringify(snapshot.rows);
+      if (this.sensitiveLiterals.contains(normalizedRows)) {
+        throw new Error("inventory row data contained a control-plane sensitive value");
+      }
       const secretMatch = secretPatterns.find((secretPattern) =>
         new RegExp(secretPattern.pattern, "i").test(normalizedRows),
       );

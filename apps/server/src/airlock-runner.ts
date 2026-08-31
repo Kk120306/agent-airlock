@@ -8,6 +8,7 @@ import type {
 } from "@agent-airlock/transactional-resource-sdk";
 import {
   EXTERNAL_ACTION_BYPASS_DISCLOSURE,
+  externalActionDispatcherScopesEqual,
   type ExternalActionDeliveryReceipt,
   type ExternalActionDispatcher,
   ExternalActionOutbox,
@@ -48,6 +49,33 @@ import { promotionValidationEvidenceHash } from "./promotion-receipt-evidence.js
 import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
+export const CANONICAL_ADVANCE_EVIDENCE_SUMMARY =
+  "Canonical State advanced before external action delivery";
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+function hasCanonicalAdvanceEvidence(transaction: RunTransaction): boolean {
+  return (
+    transaction.disposition === "promoted" ||
+    transaction.status === "promoted" ||
+    (transaction.canonicalStateIdAfter !== null &&
+      transaction.canonicalStateIdAfter !== transaction.canonicalStateIdBefore) ||
+    (transaction.canonicalContentHashAfter !== null &&
+      transaction.canonicalContentHashAfter !==
+        transaction.canonicalContentHashBefore) ||
+    transaction.promotionReceipt?.disposition === "promoted" ||
+    transaction.recovery.journalPhase === "canonical-advanced" ||
+    transaction.recovery.journalPhase === "effects-delivered" ||
+    transaction.recovery.journalPhase === "completed"
+  );
+}
 
 export interface AirlockRunRequest extends Omit<RunnerRequest, "outboxPath"> {
   runId: string;
@@ -511,6 +539,11 @@ export class AirlockRunner {
         prompt: request.prompt,
         threadId: candidate.runtimeThreadId,
       });
+      if (this.validator.containsControlPlaneSensitiveValue(result.output)) {
+        throw new Error(
+          "Runtime output contained a control-plane sensitive value",
+        );
+      }
       await this.workspaces.recordCandidateThread(
         request.runId,
         result.threadId,
@@ -701,10 +734,12 @@ export class AirlockRunner {
         targetProviderVersions,
         providerPlans,
       );
+      this.actionDispatcher.assertOperational();
       let journal = await this.promotionJournal.begin({
         plan,
         transaction,
         result,
+        externalActionScope: this.actionDispatcher.scope,
       });
       transaction = journal.transaction;
       await onProgress(transaction);
@@ -745,6 +780,11 @@ export class AirlockRunner {
         installed,
       );
       transaction = this.recordCanonicalAdvance(transaction, canonicalState);
+      journal = await this.promotionJournal.updateTransaction(
+        request.runId,
+        transaction,
+      );
+      transaction = journal.transaction;
       await this.injectPromotionFault?.(
         "after-canonical-advance",
         request.runId,
@@ -822,9 +862,11 @@ export class AirlockRunner {
       await this.injectPromotionFault?.("after-completed", request.runId);
       return { ...result, transaction, canonicalState };
     } catch (error) {
-      const journal = await this.promotionJournal
-        .read(request.runId)
-        .catch(() => null);
+      const journal = await this.readPromotionJournalAfterFailure(
+        request,
+        transaction,
+        onProgress,
+      );
       if (journal) {
         const evidencedTransaction = structuredClone(journal.transaction);
         evidencedTransaction.providerResources = structuredClone(
@@ -1150,11 +1192,13 @@ export class AirlockRunner {
     );
 
     try {
+      this.actionDispatcher.assertOperational();
       let journal = await this.promotionJournal.begin({
         plan,
         transaction,
         result,
         authority,
+        externalActionScope: this.actionDispatcher.scope,
       });
       transaction = journal.transaction;
       await onProgress(transaction);
@@ -1195,6 +1239,11 @@ export class AirlockRunner {
         installed,
       );
       transaction = this.recordCanonicalAdvance(transaction, canonicalState);
+      journal = await this.promotionJournal.updateTransaction(
+        request.runId,
+        transaction,
+      );
+      transaction = journal.transaction;
       await this.injectPromotionFault?.(
         "after-canonical-advance",
         request.runId,
@@ -1275,9 +1324,11 @@ export class AirlockRunner {
       await this.injectPromotionFault?.("after-completed", request.runId);
       return { ...result, transaction, canonicalState };
     } catch (error) {
-      const journal = await this.promotionJournal
-        .read(request.runId)
-        .catch(() => null);
+      const journal = await this.readPromotionJournalAfterFailure(
+        request,
+        transaction,
+        onProgress,
+      );
       if (!journal) throw error;
       const evidencedTransaction = structuredClone(journal.transaction);
       evidencedTransaction.providerResources = structuredClone(
@@ -1525,7 +1576,11 @@ export class AirlockRunner {
       );
     } catch (error) {
       if (error instanceof AirlockRunError) throw error;
-      const journal = await this.promotionJournal.read(request.runId).catch(() => null);
+      const journal = await this.readPromotionJournalAfterFailure(
+        request,
+        transaction,
+        onProgress,
+      );
       if (journal) {
         throw new AirlockRunError(
           "Federated Promotion was interrupted at " +
@@ -1537,6 +1592,79 @@ export class AirlockRunner {
         );
       }
       throw error;
+    }
+  }
+
+  private async readPromotionJournalAfterFailure(
+    request: Pick<AirlockRunRequest, "runId" | "agentId">,
+    transaction: RunTransaction,
+    onProgress: TransactionProgress,
+  ): Promise<PromotionJournalRecord | null> {
+    try {
+      return await this.promotionJournal.read(request.runId);
+    } catch (error) {
+      const missing = isMissingFileError(error);
+      if (
+        missing &&
+        transaction.recovery.journalPhase === null &&
+        !hasCanonicalAdvanceEvidence(transaction)
+      ) {
+        return null;
+      }
+      let recoveryTransaction = structuredClone(transaction);
+      let canonicalInspection = "";
+      try {
+        const canonical =
+          await this.workspaces.readCanonicalForProviderTransition(
+            request.agentId,
+          );
+        if (
+          recoveryTransaction.candidateStateId !== null &&
+          canonical.stateId === recoveryTransaction.candidateStateId
+        ) {
+          recoveryTransaction = this.recordCanonicalAdvance(
+            recoveryTransaction,
+            canonical,
+          );
+        } else if (
+          canonical.stateId !== recoveryTransaction.canonicalStateIdBefore ||
+          canonical.contentHash !==
+            recoveryTransaction.canonicalContentHashBefore
+        ) {
+          canonicalInspection =
+            "; current Canonical State contradicts the interrupted Promotion";
+        }
+      } catch (inspectionError) {
+        canonicalInspection =
+          "; Canonical State inspection failed closed: " +
+          this.sanitizeRecoveryError(
+            inspectionError,
+            "Canonical State inspection failed closed",
+          );
+      }
+      recoveryTransaction.status = "recovery-error";
+      const recoveryError = missing
+        ? "Promotion journal is missing after durable Promotion began" +
+          canonicalInspection
+        : "Promotion journal is unreadable: " +
+          this.sanitizeRecoveryError(
+            error,
+            "Promotion journal read failed closed",
+          ) +
+          canonicalInspection;
+      recoveryTransaction.recovery = {
+        ...recoveryTransaction.recovery,
+        recoveryError: recoveryError.slice(0, 500),
+      };
+      // AgentService persists the AirlockRunError transaction even when this
+      // best-effort progress write is unavailable.
+      await onProgress(recoveryTransaction).catch(() => undefined);
+      throw new AirlockRunError(
+        "Promotion journal is unavailable and requires durable reconciliation",
+        recoveryTransaction,
+        false,
+        error,
+      );
     }
   }
 
@@ -1765,7 +1893,8 @@ export class AirlockRunner {
     initial: PromotionJournalRecord,
     terminalAuthority: RunTransaction | null,
   ): Promise<ReconciledPromotion> {
-    let record = structuredClone(initial);
+    this.actionDispatcher.assertOperational();
+    let record = await this.bindAndAssertExternalActionScope(initial);
     let transaction = structuredClone(record.transaction);
     const priorCompletedRecovery =
       record.phase === "completed" &&
@@ -1858,6 +1987,17 @@ export class AirlockRunner {
     if (record.phase === "canonical-advanced") {
       const providerIds = providerIdsFromPlan(record.plan);
       const canonical = await this.verifyJournalCanonical(record);
+      const hasCanonicalAdvanceEvent = transaction.events.some(
+        (event) => event.summary === CANONICAL_ADVANCE_EVIDENCE_SUMMARY,
+      );
+      transaction = this.recordCanonicalAdvance(transaction, canonical);
+      if (!hasCanonicalAdvanceEvent) {
+        record = await this.promotionJournal.updateTransaction(
+          record.runId,
+          transaction,
+        );
+        transaction = record.transaction;
+      }
       const installedResourcesRoot =
         await this.workspaces.installedResourcesPath(
           record.agentId,
@@ -2000,6 +2140,38 @@ export class AirlockRunner {
     return this.workspaces.advancePromotion(record.plan, installed);
   }
 
+  private async bindAndAssertExternalActionScope(
+    record: PromotionJournalRecord,
+  ): Promise<PromotionJournalRecord> {
+    if (record.schemaVersion === 3) {
+      if (
+        !externalActionDispatcherScopesEqual(
+          record.externalActionScope,
+          this.actionDispatcher.scope,
+        )
+      ) {
+        throw new Error(
+          "Promotion journal external-action consumer scope does not match the configured dispatcher",
+        );
+      }
+      return structuredClone(record);
+    }
+    const deliveryCouldHaveStarted =
+      record.transaction.externalActions.intents.length > 0 &&
+      (record.phase === "canonical-advanced" ||
+        record.phase === "effects-delivered" ||
+        record.phase === "completed");
+    if (deliveryCouldHaveStarted) {
+      throw new Error(
+        "Legacy Promotion journal has no external-action consumer scope after delivery could have started",
+      );
+    }
+    return this.promotionJournal.bindExternalActionScope(
+      record.runId,
+      this.actionDispatcher.scope,
+    );
+  }
+
   private async verifyDeliveredEffects(
     record: PromotionJournalRecord,
     canonical: CanonicalStateReference,
@@ -2062,6 +2234,17 @@ export class AirlockRunner {
     next.canonicalStateIdAfter = canonicalState.stateId;
     next.canonicalContentHashAfter = canonicalState.contentHash;
     if (next.sqlite) next.sqlite.after = next.sqlite.candidate;
+    if (
+      !next.events.some(
+        (event) => event.summary === CANONICAL_ADVANCE_EVIDENCE_SUMMARY,
+      )
+    ) {
+      next.events.push({
+        status: "promoting",
+        at: now(),
+        summary: CANONICAL_ADVANCE_EVIDENCE_SUMMARY,
+      });
+    }
     return next;
   }
 
