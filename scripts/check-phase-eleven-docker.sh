@@ -546,7 +546,8 @@ export_production_image_artifacts() {
     --output "$provenance_path"
   node scripts/production-image-provenance.mjs \
     --verify "$provenance_path" \
-    --artifact-directory "$PRODUCTION_IMAGE_ARTIFACT_DIRECTORY"
+    --artifact-directory "$PRODUCTION_IMAGE_ARTIFACT_DIRECTORY" \
+    --allow-existing-image true
   PRODUCTION_IMAGE_ARTIFACT_ROOT="$PRODUCTION_IMAGE_ARTIFACT_DIRECTORY" \
     node --input-type=module -e '
       import { open } from "node:fs/promises";

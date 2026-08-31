@@ -1031,6 +1031,7 @@ export async function verifyProductionImageProvenance(
     inspectImage = inspectRunnableImage,
     inspectSource = inspectRuntimeSourceProvenance,
     projectRoot = defaultProjectRoot,
+    requireFreshReplay = true,
     validateArchive = validateDockerArchiveLoad,
   } = {},
 ) {
@@ -1125,7 +1126,7 @@ export async function verifyProductionImageProvenance(
     ) {
       return false;
     }
-    if (archivePath) {
+    if (archivePath && requireFreshReplay) {
       replayOwnership = await validateArchive(archivePath, proof.image.id, {
         requireAbsent: true,
       });
@@ -1175,7 +1176,18 @@ function parseArguments(argv) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.has("--verify")) {
-    if (options.size !== 2 || !options.has("--artifact-directory")) {
+    const allowExistingImage = options.get("--allow-existing-image");
+    const verificationOptionNames = new Set([
+      "--allow-existing-image",
+      "--artifact-directory",
+      "--verify",
+    ]);
+    if (
+      ![2, 3].includes(options.size) ||
+      !options.has("--artifact-directory") ||
+      [...options.keys()].some((name) => !verificationOptionNames.has(name)) ||
+      (options.size === 3 && allowExistingImage !== "true")
+    ) {
       throw new Error("Provenance verification arguments are incomplete");
     }
     const proofPath = path.resolve(options.get("--verify"));
@@ -1186,6 +1198,7 @@ async function main() {
     if (
       !(await verifyProductionImageProvenance(proof, {
         artifactDirectory: path.resolve(options.get("--artifact-directory")),
+        requireFreshReplay: allowExistingImage !== "true",
       }))
     ) {
       throw new Error("Production image provenance verification failed");

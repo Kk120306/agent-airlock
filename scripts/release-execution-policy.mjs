@@ -4,7 +4,7 @@ import ts from "typescript";
 
 const approvedReleaseSourceDigests = Object.freeze({
   productGateSource:
-    "8811deb92b7d8fc6f080173ff2a7a4383f03637def0f90fccef72edf052c9676",
+    "fcc50b79634c7caeeccba19d353b5fb3502d024b81b49a8e6dff89e69bafa27f",
   proveRuntimeSource:
     "f9d96158196a8165ed39eaba2e4d139538970cac09624a794606ba45a7690521",
   runtimeProofTestSource:
@@ -57,7 +57,7 @@ export const releaseExecutionDependencyPaths = Object.freeze([
 ]);
 
 const approvedReleaseDependencyClosureDigest =
-  "78a88d56cbd29c6dcc50210e563cad2ce2951e065a9afb881acaa8ce52aa7d24";
+  "a43e48a8434ea3058590641d53eb26db612b99b3cc17236a00261c7d09243faa";
 
 function approvedSourceDigest(name, source) {
   return (

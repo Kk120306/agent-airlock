@@ -246,6 +246,24 @@ test("production image provenance binds the exact image archive and proof closur
   );
 });
 
+test("production image provenance can verify the gate-owned loaded image without replay", async () => {
+  const { observedImage, proof } = await createFixture();
+  let replayAttempts = 0;
+
+  assert.equal(
+    await verifyProductionImageProvenance(proof, {
+      ...verificationOptions(observedImage),
+      requireFreshReplay: false,
+      validateArchive: async () => {
+        replayAttempts += 1;
+        throw new Error("the loaded gate image must not be replayed");
+      },
+    }),
+    true,
+  );
+  assert.equal(replayAttempts, 0);
+});
+
 test("production image provenance accepts the modern Docker blob archive layout", async () => {
   const { observedImage, proof } = await createFixture({ modern: true });
 
