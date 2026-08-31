@@ -555,7 +555,7 @@ async function assertRenderedOutcomeContract(page) {
   await summary.getByText("protocol-proof.txt", { exact: true }).waitFor();
   await summary.getByText("4 files · 64.0 KB", { exact: true }).waitFor();
   await summary
-    .getByText("0 secret patterns · 1 commands", { exact: true })
+    .getByText("0 secret patterns · 0 commands", { exact: true })
     .waitFor();
   if ((await summary.getByText("AGENTS.md", { exact: true }).count()) !== 2) {
     fail(
