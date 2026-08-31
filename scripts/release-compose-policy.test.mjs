@@ -463,6 +463,17 @@ test("resolved Compose policy accepts the exact isolated launchpad service", () 
   );
 });
 
+test("resolved Compose policy accepts explicit short-syntax bind semantics", () => {
+  const config = resolvedFixture();
+  for (const volume of config.services.launchpad.volumes) {
+    volume.bind = { create_host_path: true };
+  }
+  assert.equal(
+    approvedResolvedLaunchpadComposeConfig(config, resolvedExpected),
+    true,
+  );
+});
+
 test("resolved Compose policy rejects privilege and identity mutations", async (context) => {
   const mutations = [
     ["hostile ambient sandbox", (service) => (service.environment.CODEX_SANDBOX_MODE = "danger-full-access")],
@@ -488,6 +499,7 @@ test("resolved Compose policy rejects privilege and identity mutations", async (
     ["DNS override", (service) => (service.dns = ["8.8.8.8"])],
     ["service link", (service) => (service.links = ["escape"])],
     ["volume bind options", (service) => (service.volumes[0].bind = { propagation: "rshared" })],
+    ["disabled short-syntax bind", (service) => (service.volumes[0].bind = { create_host_path: false })],
   ];
   for (const [name, mutate] of mutations) {
     await context.test(name, () => {

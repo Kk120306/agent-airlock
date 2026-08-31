@@ -192,6 +192,16 @@ function absentOrEmpty(value) {
     (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
 }
 
+function approvedResolvedBindOptions(value) {
+  return absentOrEmpty(value) ||
+    (value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      JSON.stringify(Object.keys(value).sort()) ===
+        JSON.stringify(["create_host_path"]) &&
+      value.create_host_path === true);
+}
+
 export function approvedResolvedLaunchpadComposeConfig(config, expected = {}) {
   const serviceNames = Object.keys(config?.services ?? {}).sort();
   const service = config?.services?.launchpad;
@@ -293,7 +303,7 @@ export function approvedResolvedLaunchpadComposeConfig(config, expected = {}) {
         JSON.stringify(Object.keys(volume).sort()) ===
           JSON.stringify(["bind", "source", "target", "type"]) &&
         volume?.type === "bind" &&
-        absentOrEmpty(volume?.bind) &&
+        approvedResolvedBindOptions(volume?.bind) &&
         expectedMounts.get(volume.target) === volume.source,
     ) &&
     ports.length === 1 &&

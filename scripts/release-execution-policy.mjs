@@ -57,7 +57,7 @@ export const releaseExecutionDependencyPaths = Object.freeze([
 ]);
 
 const approvedReleaseDependencyClosureDigest =
-  "0cbb63c6b0153dd514fb790203a9724178d07b82984514cbd7686fe846eade4c";
+  "ff38ab3a41a99f5e5e659a4d13afdcdeede9b16a4a59caef7b5606d3f1a5af46";
 
 function approvedSourceDigest(name, source) {
   return (
