@@ -263,7 +263,9 @@ async function sha256GzipTarMember(archivePath, member) {
     const hash = createHash("sha256");
     let bytes = 0;
     let extractorCode = null;
+    let extractorClosed = false;
     let validatorCode = null;
+    let validatorClosed = false;
     let decompressorEnded = false;
     let settled = false;
     const extractor = spawnChild("tar", ["-xOf", archivePath, "--", member], {
@@ -273,9 +275,13 @@ async function sha256GzipTarMember(archivePath, member) {
     const validator = spawnChild("tar", ["-tf", "-"], {
       stdio: ["pipe", "ignore", "ignore"],
     });
+    const timeout = setTimeout(() => {
+      rejectInspection("Production image layer inspection timed out");
+    }, 300_000);
     const rejectInspection = (message) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       extractor.kill("SIGKILL");
       decompressor.destroy();
       validator.kill("SIGKILL");
@@ -284,8 +290,8 @@ async function sha256GzipTarMember(archivePath, member) {
     const finish = () => {
       if (
         settled ||
-        extractorCode === null ||
-        validatorCode === null ||
+        !extractorClosed ||
+        !validatorClosed ||
         !decompressorEnded
       ) {
         return;
@@ -295,12 +301,9 @@ async function sha256GzipTarMember(archivePath, member) {
         return;
       }
       settled = true;
+      clearTimeout(timeout);
       resolve("sha256:" + hash.digest("hex"));
     };
-    const timeout = setTimeout(() => {
-      rejectInspection("Production image layer inspection timed out");
-    }, 300_000);
-    extractor.stdout.pipe(decompressor);
     decompressor.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > 4 * 1024 * 1024 * 1024) {
@@ -309,7 +312,6 @@ async function sha256GzipTarMember(archivePath, member) {
       }
       hash.update(chunk);
     });
-    decompressor.pipe(validator.stdin);
     for (const stream of [extractor.stdout, decompressor, validator.stdin]) {
       stream.once("error", () => {
         rejectInspection("Production image layer could not be inspected");
@@ -322,6 +324,7 @@ async function sha256GzipTarMember(archivePath, member) {
       rejectInspection("Production image layer could not be validated");
     });
     extractor.once("close", (code) => {
+      extractorClosed = true;
       extractorCode = code;
       finish();
     });
@@ -330,13 +333,19 @@ async function sha256GzipTarMember(archivePath, member) {
       finish();
     });
     validator.once("close", (code) => {
+      validatorClosed = true;
       validatorCode = code;
+      decompressor.unpipe(validator.stdin);
+      decompressor.resume();
       finish();
     });
-    Promise.all([
-      new Promise((resolveClose) => extractor.once("close", resolveClose)),
-      new Promise((resolveClose) => validator.once("close", resolveClose)),
-    ]).finally(() => clearTimeout(timeout));
+    decompressor.once("close", () => {
+      if (!decompressorEnded) {
+        rejectInspection("Production image layer could not be inspected");
+      }
+    });
+    extractor.stdout.pipe(decompressor);
+    decompressor.pipe(validator.stdin);
   });
 }
 
@@ -346,60 +355,62 @@ async function sha256TarMember(archivePath, member) {
     let bytes = 0;
     let settled = false;
     let extractorCode = null;
+    let extractorClosed = false;
     let validatorCode = null;
+    let validatorClosed = false;
     const extractor = spawnChild("tar", ["-xOf", archivePath, "--", member], {
       stdio: ["ignore", "pipe", "ignore"],
     });
     const validator = spawnChild("tar", ["-tf", "-"], {
       stdio: ["pipe", "ignore", "ignore"],
     });
+    const timeout = setTimeout(() => {
+      rejectInspection("Production image layer inspection timed out");
+    }, 300_000);
     const rejectInspection = (message) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       extractor.kill("SIGKILL");
       validator.kill("SIGKILL");
       reject(new Error(message));
     };
     const finish = () => {
-      if (settled || extractorCode === null || validatorCode === null) return;
+      if (settled || !extractorClosed || !validatorClosed) return;
       if (extractorCode !== 0 || validatorCode !== 0 || bytes < 1) {
         rejectInspection("Production image archive contains an invalid layer");
         return;
       }
       settled = true;
+      clearTimeout(timeout);
       resolve("sha256:" + hash.digest("hex"));
     };
-    const timeout = setTimeout(() => {
-      rejectInspection("Production image layer inspection timed out");
-    }, 300_000);
     extractor.stdout.on("data", (chunk) => {
       bytes += chunk.length;
       hash.update(chunk);
     });
-    extractor.stdout.pipe(validator.stdin);
     validator.stdin.once("error", () => {
       rejectInspection("Production image archive contains an invalid layer");
     });
     extractor.once("error", () => {
-      clearTimeout(timeout);
       rejectInspection("Production image layer could not be inspected");
     });
     validator.once("error", () => {
-      clearTimeout(timeout);
       rejectInspection("Production image layer could not be validated");
     });
     extractor.once("close", (code) => {
+      extractorClosed = true;
       extractorCode = code;
       finish();
     });
     validator.once("close", (code) => {
+      validatorClosed = true;
       validatorCode = code;
+      extractor.stdout.unpipe(validator.stdin);
+      extractor.stdout.resume();
       finish();
     });
-    Promise.all([
-      new Promise((resolveClose) => extractor.once("close", resolveClose)),
-      new Promise((resolveClose) => validator.once("close", resolveClose)),
-    ]).finally(() => clearTimeout(timeout));
+    extractor.stdout.pipe(validator.stdin);
   });
 }
 
