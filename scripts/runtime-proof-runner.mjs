@@ -3184,10 +3184,7 @@ export async function createPlaywrightRuntimeProofDriver({
             .waitFor({ state: "visible", timeout: 5_000 });
           await runtimeStatus
             .getByText(
-              "Real Codex CLI in a disposable container · local deterministic Responses fixture · no ModelArk request or paid inference.",
-              {
-                exact: true,
-              },
+              /^Real Codex CLI in disposable (?:docker|podman) Runtime · local deterministic Responses fixture · no ModelArk request or paid inference\.$/,
             )
             .waitFor({ state: "visible", timeout: 5_000 });
           const guide = page.getByRole("region", { name: "Full safety loop" });
