@@ -93,7 +93,7 @@ function fixture() {
       "required-paths",
       "change-limits",
       "secret-patterns",
-      "command:protocol-content",
+      "protocol-fixture-content",
       "sqlite-resource",
       "external-action-intents",
     ].map((name) => ({ name, required: true, status: "passed" })),

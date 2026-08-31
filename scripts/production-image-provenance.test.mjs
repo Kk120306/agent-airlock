@@ -42,6 +42,9 @@ after(async () => {
 });
 
 async function createFixture({
+  classicModern = false,
+  dockerManifestMutate = null,
+  layerSourcesMutate = null,
   modern = false,
   optionLikeLayer = false,
   repoTags = null,
@@ -66,6 +69,7 @@ async function createFixture({
     path.join(archiveRoot, "layer", "layer.tar"),
   );
   const layerDigest = sha256(layerBytes);
+  const configDiffId = wrongDiffId ? "sha256:" + "0".repeat(64) : layerDigest;
   const configBytes = Buffer.from(
     JSON.stringify({
       architecture: "amd64",
@@ -77,15 +81,17 @@ async function createFixture({
       },
       os: "linux",
       rootfs: {
-        diff_ids: [wrongDiffId ? "sha256:" + "0".repeat(64) : layerDigest],
+        diff_ids: [configDiffId],
         type: "layers",
       },
     }) + "\n",
   );
   const configDigest = sha256(configBytes);
-  const archiveLayerBytes = modern ? gzipSync(layerBytes) : layerBytes;
+  const modernArchive = modern || classicModern;
+  const archiveLayerBytes =
+    modernArchive && !classicModern ? gzipSync(layerBytes) : layerBytes;
   const archiveLayerDigest = sha256(archiveLayerBytes);
-  const layerName = modern
+  const layerName = modernArchive
     ? "blobs/sha256/" + archiveLayerDigest.slice("sha256:".length)
     : optionLikeLayer
       ? "--checkpoint=1/layer.tar"
@@ -93,8 +99,16 @@ async function createFixture({
   let imageId = configDigest;
   let configName = configDigest.slice("sha256:".length) + ".json";
   let extraMembers = [];
-  if (modern) {
+  let layerSources;
+  if (modernArchive) {
     configName = "blobs/sha256/" + configDigest.slice("sha256:".length);
+    const layerDescriptor = {
+      digest: archiveLayerDigest,
+      mediaType: classicModern
+        ? "application/vnd.oci.image.layer.v1.tar"
+        : "application/vnd.oci.image.layer.v1.tar+gzip",
+      size: archiveLayerBytes.length,
+    };
     const runnableManifestBytes = Buffer.from(
       JSON.stringify({
         config: {
@@ -102,13 +116,7 @@ async function createFixture({
           mediaType: "application/vnd.oci.image.config.v1+json",
           size: configBytes.length,
         },
-        layers: [
-          {
-            digest: archiveLayerDigest,
-            mediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
-            size: archiveLayerBytes.length,
-          },
-        ],
+        layers: [layerDescriptor],
         mediaType: "application/vnd.oci.image.manifest.v1+json",
         schemaVersion: 2,
       }),
@@ -116,31 +124,43 @@ async function createFixture({
     const runnableManifestDigest = sha256(runnableManifestBytes);
     const runnableManifestName =
       "blobs/sha256/" + runnableManifestDigest.slice("sha256:".length);
-    const rootIndexBytes = Buffer.from(
-      JSON.stringify({
-        manifests: [
-          {
-            digest: runnableManifestDigest,
-            mediaType: "application/vnd.oci.image.manifest.v1+json",
-            platform: { architecture: "amd64", os: "linux" },
-            size: runnableManifestBytes.length,
-          },
-        ],
+    let archiveRootDescriptor;
+    let rootIndexName;
+    let rootIndexBytes;
+    if (classicModern) {
+      archiveRootDescriptor = {
+        digest: runnableManifestDigest,
+        mediaType: "application/vnd.oci.image.manifest.v1+json",
+        size: runnableManifestBytes.length,
+      };
+      layerSources = { [configDiffId]: structuredClone(layerDescriptor) };
+      layerSourcesMutate?.(layerSources);
+    } else {
+      rootIndexBytes = Buffer.from(
+        JSON.stringify({
+          manifests: [
+            {
+              digest: runnableManifestDigest,
+              mediaType: "application/vnd.oci.image.manifest.v1+json",
+              platform: { architecture: "amd64", os: "linux" },
+              size: runnableManifestBytes.length,
+            },
+          ],
+          mediaType: "application/vnd.oci.image.index.v1+json",
+          schemaVersion: 2,
+        }),
+      );
+      imageId = sha256(rootIndexBytes);
+      rootIndexName = "blobs/sha256/" + imageId.slice("sha256:".length);
+      archiveRootDescriptor = {
+        digest: imageId,
         mediaType: "application/vnd.oci.image.index.v1+json",
-        schemaVersion: 2,
-      }),
-    );
-    imageId = sha256(rootIndexBytes);
-    const rootIndexName = "blobs/sha256/" + imageId.slice("sha256:".length);
+        size: rootIndexBytes.length,
+      };
+    }
     const archiveIndexBytes = Buffer.from(
       JSON.stringify({
-        manifests: [
-          {
-            digest: imageId,
-            mediaType: "application/vnd.oci.image.index.v1+json",
-            size: rootIndexBytes.length,
-          },
-        ],
+        manifests: [archiveRootDescriptor],
         mediaType: "application/vnd.oci.image.index.v1+json",
         schemaVersion: 2,
       }),
@@ -158,15 +178,24 @@ async function createFixture({
         path.join(archiveRoot, runnableManifestName),
         runnableManifestBytes,
       ),
-      writeFile(path.join(archiveRoot, rootIndexName), rootIndexBytes),
+      ...(rootIndexName
+        ? [writeFile(path.join(archiveRoot, rootIndexName), rootIndexBytes)]
+        : []),
     ]);
     extraMembers = [
       "oci-layout",
       "index.json",
-      rootIndexName,
+      ...(rootIndexName ? [rootIndexName] : []),
       runnableManifestName,
     ];
   }
+  const dockerManifest = {
+    Config: configName,
+    RepoTags: repoTags,
+    Layers: [layerName],
+    ...(layerSources ? { LayerSources: layerSources } : {}),
+  };
+  dockerManifestMutate?.(dockerManifest);
   await Promise.all([
     mkdir(path.dirname(path.join(archiveRoot, configName)), {
       recursive: true,
@@ -178,13 +207,7 @@ async function createFixture({
     writeFile(path.join(archiveRoot, layerName), archiveLayerBytes),
     writeFile(
       path.join(archiveRoot, "manifest.json"),
-      JSON.stringify([
-        {
-          Config: configName,
-          RepoTags: repoTags,
-          Layers: [layerName],
-        },
-      ]),
+      JSON.stringify([dockerManifest]),
     ),
   ]);
   await rm(archivePath, { force: true });
@@ -279,6 +302,81 @@ test("production image provenance accepts the modern Docker blob archive layout"
     proof.image.id,
     proof.archive.identity.configDigest,
     "the daemon index ID must remain distinct from its OCI config digest",
+  );
+});
+
+test("production image provenance accepts Docker 28 config-bound OCI archives", async () => {
+  const { imageId, observedImage, proof } = await createFixture({
+    classicModern: true,
+  });
+
+  assert.equal(
+    await verifyProductionImageProvenance(
+      proof,
+      verificationOptions(observedImage),
+    ),
+    true,
+  );
+  assert.equal(proof.archive.identity.kind, "oci-manifest");
+  assert.equal(proof.archive.identity.configDigest, imageId);
+  assert.notEqual(proof.archive.identity.rootDigest, imageId);
+});
+
+test("production image provenance rejects malformed Docker 28 layer sources", async (context) => {
+  const mutations = [
+    ["missing source", (sources) => delete sources[Object.keys(sources)[0]]],
+    [
+      "extra source",
+      (sources) => {
+        sources["sha256:" + "9".repeat(64)] = structuredClone(
+          Object.values(sources)[0],
+        );
+      },
+    ],
+    [
+      "source URL",
+      (sources) => {
+        Object.values(sources)[0].urls = ["https://example.invalid/layer"];
+      },
+    ],
+    [
+      "source digest",
+      (sources) => {
+        Object.values(sources)[0].digest = "sha256:" + "8".repeat(64);
+      },
+    ],
+    [
+      "source size",
+      (sources) => {
+        Object.values(sources)[0].size += 1;
+      },
+    ],
+    [
+      "source media type",
+      (sources) => {
+        Object.values(sources)[0].mediaType =
+          "application/vnd.oci.image.layer.v1.tar+gzip";
+      },
+    ],
+  ];
+  for (const [name, layerSourcesMutate] of mutations) {
+    await context.test(name, async () => {
+      await assert.rejects(
+        createFixture({ classicModern: true, layerSourcesMutate }),
+        /layer sources are malformed/,
+      );
+    });
+  }
+});
+
+test("production image provenance rejects Docker layer sources on legacy archives", async () => {
+  await assert.rejects(
+    createFixture({
+      dockerManifestMutate: (manifest) => {
+        manifest.LayerSources = {};
+      },
+    }),
+    /does not bind one exact image/,
   );
 });
 

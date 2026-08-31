@@ -127,6 +127,7 @@ import type {
   UpdateAgentInput,
 } from "./types.js";
 import {
+  createStructuralValidators,
   createValidationCommandExecutor,
   type ValidationCommandExecutor,
 } from "./validation-command-runner.js";
@@ -310,6 +311,7 @@ export class AgentService {
       new OutcomeValidator(
         validationCommandExecutor,
         controlPlaneSensitiveValues,
+        createStructuralValidators(config),
       ),
       new SqliteResource(controlPlaneSensitiveValues),
       new ExternalActionOutbox(controlPlaneSensitiveValues),

@@ -20,7 +20,10 @@ import type {
   WorkspaceChange,
   WorkspaceChangeSummary,
 } from "./types.js";
-import type { ValidationCommandExecutor } from "./validation-command-runner.js";
+import type {
+  StructuralValidator,
+  ValidationCommandExecutor,
+} from "./validation-command-runner.js";
 
 const MAX_INVENTORY_ENTRIES = 10_000;
 const MAX_EVIDENCE_CHANGES = 200;
@@ -67,6 +70,7 @@ export class OutcomeValidator {
   constructor(
     private readonly commandExecutor: ValidationCommandExecutor,
     sensitiveValues: readonly string[] = [],
+    private readonly structuralValidators: readonly StructuralValidator[] = [],
   ) {
     this.sensitiveLiterals = new SensitiveLiteralFilter(sensitiveValues);
   }
@@ -230,6 +234,24 @@ export class OutcomeValidator {
           output: null,
         })),
       );
+    }
+
+    for (const validator of this.structuralValidators) {
+      const structuralStarted = Date.now();
+      try {
+        validations.push(
+          await validator.validate(candidateWorkspacePath, runId),
+        );
+      } catch {
+        validations.push(
+          requiredEvidence(
+            validator.name,
+            "error",
+            "Trusted structural Validation could not complete safely",
+            structuralStarted,
+          ),
+        );
+      }
     }
 
     for (const command of contract.validationCommands) {

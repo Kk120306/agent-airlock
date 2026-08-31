@@ -35,11 +35,11 @@ const expectedResourceKinds = [
 ];
 const expectedRequiredValidationNames = [
   "change-limits",
-  "command:protocol-content",
   "execution-profile",
   "external-action-intents",
   "path-safety",
   "protected-paths",
+  "protocol-fixture-content",
   "required-paths",
   "secret-patterns",
   "sqlite-resource",

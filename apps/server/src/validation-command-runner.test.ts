@@ -15,9 +15,9 @@ import { loadConfig } from "./config.js";
 import {
   buildValidationContainerArgs,
   ContainerValidationCommandExecutor,
+  createStructuralValidators,
   createValidationCommandExecutor,
-  PRODUCT_IMAGE_PROTOCOL_VALIDATION_COMMAND,
-  ProductImageFixtureValidationCommandExecutor,
+  ProductImageFixtureStructuralValidator,
 } from "./validation-command-runner.js";
 import type { ValidationCommand } from "./types.js";
 
@@ -41,13 +41,6 @@ const command: ValidationCommand = {
   timeoutMs: 1_000,
 };
 
-const productFixtureCommand: ValidationCommand = {
-  name: "protocol-content",
-  command: PRODUCT_IMAGE_PROTOCOL_VALIDATION_COMMAND,
-  required: true,
-  timeoutMs: 10_000,
-};
-
 async function makeProductFixtureValidationWorkspace(runId: string): Promise<{
   root: string;
   workspace: string;
@@ -55,9 +48,7 @@ async function makeProductFixtureValidationWorkspace(runId: string): Promise<{
   const root = await mkdtemp(path.join(tmpdir(), "airlock-product-validation-"));
   temporaryDirectories.push(root);
   const candidateRoot = path.join(root, ".candidates", runId);
-  await mkdir(candidateRoot, { recursive: true });
-  const validationRoot = await mkdtemp(path.join(candidateRoot, ".validation-"));
-  const workspace = path.join(validationRoot, "workspace");
+  const workspace = path.join(candidateRoot, "workspace");
   await mkdir(path.join(workspace, ".airlock"), { recursive: true });
   await writeFile(path.join(workspace, "protocol-proof.txt"), "candidate-only\n");
   const database = new DatabaseSync(path.join(workspace, ".airlock", "demo.sqlite"));
@@ -187,7 +178,7 @@ describe("Validation command container", () => {
 });
 
 describe("Product-image fixture Validation command", () => {
-  it("selects the trusted exact executor only for the shipped product fixture", async () => {
+  it("selects an explicit structural validator only for the product fixture", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "airlock-validation-profile-"));
     temporaryDirectories.push(root);
     const base = {
@@ -222,22 +213,19 @@ describe("Product-image fixture Validation command", () => {
     });
 
     expect(createValidationCommandExecutor(productConfig)).toBeInstanceOf(
-      ProductImageFixtureValidationCommandExecutor,
+      ContainerValidationCommandExecutor,
     );
     for (const mutation of [
       { protocolFixtureMode: false },
       { runtimeProvider: "container" as const },
-      { host: "127.0.0.1" },
-      { authToken: "short" },
-      { codexBin: "/tmp/fake-codex" },
-      { arkApiKey: "different" },
-      { arkModel: "different" },
-      { arkBaseUrl: "http://127.0.0.1:43992/v1" },
     ]) {
-      expect(
-        createValidationCommandExecutor({ ...productConfig, ...mutation }),
-      ).toBeInstanceOf(ContainerValidationCommandExecutor);
+      expect(createStructuralValidators({ ...productConfig, ...mutation })).toEqual([]);
     }
+    expect(createStructuralValidators(productConfig)[0]).toBeInstanceOf(
+      ProductImageFixtureStructuralValidator,
+    );
+    expect(createStructuralValidators(containerConfig)).toEqual([]);
+    expect(createStructuralValidators(defaultConfig)).toEqual([]);
     expect(createValidationCommandExecutor(containerConfig)).toBeInstanceOf(
       ContainerValidationCommandExecutor,
     );
@@ -246,57 +234,33 @@ describe("Product-image fixture Validation command", () => {
     );
   });
 
-  it("passes the exact file and SQLite assertions on a disposable Candidate copy", async () => {
+  it("passes the exact file and SQLite structural assertions on Candidate State", async () => {
     const runId = "run-product-proof";
     const { root, workspace } =
       await makeProductFixtureValidationWorkspace(runId);
-    const executor = new ProductImageFixtureValidationCommandExecutor(root);
+    const validator = new ProductImageFixtureStructuralValidator(root);
 
     await expect(
-      executor.execute(workspace, productFixtureCommand, runId),
+      validator.validate(workspace, runId),
     ).resolves.toMatchObject({
-      exitCode: 0,
-      output: "",
-      timedOut: false,
-      outputExceeded: false,
+      name: "protocol-fixture-content",
+      status: "passed",
+      required: true,
     });
   });
-
-  it.each([
-    ["name", { name: "different" }],
-    [
-      "command",
-      { command: PRODUCT_IMAGE_PROTOCOL_VALIDATION_COMMAND + " && true" },
-    ],
-    ["severity", { required: false }],
-    ["timeout", { timeoutMs: 9_999 }],
-  ] as const)(
-    "rejects a changed %s before inspecting Candidate State",
-    async (_name, mutation) => {
-      const executor = new ProductImageFixtureValidationCommandExecutor("/unused");
-
-      await expect(
-        executor.execute(
-          "/unused",
-          { ...productFixtureCommand, ...mutation },
-          "run-product-proof",
-        ),
-      ).rejects.toThrow("exact approved command");
-    },
-  );
 
   it("fails changed proof content and changed SQLite content", async () => {
     const runId = "run-product-mutation";
     const { root, workspace } =
       await makeProductFixtureValidationWorkspace(runId);
-    const executor = new ProductImageFixtureValidationCommandExecutor(root);
+    const validator = new ProductImageFixtureStructuralValidator(root);
     const proofPath = path.join(workspace, "protocol-proof.txt");
     const databasePath = path.join(workspace, ".airlock", "demo.sqlite");
 
     await writeFile(proofPath, "not-candidate-only\n");
     await expect(
-      executor.execute(workspace, productFixtureCommand, runId),
-    ).resolves.toMatchObject({ exitCode: 1 });
+      validator.validate(workspace, runId),
+    ).resolves.toMatchObject({ status: "failed" });
     await writeFile(proofPath, "candidate-only\n");
     const database = new DatabaseSync(databasePath);
     database
@@ -304,19 +268,19 @@ describe("Product-image fixture Validation command", () => {
       .run("not-candidate-only", "demo");
     database.close();
     await expect(
-      executor.execute(workspace, productFixtureCommand, runId),
-    ).resolves.toMatchObject({ exitCode: 1 });
+      validator.validate(workspace, runId),
+    ).resolves.toMatchObject({ status: "failed" });
   });
 
-  it("rejects a workspace outside the Run-owned disposable validation root", async () => {
+  it("rejects a workspace outside Run-owned Candidate State", async () => {
     const runId = "run-product-path";
     const { root } = await makeProductFixtureValidationWorkspace(runId);
     const canonicalWorkspace = path.join(root, "canonical", "workspace");
     await mkdir(canonicalWorkspace, { recursive: true });
-    const executor = new ProductImageFixtureValidationCommandExecutor(root);
+    const validator = new ProductImageFixtureStructuralValidator(root);
 
     await expect(
-      executor.execute(canonicalWorkspace, productFixtureCommand, runId),
-    ).rejects.toThrow("disposable Candidate copy");
+      validator.validate(canonicalWorkspace, runId),
+    ).rejects.toThrow("requires Candidate State");
   });
 });

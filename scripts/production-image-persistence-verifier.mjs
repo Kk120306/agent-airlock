@@ -57,7 +57,7 @@ const expectedValidationNames = [
   "change-limits",
   "secret-patterns",
   "assurance-catalog-rule:private-key-block:v1",
-  "command:protocol-content",
+  "protocol-fixture-content",
   "sqlite-resource",
   "external-action-intents",
 ];

@@ -6,10 +6,8 @@ export const realRuntimeProofAgentInstructions =
 export const productionImageBoundaryPrompt =
   "Apply the production image boundary proof through isolated Candidate State.";
 
-const protocolValidationCommand = [
-  'test "$(cat protocol-proof.txt)" = candidate-only',
-  "node --no-warnings --experimental-sqlite --input-type=module -e 'import { DatabaseSync } from \"node:sqlite\"; const database = new DatabaseSync(\".airlock/demo.sqlite\"); const row = database.prepare(\"SELECT value FROM inventory WHERE id = ?\").get(\"demo\"); database.close(); if (row?.value !== \"candidate-only\") process.exit(1);'",
-].join(" && ");
+export const productImageStructuralValidationName =
+  "protocol-fixture-content";
 
 export const realRuntimeProofContract = Object.freeze({
   requiredPaths: ["AGENTS.md", "protocol-proof.txt"],
@@ -17,12 +15,5 @@ export const realRuntimeProofContract = Object.freeze({
   maxChangedFiles: 4,
   maxAddedBytes: 65_536,
   secretPatterns: [],
-  validationCommands: [
-    {
-      name: "protocol-content",
-      command: protocolValidationCommand,
-      required: true,
-      timeoutMs: 10_000,
-    },
-  ],
+  validationCommands: [],
 });

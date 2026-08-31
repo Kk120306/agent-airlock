@@ -45,6 +45,13 @@ const gzipLayerMediaTypes = new Set([
   "application/vnd.oci.image.layer.v1.tar+gzip",
   "application/vnd.docker.image.rootfs.diff.tar.gzip",
 ]);
+const uncompressedLayerMediaTypes = new Set([
+  "application/vnd.oci.image.layer.v1.tar",
+]);
+const archiveLayerMediaTypes = new Set([
+  ...gzipLayerMediaTypes,
+  ...uncompressedLayerMediaTypes,
+]);
 const attestationLayerMediaTypes = new Set(["application/vnd.in-toto+json"]);
 
 export const productionImageInputPaths = Object.freeze([
@@ -71,6 +78,7 @@ export const productionImageProofClosurePaths = Object.freeze([
   "apps/server/src/outcome-validator.ts",
   "apps/server/src/sensitive-literals.ts",
   "apps/server/src/sqlite-resource.ts",
+  "apps/server/src/validation-command-runner.ts",
   "apps/web/src/App.tsx",
   "docker-compose.yml",
   "docker/codex-runtime/package.json",
@@ -468,6 +476,31 @@ async function inspectAttestationManifest(
   }
 }
 
+function assertDockerLayerSources(layerSources, diffIds, descriptors) {
+  if (layerSources === undefined) return;
+  if (
+    layerSources === null ||
+    typeof layerSources !== "object" ||
+    Array.isArray(layerSources) ||
+    JSON.stringify(Object.keys(layerSources).sort()) !==
+      JSON.stringify([...diffIds].sort())
+  ) {
+    throw new Error("Production image Docker layer sources are malformed");
+  }
+  for (let index = 0; index < diffIds.length; index += 1) {
+    const source = layerSources[diffIds[index]];
+    const descriptor = descriptors[index];
+    if (
+      !exactKeys(source, ["mediaType", "size", "digest"]) ||
+      source.mediaType !== descriptor.mediaType ||
+      source.size !== descriptor.size ||
+      source.digest !== descriptor.digest
+    ) {
+      throw new Error("Production image Docker layer sources are malformed");
+    }
+  }
+}
+
 async function inspectModernDockerArchive(
   archivePath,
   imageId,
@@ -487,8 +520,7 @@ async function inspectModernDockerArchive(
     archiveIndex?.schemaVersion !== 2 ||
     !ociIndexMediaTypes.has(archiveIndex?.mediaType) ||
     !Array.isArray(archiveIndex.manifests) ||
-    archiveIndex.manifests.length !== 1 ||
-    archiveIndex.manifests[0]?.digest !== imageId
+    archiveIndex.manifests.length !== 1
   ) {
     throw new Error("Production image OCI root does not bind its image ID");
   }
@@ -545,7 +577,7 @@ async function inspectModernDockerArchive(
     !Array.isArray(runnableManifest.layers) ||
     runnableManifest.layers.length < 1 ||
     runnableManifest.layers.some(
-      (descriptor) => !gzipLayerMediaTypes.has(descriptor?.mediaType),
+      (descriptor) => !archiveLayerMediaTypes.has(descriptor?.mediaType),
     )
   ) {
     throw new Error("Production image platform manifest is malformed");
@@ -555,6 +587,14 @@ async function inspectModernDockerArchive(
     runnableManifest.config,
     ociConfigMediaTypes,
   );
+  const rootBindsImageId = rootDescriptor.digest === imageId;
+  const configBindsImageId =
+    runnableDescriptor === rootDescriptor &&
+    ociManifestMediaTypes.has(rootDescriptor.mediaType) &&
+    runnableManifest.config.digest === imageId;
+  if (!rootBindsImageId && !configBindsImageId) {
+    throw new Error("Production image OCI root does not bind its image ID");
+  }
   const layerNames = runnableManifest.layers.map(
     (descriptor) => `blobs/sha256/${descriptor.digest.slice("sha256:".length)}`,
   );
@@ -581,6 +621,11 @@ async function inspectModernDockerArchive(
   ) {
     throw new Error("Production image archive platform is unsupported");
   }
+  assertDockerLayerSources(
+    dockerManifest.LayerSources,
+    config.rootfs.diff_ids,
+    runnableManifest.layers,
+  );
   for (let index = 0; index < runnableManifest.layers.length; index += 1) {
     const descriptor = runnableManifest.layers[index];
     const member = layerNames[index];
@@ -591,10 +636,10 @@ async function inspectModernDockerArchive(
     ) {
       throw new Error("Production image layer contradicts its descriptor");
     }
-    if (
-      (await sha256GzipTarMember(archivePath, member)) !==
-      config.rootfs.diff_ids[index]
-    ) {
+    const diffId = gzipLayerMediaTypes.has(descriptor.mediaType)
+      ? await sha256GzipTarMember(archivePath, member)
+      : await sha256TarMember(archivePath, member);
+    if (diffId !== config.rootfs.diff_ids[index]) {
       throw new Error("Production image layer contradicts its config");
     }
   }
@@ -639,10 +684,19 @@ async function inspectDockerArchive(archivePath, imageId) {
   const repoTagsValid =
     repoTags === null ||
     (Array.isArray(repoTags) && repoTags.length === 0);
+  const manifestShapeValid =
+    exactKeys(manifest?.[0], ["Config", "RepoTags", "Layers"]) ||
+    (modernArchive &&
+      exactKeys(manifest?.[0], [
+        "Config",
+        "RepoTags",
+        "Layers",
+        "LayerSources",
+      ]));
   if (
     !Array.isArray(manifest) ||
     manifest.length !== 1 ||
-    !exactKeys(manifest[0], ["Config", "RepoTags", "Layers"]) ||
+    !manifestShapeValid ||
     (!modernArchive && !legacyArchive) ||
     !repoTagsValid ||
     !Array.isArray(manifest[0].Layers) ||

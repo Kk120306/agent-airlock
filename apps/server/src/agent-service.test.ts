@@ -18,10 +18,7 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
-import {
-  PRODUCT_IMAGE_PROTOCOL_VALIDATION_COMMAND,
-  type ValidationCommandExecutor,
-} from "./validation-command-runner.js";
+import type { ValidationCommandExecutor } from "./validation-command-runner.js";
 import { WorkspaceManager } from "./workspace.js";
 import { persistFixtureSession } from "../test/session-fixture.js";
 import { waitForRunStatus } from "../test/agent-service-workflow.js";
@@ -1009,7 +1006,7 @@ describe("Agent lifecycle", () => {
     },
   );
 
-  it("promotes the exact product-image fixture command without a nested container engine", async () => {
+  it("promotes the product-image fixture through truthful structural Validation", async () => {
     const service = await makeService(
       {
         run: async (request) => {
@@ -1055,14 +1052,7 @@ describe("Agent lifecycle", () => {
       maxChangedFiles: 4,
       maxAddedBytes: 65_536,
       secretPatterns: [],
-      validationCommands: [
-        {
-          name: "protocol-content",
-          command: PRODUCT_IMAGE_PROTOCOL_VALIDATION_COMMAND,
-          required: true,
-          timeoutMs: 10_000,
-        },
-      ],
+      validationCommands: [],
     });
 
     const { run } = await service.sendMessage(
@@ -1076,7 +1066,7 @@ describe("Agent lifecycle", () => {
     expect(completed.transaction?.validations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: "command:protocol-content",
+          name: "protocol-fixture-content",
           required: true,
           status: "passed",
         }),

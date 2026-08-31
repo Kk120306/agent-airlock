@@ -184,20 +184,14 @@ for (const [label, drift] of [
     (contract) => contract.secretPatterns.push({ name: "drift", pattern: "drift" }),
   ],
   [
-    "validation name",
-    (contract) => (contract.validationCommands[0].name = "drifted-name"),
-  ],
-  [
-    "validation command",
-    (contract) => (contract.validationCommands[0].command = "true"),
-  ],
-  [
-    "validation requirement",
-    (contract) => (contract.validationCommands[0].required = false),
-  ],
-  [
-    "validation timeout",
-    (contract) => (contract.validationCommands[0].timeoutMs += 1),
+    "validation commands",
+    (contract) =>
+      contract.validationCommands.push({
+        name: "unexpected-command",
+        command: "true",
+        required: true,
+        timeoutMs: 1_000,
+      }),
   ],
 ]) {
   test(`rejects drifted Runtime ${label}`, async () => {

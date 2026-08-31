@@ -448,7 +448,7 @@ async function fixture() {
       output: null,
     },
     ...[
-      "command:protocol-content",
+      "protocol-fixture-content",
       "sqlite-resource",
       "external-action-intents",
     ].map((name) => ({
