@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
@@ -216,15 +218,29 @@ export class CodexRunner implements AgentRunner {
   }
 
   async isAvailable(): Promise<boolean> {
+    let probeCodexHome: string | null = null;
+    let available = false;
     try {
+      probeCodexHome = await mkdtemp(
+        path.join(tmpdir(), "agent-airlock-codex-probe-"),
+      );
       await execFileAsync(this.config.codexBin, ["--version"], {
         timeout: 5_000,
-        env: buildCodexEnvironment(this.config, this.config.codexHome),
+        env: buildCodexEnvironment(this.config, probeCodexHome),
       });
-      return true;
+      available = true;
     } catch {
-      return false;
+      available = false;
+    } finally {
+      if (probeCodexHome) {
+        try {
+          await rm(probeCodexHome, { recursive: true, force: true });
+        } catch {
+          available = false;
+        }
+      }
     }
+    return available;
   }
 
   async cancel(agentId: string, executionId?: string): Promise<boolean> {
